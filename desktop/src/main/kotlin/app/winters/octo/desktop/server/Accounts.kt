@@ -341,12 +341,13 @@ class Accounts(
     // server, brought up to date with the form's details (an address moved
     // to https, say), and `label` its name when given. An empty password
     // keeps the saved one, and empty sign-in page fields their saved values,
-    // as an edit does.
-    suspend fun signInAgain(id: String, request: SignInRequest, generation: Long = ticket(), label: String? = null): SignInOutcome =
+    // as an edit does. With `sameAccount`, a sign-in that reaches another
+    // account than the kept one's keeps it beside the kept one instead.
+    suspend fun signInAgain(id: String, request: SignInRequest, generation: Long = ticket(), label: String? = null, sameAccount: Boolean = false): SignInOutcome =
         writer.withLock {
             val old = find(id) ?: return@withLock SignInOutcome.Failed("That server isn't in your list any more.")
             val filled = filled(old, request) ?: return@withLock missingSecret(request)
-            keep(filled, use = true, generation, replacing = old, label = label)
+            keep(filled, use = true, generation, replacing = old, label = label, sameAccount = sameAccount)
         }
 
     // The request with its secret: the one typed, or else the kept server's
@@ -365,7 +366,14 @@ class Accounts(
         settings.update { s -> s.copy(servers = s.servers.map { if (it.id == id) it.copy(label = label.trim()) else it }) }
     }
 
-    private suspend fun keep(request: SignInRequest, use: Boolean, generation: Long, replacing: SavedServer? = null, label: String? = null): SignInOutcome {
+    private suspend fun keep(
+        request: SignInRequest,
+        use: Boolean,
+        generation: Long,
+        replacing: SavedServer? = null,
+        label: String? = null,
+        sameAccount: Boolean = false,
+    ): SignInOutcome {
         val reached = when (val tried = attempt(request, replacing)) {
             is Attempt.Failed -> return SignInOutcome.Failed(tried.message, tried.gateway)
             is Attempt.Untrusted -> return SignInOutcome.Untrusted(tried.question)
@@ -375,10 +383,14 @@ class Accounts(
         val secret = request.secretFor()
         val address = reached.main.toString()
         val username = reached.credentials.username
+        // With `sameAccount`, a sign-in that reached another account (an API
+        // key of someone else's) keeps that account as a server of its own
+        // and leaves the kept one as it was.
+        val edited = replacing?.takeUnless { sameAccount && it.username != username }
         // The same account already kept (other than the one edited).
-        val twin = servers.firstOrNull { it.address == address && it.username == username && it.id != replacing?.id }
-        if (replacing != null && twin != null) return SignInOutcome.Failed("${twin.name} is already in your list with that address and username.")
-        val base = replacing ?: twin
+        val twin = servers.firstOrNull { it.address == address && it.username == username && it.id != edited?.id }
+        if (edited != null && twin != null) return SignInOutcome.Failed("${twin.name} is already in your list with that address and username.")
+        val base = edited ?: twin
         val id = when {
             base == null -> freshId(username, address)
             // Another account on the server gets its own plays and queue.

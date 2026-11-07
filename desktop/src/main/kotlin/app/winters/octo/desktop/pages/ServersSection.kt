@@ -290,12 +290,13 @@ internal enum class SheetKind { Add, Edit, SignIn, Secure }
 internal fun sheetFor(outcome: SwitchOutcome.NeedsPassword): SheetKind =
     if (outcome.note == GatewayWords.NEEDS_HTTPS) SheetKind.Secure else SheetKind.SignIn
 
-// What saving a server sheet asks of the accounts, under `ticket`.
+// What saving a server sheet asks of the accounts, under `ticket`. A sheet
+// that signs in to a kept server again never hands it to another account.
 internal suspend fun saveSheet(accounts: Accounts, kind: SheetKind, server: SavedServer?, form: SignInForm, ticket: Long): SignInOutcome = when (kind) {
     SheetKind.Add -> accounts.add(form.request())
     SheetKind.Edit -> accounts.edit(server!!.id, form.request(), form.label, ticket)
-    SheetKind.SignIn -> accounts.signInAgain(server!!.id, form.request(), ticket)
-    SheetKind.Secure -> accounts.signInAgain(server!!.id, form.request(), ticket, form.label)
+    SheetKind.SignIn -> accounts.signInAgain(server!!.id, form.request(), ticket, sameAccount = true)
+    SheetKind.Secure -> accounts.signInAgain(server!!.id, form.request(), ticket, form.label, sameAccount = true)
 }
 
 fun addServer(app: AppState) = serverSheet(app, SheetKind.Add, null)

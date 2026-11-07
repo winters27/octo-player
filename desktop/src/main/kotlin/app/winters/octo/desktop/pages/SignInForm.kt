@@ -119,14 +119,14 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // The kept server this form signs in to again, when it was filled in
     // for one (AppState.fillSignIn): signing in then brings that server up
-    // to date rather than keeping another. Another host typed lets go of it
-    // for good.
+    // to date rather than keeping another.
     var keptId: String? = null
 
     // The kept server a sign-in brings up to date: the one the form was
-    // filled in for, while its host is still the one typed and, unless an
-    // API key says whose it is, its username too. Anything else is signed in
-    // to as a server of its own, never in place of the kept one.
+    // filled in for, while its host is the one typed and, unless an API key
+    // says whose it is, its username too. Anything else is signed in to as a
+    // server of its own, never in place of the kept one; an API key of
+    // another account is kept beside it (Accounts.signInAgain, sameAccount).
     val signsInAgainTo: String?
         get() {
             val kept = lastServer?.takeIf { it.id == keptId } ?: return null
@@ -161,7 +161,6 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             address = text
             if (!schemePicked) scheme = automaticScheme(text)
         }
-        if (url?.host != keptHost) keptId = null
         result = null
         movedFrom(before)
     }
