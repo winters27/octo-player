@@ -306,6 +306,54 @@ import Testing
         #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
     }
 
+    /// Where a background download's redirects end, followed by `hop` from the client's own
+    /// request to the http home, as `ServerExchange.finalAddress` follows them.
+    func finalOfHomeDownload(to location: String, scope: ServerScope) throws -> URL {
+        let sent = signer(scope).prepared(URLRequest(url: URL(string: "http://192.168.1.20:4533/rest/stream?id=s1")!))
+        let fromHome = try #require(sent.url)
+        var moved = sent
+        moved.url = URL(string: location)!
+        let next = try #require(hopped(redirect(fromHome, to: location), moved, first: fromHome, scope: scope))
+        return try #require(next.url)
+    }
+
+    /// Red when the background request is built for the asked address, or without the client's
+    /// headers for where the redirects end.
+    @Test func aBackgroundDownloadMovedUpToTheHttpsTwinCarriesTheSignIn() throws {
+        let scope = ServerScope(main: main, home: home)
+        let landed = try finalOfHomeDownload(to: "https://192.168.1.20/rest/stream?id=s1", scope: scope)
+        let request = backgroundDownloadRequest(landed, client: signer(scope), serverOnly: ["X-Octo-Purpose": "offline"])
+        #expect(request.url?.absoluteString == "https://192.168.1.20/rest/stream?id=s1")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == basic)
+        #expect(request.value(forHTTPHeaderField: "CF-Access-Client-Id") == "id")
+        #expect(request.value(forHTTPHeaderField: "CF-Access-Client-Secret") == "secret")
+        #expect(request.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(request.value(forHTTPHeaderField: "X-Octo-Device-Id") == "abc")
+        #expect(request.value(forHTTPHeaderField: "X-Octo-Purpose") == "offline")
+        #expect(request.value(forHTTPHeaderField: "Cookie") == nil)
+        #expect(!request.httpShouldHandleCookies)
+        // The http home itself, unmoved, never carries the sign-in page's headers.
+        let plain = backgroundDownloadRequest(URL(string: "http://192.168.1.20:4533/rest/stream?id=s1")!, client: signer(scope))
+        #expect(plain.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(plain.value(forHTTPHeaderField: "CF-Access-Client-Id") == nil)
+        #expect(plain.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+    }
+
+    /// Red when a background download moved to another host gets anything of the server's.
+    @Test func aBackgroundDownloadMovedToAnotherHostCarriesNone() throws {
+        let scope = ServerScope(main: main, home: home)
+        let landed = try finalOfHomeDownload(to: "https://192.168.1.21/rest/stream?id=s1", scope: scope)
+        let request = backgroundDownloadRequest(landed, client: signer(scope), serverOnly: ["X-Octo-Purpose": "offline"])
+        #expect(request.url?.host == "192.168.1.21")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(request.value(forHTTPHeaderField: "CF-Access-Client-Id") == nil)
+        #expect(request.value(forHTTPHeaderField: "CF-Access-Client-Secret") == nil)
+        #expect(request.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
+        #expect(request.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
+        #expect(request.value(forHTTPHeaderField: "X-Octo-Purpose") == nil)
+        #expect(request.value(forHTTPHeaderField: "User-Agent") != nil)
+    }
+
     /// Red when the move up is counted for any host, not the address's own.
     @Test func aMoveUpToAnotherHostKeepsNone() throws {
         let lan = URL(string: "http://192.168.1.20:4533")!

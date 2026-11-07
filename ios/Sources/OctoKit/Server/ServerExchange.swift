@@ -124,6 +124,20 @@ public enum ServerExchange {
         }
         return (file, http)
     }
+
+    /// Where a request to the server ends after its redirects, each one through `hop` as every
+    /// call's are: a one-byte ask whose body is never read, its final answer's cookies kept. A
+    /// failure to reach the server comes out as URLSession gave it.
+    public static func finalAddress(of request: URLRequest, client: SubsonicClient) async throws -> URL {
+        var asked = client.prepared(request)
+        asked.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        let hops = ExchangeHops(client: client, first: asked.url)
+        let (bytes, response) = try await client.session.bytes(for: asked, delegate: hops)
+        bytes.task.cancel()
+        guard let http = response as? HTTPURLResponse, let url = http.url else { throw URLError(.badServerResponse) }
+        storeCookies(of: http, in: client.cookies, scope: client.scope)
+        return url
+    }
     #endif
 
     static func send(_ request: URLRequest, client: SubsonicClient) async throws -> (Data, URLResponse, [AnswerHop]) {
@@ -186,6 +200,21 @@ public func addingGatewayLogin(_ request: URLRequest, headers: (URL) -> [String:
         out.setValue(value, forHTTPHeaderField: name)
     }
     return out
+}
+
+/// The request a background download goes out with, at the address its redirects end at
+/// (`landed`, as `ServerExchange.finalAddress` follows them): the client's headers for that
+/// address (`headers(for:)`: the server's own and, at a gateway address, its sign-in page's; off
+/// the server the app's name alone), and `serverOnly` only at one of the server's addresses.
+/// Cookies are off, since the system carries the transfer on by itself.
+public func backgroundDownloadRequest(_ landed: URL, client: SubsonicClient, serverOnly: [String: String] = [:]) -> URLRequest {
+    var request = URLRequest(url: landed)
+    for (name, value) in client.headers(for: landed) { request.setValue(value, forHTTPHeaderField: name) }
+    if client.scope.covers(landed) {
+        for (name, value) in serverOnly { request.setValue(value, forHTTPHeaderField: name) }
+    }
+    request.httpShouldHandleCookies = false
+    return request
 }
 
 /// One redirect hop of a request to the server: the hop's sign-in page cookies are kept, the

@@ -435,18 +435,30 @@ final class OfflineDownloads {
         }
         var params = [("id", next.serverId)]
         params += StreamRequest(maxKbps).params
-        let address = server.client.url("stream", params)
-        var request = URLRequest(url: address)
-        // The server's headers for the address alone: the system carries the transfer on by
-        // itself, so no sign-in page cookie goes with it.
-        for (name, value) in server.client.headers(for: address) { request.setValue(value, forHTTPHeaderField: name) }
-        request.httpShouldHandleCookies = false
+        let client = server.client
         // The server is told this is an offline copy, so an Octo server does not count it as a play.
-        request.setValue(octoPurposeOffline, forHTTPHeaderField: octoPurposeHeader)
+        let purpose = [octoPurposeHeader: octoPurposeOffline]
+        var asked = URLRequest(url: client.url("stream", params))
+        for (name, value) in purpose { asked.setValue(value, forHTTPHeaderField: name) }
+        asked.allowsCellularAccess = !settings.offline.wifiOnly
+        // The system follows a background transfer's redirects by itself, with none of the
+        // server's rules, so they are followed here first and the transfer asks where they end.
+        let landed: URL
+        do {
+            landed = try await ServerExchange.finalAddress(of: asked, client: client)
+        } catch {
+            guard running == nil else { return }
+            Task { await self.afterFailure(next, refused: false, error: error) }
+            return
+        }
+        // Another connection came in meanwhile: the song waits for the pump that follows it.
+        guard running == nil, session.client?.cookies.id == client.cookies.id else {
+            Task { await self.pump() }
+            return
+        }
+        var request = backgroundDownloadRequest(landed, client: client, serverOnly: purpose)
         request.allowsCellularAccess = !settings.offline.wifiOnly
         let task = transfer.downloadTask(with: request)
-        let client = server.client
-        bridge.signs(task) { client.headers(for: $0) }
         task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? "", fileSize.map(String.init) ?? ""]
             .joined(separator: "\n")
         running = Running(row: next, task: task, fileName: fileName, format: format, fileSize: fileSize)
@@ -538,27 +550,36 @@ final class OfflineDownloads {
                 }
             }
             if let part { try? FileManager.default.removeItem(at: part) }
-            if let url = error as? URLError, url.code == .cancelled { return }
-            let tried = (tries[key] ?? 0) + 1
-            tries[key] = tried
-            // Only the phone being offline (or off the Wi-Fi it waits for) counts as no connection;
-            // a connection that broke off while online is tried again like any other error.
-            let noConnection = !connectivity.online || (error as? URLError)?.code == .notConnectedToInternet
-                || downloadLeftWifi(wifiOnly: settings.offline.wifiOnly, onWifi: connectivity.onWifi)
-            switch downloadAfterFailure(noConnection: noConnection, serverRefused: turnedAway, tried: tried) {
-            case .waitForConnection:
-                tries[key] = nil
-                try? await store.setDownloadState(row.sourceId, row.serverId, state: .queued, progress: 0)
-            case .fail:
-                try? await store.setDownloadState(row.sourceId, row.serverId, state: .failed, progress: 0)
-            case .retry(let afterMs):
-                try? await store.setDownloadState(row.sourceId, row.serverId, state: .queued, progress: 0)
-                holdUntil = Date().addingTimeInterval(Double(afterMs) / 1000)
-                try? await Task.sleep(for: .milliseconds(afterMs))
-                holdUntil = nil
-            }
-            await pump()
+            await afterFailure(row, refused: turnedAway, error: error)
         }
+    }
+
+    /// A download that did not finish (its transfer, or the redirects followed before it): tried
+    /// again, waiting for a connection, or failed, by `downloadAfterFailure`. A canceled one is
+    /// left as it is.
+    private func afterFailure(_ row: KeptDownload, refused: Bool, error: Error?) async {
+        if let url = error as? URLError, url.code == .cancelled { return }
+        let store = library.store
+        let key = downloadKey(row.sourceId, row.serverId)
+        let tried = (tries[key] ?? 0) + 1
+        tries[key] = tried
+        // Only the phone being offline (or off the Wi-Fi it waits for) counts as no connection;
+        // a connection that broke off while online is tried again like any other error.
+        let noConnection = !connectivity.online || (error as? URLError)?.code == .notConnectedToInternet
+            || downloadLeftWifi(wifiOnly: settings.offline.wifiOnly, onWifi: connectivity.onWifi)
+        switch downloadAfterFailure(noConnection: noConnection, serverRefused: refused, tried: tried) {
+        case .waitForConnection:
+            tries[key] = nil
+            try? await store.setDownloadState(row.sourceId, row.serverId, state: .queued, progress: 0)
+        case .fail:
+            try? await store.setDownloadState(row.sourceId, row.serverId, state: .failed, progress: 0)
+        case .retry(let afterMs):
+            try? await store.setDownloadState(row.sourceId, row.serverId, state: .queued, progress: 0)
+            holdUntil = Date().addingTimeInterval(Double(afterMs) / 1000)
+            try? await Task.sleep(for: .milliseconds(afterMs))
+            holdUntil = nil
+        }
+        await pump()
     }
 }
 
@@ -581,16 +602,6 @@ final class TransferBridge: NSObject, URLSessionDownloadDelegate, @unchecked Sen
     /// Finished files moved aside, and refusals, by transfer, until the transfer completes.
     private var parts: [Int: URL] = [:]
     private var refused = Set<Int>()
-    /// The headers of the client that signed each transfer started in this run, by transfer, for
-    /// its redirects; a transfer left from an earlier run has none.
-    private let lock = NSLock()
-    private var signers: [Int: @Sendable (URL) -> [String: String]] = [:]
-
-    /// Notes the client headers (its `headers(for:)`) a transfer's redirects get their sign-in
-    /// page headers from, until it completes.
-    func signs(_ task: URLSessionTask, with headers: @escaping @Sendable (URL) -> [String: String]) {
-        lock.withLock { signers[task.taskIdentifier] = headers }
-    }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
@@ -615,21 +626,11 @@ final class TransferBridge: NSObject, URLSessionDownloadDelegate, @unchecked Sen
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        // The shared trust's rule for the server in use, then, at a gateway address, the signing
-        // client's sign-in page headers the request lacks.
-        let next = ServerTrust.shared.redirected(request, first: task.originalRequest)
-        guard let headers = signer(of: task) else { return next }
-        return addingGatewayLogin(next, headers: headers)
-    }
-
-    /// The client headers a transfer started in this run was signed with.
-    private func signer(of task: URLSessionTask) -> (@Sendable (URL) -> [String: String])? {
-        lock.withLock { signers[task.taskIdentifier] }
+        ServerTrust.shared.redirected(request, first: task.originalRequest)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         ServerTrust.shared.noteEnd(of: task.originalRequest, error)
-        lock.withLock { signers[task.taskIdentifier] = nil }
         let part = parts.removeValue(forKey: task.taskIdentifier)
         let refusedNow = refused.remove(task.taskIdentifier) != nil
         Task { @MainActor [weak owner] in

@@ -149,14 +149,6 @@ import Testing
         }
     }
 
-    /// Red when a background download's redirect goes back to dropping headers only.
-    @Test func aBackgroundDownloadsRedirectGetsTheSignInAtAGatewayAddress() throws {
-        let sources = try Self.sources()
-        let code = Self.code(try #require(sources.first { $0.path == "Octo/Data/OfflineDownloads.swift" }))
-        #expect(code.contains("bridge.signs(task)"), "each transfer names the client that signed it")
-        #expect(code.contains("addingGatewayLogin(next, headers:"), "its redirects get that client's sign-in page headers")
-    }
-
     /// Red when a byte delegate goes back to a page check of its own.
     @Test func everyByteDelegateRefusesASignInPageByTheSharedRule() throws {
         let sources = try Self.sources()
