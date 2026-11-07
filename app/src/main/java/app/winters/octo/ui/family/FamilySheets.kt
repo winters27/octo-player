@@ -690,7 +690,7 @@ private fun QrWell(link: String, label: String, side: Dp, dim: Boolean, overlay:
 
 // The QR code on white, with a generous quiet edge.
 @Composable
-private fun QrTile(text: String, label: String, side: Dp, modifier: Modifier) {
+internal fun QrTile(text: String, label: String, side: Dp, modifier: Modifier) {
     val code = remember(text) { qrCode(text) }
     val quiet = side / 13
     Box(modifier.size(side).background(Color.White, RoundedCornerShape(14.dp)).padding(quiet).semantics { contentDescription = label }) {

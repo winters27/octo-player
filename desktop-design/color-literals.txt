@@ -1,0 +1,10 @@
+desktop-design/src/main/kotlin/app/winters/octo/design/Access.kt | Color.Black | token
+desktop-design/src/main/kotlin/app/winters/octo/design/CrispIcons.kt | Color.White | mask
+desktop-design/src/main/kotlin/app/winters/octo/design/CrispIcons.kt | Color.White | mask
+desktop-design/src/main/kotlin/app/winters/octo/design/Fades.kt | Color.Black | mask
+desktop-design/src/main/kotlin/app/winters/octo/design/Fades.kt | Color.Black | mask
+desktop-design/src/main/kotlin/app/winters/octo/design/Fades.kt | Color.Black | mask
+desktop-design/src/main/kotlin/app/winters/octo/design/GlassMenu.kt | Color.Black | scrim
+desktop-design/src/main/kotlin/app/winters/octo/design/GlassMenu.kt | Color.Black | scrim
+desktop-design/src/main/kotlin/app/winters/octo/design/GlassMenu.kt | Color.Black | scrim
+desktop-design/src/main/kotlin/app/winters/octo/design/VectorXml.kt | Color.White | mask

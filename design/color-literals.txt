@@ -1,0 +1,40 @@
+design/src/main/java/app/winters/octo/design/Artwork.kt | Color(0xFFC8C8C8) | over-art
+design/src/main/java/app/winters/octo/design/ExplicitMark.kt | Color.Black | mask
+design/src/main/java/app/winters/octo/design/GlassSheet.kt | Color.Black | scrim
+design/src/main/java/app/winters/octo/design/Glaze.kt | Color.Black | mask
+design/src/main/java/app/winters/octo/design/Glaze.kt | Color.Black | mask
+design/src/main/java/app/winters/octo/design/Materials.kt | Color(0xFF282828) | over-art
+design/src/main/java/app/winters/octo/design/Materials.kt | Color(0xFF161618) | over-art
+design/src/main/java/app/winters/octo/design/Materials.kt | Color.Black | shadow
+design/src/main/java/app/winters/octo/design/Materials.kt | Color.Black | shadow
+design/src/main/java/app/winters/octo/design/Materials.kt | Color.White | over-art
+design/src/main/java/app/winters/octo/design/Materials.kt | Color.White | over-art
+design/src/main/java/app/winters/octo/design/Materials.kt | Color.White | over-art
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color( red = from.red + (to.red - from.red) * amount, green = from.green + (to.green - from.green) * amount, blue = from.blue + (to.blue - from.blue) * amount, ) | token
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFF97B1B9) | token
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFFEF4444) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFFFF3B30) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFFFF3B30) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFFFF9500) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFFFFCC00) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFF28CD41) | signal
+design/src/main/java/app/winters/octo/design/OctoColors.kt | Color(0xFF007AFF) | signal
+design/src/main/java/app/winters/octo/design/OctoPalette.kt | Color.Black | scrim
+design/src/main/java/app/winters/octo/design/OctoPalette.kt | Color.White | token
+design/src/main/java/app/winters/octo/design/OctoPalette.kt | Color.Black | shadow
+design/src/main/java/app/winters/octo/design/OctoSwitch.kt | Color.White | self-contained pill
+design/src/main/java/app/winters/octo/design/OctoTheme.kt | Color.White | signal
+design/src/main/java/app/winters/octo/design/OctoTheme.kt | Color.Black | scrim
+design/src/main/java/app/winters/octo/design/OctoTheme.kt | Color.White | signal
+design/src/main/java/app/winters/octo/design/OctoTheme.kt | Color.Black | scrim
+design/src/main/java/app/winters/octo/design/OctoTokens.kt | Color.Black | self-contained pill
+design/src/main/java/app/winters/octo/design/OctoTokens.kt | Color.White | self-contained pill
+design/src/main/java/app/winters/octo/design/PlaylistArt.kt | Color.Black | over-art
+design/src/main/java/app/winters/octo/design/PlaylistArt.kt | Color.White | over-art
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color.Black | shadow
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color.White | self-contained pill
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color.Black | shadow
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color.Black | self-contained pill
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color.White | self-contained pill
+design/src/main/java/app/winters/octo/design/Sliders.kt | Color(0xFFE4E6E8) | self-contained pill
+design/src/main/java/app/winters/octo/design/Tooltip.kt | Color(0xFF09090B) | self-contained pill

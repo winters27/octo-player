@@ -35,11 +35,19 @@ desktop/src/main/kotlin/app/winters/octo/desktop/pages/SignInPage.kt | Color.Bla
 desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt | Color.White | self-contained pill
 desktop/src/main/kotlin/app/winters/octo/desktop/sound/EqCurve.kt | Color.Black | self-contained pill
 desktop/src/main/kotlin/app/winters/octo/desktop/system/MiniPlayer.kt | Color.Black | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt | Color(0xFF9061FA) | token
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/Ambience.kt | Color.White | token
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.White | over-art
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/FullPlayer.kt | Color.Black | over-art
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/LivePlayerParts.kt | Color(0xFFFF8A80) | signal
 desktop/src/main/kotlin/app/winters/octo/desktop/ui/LiveRadioParts.kt | Color.White | over-art
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
+desktop/src/main/kotlin/app/winters/octo/desktop/ui/PageShade.kt | Color.Black | scrim
 desktop/src/main/kotlin/app/winters/octo/desktop/window/Frame.kt | Color(0xFFC42B1C) | signal
 desktop/src/main/kotlin/app/winters/octo/desktop/window/Frame.kt | Color.White | signal

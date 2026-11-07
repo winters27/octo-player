@@ -23,6 +23,8 @@ import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.desktop.ui.SongMenu
+import app.winters.octo.design.POPUP_TAG
+import app.winters.octo.desktop.pages.addServer
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
@@ -330,6 +332,106 @@ class ContrastTest {
             plain + round("lit")
         }
         check(danger, minimum = ThemeChoice.entries.size * AccentChoice.entries.size * 2)
+    }
+
+    // Where the open pop-up is, for words inside it alone.
+    private fun A11yScene.popup(): Rect =
+        nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == POPUP_TAG }.boundsInRoot
+
+    // A library list, a song menu and the add a server sheet over it, in
+    // every theme, each word at its role's minimum: main and secondary
+    // words 7:1, muted words 4.5:1.
+    @Test(timeout = 300_000)
+    fun aListAMenuAndASheetReadInEveryTheme() {
+        val spots = ThemeChoice.entries.flatMap { theme ->
+            A11yScene(folder.newFolder()).use { s ->
+                s.onUi {
+                    s.app.settings.pickTheme(theme)
+                    s.app.navigator.go(Page.Songs)
+                }
+                val page = s.settle(1_000)
+                keep(page, "contrast-theme-songs-${theme.name.lowercase()}")
+                val list = s.spots(page, "${theme.label} songs", listOf(
+                    Triple("Songs", "title (main)", 7.0),
+                    Triple("5 songs...", "header line (muted)", 4.5),
+                    Triple("Airbag", "song title (main)", 7.0),
+                    Triple("Radiohead", "artist (secondary)", 7.0),
+                    Triple("4:21", "length (muted)", 4.5),
+                    Triple("ARTIST", "column heading (muted)", 4.5),
+                ), { it.left > 240f && it.bottom < 780f }) + s.spots(page, "${theme.label} sidebar", listOf(
+                    Triple("LIBRARY", "group name (muted)", 4.5),
+                    Triple("Albums", "place (secondary)", 7.0),
+                    Triple("Songs", "open place (main)", 7.0),
+                ), { it.right < 240f })
+                s.onUi { s.app.popups.showAt(androidx.compose.ui.unit.IntOffset(400, 120)) { close -> SongMenu(s.app, listOf(s.app.library!!.index!!.songs[2]), close) } }
+                val menu = s.settle(700)
+                keep(menu, "contrast-theme-menu-${theme.name.lowercase()}")
+                val menuBox = s.popup()
+                val inMenu = s.spots(menu, "${theme.label} menu", listOf(
+                    Triple("Karma Police", "menu title (secondary)", 7.0),
+                    Triple("Play next", "row (main)", 7.0),
+                ), { menuBox.contains(it.center) })
+                s.onUi {
+                    s.app.popups.close()
+                    addServer(s.app)
+                }
+                val sheet = s.settle(700)
+                keep(sheet, "contrast-theme-sheet-${theme.name.lowercase()}")
+                val sheetBox = s.popup()
+                list + inMenu + s.spots(sheet, "${theme.label} sheet", listOf(
+                    Triple("Add a server", "sheet title (secondary)", 7.0),
+                    Triple("Server address", "field name (muted)", 4.5),
+                    Triple("Name", "field name (muted)", 4.5),
+                    Triple("Optional, like Home or Work", "field hint (muted)", 4.5),
+                ), { sheetBox.contains(it.center) })
+            }
+        }
+        check(spots, minimum = ThemeChoice.entries.size * 15)
+    }
+
+    // Settings > Appearance in every theme, each word at its role's minimum.
+    @Test(timeout = 300_000)
+    fun settingsReadsInEveryTheme() {
+        val spots = ThemeChoice.entries.flatMap { theme ->
+            A11yScene(folder.newFolder(), height = 1_200).use { s ->
+                s.onUi {
+                    s.app.settings.pickTheme(theme)
+                    s.app.openSettings(SettingsKey.Look)
+                }
+                val image = s.settle(1_500)
+                keep(image, "contrast-theme-settings-${theme.name.lowercase()}")
+                s.spots(image, "${theme.label} settings", listOf(
+                    Triple("How Octo looks: colors, backgrounds and text.", "page line (secondary)", 7.0),
+                    Triple("Window background", "card title (main)", 7.0),
+                    Triple("Like Windows follows...", "text size caption (muted)", 4.5),
+                ), { it.left > 300f && it.bottom < 1_080f }) + s.spots(image, "${theme.label} settings list", listOf(
+                    Triple("LISTENING", "group name (muted)", 4.5),
+                    Triple("Appearance", "page shown (main)", 7.0),
+                ), { it.right < 300f })
+            }
+        }
+        check(spots, minimum = ThemeChoice.entries.size * 5)
+    }
+
+    // The sign-in page, which keeps Octo's dark look, in every theme.
+    @Test(timeout = 300_000)
+    fun theSignInPageReadsInEveryTheme() {
+        val spots = A11yScene(folder.newFolder()).use { s ->
+            s.onUi { s.app.signOut() }
+            s.settle(1_000).close()
+            ThemeChoice.entries.flatMap { theme ->
+                s.onUi { s.app.settings.pickTheme(theme) }
+                val image = s.settle(700)
+                keep(image, "contrast-theme-sign-in-${theme.name.lowercase()}")
+                s.spots(image, "${theme.label} sign-in", listOf(
+                    Triple("Octo", "name (main)", 7.0),
+                    Triple("Sign in to your music server...", "line (secondary)", 7.0),
+                    Triple("Server address", "field name (muted)", 4.5),
+                    Triple("Off, Octo asks again each time it opens.", "switch caption (muted)", 4.5),
+                ))
+            }
+        }
+        check(spots, minimum = ThemeChoice.entries.size * 4)
     }
 
     private fun A11yScene.until(what: () -> Boolean) {

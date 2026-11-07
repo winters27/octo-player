@@ -1,5 +1,3 @@
-app/src/main/java/app/winters/octo/animated/LoopBackdrop.kt | 0xFFFFFFFF | over-art
-app/src/main/java/app/winters/octo/animated/LoopBackdrop.kt | 0xFF000000 | over-art
 app/src/main/java/app/winters/octo/animated/LoopBackdrop.kt | Color.Black | over-art
 app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF2A3438) | over-art
@@ -7,36 +5,47 @@ app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF1A1A1B) 
 app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF3A4A50) | over-art
 app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF0A0B0F) | over-art
 app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF0C0C0D) | over-art
-app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | android.graphics.Color.BLACK | over-art
+app/src/main/java/app/winters/octo/player/ArtworkPalette.kt | Color(0xFF0A0B0F) | over-art
 app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color(0x52121214) | over-art
-app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White.copy(alpha = 0.16f) | over-art
 app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White | over-art
-app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.Black.copy(alpha = bright) | over-art
-app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.Black.copy(alpha = dark) | over-art
-app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White.copy(alpha = pose.glowAlpha.toFloat().coerceAtMost(1f)) | over-art
-app/src/main/java/app/winters/octo/player/immersive/BackgroundPrefs.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/FlowingLyrics.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/LivePlayerParts.kt | Color(0xFFFF3B30) | signal
 app/src/main/java/app/winters/octo/player/LyricsMenu.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.Black | over-art
-app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White.copy(alpha = SUNG_ALPHA) | over-art
-app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White.copy(alpha = lerp(0.3f, 0.6f, shown)) | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/LyricsPane.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/TitleButtons.kt | Color.White | over-art
-app/src/main/java/app/winters/octo/playback/ArtworkProvider.kt | 0xFF34363B | over-art
-app/src/main/java/app/winters/octo/playback/CarArt.kt | 0xFF000000 | over-art
-app/src/main/java/app/winters/octo/playback/CarArt.kt | 0xFFFFFFFF | over-art
+app/src/main/java/app/winters/octo/player/TitleButtons.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/immersive/BackgroundPrefs.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/ui/admin/OctoAdminScreen.kt | Color(0xFF8FBFA0) | signal
 app/src/main/java/app/winters/octo/ui/admin/OctoAdminScreen.kt | Color(0xFFE3B35B) | signal
-app/src/main/java/app/winters/octo/ui/common/Items.kt | Color.Black.copy(alpha = 0.5f) | over-art
-app/src/main/java/app/winters/octo/ui/common/NotInLibrary.kt | Color.Black.copy(alpha = 0.42f) | over-art
-app/src/main/java/app/winters/octo/ui/common/NotInLibrary.kt | Color.White.copy(alpha = 0.9f) | over-art
-app/src/main/java/app/winters/octo/ui/common/StationCover.kt | Color.White.copy(alpha = 0.7f) | over-art
+app/src/main/java/app/winters/octo/ui/common/FadingMarquee.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/ui/common/FadingMarquee.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/ui/common/Items.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/ui/common/ListEdits.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/ui/common/NotInLibrary.kt | Color.Black | over-art
+app/src/main/java/app/winters/octo/ui/common/NotInLibrary.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/ui/common/PageHeader.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/ui/common/PageHeader.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/ui/common/StationCover.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/ui/family/FamilyQrViews.kt | Color.Black | scanner
-app/src/main/java/app/winters/octo/ui/family/FamilyQrViews.kt | Color.White.copy(alpha = 0.8f) | scanner
+app/src/main/java/app/winters/octo/ui/family/FamilyQrViews.kt | Color.White | scanner
 app/src/main/java/app/winters/octo/ui/family/FamilySheets.kt | Color.White | scanner
 app/src/main/java/app/winters/octo/ui/family/FamilySheets.kt | Color.Black | scanner
-app/src/main/java/app/winters/octo/ui/output/OutputSheet.kt | Color.Black.copy(alpha = 0.72f) | over-art
+app/src/main/java/app/winters/octo/ui/output/OutputSheet.kt | Color.Black | over-art
 app/src/main/java/app/winters/octo/ui/sound/ResponseGraph.kt | Color.White | self-contained pill
-app/src/main/java/app/winters/octo/ui/sound/ResponseGraph.kt | Color.Black.copy(alpha = 0.72f) | self-contained pill
+app/src/main/java/app/winters/octo/ui/sound/ResponseGraph.kt | Color.Black | self-contained pill

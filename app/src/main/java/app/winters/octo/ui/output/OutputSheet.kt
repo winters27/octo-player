@@ -31,6 +31,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.OctoColors
+import app.winters.octo.design.OverArt
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.SelectedFill
@@ -209,6 +210,6 @@ fun CastingMark(modifier: Modifier = Modifier) {
             .background(Color.Black.copy(alpha = 0.72f)),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(OctoIcons.CastConnected), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(11.dp))
+        OverArt { Icon(painterResource(OctoIcons.CastConnected), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(11.dp)) }
     }
 }

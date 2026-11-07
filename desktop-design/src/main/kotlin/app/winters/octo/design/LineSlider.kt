@@ -113,6 +113,8 @@ fun LineSlider(
     val followed = if (look == SliderLook.Jewel) rememberFollowedFraction(fraction, dragging) else null
     val measurer = rememberTextMeasurer()
     val jewelTrack = OctoColors.OffTrack
+    val jewelShadow = shadowColor(1f)
+    val jewelTick = OctoColors.TextPrimary.copy(alpha = 0.30f)
     val bubbleFill = glassFilm(0.72f)
     val bubbleWords = OctoColors.TextPrimary
 
@@ -179,7 +181,7 @@ fun LineSlider(
                 val y = size.height / 2
                 if (jewel != null) {
                     val shown = if (dragging) dragFraction else followed?.value ?: current()
-                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer)
+                    drawJewelSlider(y, shown, jewel, fill, jewelTrack, bubbleFill, bubbleWords, steps, valueLabel?.invoke(shown), measurer, jewelTrack, jewelShadow, jewelTick)
                     return@drawBehind
                 }
                 val stroke = thickness.toPx()
