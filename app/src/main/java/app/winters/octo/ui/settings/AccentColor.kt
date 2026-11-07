@@ -56,18 +56,23 @@ class AccentViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val seed: StateFlow<Int?> = choice
+    // The cover's color the accent grows from, and whether it is known yet:
+    // at once for every accent but From the album art (no color), and for
+    // that once the playing cover's colors are read. Kept as one value so
+    // the two never disagree for a frame.
+    val seed: StateFlow<AccentSeed> = choice
         .flatMapLatest { choice ->
             when (choice) {
+                null -> flowOf(AccentSeed(null, seedKnown = false))
                 AccentChoice.FromArt -> playback.now
                     .map { it.artwork }
                     .distinctUntilChanged()
-                    .mapLatest { artwork -> palette.colorsFor(artwork).seed() }
-                else -> flowOf(null)
+                    .mapLatest { artwork -> AccentSeed(palette.colorsFor(artwork).seed(), seedKnown = true) }
+                else -> flowOf(AccentSeed(null, seedKnown = true))
             }
         }
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AccentSeed(null, seedKnown = false))
 
     // Whether the glass takes the accent too.
     val glassTint: StateFlow<Boolean?> = settings.prefs
@@ -88,6 +93,10 @@ class AccentViewModel @Inject constructor(
         viewModelScope.launch { settings.setGlassTint(on) }
     }
 }
+
+// The cover's color From the album art grows from (null for none), and
+// whether it has been worked out for the accent chosen.
+data class AccentSeed(val argb: Int?, val seedKnown: Boolean)
 
 // The cover's color an accent grows from: its most vivid, or none for
 // music without artwork.
@@ -125,7 +134,8 @@ fun AccentPicker(active: ThemeChoice, vm: AccentViewModel = hiltViewModel()) {
 }
 
 // Whether the glass takes the accent too, under the picker. Off, the bar,
-// glazed buttons and sheets keep Octo's blue gray whatever accent is chosen.
+// glazed buttons and sheets keep the theme's own accent whatever accent is
+// chosen.
 @Composable
 fun GlassTintRow(vm: AccentViewModel = hiltViewModel()) {
     val chosen = vm.choice.collectAsStateWithLifecycle().value ?: AccentChoice.Octo
@@ -139,6 +149,6 @@ fun GlassTintRow(vm: AccentViewModel = hiltViewModel()) {
     )
 }
 
-const val GLASS_TINT_HELP = "The bar, glass buttons and sheets take the accent too. Off, they stay Octo's blue gray."
+const val GLASS_TINT_HELP = "The bar, glass buttons and sheets take the accent too. Off, they keep the theme's own accent."
 const val GLASS_TINT_SAME = "The theme's own accent is already the glass's color. Pick another accent to tint the glass with it."
 

@@ -220,9 +220,14 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             val player = remember { MutableTransitionState(false) }
             player.targetState = connection != null && app.fullPlayer
             val covered = player.isIdle && player.currentState
-            // The title bar and the pop-ups sit over the full player or the sign-in
-            // page's backdrop, which keep Octo's dark look in every theme.
-            val overArt = app.fullPlayer || connection == null
+            // The title bar and the pop-ups sit over the full player (all the
+            // while it fades in or out) or the sign-in page's backdrop, which
+            // keep Octo's dark look in every theme.
+            val playerShows = player.currentState || player.targetState
+            val overArt = playerShows || connection == null
+            // While the full player shows, the pop-ups frost it, not the
+            // window's colours under it.
+            val playerBackdrop = rememberHazeState()
             val shown = LocalWindowShown.current && !covered
             CompositionLocalProvider(LocalWindowShown provides shown) {
                 // The colours the glass frosts. Only these: the page is not under
@@ -239,14 +244,14 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
                         Box(Modifier.fillMaxSize().drawnUnless(covered)) { SignedInFrame(app, backdrop, parts) }
                     }
                     AnimatedVisibility(player, enter = fadeIn(motionFade()), exit = fadeOut(motionFade())) {
-                        OverArt { FullPlayer(app, Modifier.fillMaxSize().part(parts, parts.full, app), top = FrameSize.TitleBar) }
+                        OverArt { FullPlayer(app, Modifier.fillMaxSize().hazeSource(playerBackdrop).part(parts, parts.full, app), top = FrameSize.TitleBar) }
                     }
                 }
                 if (connection != null && app.omnibox.open && !app.fullPlayer) OmniboxOver(app, backdrop)
                 OverArt(enabled = overArt) { Box(Modifier.part(parts, parts.title, app)) { TitleBar(app, frame, onClose) } }
             }
             // A pop-up keeps the look it opened with until it closes.
-            OverArt(enabled = overArt) { HoldLook(app.popups.open) { PopupLayer(app.popups, backdrop) } }
+            OverArt(enabled = overArt) { HoldLook(app.popups.open) { PopupLayer(app.popups, if (playerShows && connection != null) playerBackdrop else backdrop) } }
             OverArt(enabled = connection == null) { DragLabel(drag) }
             if (frame != null) ResizeEdges(frame)
         }

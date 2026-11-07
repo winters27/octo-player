@@ -22,6 +22,9 @@ import app.winters.octo.sound.SoundSettings
 import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.ThemeSettings
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -132,6 +135,25 @@ class BackupTest {
         // A light theme in the dark slot reads as the slot's default.
         val crossed = text.replace("\"themeDark\": \"Dusk\"", "\"themeDark\": \"Paper\"")
         assertEquals(ThemeChoice.Octo, (decodeBackup(crossed) as BackupRead.Read).backup.player!!.themes().dark)
+    }
+
+    // The backup the iPhone app reads too: its four theme fields, one a theme
+    // of the wrong kind for its slot, read as the theme settings beside it.
+    @Test
+    fun theSharedThemeBackupReadsAsTheIPhoneReadsIt() {
+        val file = listOf(
+            "../shared/core/src/commonTest/resources/backup/theme-player.json",
+            "shared/core/src/commonTest/resources/backup/theme-player.json",
+        ).map { java.io.File(it) }.first { it.exists() }
+        val fixture = kotlinx.serialization.json.Json.parseToJsonElement(file.readText()).jsonObject
+        val read = decodeBackup(fixture.getValue("backup").toString()) as BackupRead.Read
+        val want = fixture.getValue("themes").jsonObject
+        fun name(key: String) = ThemeChoice.valueOf(want.getValue(key).jsonPrimitive.content)
+        assertEquals(
+            ThemeSettings(name("theme"), name("light"), name("dark"), want.getValue("match").jsonPrimitive.boolean),
+            read.backup.player!!.themes(),
+        )
+        assertEquals(AccentChoice.Coral, read.backup.player!!.prefs.accent)
     }
 
     @Test

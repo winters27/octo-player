@@ -19,13 +19,13 @@ import org.jetbrains.skia.Surface
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// Every word on a page reads over the window's colours as they are drawn
+// Every word on a page reads over the window's colors as they are drawn
 // behind it, in every theme: the cover's glow at the usual and the
 // strongest strength, the immersive wash at its strongest (0.9), and the
-// stand-in colours while nothing plays, each with the light themes' veil
+// stand-in colors while nothing plays, each with the light themes' veil
 // and the page's shade. Main and secondary words at 7:1, muted words and
 // the accent, complement and third at 4.5:1, over both the brightest and
-// the darkest colour of each.
+// the darkest color of each.
 class AmbientContrastTest {
     private fun cover(background: Int, disc: Int = background): Image {
         val surface = Surface.makeRasterN32Premul(300, 300)
@@ -52,7 +52,7 @@ class AmbientContrastTest {
     private val strengths = listOf(0.5f, 1f)
 
     // What falls short over each of `patches` shown at `opacity` on the
-    // page, under `veil` of the page colour and then `shade`.
+    // page, under `veil` of the page color and then `shade`.
     private fun shortfalls(words: PageWords, what: String, patches: List<Int>, opacity: Float, veil: Float, shade: PageShade): List<String> =
         patches.flatMap { patch ->
             val washed = overlay(words.page, veil, overlay(patch, opacity, words.page))

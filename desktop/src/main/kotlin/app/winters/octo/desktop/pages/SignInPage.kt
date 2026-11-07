@@ -312,8 +312,10 @@ private fun SignInCard(backdrop: HazeState, short: Boolean, content: @Composable
     }
 }
 
-// The card's film: a dark grey that lets the colours through.
-private val CardFilm = Color(0xFF1A1A1E).copy(alpha = 0.55f)
+// The card's film: a dark gray that lets the colors through, as dark as
+// every word on the card needs over the brightest of them (main and
+// secondary words 7:1, muted words 4.5:1).
+private val CardFilm = Color(0xFF1A1A1E).copy(alpha = 0.79f)
 
 // The settings most servers never need: other ways of signing in, a home
 // address and extra headers.

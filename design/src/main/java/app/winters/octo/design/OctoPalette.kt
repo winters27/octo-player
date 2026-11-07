@@ -101,6 +101,10 @@ private val LocalOverArtAccent = staticCompositionLocalOf { OctoAccentFamily(Oct
 
 internal val OctoDarkSurfaces = surfacesOf(OctoDefaultPalette)
 
+// Whether what is drawn here sits over art, in Octo's dark look: true inside
+// an enabled OverArt and everything it holds.
+val LocalOverArtOn = staticCompositionLocalOf { false }
+
 // What wraps every themed subtree: Android's Material theme on the phone,
 // nothing on the desktop, which draws no Material parts.
 val LocalThemeWrapper = staticCompositionLocalOf<@Composable (@Composable () -> Unit) -> Unit> { { it() } }
@@ -130,7 +134,8 @@ fun ProvideOctoTheme(palette: ResolvedPalette, content: @Composable () -> Unit) 
 fun OverArt(enabled: Boolean = true, content: @Composable () -> Unit) {
     val surfaces = if (enabled) LocalOverArtSurfaces.current else LocalOctoSurfaces.current
     val accent = if (enabled) LocalOverArtAccent.current else LocalOctoAccent.current
-    CompositionLocalProvider(LocalOctoSurfaces provides surfaces, LocalOctoAccent provides accent) {
+    val on = enabled || LocalOverArtOn.current
+    CompositionLocalProvider(LocalOctoSurfaces provides surfaces, LocalOctoAccent provides accent, LocalOverArtOn provides on) {
         LocalThemeWrapper.current(content)
     }
 }
@@ -146,16 +151,20 @@ fun SelectedFill(selected: Boolean = true, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalOctoSurfaces provides surfaces, content = content)
 }
 
-// Draws a sheet or menu in the look in force when `open` last became true,
-// until it closes, so the player closing behind it changes nothing in it.
+// Whether a sheet or menu draws over art, as it was when it last opened.
+private class HeldOverArt(var open: Boolean, var overArt: Boolean)
+
+// Draws a sheet or menu over art or in the theme as it was when `open` last
+// became true, kept through its closing, so the player closing behind it
+// changes nothing in it. The colors themselves stay live: a theme switched
+// while it is open draws in the new theme.
 @Composable
 fun HoldLook(open: Boolean, content: @Composable () -> Unit) {
-    val surfaces = LocalOctoSurfaces.current
-    val accent = LocalOctoAccent.current
-    val held = remember(open) { surfaces to accent }
-    CompositionLocalProvider(LocalOctoSurfaces provides held.first, LocalOctoAccent provides held.second) {
-        LocalThemeWrapper.current(content)
-    }
+    val overArt = LocalOverArtOn.current
+    val held = remember { HeldOverArt(open, overArt) }
+    if (open && !held.open) held.overArt = overArt
+    held.open = open
+    OverArt(enabled = held.overArt, content = content)
 }
 
 // A dark film's color in this theme: as it is on a dark theme; on a light

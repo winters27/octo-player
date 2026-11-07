@@ -76,7 +76,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// How long one song's colours take to become the next's.
+// How long one song's colors take to become the next's.
 private const val CrossfadeMs = 800
 
 // The glow drifts at a fifth of the player's pace. A field this faint and
@@ -95,7 +95,7 @@ private fun bottomFade(page: Color) = Brush.verticalGradient(
     1f to page.copy(alpha = 0.4f),
 )
 
-// The settings and colours the glow is made from.
+// The settings and colors the glow is made from.
 @HiltViewModel
 class AmbienceViewModel @Inject constructor(
     private val settings: PlayerSettings,
@@ -116,7 +116,7 @@ class AmbienceViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    // The same colours the full player uses, from the same cache.
+    // The same colors the full player uses, from the same cache.
     suspend fun colorsFor(artwork: String?): PlayerColors = palette.colorsFor(artwork)
 
     fun setStrength(strength: AmbientStrength) {
@@ -159,11 +159,11 @@ fun PageArtwork(route: NavKey, artwork: String?) {
     }
 }
 
-// The glow behind every page: the artwork's colours, faint and kept
+// The glow behind every page: the artwork's colors, faint and kept
 // readable, above the plain background and under the page. It drifts only
 // while music plays, the app is in view and nothing covers it (awake), and
 // never when the phone's animations are off. With nothing with artwork to
-// feed it, the theme's own colours rest there, still.
+// feed it, the theme's own colors rest there, still.
 @Composable
 fun AmbientBackdrop(
     route: NavKey?,
@@ -174,7 +174,7 @@ fun AmbientBackdrop(
 ) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val source = ambientSource(prefs, route, pages.artworkFor(route), now.trackId != null, now.artwork)
-    // Kept through a turn to none, so the old colours fade out as they are.
+    // Kept through a turn to none, so the old colors fade out as they are.
     val colors by produceState<PlayerColors?>(null, source) {
         when (source) {
             AmbientSource.None -> Unit
@@ -184,8 +184,9 @@ fun AmbientBackdrop(
     }
     val theme = LocalActiveTheme.current
     val glow = LocalOctoSurfaces.current.glow
-    val look = remember(prefs, route, source, theme, glow, colors) {
-        ambientLook(prefs, areaOf(route), source, theme, glow.map { it.toArgb() }, colors?.mesh?.map { it.toArgb() })
+    val accent = OctoColors.Accent.toArgb()
+    val look = remember(prefs, route, source, theme, glow, colors, accent) {
+        ambientLook(prefs, areaOf(route), source, theme, glow.map { it.toArgb() }, colors?.mesh?.map { it.toArgb() }, accent)
     }
     val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
     val reduceMotion = rememberSystemReduceMotion() || appCalm
@@ -193,7 +194,7 @@ fun AmbientBackdrop(
 }
 
 // The film for the floating bar's glass: the plain one, or with a trace of
-// the song's main colour when the bar is chosen to glow.
+// the song's main color when the bar is chosen to glow.
 @Composable
 fun rememberBarFilm(now: NowPlaying, vm: AmbienceViewModel = hiltViewModel()): State<Color> {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
@@ -203,15 +204,17 @@ fun rememberBarFilm(now: NowPlaying, vm: AmbienceViewModel = hiltViewModel()): S
     }
     val plain = GlazeTint
     val theme = LocalActiveTheme.current
-    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it, plain, theme) } } ?: plain
+    val accent = OctoColors.Accent.toArgb()
+    val target = colors?.let { c -> strength?.let { barFilm(c.mesh[0], it, plain, theme, accent) } } ?: plain
     return animateColorAsState(target, tween(CrossfadeMs), label = "bar film")
 }
 
-// A trace of a colour over the glass's usual dim film, `plain`: held dark
-// and soft on a dark theme; on a light one kept readable as the glow is.
-fun barFilm(color: Color, strength: AmbientStrength, plain: Color, theme: ThemeChoice = ThemeChoice.Octo): Color {
+// A trace of a color over the glass's usual dim film, `plain`: held dark
+// and soft on a dark theme; on a light one kept readable as the glow is,
+// `accent` (the accent drawn now) too.
+fun barFilm(color: Color, strength: AmbientStrength, plain: Color, theme: ThemeChoice = ThemeChoice.Octo, accent: Int? = null): Color {
     val alpha = barTintAlpha(strength)
-    val tint = if (theme.light) glowForCover(theme, color.toArgb(), perMille(alpha)) else ambientColor(color.toArgb())
+    val tint = if (theme.light) glowForCover(theme, color.toArgb(), perMille(alpha), accent) else ambientColor(color.toArgb())
     return Color(tint).copy(alpha = alpha).compositeOver(plain)
 }
 
@@ -224,11 +227,12 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
     val theme = LocalActiveTheme.current
     val glow = LocalOctoSurfaces.current.glow
     val alpha = ambientAlpha(strength)
-    // With nothing playing the theme's own colours show, or the quiet ones
+    val accent = OctoColors.Accent.toArgb()
+    // With nothing playing the theme's own colors show, or the quiet ones
     // for a theme with none.
-    val mesh = remember(colors, theme, glow, alpha, now.trackId == null) {
-        val resting = if (now.trackId == null) restingGlow(theme, glow.map { it.toArgb() }, alpha) else emptyList()
-        resting.ifEmpty { null } ?: colors?.mesh?.map { coverGlow(theme, it.toArgb(), alpha) }
+    val mesh = remember(colors, theme, glow, alpha, now.trackId == null, accent) {
+        val resting = if (now.trackId == null) restingGlow(theme, glow.map { it.toArgb() }, alpha, accent) else emptyList()
+        resting.ifEmpty { null } ?: colors?.mesh?.let { m -> coverMesh(theme, m.map { it.toArgb() }, alpha, accent) }
     }
     Box(
         modifier
@@ -257,7 +261,7 @@ fun AmbientPreview(strength: AmbientStrength, modifier: Modifier = Modifier, vm:
     }
 }
 
-// The colour field itself, in a layer of its own: new frames redraw only
+// The color field itself, in a layer of its own: new frames redraw only
 // this layer, and only its drawing reads the moving values, so the page over
 // it is never recomposed or redrawn for it.
 @Composable
@@ -303,7 +307,7 @@ private fun AmbientField(mesh: List<Int>?, strength: Float, moving: Boolean, mod
     )
 }
 
-// Draws the four colours as a field.
+// Draws the four colors as a field.
 private interface FieldPainter {
     val moves: Boolean
     fun DrawScope.paint(c0: Color, c1: Color, c2: Color, c3: Color, time: Float, alpha: Float)
@@ -330,7 +334,7 @@ private class MeshPainter : FieldPainter {
     }
 }
 
-// A still diagonal blend of the same colours, for older phones.
+// A still diagonal blend of the same colors, for older phones.
 private class GradientPainter : FieldPainter {
     override val moves = false
 

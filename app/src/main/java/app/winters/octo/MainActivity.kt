@@ -9,6 +9,7 @@ import app.winters.octo.theme.ThemeApplier
 import app.winters.octo.theme.ThemeRoot
 import app.winters.octo.theme.ThemeStore
 import app.winters.octo.theme.activeTheme
+import app.winters.octo.theme.barStyleFor
 import app.winters.octo.theme.base
 import app.winters.octo.ui.imports.ImportInbox
 import app.winters.octo.ui.imports.fromHistory
@@ -23,6 +24,7 @@ import android.provider.MediaStore
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -71,8 +73,13 @@ class MainActivity : ComponentActivity() {
         // The window behind the first frame is the page of the theme showing,
         // so nothing flashes before the first frame is drawn.
         val deviceDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        val page = activeTheme(settings, deviceDark).base.page
+        val theme = activeTheme(settings, deviceDark)
+        val page = theme.base.page
         window.setBackgroundDrawable(ColorDrawable(page))
+        // The bars match that page from the first frame too; the root keeps
+        // them in step from then on.
+        val (status, navigation) = barStyleFor(theme.light, theme.light)
+        enableEdgeToEdge(status, navigation)
         ThemeApplier.applySplash(this, settings)
         lifecycleScope.launch { themes.settings.collect { ThemeApplier.applySplash(this@MainActivity, it) } }
         // Android 12 shows its own launch screen; when the theme's page is not

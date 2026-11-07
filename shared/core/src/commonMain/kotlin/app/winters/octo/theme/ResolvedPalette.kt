@@ -1,5 +1,6 @@
 package app.winters.octo.theme
 
+import app.winters.octo.covers.Lch
 import app.winters.octo.covers.lchToArgb
 import app.winters.octo.covers.toLch
 import app.winters.octo.player.immersive.contrastRatio
@@ -249,27 +250,54 @@ fun resolvePalette(theme: ThemeChoice, choice: AccentChoice, art: Int?, glassTin
     )
 }
 
+// Whether every word role on the page of `p` reads with `glow` at
+// `alphaPerMille` over it: main and secondary words at 7:1, muted words,
+// the theme's accent, complement and third, and `accent` when given, at
+// 4.5:1.
+private fun glowReads(p: ResolvedPalette, glow: Int, alphaPerMille: Int, accent: Int?): Boolean {
+    val under = overArgb(alphaArgb(glow, alphaPerMille), p.page)
+    return contrastRatio(p.text, under) >= 7.0 && contrastRatio(p.secondary, under) >= 7.0 &&
+        contrastOn(p.muted, under) >= 4.5 &&
+        (listOf(p.accents.accent, p.complement, p.third) + listOfNotNull(accent)).all { contrastRatio(it, under) >= 4.5 }
+}
+
+// A color's lightness moved `k` hundredths: down on a dark theme, up on a
+// light one.
+private fun stepped(lch: Lch, k: Int, light: Boolean): Int =
+    lchToArgb((if (light) lch.l + k * 0.01 else lch.l - k * 0.01).coerceIn(0.0, 1.0), lch.c, lch.h)
+
 // A cover's color for the page glow in `theme`, so every word role still
 // reads with the glow at `alphaPerMille` over the page: on a dark theme the
 // color darkened in steps (no change for a cover that already reads); on a
-// light one mixed 70% toward the page, then lightened in steps.
-fun glowForCover(theme: ThemeChoice, art: Int, alphaPerMille: Int): Int {
+// light one mixed 70% toward the page, then lightened in steps. `accent` is
+// the accent drawn now, when it is not the theme's own; it must read too.
+fun glowForCover(theme: ThemeChoice, art: Int, alphaPerMille: Int, accent: Int? = null): Int {
     val p = resolvePalette(theme, AccentChoice.Octo, null, false)
     val start = if (theme.light) mixArgb(art, p.page, 700) else art
     val lch = toLch(start)
     for (k in 0..60) {
-        val glow = if (k == 0) {
-            start
-        } else {
-            lchToArgb((if (theme.light) lch.l + k * 0.01 else lch.l - k * 0.01).coerceIn(0.0, 1.0), lch.c, lch.h)
-        }
-        val under = overArgb(alphaArgb(glow, alphaPerMille), p.page)
-        val reads = contrastRatio(p.text, under) >= 7.0 && contrastRatio(p.secondary, under) >= 7.0 &&
-            contrastOn(p.muted, under) >= 4.5 &&
-            listOf(p.accents.accent, p.complement, p.third).all { contrastRatio(it, under) >= 4.5 }
-        if (reads) return glow
+        val glow = if (k == 0) start else stepped(lch, k, theme.light)
+        if (glowReads(p, glow, alphaPerMille, accent)) return glow
     }
     return p.page
+}
+
+// The colors of a glow mesh in `theme` (a cover's, or the theme's own at
+// rest), each made readable by glowForCover, then, where the glow blends
+// two of them, the even blend of every pair read too: while one does not,
+// all of them darkened (a dark theme) or lightened (a light one) together
+// in steps, so the mesh keeps its look.
+fun glowMesh(theme: ThemeChoice, colors: List<Int>, alphaPerMille: Int, accent: Int? = null): List<Int> {
+    val p = resolvePalette(theme, AccentChoice.Octo, null, false)
+    val each = colors.map { glowForCover(theme, it, alphaPerMille, accent) }
+    if (each.size < 2) return each
+    val lch = each.map(::toLch)
+    for (k in 0..100) {
+        val mesh = if (k == 0) each else lch.map { stepped(it, k, theme.light) }
+        val blends = mesh.indices.flatMap { i -> (i + 1 until mesh.size).map { j -> mixArgb(mesh[i], mesh[j], 500) } }
+        if ((mesh + blends).all { glowReads(p, it, alphaPerMille, accent) }) return mesh
+    }
+    return each.map { p.page }
 }
 
 // The desktop key color (an icon tint taken from the cover) in `theme`:

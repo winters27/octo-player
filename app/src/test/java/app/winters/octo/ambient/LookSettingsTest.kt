@@ -21,7 +21,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-// A theme supplies colours only: every look setting draws as set in every
+// A theme supplies colors only: every look setting draws as set in every
 // theme, and picking a theme writes none of them.
 @RunWith(RobolectricTestRunner::class)
 class LookSettingsTest {
@@ -66,7 +66,7 @@ class LookSettingsTest {
             for (area in AmbientArea.entries) {
                 assertEquals("$theme $strength $area playing", ambientAlpha(strength), look(theme, prefs, area, playing = true).alpha)
                 val resting = look(theme, prefs, area, playing = false)
-                // The theme's own colours rest at the same strength; Octo has none.
+                // The theme's own colors rest at the same strength; Octo has none.
                 if (theme == ThemeChoice.Octo) {
                     assertEquals(0f, resting.alpha)
                     assertFalse(resting.rests)

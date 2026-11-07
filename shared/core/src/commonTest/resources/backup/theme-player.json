@@ -1,0 +1,19 @@
+{
+  "backup": {
+    "kind": "octo-settings",
+    "version": 1,
+    "player": {
+      "accent": "Coral",
+      "theme": "Paper",
+      "themeLight": "Moss",
+      "themeDark": "Dusk",
+      "themeMatch": true
+    }
+  },
+  "themes": {
+    "theme": "Paper",
+    "light": "Daylight",
+    "dark": "Dusk",
+    "match": true
+  }
+}

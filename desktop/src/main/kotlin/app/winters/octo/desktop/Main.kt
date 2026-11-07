@@ -427,7 +427,9 @@ fun main(args: Array<String>) {
             val startPalette = remember { paletteFor(settings.current, deviceDark.value) }
             val palette = ready?.app?.palette?.collectAsState()?.value ?: startPalette
             KeepDeviceMode(os, deviceDark, portal)
-            KeepChrome(window, os, custom, palette, ready?.app)
+            CompositionLocalProvider(LocalWindowShown provides ((ready?.system?.windowVisible ?: !inTray) && !windowState.isMinimized)) {
+                KeepChrome(window, os, custom, palette, ready?.app)
+            }
             ProvideOctoTheme(palette) {
             Box(Modifier.fillMaxSize()) {
             if (ready != null) {
@@ -475,11 +477,13 @@ private fun KeepDeviceMode(os: DesktopOs, deviceDark: MutableStateFlow<Boolean>,
 }
 
 // Draws the window's own frame (the system title bar, the traffic lights,
-// the GTK title bar) dark or light to match what is under it.
+// the GTK title bar) dark or light to match what is under it, again each
+// time the window shows.
 @Composable
 private fun KeepChrome(window: ComposeWindow, os: DesktopOs, ownFrame: Boolean, palette: ResolvedPalette, app: AppState?) {
     val dark = chromeDark(palette, app?.fullPlayer == true, app != null && app.connection == null)
-    LaunchedEffect(dark) {
+    val shown = LocalWindowShown.current
+    LaunchedEffect(dark, shown) {
         when (os) {
             DesktopOs.Windows -> if (!ownFrame) darkTitleBar(window, dark)
             DesktopOs.Mac -> macAppearance(window, dark)

@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.design.LocalThemeWrapper
 import app.winters.octo.design.OctoTheme
 import app.winters.octo.design.ProvideOctoTheme
+import app.winters.octo.ui.settings.AccentSeed
 import app.winters.octo.ui.settings.AccentViewModel
 
 // The launch color the manifest's window shows before anything is drawn.
@@ -66,12 +67,13 @@ fun ThemeRoot(
 
     val chosen by accent.choice.collectAsStateWithLifecycle()
     val tinted by accent.glassTint.collectAsStateWithLifecycle()
-    val seed by accent.seed.collectAsStateWithLifecycle()
+    val seeded by accent.seed.collectAsStateWithLifecycle()
+    val seed = seeded.argb
     val loaded by accent.loaded.collectAsStateWithLifecycle()
     val seen = remember(store) { store.seen }
     val choice = chosen ?: seen.choice
     val glass = tinted ?: seen.glass
-    val art = if (chosen != null) seed else seen.art
+    val art = firstFrameArt(chosen, seeded, seen.art)
 
     val palette = remember(active, choice, art, glass) { resolvePalette(active, choice, art, glass) }
 
@@ -91,9 +93,8 @@ fun ThemeRoot(
 
     val request = remember { mutableStateOf<BarWish?>(null) }
     val bars = barsFor(request.value, palette.light)
-    val scrim = alphaArgb(palette.page, 500)
     SideEffect {
-        val (status, navigation) = barStyleFor(bars.statusLight, bars.navigationLight, scrim)
+        val (status, navigation) = barStyleFor(bars.statusLight, bars.navigationLight)
         (activity as? ComponentActivity)?.enableEdgeToEdge(status, navigation)
     }
 
@@ -117,6 +118,11 @@ fun ThemeRoot(
         }
     }
 }
+
+// The cover color the accent grows from: this run's once the accent chosen
+// is read and its cover worked out, until then the one seen last time.
+internal fun firstFrameArt(chosen: AccentChoice?, seeded: AccentSeed, seenArt: Int?): Int? =
+    if (chosen != null && seeded.seedKnown) seeded.argb else seenArt
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

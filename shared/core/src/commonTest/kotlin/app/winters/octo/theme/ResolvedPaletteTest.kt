@@ -135,25 +135,69 @@ class ResolvedPaletteTest {
         }
     }
 
+    private val glowSeeds = artSeeds.filterNotNull() + listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0xFF00A000.toInt(), 0xFF0000FF.toInt())
+
+    // Every word role, and the accent drawn now, over `glow` at `alpha`.
+    private fun checkGlow(w: String, p: ResolvedPalette, glow: Int, alpha: Int, accent: Int) {
+        val under = overArgb(alphaArgb(glow, alpha), p.page)
+        check("$w text", contrastRatio(p.text, under), 7.0)
+        check("$w secondary", contrastRatio(p.secondary, under), 7.0)
+        check("$w muted", contrastOn(p.muted, under), 4.5)
+        check("$w theme accent", contrastRatio(p.accents.accent, under), 4.5)
+        check("$w complement", contrastRatio(p.complement, under), 4.5)
+        check("$w third", contrastRatio(p.third, under), 4.5)
+        check("$w accent drawn", contrastRatio(accent, under), 4.5)
+    }
+
     @Test
     fun glowKeepsWordsReadable() {
-        val seeds = artSeeds.filterNotNull() + listOf(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0xFF00A000.toInt(), 0xFF0000FF.toInt())
         for (theme in ThemeChoice.entries) {
             val p = resolvePalette(theme, AccentChoice.Octo, null, false)
-            for (seed in seeds) {
-                for (alpha in listOf(140, 240)) {
-                    val glow = glowForCover(theme, seed, alpha)
-                    val under = overArgb(alphaArgb(glow, alpha), p.page)
-                    val w = "$theme/%08X/glow %08X/alpha $alpha".format(seed, glow)
-                    check("$w text", contrastRatio(p.text, under), 7.0)
-                    check("$w secondary", contrastRatio(p.secondary, under), 7.0)
-                    check("$w muted", contrastOn(p.muted, under), 4.5)
-                    check("$w accent", contrastRatio(p.accents.accent, under), 4.5)
-                    check("$w complement", contrastRatio(p.complement, under), 4.5)
-                    check("$w third", contrastRatio(p.third, under), 4.5)
+            for (choice in AccentChoice.entries) {
+                for (seed in glowSeeds) {
+                    val accent = themedAccent(theme, choice, seed)
+                    for (alpha in listOf(140, 240)) {
+                        val glow = glowForCover(theme, seed, alpha, accent)
+                        checkGlow("$theme/${choice.label}/%08X/glow %08X/alpha $alpha".format(seed, glow), p, glow, alpha, accent)
+                    }
                 }
             }
         }
+    }
+
+    // A glow mesh, the theme's own colors at rest or a cover's, reads where
+    // any two of its colors blend half and half too, for every accent.
+    @Test
+    fun aGlowMeshReadsAtEveryBlendOfTwoOfItsColors() {
+        val covers = listOf(
+            listOf(0xFFFFFFFF.toInt(), 0xFF000000.toInt(), 0xFFE01010.toInt(), 0xFF00A000.toInt()),
+            listOf(0xFFFFE000.toInt(), 0xFF0000FF.toInt(), 0xFF3A8FB7.toInt(), 0xFFFFFFFF.toInt()),
+        )
+        for (theme in ThemeChoice.entries) {
+            val p = resolvePalette(theme, AccentChoice.Octo, null, false)
+            val meshes = covers + if (p.glow.size >= 3) listOf(listOf(p.glow[0], p.glow[1], p.glow[2], p.glow[0])) else emptyList()
+            for (choice in AccentChoice.entries) {
+                for ((m, colors) in meshes.withIndex()) {
+                    val accent = themedAccent(theme, choice, colors[0])
+                    for (alpha in listOf(140, 240)) {
+                        val mesh = glowMesh(theme, colors, alpha, accent)
+                        assertEquals(colors.size, mesh.size)
+                        for (i in mesh.indices) for (j in mesh.indices) {
+                            val blend = mixArgb(mesh[i], mesh[j], 500)
+                            checkGlow("$theme/${choice.label}/mesh $m/$i-$j %08X/alpha $alpha".format(blend), p, blend, alpha, accent)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // A mesh that already reads at every blend is left as glowForCover
+    // makes each of its colors.
+    @Test
+    fun aMeshThatReadsIsLeftAsItIs() {
+        val dark = listOf(0xFF102030.toInt(), 0xFF201030.toInt(), 0xFF103020.toInt())
+        assertEquals(dark.map { glowForCover(ThemeChoice.Octo, it, 140) }, glowMesh(ThemeChoice.Octo, dark, 140))
     }
 
     @Test

@@ -69,7 +69,7 @@ class MotionViewModel @Inject constructor(private val settings: PlayerSettings) 
     }
 }
 
-// How the app looks: the theme, the accent, the artwork's colours glowing behind the
+// How the app looks: the theme, the accent, the artwork's colors glowing behind the
 // pages, how strongly and where, Home's sections, the player's background, and how
 // much moves.
 @Composable

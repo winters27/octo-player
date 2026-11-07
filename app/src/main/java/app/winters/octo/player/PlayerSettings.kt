@@ -102,7 +102,7 @@ data class PlayerPrefs(
     // The accent the app is drawn in, or the playing cover's.
     val accent: AccentChoice = AccentChoice.Octo,
     // Whether the glass (the bar, glazed buttons and sheets) takes the
-    // accent too, or keeps Octo's blue gray.
+    // accent too, or keeps the theme's own accent.
     val glassTint: Boolean = false,
     // Where an album's animated art plays: in place of the cover, filling
     // the player, or nowhere. Kept by its key ("square", "full_screen",

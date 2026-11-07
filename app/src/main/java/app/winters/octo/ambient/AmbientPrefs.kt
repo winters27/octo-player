@@ -2,19 +2,20 @@ package app.winters.octo.ambient
 
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.glowForCover
+import app.winters.octo.theme.glowMesh
 import kotlinx.serialization.Serializable
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-// How strongly the artwork's colours show behind the pages.
+// How strongly the artwork's colors show behind the pages.
 enum class AmbientStrength { Off, Subtle, Rich }
 
-// The parts of the app that can wear the artwork's colours.
+// The parts of the app that can wear the artwork's colors.
 enum class AmbientArea { Home, Library, Search, Settings }
 
-// Where the ambient colour shows, and how strongly. Subtle everywhere by
+// Where the ambient color shows, and how strongly. Subtle everywhere by
 // default: the glow was asked for, and at this strength it stays a faint
 // wash that Off turns away in one tap.
 @Serializable
@@ -39,14 +40,14 @@ data class AmbientPrefs(
     val tintsBar: Boolean get() = strength != AmbientStrength.Off && bar
 }
 
-// How much of the colour shows over the app's near-black background.
+// How much of the color shows over the app's near-black background.
 fun ambientAlpha(strength: AmbientStrength): Float = when (strength) {
     AmbientStrength.Off -> 0f
     AmbientStrength.Subtle -> 0.14f
     AmbientStrength.Rich -> 0.24f
 }
 
-// How much of the colour tints the bar's glass: about half the page's, so
+// How much of the color tints the bar's glass: about half the page's, so
 // the glass stays glass.
 fun barTintAlpha(strength: AmbientStrength): Float = when (strength) {
     AmbientStrength.Off -> 0f
@@ -54,7 +55,7 @@ fun barTintAlpha(strength: AmbientStrength): Float = when (strength) {
     AmbientStrength.Rich -> 0.10f
 }
 
-// Artwork colours are held to this lightness and saturation before they
+// Artwork colors are held to this lightness and saturation before they
 // glow, so a white or neon cover still comes through as a dark, soft tint.
 const val AmbientMaxLightness = 0.5f
 const val AmbientMaxSaturation = 0.55f
@@ -62,14 +63,14 @@ const val AmbientMaxSaturation = 0.55f
 // The page background the glow sits on, as ARGB. Matches OctoColors.Background.
 const val AmbientBase = 0xFF0C0C0D.toInt()
 
-// An artwork colour made safe to glow: the same hue, no brighter and no more
+// An artwork color made safe to glow: the same hue, no brighter and no more
 // saturated than the limits above.
 fun ambientColor(argb: Int): Int {
     val hsl = toHsl(argb)
     return fromHsl(hsl[0], min(hsl[1], AmbientMaxSaturation), min(hsl[2], AmbientMaxLightness))
 }
 
-// A colour laid over another at some opacity, as the screen draws it.
+// A color laid over another at some opacity, as the screen draws it.
 fun composite(argb: Int, alpha: Float, over: Int = AmbientBase): Int {
     fun channel(shift: Int): Int {
         val top = (argb shr shift) and 0xFF
@@ -84,15 +85,20 @@ fun perMille(alpha: Float): Int = kotlin.math.floor(alpha * 1000.0 + 0.5).toInt(
 
 // A cover's color as it glows behind the pages in `theme` at `alpha`: on a
 // dark theme held dark and soft first, then on any theme kept so every word
-// on the page still reads over it (glowForCover).
-fun coverGlow(theme: ThemeChoice, argb: Int, alpha: Float): Int =
-    glowForCover(theme, if (theme.light) argb else ambientColor(argb), perMille(alpha))
+// on the page, and `accent` when given, still reads over it (glowForCover).
+fun coverGlow(theme: ThemeChoice, argb: Int, alpha: Float, accent: Int? = null): Int =
+    glowForCover(theme, if (theme.light) argb else ambientColor(argb), perMille(alpha), accent)
+
+// A cover's colors as they glow together behind the pages: each as
+// coverGlow makes it, and where two blend the blend reads too (glowMesh).
+fun coverMesh(theme: ThemeChoice, colors: List<Int>, alpha: Float, accent: Int? = null): List<Int> =
+    glowMesh(theme, colors.map { if (theme.light) it else ambientColor(it) }, perMille(alpha), accent)
 
 // The theme's own colors at rest: its glow colors in the order accent,
-// complement, third and accent again, each kept readable at `alpha` as a
-// cover's is. Empty for a theme with none (Octo).
-fun restingGlow(theme: ThemeChoice, glow: List<Int>, alpha: Float): List<Int> =
-    if (glow.size < 3) emptyList() else listOf(glow[0], glow[1], glow[2], glow[0]).map { glowForCover(theme, it, perMille(alpha)) }
+// complement, third and accent again, kept readable at `alpha` as a cover's
+// are, where they blend too. Empty for a theme with none (Octo).
+fun restingGlow(theme: ThemeChoice, glow: List<Int>, alpha: Float, accent: Int? = null): List<Int> =
+    if (glow.size < 3) emptyList() else glowMesh(theme, listOf(glow[0], glow[1], glow[2], glow[0]), perMille(alpha), accent)
 
 // What the glow behind a page draws: its four colors (null for none known
 // yet), how strongly, and whether they are the theme's own at rest.
@@ -102,12 +108,12 @@ data class AmbientLook(val mesh: List<Int>?, val alpha: Float, val rests: Boolea
 // or the page's own) while `source` names one; the theme's own colors, held
 // still, where the glow is on for the area and nothing with artwork feeds
 // it; otherwise none, with the last colors kept so they fade out as they
-// are.
-fun ambientLook(prefs: AmbientPrefs?, area: AmbientArea?, source: AmbientSource, theme: ThemeChoice, glow: List<Int>, cover: List<Int>?): AmbientLook {
+// are. `accent` is the accent drawn now, which reads over the glow too.
+fun ambientLook(prefs: AmbientPrefs?, area: AmbientArea?, source: AmbientSource, theme: ThemeChoice, glow: List<Int>, cover: List<Int>?, accent: Int? = null): AmbientLook {
     val alpha = ambientAlpha(prefs?.strength ?: AmbientStrength.Off)
-    val mesh = cover?.map { coverGlow(theme, it, alpha) }
+    val mesh = cover?.let { coverMesh(theme, it, alpha, accent) }
     if (source != AmbientSource.None) return AmbientLook(mesh, alpha, rests = false)
-    val resting = restingGlow(theme, glow, alpha)
+    val resting = restingGlow(theme, glow, alpha, accent)
     val shown = prefs != null && area != null && prefs.shows(area)
     return if (shown && resting.isNotEmpty()) AmbientLook(resting, alpha, rests = true) else AmbientLook(mesh, 0f, rests = false)
 }
@@ -126,7 +132,7 @@ fun luminance(argb: Int): Double {
     return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0)
 }
 
-// The WCAG contrast ratio between two colours, from 1 to 21.
+// The WCAG contrast ratio between two colors, from 1 to 21.
 fun contrast(a: Int, b: Int): Double {
     val la = luminance(a)
     val lb = luminance(b)

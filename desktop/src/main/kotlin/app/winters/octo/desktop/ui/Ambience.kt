@@ -43,7 +43,7 @@ import app.winters.octo.player.immersive.readableAlpha
 import app.winters.octo.theme.ResolvedPalette
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.contrastOn
-import app.winters.octo.theme.glowForCover
+import app.winters.octo.theme.glowMesh
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.ColorAlphaType
@@ -52,25 +52,25 @@ import org.jetbrains.skia.Image
 import org.jetbrains.skia.ImageInfo
 import kotlin.math.roundToInt
 
-// Octo's own colour, the violet of its icon: the key colour while no song
+// Octo's own color, the violet of its icon: the key color while no song
 // gives one.
 val OctoKey = Color(0xFF9061FA)
 
-// The colour the glass takes a hint of: the playing song's, or Octo's.
+// The color the glass takes a hint of: the playing song's, or Octo's.
 val LocalKeyColour = staticCompositionLocalOf { OctoKey }
 
-// A colour made fit to tint with: the same hue, never too dark or grey to
+// A color made fit to tint with: the same hue, never too dark or gray to
 // show on dark glass.
 fun keyColour(argb: Int): Color {
     val hsv = FloatArray(3)
     java.awt.Color.RGBtoHSB(argb shr 16 and 0xFF, argb shr 8 and 0xFF, argb and 0xFF, hsv)
-    // A cover with hardly any colour gives Octo's own.
+    // A cover with hardly any color gives Octo's own.
     if (hsv[1] < 0.12f) return OctoKey
     val rgb = java.awt.Color.HSBtoRGB(hsv[0], hsv[1].coerceIn(0.35f, 0.8f), hsv[2].coerceIn(0.75f, 1f))
     return Color(rgb or (0xFF shl 24))
 }
 
-// The glass's rim with a fifth of the key colour in it, mixed from white on
+// The glass's rim with a fifth of the key color in it, mixed from white on
 // a dark theme and from the edge color on a light one.
 @Composable
 @ReadOnlyComposable
@@ -131,15 +131,15 @@ val WashCover.glowPatches: List<Int> get() = listOf(darkest, glowPeak)
 
 // The theme's own colors as a still wash, for a theme that has them: its
 // glow colors (accent, complement, third and accent again, one to a
-// corner), each kept readable at `alpha` over the page as a cover's glow
-// is. Made once for each set of colors, untouched by the wash's tuning.
+// corner), kept readable at `alpha` over the page, where they blend too
+// (glowMesh). Made once for each set of colors, untouched by the wash's tuning.
 internal object ThemeArt {
     private val untouched = WashTuning(contrast = 1f, saturation = 1f, brightnessCap = 1f)
     @Volatile private var made: WashCover? = null
 
     fun corners(theme: ThemeChoice, glow: List<Int>, alpha: Float): List<Int> {
         val perMille = kotlin.math.floor(alpha * 1000.0 + 0.5).toInt()
-        return listOf(glow[0], glow[1], glow[2], glow[0]).map { glowForCover(theme, it, perMille) }
+        return glowMesh(theme, listOf(glow[0], glow[1], glow[2], glow[0]), perMille)
     }
 
     @Synchronized
@@ -187,8 +187,8 @@ internal object ThemeArt {
 enum class WindowGlow { None, SignIn, Immersive, Quiet, Cover }
 
 // What the window shows behind everything for `look`: Octo's own moving
-// colours behind the sign-in; nothing with the glow off; the immersive
-// wash; the stand-in colours while nothing with a cover plays; or the
+// colors behind the sign-in; nothing with the glow off; the immersive
+// wash; the stand-in colors while nothing with a cover plays; or the
 // cover's glow.
 fun windowGlow(look: Appearance, signedIn: Boolean, cover: String?): WindowGlow = when {
     !signedIn -> WindowGlow.SignIn
@@ -242,12 +242,12 @@ internal object OctoArt {
     private fun keyFor(tuning: WashTuning) = "octo|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
 }
 
-// Octo's own colours as a slow wash, for when there is no cover to show:
+// Octo's own colors as a slow wash, for when there is no cover to show:
 // behind the sign-in, and very dim behind the pages while nothing plays.
 // It is the full player's background seeded with the app's icon, or in a
-// theme with colours of its own, with those. With motion reduced, `moving`
-// off, or the window minimised or in the tray, it holds still. `veil` is
-// how much of the page colour lies over it; a light theme lays more over
+// theme with colors of its own, with those. With motion reduced, `moving`
+// off, or the window minimized or in the tray, it holds still. `veil` is
+// how much of the page color lies over it; a light theme lays more over
 // that, as far as its words need.
 @Composable
 fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier = Modifier) {
@@ -277,11 +277,11 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
     }
 }
 
-// The key colour for a prepared cover.
+// The key color for a prepared cover.
 fun WashCover.keyColour(): Color = if (main == 0) OctoKey else keyColour(main)
 
 // Whether what reads it is on screen: the window not minimized and not
-// hidden in the tray, and for the frame and its colours, not covered by
+// hidden in the tray, and for the frame and its colors, not covered by
 // the full player. What moves rests while it is not.
 val LocalWindowShown = compositionLocalOf { true }
 
@@ -294,17 +294,17 @@ val LocalSoftwareDrawing = compositionLocalOf { false }
 // strength setting: from a third to nine tenths.
 fun immersiveOpacity(strength: Float): Float = 0.3f + 0.6f * strength.coerceIn(0f, 1f)
 
-// How much of Octo's own colours show while nothing plays: what the glow
+// How much of Octo's own colors show while nothing plays: what the glow
 // shows of them, a fifth to a half.
 fun quietOpacity(strength: Float): Float = 0.2f + 0.3f * strength.coerceIn(0f, 1f)
 
 // The contrast main and secondary words keep over what is behind them.
 const val SecondaryContrast = 7.0
 
-// The contrast the pages' quieter words (the accent colour, used for
+// The contrast the pages' quieter words (the accent color, used for
 // subtitles and details) keep over the wash's brightest part, the usual
 // minimum for reading. The quietest and the secondary words are brought
-// up to theirs by the page's own shade (PageShade.kt), so the colours stay
+// up to theirs by the page's own shade (PageShade.kt), so the colors stay
 // rich.
 const val PageContrast = 4.5
 
@@ -319,7 +319,7 @@ fun WashCover.pageOpacity(strength: Float, page: Color, words: Color): Float =
 // the strength.
 fun glowOpacity(strength: Float): Float = 0.12f + 0.38f * strength.coerceIn(0f, 1f)
 
-// How fast the immersive colours drift behind the pages, as a share of the
+// How fast the immersive colors drift behind the pages, as a share of the
 // full pace, or null when they hold still. Gentle is half the full
 // player's own speed; Full is its speed.
 fun ambienceSpeed(motion: AmbienceMotion, wash: WashPrefs): Float? = when (motion) {
@@ -328,7 +328,7 @@ fun ambienceSpeed(motion: AmbienceMotion, wash: WashPrefs): Float? = when (motio
     AmbienceMotion.Full -> wash.speed / 100f
 }
 
-// Whether the immersive colours move now: only while music plays, the
+// Whether the immersive colors move now: only while music plays, the
 // window is on screen and the full player (which has its own) is shut;
 // never when held still, with motion reduced, or without a graphics card.
 fun ambienceMoves(motion: AmbienceMotion, playing: Boolean, shown: Boolean, software: Boolean, fullPlayer: Boolean, reduced: Boolean): Boolean =
@@ -343,7 +343,7 @@ fun ambienceFps(wash: WashPrefs): Int = minOf(wash.fps, FpsChoices.first())
 // The full player's moving wash behind the whole window: the playing
 // song's cover, as the full player draws it and from the same prepared
 // copy, dimmed behind the pages so their words stay readable. With nothing
-// playing, Octo's own colours stand in, still. It moves only while music
+// playing, Octo's own colors stand in, still. It moves only while music
 // plays, the window is on screen and the full player is shut (it has its
 // own), and never with motion reduced or without a graphics card.
 @Composable
@@ -375,10 +375,10 @@ fun ImmersiveAmbience(app: AppState, modifier: Modifier = Modifier) {
     ImmersiveBackdrop(cover, look.glowStrength, paceBpm(song?.bpm, wash.useBpm), ambienceFps(wash), ambienceSpeed(look.ambienceMotion, wash) ?: 0f, moving, modifier, quiet = song == null)
 }
 
-// The wash behind the pages over the page colour, as much of it showing as
+// The wash behind the pages over the page color, as much of it showing as
 // the strength asks and the cover allows (`pageOpacity`), easing between
-// covers. `quiet` (nothing playing, the stand-in colours) keeps it as dim
-// as the glow keeps them. On a light theme a veil of the page colour lies
+// covers. `quiet` (nothing playing, the stand-in colors) keeps it as dim
+// as the glow keeps them. On a light theme a veil of the page color lies
 // over it, as far as the words need over its darkest patch at full
 // strength.
 @Composable

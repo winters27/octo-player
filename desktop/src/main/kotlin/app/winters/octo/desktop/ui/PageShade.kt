@@ -29,8 +29,8 @@ import app.winters.octo.player.immersive.overlay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// A soft shade of black (of the page colour on a light theme) behind the
-// page's words, so the window's colours can stay rich while the quietest
+// A soft shade of black (of the page color on a light theme) behind the
+// page's words, so the window's colors can stay rich while the quietest
 // words (TextMuted: times, counts, small captions) and the secondary ones
 // still read. It is worked out from the cover itself: a dark
 // cover gets none, a bright one just enough. With the glow it follows the
@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
 // wash it lies evenly over the page. It is shade, not a panel: no edge of
 // its own, and the glass of the frame and the player is left as it is.
 
-// What the quietest words keep over the brightest colour behind them:
+// What the quietest words keep over the brightest color behind them:
 // WCAG AA for small text, and a hair more for the grain and the blur.
 const val ShadeContrast = 4.6
 
@@ -49,7 +49,7 @@ const val ShadeSecondaryContrast = 7.1
 const val MaxShade = 0.85f
 
 // The shade (`shade`, black on a dark theme, the page color on a light
-// one) `under` (the riskiest colour behind the words) needs over it for the
+// one) `under` (the riskiest color behind the words) needs over it for the
 // quietest words (`muted`) to read, and with `secondary`, the secondary
 // words at ShadeSecondaryContrast too: 0 when they already do.
 fun shadeFor(under: Int, muted: Color, secondary: Color? = null, shade: Int = 0xFF000000.toInt()): Float {
@@ -88,11 +88,11 @@ data class PageShade(val stops: List<Pair<Dp, Float>>, val color: Color = Color.
 // How many steps the glow's shade is worked out at down its height.
 private const val GlowSteps = 8
 
-// The shade for the glow: at each depth, what the glow's riskiest colour
+// The shade for the glow: at each depth, what the glow's riskiest color
 // (`peak`: the brightest of the cover as it is on a dark theme, its
 // darkest patch on a light one) comes to there, faded as the glow fades
 // into the page (`glow` at the top, none at its foot), under `veil` of
-// the page colour. `page` is the page color, `muted` the quietest words'
+// the page color. `page` is the page color, `muted` the quietest words'
 // and `secondary` the secondary words'; `shade` the shade's color.
 fun glowShade(
     peak: Int,
@@ -112,7 +112,7 @@ fun glowShade(
 }
 
 // The shade for a wash lying evenly behind the page at `opacity`, under
-// `veil` of the page colour.
+// `veil` of the page color.
 fun evenShade(
     peak: Int,
     opacity: Float,
@@ -126,11 +126,11 @@ fun evenShade(
     return PageShade.even(shadeFor(overlay(base, veil, overlay(peak, opacity, base)), muted, secondary, shade.toArgb()), shade)
 }
 
-// The shade for the window's colours as they are now: the ambience's
+// The shade for the window's colors as they are now: the ambience's
 // style and strength and the cover it shows (`cover`, or the stand-in
-// colours when nothing plays), for the page's `words`. On a dark theme it
-// is black, measured over the brightest colour; on a light one it is the
-// page colour, measured over the darkest patch under the veil the wash
+// colors when nothing plays), for the page's `words`. On a dark theme it
+// is black, measured over the brightest color; on a light one it is the
+// page color, measured over the darkest patch under the veil the wash
 // gets there.
 fun shadeFor(look: Appearance, cover: WashCover?, playing: Boolean, words: PageWords): PageShade {
     if (!look.ambientGlow || cover == null) return PageShade.None
@@ -179,7 +179,7 @@ fun rememberPageShade(app: AppState): PageShade {
     val words = currentPageWords()
     val target = shadeFor(look, cover, playing, words)
     val color = if (words.light) OctoColors.Background else Color.Black
-    // The shape follows at once; how dark it is eases like the colours do.
+    // The shape follows at once; how dark it is eases like the colors do.
     val most by animateFloatAsState(target.most, tween(motionScale().ms(CoverFadeMs.toInt())), label = "page shade")
     val top = target.most
     if (top <= 0f) return if (most <= 0f) PageShade.None else PageShade.even(most, color)
