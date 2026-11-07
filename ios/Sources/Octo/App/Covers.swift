@@ -186,6 +186,12 @@ actor Covers {
     private static func read(_ files: [URL], step: Int) async -> (image: UIImage?, standIn: Bool) {
         for file in files {
             guard let data = try? Data(contentsOf: file) else { continue }
+            // A web page an older version kept as a cover (a sign-in page) is let go and fetched
+            // again.
+            if looksLikeHtmlFile(data.prefix(64)) {
+                try? FileManager.default.removeItem(at: file)
+                continue
+            }
             if serverCoverMayBeStandIn(length: Int64(data.count)) && serverCoverIsStandIn([UInt8](data)) {
                 try? FileManager.default.removeItem(at: file)
                 return (nil, true)
@@ -204,14 +210,15 @@ actor Covers {
     /// One cover from the server at one size, saved on the phone; the server's stand-in is never
     /// saved, and said so.
     private static func fetch(_ coverId: String, step: Int, client: SubsonicClient, saveTo file: URL) async -> (UIImage?, Bool) {
-        var request = URLRequest(url: client.coverURL(coverId, size: step))
-        for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
+        let request = URLRequest(url: client.coverURL(coverId, size: step))
         #if DEBUG
         let started = Date()
         defer { coverLog.notice("cover fetch \(coverId, privacy: .public) \(step) \(Int(Date().timeIntervalSince(started) * 1000)) ms") }
         #endif
-        guard let (data, response) = try? await client.session.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200
+        // Through the server's own connection, which refuses a sign-in page answering in the
+        // server's place, so none is ever kept as a cover.
+        guard let (data, response) = try? await ServerExchange.media(for: request, client: client, endpoint: "getCoverArt"),
+              response.statusCode == 200
         else { return (nil, false) }
         if serverCoverIsStandIn([UInt8](data)) { return (nil, true) }
         guard let image = UIImage(data: data) else { return (nil, false) }

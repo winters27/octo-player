@@ -55,16 +55,23 @@ actor ArtworkCache {
         let file = folder.appendingPathComponent(Hashes.sha1Hex(attempt.diskKey))
         let task = Task<(UIImage?, Bool), Never> {
             if let data = try? Data(contentsOf: file) {
-                if serverCoverMayBeStandIn(length: Int64(data.count)) && serverCoverIsStandIn([UInt8](data)) {
+                if looksLikeHtmlFile(data.prefix(64)) {
+                    // A web page an older version kept as a cover (a sign-in page) is let go and
+                    // fetched again.
                     try? FileManager.default.removeItem(at: file)
-                    return (nil, true)
+                } else {
+                    if serverCoverMayBeStandIn(length: Int64(data.count)) && serverCoverIsStandIn([UInt8](data)) {
+                        try? FileManager.default.removeItem(at: file)
+                        return (nil, true)
+                    }
+                    if let image = UIImage(data: data) { return (image.preparingForDisplay() ?? image, false) }
                 }
-                if let image = UIImage(data: data) { return (image.preparingForDisplay() ?? image, false) }
             }
-            var request = URLRequest(url: client.coverURL(attempt.coverId, size: attempt.px))
-            for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
-            guard let (data, response) = try? await client.session.data(for: request),
-                  (response as? HTTPURLResponse)?.statusCode == 200
+            // Through the server's own connection, which refuses a sign-in page answering in the
+            // server's place, so none is ever kept as a cover.
+            let request = URLRequest(url: client.coverURL(attempt.coverId, size: attempt.px))
+            guard let (data, response) = try? await ServerExchange.media(for: request, client: client, endpoint: "getCoverArt"),
+                  response.statusCode == 200
             else { return (nil, false) }
             if serverCoverIsStandIn([UInt8](data)) { return (nil, true) }
             guard let image = UIImage(data: data) else { return (nil, false) }

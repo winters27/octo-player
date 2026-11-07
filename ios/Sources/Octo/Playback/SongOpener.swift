@@ -84,24 +84,60 @@ struct StreamContext: Sendable {
     }
 
     /// The name a server song is kept under, or nil when no server is known for it or songs are
-    /// not kept. A saved copy of a file the server has since swapped is let go on the way.
+    /// not kept. A saved copy of a file the server has since swapped is let go on the way, and so
+    /// is one that starts like a web page (a sign-in page an older version kept as the song).
     func savedKey(_ ref: StreamRef) -> String? {
         guard keeping, let source = ref.sourceId ?? sourceId else { return nil }
         let request = ref.request(quality)
-        return try? blocking { await StreamCache.shared.savedKey(source, ref, request) }
+        return try? blocking {
+            let key = await StreamCache.shared.savedKey(source, ref, request)
+            await StreamCache.shared.dropPage(key)
+            return key
+        }
     }
 
-    /// A signed request for one load of a server song. Fails at once with no connection, no
-    /// server, an unreadable address, or another server's song.
-    func sign(_ ref: StreamRef) throws -> URLRequest {
+    /// A request for one load of a server song, and the client it goes through. Fails at once
+    /// with no connection, no server, an unreadable address, or another server's song.
+    func streamRequest(_ ref: StreamRef) throws -> (request: URLRequest, client: SubsonicClient) {
         guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
         guard let (client, inUse) = serverNow() else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
         if let source = ref.sourceId, source != inUse, keptSources.contains(source) {
             throw PlayError(.ioUnspecified, detail: "Another server's song")
         }
-        var request = URLRequest(url: client.streamURL(serverId: ref.serverId, request: ref.request(quality)))
-        for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
-        return request
+        return (URLRequest(url: client.streamURL(serverId: ref.serverId, request: ref.request(quality))), client)
+    }
+
+    /// A signed request for one load of a server song: the server's headers for its address and
+    /// the sign-in page's cookies, with the store its answers keep cookies in. Fails as
+    /// `streamRequest` does.
+    func sign(_ ref: StreamRef) throws -> SignedStream {
+        let (request, client) = try streamRequest(ref)
+        return SignedStream(request: client.prepared(request), cookies: client.cookies, scope: client.scope)
+    }
+}
+
+/// One request for a song's bytes, with where its answers keep a sign-in page's cookies: the
+/// store and scope of the client that signed it, so every answer to it, redirects included,
+/// writes into that client's store and no other. A request to an outside address carries an
+/// empty store and no scope.
+struct SignedStream: Sendable {
+    let request: URLRequest
+    let cookies: ServerCookies
+    let scope: ServerScope
+
+    /// A request to an address outside the server: no server's headers or cookies go with it.
+    static func outside(_ request: URLRequest) -> SignedStream {
+        SignedStream(request: request, cookies: ServerCookies(), scope: ServerScope())
+    }
+
+    /// The same request at another address of the same song (as a player's loader asks for it):
+    /// its headers, and the store's cookies for that address as they are now.
+    func asking(_ url: URL) -> URLRequest {
+        var out = request
+        out.url = url
+        out.httpShouldHandleCookies = false
+        out.setValue(scope.covers(url) ? cookies.cookieHeader(for: url) : nil, forHTTPHeaderField: "Cookie")
+        return out
     }
 }
 
@@ -168,7 +204,7 @@ enum SongOpener {
             case "http", "https":
                 let remote = try RemoteFile(online: { OnlineWatch.shared.online }) {
                     guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
-                    return URLRequest(url: url)
+                    return .outside(URLRequest(url: url))
                 }
                 token.adopt(remote)
                 return OpenedSong(decoder: try SongDecoder(source: remote, mimeType: mime, outputRate: outputRate), bytes: remote)

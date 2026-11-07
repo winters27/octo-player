@@ -340,12 +340,11 @@ enum CoverTiming {
             for size in [600, 128, 600] {
                 var request = URLRequest(url: client.coverURL(coverId, size: size))
                 request.cachePolicy = .reloadIgnoringLocalCacheData
-                for (name, value) in client.headers { request.setValue(value, forHTTPHeaderField: name) }
                 let start = Date()
-                let answer = try? await client.session.data(for: request)
+                let answer = try? await ServerExchange.answer(for: request, client: client)
                 let ms = Int(Date().timeIntervalSince(start) * 1000)
-                let bytes = answer?.0.count ?? 0
-                let status = (answer?.1 as? HTTPURLResponse)?.statusCode ?? 0
+                let bytes = answer?.data.count ?? 0
+                let status = answer?.status ?? 0
                 log.notice("cover \(size) \(ms) ms \(bytes) bytes status \(status) \(name, privacy: .public)")
             }
         }

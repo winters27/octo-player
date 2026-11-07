@@ -290,12 +290,17 @@ struct ShareLinkItems: View {
     let title: String
     var heading: String?
     @Environment(LibraryActions.self) private var actions
+    @Environment(Session.self) private var session
 
     var body: some View {
         if let heading {
-            Section(heading) { Text("Anyone with the link can listen.") }
+            Section(heading) {
+                Text("Anyone with the link can listen.")
+                if session.behindSignInPage { Text(GatewayWords.shareLine) }
+            }
         } else {
             Text("Anyone with the link can listen.")
+            if session.behindSignInPage { Text(GatewayWords.shareLine) }
         }
         Section("Link expires") {
             ForEach(ShareExpiry.allCases, id: \.self) { expiry in

@@ -137,6 +137,21 @@ actor StreamCache {
         return (file(key), index.entries[key]?.mimeType)
     }
 
+    /// Lets a saved song go, file and all, when what is saved of it starts like a web page: a
+    /// sign-in page an older version kept in the song's place. True when it went.
+    @discardableResult
+    func dropPage(_ key: String) -> Bool {
+        guard savedRun(key, from: 0) > 0, let handle = try? FileHandle(forReadingFrom: file(key)) else { return false }
+        let head = (try? handle.read(upToCount: 64)) ?? Data()
+        try? handle.close()
+        guard looksLikeHtmlFile(head) else { return false }
+        try? FileManager.default.removeItem(at: file(key))
+        index.remove([key])
+        dirty = true
+        save()
+        return true
+    }
+
     /// The server answered for a saved song: a saved copy of another file (another type or whole
     /// length) goes, file and all, then the song is described as the server gave it. True when the
     /// saved copy went.

@@ -187,15 +187,12 @@ func loopRowColor(_ picture: CGImage, share: CGFloat) -> UInt32? {
     return best
 }
 
-/// The fetcher for a clip's addresses: one that leads to the server goes with the server's own
-/// connection and headers (a proxy in front of it may want them); Apple's own go plainly.
+/// The fetcher for a clip's addresses: one that leads to the server goes through the server's
+/// own connection (its headers and sign-in page cookies, which a proxy or a sign-in page in
+/// front of it may want); Apple's own go plainly.
 @MainActor
 func loopFetcher(for clip: AnimatedClip, client: SubsonicClient?) -> LoopFetcher {
-    if let client, let host = URL(string: clip.video)?.host, host == client.baseURL.host {
-        let headers = client.headers
-        return LoopFetcher(session: client.session) { url in url.host == host ? headers : [:] }
-    }
-    return LoopFetcher(session: .shared)
+    LoopFetcher(session: .shared, client: client)
 }
 
 /// The space a loop of `shape` is picked for, in pixels: the square at the screen's full

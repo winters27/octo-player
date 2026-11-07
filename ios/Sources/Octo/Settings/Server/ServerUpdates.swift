@@ -60,9 +60,11 @@ final class ServerUpdates {
               !track.starting, track.watch == nil else { return }
         track = track.beganStart()
         Task {
-            let (code, data) = await Self.send(ServerUpdateCalls.startRequest(client, tag: tag), through: client.session)
+            // Through the server's own connection; a sign-in page in front of it refuses with its
+            // words.
+            let started = await ServerUpdateCalls.start(client, tag: tag)
             guard serverId == id, session.activeId == id else { return }
-            track = track.started(ServerUpdateCalls.startAnswer(status: code, data: data, tag: tag))
+            track = track.started(started)
             restart()
         }
     }
@@ -116,19 +118,15 @@ final class ServerUpdates {
         // While an update is under way each question goes through a session of its own, so a
         // connection kept open to the Octo that was replaced is never waited on.
         let fresh = track.watch != nil ? session.freshSession(seconds: ServerUpdateTiming.callSeconds) : nil
-        let (code, data) = await Self.send(ServerUpdateCalls.stateRequest(client), through: fresh ?? client.session)
+        // The same client through the fresh session keeps its scope and sign-in page cookies; a
+        // sign-in page in front of the server is no answer.
+        let answer = await ServerUpdateCalls.readState(fresh.map { client.through($0) } ?? client)
         fresh?.finishTasksAndInvalidate()
         guard !Task.isCancelled, serverId == id, session.activeId == id else { return }
         let before = track
-        track = track.read(ServerUpdateCalls.readAnswer(status: code, data: data), nowMs: epochNowMs())
+        track = track.read(answer, nowMs: epochNowMs())
         if case .done = track.outcome, before.outcome != track.outcome {
             Task { await session.readServerAgain() }
         }
-    }
-
-    /// Sends a call and answers its status, nil when nothing came back.
-    private static func send(_ request: URLRequest, through session: URLSession) async -> (Int?, Data) {
-        guard let (data, response) = try? await session.data(for: request) else { return (nil, Data()) }
-        return ((response as? HTTPURLResponse)?.statusCode, data)
     }
 }

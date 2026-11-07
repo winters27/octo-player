@@ -90,10 +90,12 @@ final class SavedCopy: ByteSource, @unchecked Sendable {
 /// A song read from the server by parts: what is asked for downloads into a file of its own on
 /// the phone, from the place a read needs onwards, so the player can jump about and a part read
 /// once is not fetched again. Each request is signed as it goes out (`sign`), so no address is
-/// kept. A failed request is tried again after 0, 1 and 2 seconds; a refusal to load at all (no
-/// connection, no server) fails at once.
+/// kept, and goes with the store its answers keep a sign-in page's cookies in. A web page where a
+/// server song was asked for is a sign-in page in front of the server, refused at once. A failed
+/// request is tried again after 0, 1 and 2 seconds; a refusal to load at all (no connection, no
+/// server) fails at once.
 final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked Sendable {
-    private let sign: @Sendable () throws -> URLRequest
+    private let sign: @Sendable () throws -> SignedStream
     /// The name the song is saved under among the songs kept on the phone, when it is kept.
     private let savedKey: String?
     /// Whether the phone is online now; a failed request is not tried again while it is not.
@@ -105,6 +107,9 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private var cancelled = false
     private var type: String?
     private var responseHeaders: [String: [String]] = [:]
+    /// What each task went out with, by task, so its answers keep cookies in that request's
+    /// store.
+    private var asked: [Int: SignedStream] = [:]
 
     /// The request downloading now: where it started, where it writes next.
     private var task: URLSessionDataTask?
@@ -135,6 +140,9 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let config = URLSessionConfiguration.default.namingOcto(Session.appVersion)
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
+        // Cookies are kept by the signing client's own store, never by the system.
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
         return URLSession(configuration: config, delegate: self, delegateQueue: queue)
     }()
 
@@ -142,7 +150,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private static let jumpAhead: Int64 = 512 * 1024
 
     init(savedKey: String? = nil, online: @escaping @Sendable () -> Bool = { true },
-         sign: @escaping @Sendable () throws -> URLRequest) throws {
+         sign: @escaping @Sendable () throws -> SignedStream) throws {
         self.sign = sign
         self.savedKey = savedKey
         self.online = online
@@ -232,27 +240,39 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         }
     }
 
-    /// Asks for the first byte alone and answers whether the server sends parts of a song.
+    /// Asks for the first byte alone and answers whether the server sends parts of a song. The ask
+    /// goes through this file's own session, so its redirects keep the server's rules and its
+    /// answer's sign-in page cookies are kept.
     func answersRanges() -> Bool {
-        guard var request = try? sign() else { return false }
+        guard let signed = try? sign() else { return false }
+        var request = signed.request
         request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
         let done = DispatchSemaphore(value: 0)
         final class Answer: @unchecked Sendable { var ranged = false }
         let answer = Answer()
-        let probeSession = URLSession(configuration: URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion), delegate: TrustDelegate(),
-                                      delegateQueue: nil)
-        defer { probeSession.finishTasksAndInvalidate() }
-        let probe = probeSession.dataTask(with: request) { _, response, _ in
+        condition.lock()
+        // A stopped file's session is gone, and no task may be made on it.
+        if cancelled {
+            condition.unlock()
+            return false
+        }
+        let probe = session.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse {
+                storeCookies(of: http, in: signed.cookies, scope: signed.scope)
                 var headers: [String: [String]] = [:]
                 for (key, value) in http.allHeaderFields { headers["\(key)"] = ["\(value)"] }
                 answer.ranged = OctoKit.answersRanges(headers)
             }
             done.signal()
         }
+        asked[probe.taskIdentifier] = signed
+        condition.unlock()
         probe.resume()
         _ = done.wait(timeout: .now() + 20)
         probe.cancel()
+        condition.lock()
+        asked[probe.taskIdentifier] = nil
+        condition.unlock()
         return answer.ranged
     }
 
@@ -358,17 +378,19 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     private func start(from offset: Int64) throws {
         task?.cancel()
         task = nil
-        var request: URLRequest
+        let signed: SignedStream
         do {
-            request = try sign()
+            signed = try sign()
         } catch let error as PlayError {
             failure = error
             condition.broadcast()
             throw error
         }
+        var request = signed.request
         request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
         request.timeoutInterval = 30
         let next = session.dataTask(with: request)
+        asked[next.taskIdentifier] = signed
         task = next
         taskStart = offset
         writeAt = offset
@@ -391,6 +413,11 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         condition.lock()
         defer { condition.unlock() }
+        // The answer's sign-in page cookies are kept whatever it is, in the store of the client
+        // that signed its request.
+        if let http = response as? HTTPURLResponse, let signed = asked[dataTask.taskIdentifier] {
+            storeCookies(of: http, in: signed.cookies, scope: signed.scope)
+        }
         guard dataTask === task, let http = response as? HTTPURLResponse else {
             completionHandler(.cancel)
             return
@@ -404,6 +431,16 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             } else {
                 failure = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
             }
+            condition.broadcast()
+            completionHandler(.cancel)
+            return
+        }
+        // A web page where a server song was asked for is a sign-in page answering in the
+        // server's place: never played or saved, and not asked for again.
+        if isHtml(http.value(forHTTPHeaderField: "Content-Type")),
+           asked[dataTask.taskIdentifier]?.scope.covers(dataTask.originalRequest?.url) == true {
+            task = nil
+            failure = PlayError(.signInPage, httpStatus: http.statusCode, detail: "a web page answered")
             condition.broadcast()
             completionHandler(.cancel)
             return
@@ -494,13 +531,23 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        ServerTrust.shared.redirected(request, first: task.originalRequest)
+        // Each hop keeps the server's rules for headers and its sign-in page's cookies, in the
+        // store of the client that signed the request.
+        let signed = sent(task)
+        return hop(response: response, newRequest: request, first: task.originalRequest?.url,
+                   cookies: signed?.cookies ?? ServerCookies(), scope: signed?.scope ?? ServerScope())
+    }
+
+    /// What a task went out with, and so the store its answers keep cookies in.
+    private func sent(_ task: URLSessionTask) -> SignedStream? {
+        condition.withLock { asked[task.taskIdentifier] }
     }
 
     func urlSession(_ session: URLSession, task finished: URLSessionTask, didCompleteWithError error: Error?) {
         ServerTrust.shared.noteEnd(of: finished.originalRequest, error)
         condition.lock()
         defer { condition.unlock() }
+        asked[finished.taskIdentifier] = nil
         guard finished === task else { return }
         task = nil
         if let error {
@@ -526,13 +573,5 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             }
         }
         condition.broadcast()
-    }
-}
-
-/// Answers certificate questions the way the rest of the app does.
-final class TrustDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
-    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge)
-        async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
-        ServerTrust.shared.answer(challenge)
     }
 }

@@ -109,12 +109,13 @@ final class Prefetcher {
     /// server) that stops the run.
     private enum Preparing: Sendable {
         case skip
-        case fetch(key: String, request: URLRequest)
+        case fetch(key: String, request: URLRequest, client: SubsonicClient)
         case stop
     }
 
-    /// Saves one song whole unless it already is. False when fetching should stop, such as when
-    /// the connection is gone or the server refused.
+    /// Saves one song whole unless it already is, through the server's own connection. False when
+    /// fetching should stop, such as when the connection is gone, the server refused, or a sign-in
+    /// page answered in its place.
     nonisolated private static func fetch(_ uri: String, context: StreamContext) async -> Bool {
         // Pinning and signing wait on other threads, so they run away from the main thread.
         let preparing: Preparing = await withCheckedContinuation { done in
@@ -125,22 +126,22 @@ final class Prefetcher {
                 if (try? blocking({ await StreamCache.shared.isFullySaved(key) })) == true {
                     return done.resume(returning: .skip)
                 }
-                guard let request = try? context.sign(pinned) else { return done.resume(returning: .stop) }
-                done.resume(returning: .fetch(key: key, request: request))
+                guard let (request, client) = try? context.streamRequest(pinned) else { return done.resume(returning: .stop) }
+                done.resume(returning: .fetch(key: key, request: request, client: client))
             }
         }
-        let key: String, request: URLRequest
+        let key: String, request: URLRequest, client: SubsonicClient
         switch preparing {
         case .skip: return true
         case .stop: return false
-        case .fetch(let savedKey, let signed): (key, request) = (savedKey, signed)
+        case .fetch(let savedKey, let asked, let through): (key, request, client) = (savedKey, asked, through)
         }
         do {
-            let (file, response) = try await ServerTrust.shared.session.download(for: request)
+            // The exchange adds the server's headers and its sign-in page's cookies, and refuses a
+            // web page (a sign-in page in front of the server) before anything is saved.
+            let (file, http) = try await ServerExchange.download(for: request, client: client, endpoint: "stream")
             defer { try? FileManager.default.removeItem(at: file) }
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let handle = try? FileHandle(forReadingFrom: file)
-            else { return false }
+            guard (200..<300).contains(http.statusCode), let handle = try? FileHandle(forReadingFrom: file) else { return false }
             defer { try? handle.close() }
             let cache = StreamCache.shared
             // A part saved earlier of another file (the server's listed preview, say) goes first.

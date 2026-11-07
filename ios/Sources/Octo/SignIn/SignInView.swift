@@ -13,6 +13,7 @@ struct SignInView: View {
     @State private var model: SignInModel
     @State private var reveal = false
     @State private var revealKey = false
+    @State private var revealGateway = false
     @State private var choosingCertificate = false
     @State private var pendingCertificate: (name: String, data: Data)?
     @State private var certificatePassword = ""
@@ -21,7 +22,7 @@ struct SignInView: View {
     @Environment(\.octoPalette) private var palette
     let done: (String?) -> Void
 
-    enum Field: Hashable { case address, label, username, password, apiKey, home, joinName, joinPassword, joinAgain }
+    enum Field: Hashable { case address, label, username, password, apiKey, home, joinName, joinPassword, joinAgain, gatewayFirst, gatewaySecond }
 
     #if DEBUG
     /// Set by a launch step: the next sign-in screen opens with the family QR scanner.
@@ -56,12 +57,14 @@ struct SignInView: View {
                         }
                         .padding(.top, 12)
                     }
-                    advancedToggle
-                        .padding(.top, 20)
-                    if model.advancedOpen {
-                        advanced
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+                }
+                // Advanced shows while joining too: a family link's server may stand behind a
+                // sign-in page, or want headers or a certificate of its own.
+                advancedToggle
+                    .padding(.top, 20)
+                if model.advancedOpen {
+                    advanced
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(.horizontal, 24)
@@ -343,20 +346,24 @@ struct SignInView: View {
     private var advanced: some View {
         @Bindable var model = model
         return VStack(alignment: .leading, spacing: 18) {
-            SwitchRow("Legacy sign-in", "Only for older servers that reject the normal sign-in.",
-                      isOn: Binding(get: { model.legacy && !model.useApiKey }, set: { model.legacy = $0 }))
-                .disabled(model.useApiKey)
-            if model.takesApiKeys != false || model.useApiKey {
-                VStack(alignment: .leading, spacing: 10) {
-                    SwitchRow("Sign in with an API key",
-                              model.takesApiKeys == true ? "Your server gives out API keys." : "For servers that give out API keys.",
-                              isOn: $model.useApiKey)
-                    if model.useApiKey {
-                        GlassField {
-                            FieldIcon("key")
-                            SecretField(model.editing ? "API key (unchanged)" : "API key", text: $model.apiKey, revealed: revealKey)
-                                .focused($focus, equals: .apiKey)
-                            RevealToggle(revealed: $revealKey)
+            gatewaySection
+            // A family link signs up or is handed a sign-in, so the ways of signing in stay out.
+            if !model.joining {
+                SwitchRow("Legacy sign-in", "Only for older servers that reject the normal sign-in.",
+                          isOn: Binding(get: { model.legacy && !model.useApiKey }, set: { model.legacy = $0 }))
+                    .disabled(model.useApiKey)
+                if model.takesApiKeys != false || model.useApiKey {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SwitchRow("Sign in with an API key",
+                                  model.takesApiKeys == true ? "Your server gives out API keys." : "For servers that give out API keys.",
+                                  isOn: $model.useApiKey)
+                        if model.useApiKey {
+                            GlassField {
+                                FieldIcon("key")
+                                SecretField(model.editing ? "API key (unchanged)" : "API key", text: $model.apiKey, revealed: revealKey)
+                                    .focused($focus, equals: .apiKey)
+                                RevealToggle(revealed: $revealKey)
+                            }
                         }
                     }
                 }
@@ -409,6 +416,53 @@ struct SignInView: View {
             }
         }
         .padding(.top, 6)
+    }
+
+    /// The sign-in page in front of the server (Authentik, Authelia, a proxy's password or
+    /// Cloudflare Access): the kind of sign-in it takes from apps, its two fields, and what to
+    /// know about it. A sign-in that met one opens Advanced here, at the kind it takes.
+    private var gatewaySection: some View {
+        @Bindable var model = model
+        let password = model.gatewayKind == .password
+        return Section(GatewayWords.sectionLabel, GatewayWords.caption) {
+            VStack(spacing: 8) {
+                ForEach(GatewayKind.allCases, id: \.self) { kind in
+                    GatewayKindOption(kind: kind, chosen: model.gatewayKind == kind) { model.pickGateway(kind) }
+                }
+            }
+            if model.gatewayKind != .none {
+                GlassField {
+                    FieldIcon(password ? "person" : "person.text.rectangle")
+                    TextField(password ? GatewayWords.usernameLabel : GatewayWords.clientIdLabel, text: $model.gatewayFirst)
+                        .keyboardType(password ? .default : .asciiCapable)
+                        .focused($focus, equals: .gatewayFirst)
+                        .submitLabel(.next)
+                        .onSubmit { focus = .gatewaySecond }
+                }
+                GlassField {
+                    FieldIcon(password ? "key" : "lock")
+                    SecretField(password ? GatewayWords.passwordLabel : GatewayWords.clientSecretLabel, text: $model.gatewaySecond,
+                                revealed: revealGateway)
+                        .focused($focus, equals: .gatewaySecond)
+                    RevealToggle(revealed: $revealGateway)
+                }
+                // The values saved for this kind stay while its fields are left empty.
+                if model.gatewayKind == model.gatewaySaved {
+                    Text(GatewayWords.savedLabel).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                }
+                // A sign-in page's password never crosses the internet readable.
+                if model.gatewayInsecure {
+                    Text(GatewayWords.needsHttps).font(.octoCaption).foregroundStyle(OctoColor.error)
+                }
+            }
+            if let met = model.gatewayMet {
+                Text(GatewayWords.hint(met)).font(.octoCaption).foregroundStyle(OctoColor.textSecondary)
+            }
+            if model.joining {
+                Text(GatewayWords.joinHint).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+            }
+        }
+        .animation(.snappy, value: model.gatewayKind)
     }
 
     private func takeCertificate() {
@@ -477,6 +531,45 @@ private struct RevealToggle: View {
             .font(.system(size: 13.5, weight: .semibold))
             .foregroundStyle(OctoColor.accent)
             .buttonStyle(.plain)
+    }
+}
+
+/// One kind of sign-in for the sign-in page in front of the server, as a full-width choice: the
+/// one picked on the accent with a check, the others outlined.
+private struct GatewayKindOption: View {
+    let kind: GatewayKind
+    let chosen: Bool
+    let pick: () -> Void
+
+    var body: some View {
+        let ink = chosen ? OctoColor.onAccent : OctoColor.textSecondary
+        Button(action: pick) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 16, weight: .medium)).frame(width: 22)
+                Text(GatewayWords.kindLabel(kind)).font(.system(size: 15, weight: .semibold)).multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                if chosen { Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)) }
+            }
+            .foregroundStyle(ink)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(chosen ? AnyShapeStyle(OctoColor.accent) : AnyShapeStyle(Color.clear),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(chosen ? AnyShapeStyle(Color.clear) : AnyShapeStyle(OctoColor.hairline)))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .animation(.easeInOut(duration: 0.18), value: chosen)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(chosen ? [.isSelected, .isButton] : .isButton)
+    }
+
+    private var icon: String {
+        switch kind {
+        case .none: "circle.slash"
+        case .password: "person.badge.key"
+        case .cloudflareToken: "key.horizontal"
+        }
     }
 }
 

@@ -14,6 +14,7 @@ struct SharesScreen: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 PageHeader("Shared links")
+                if session.behindSignInPage { PanelLine(text: GatewayWords.shareLine) }
                 if let deleteProblem { PanelLine(text: deleteProblem, color: OctoColor.error) }
                 switch shares {
                 case .loading:
@@ -149,6 +150,7 @@ struct ShareCard: View {
     /// Closes the card, handing over the link to share once it has gone.
     let close: (String?) -> Void
     @Environment(ServerControls.self) private var controls
+    @Environment(Session.self) private var session
     @State private var making: ShareExpiry?
     @State private var problem: String?
 
@@ -167,6 +169,14 @@ struct ShareCard: View {
                 .foregroundStyle(OctoColor.textMuted)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
+            if session.behindSignInPage {
+                Text(GatewayWords.shareLine)
+                    .font(.octoCaption)
+                    .foregroundStyle(OctoColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 8)
+            }
             Text("Link expires")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(OctoColor.textSecondary)

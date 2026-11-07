@@ -47,6 +47,8 @@ final class SignInModel {
         didSet {
             typed()
             if rest != oldValue { error = nil }
+            // A sign-in page met at another address is forgotten.
+            useGatewayForm(addressChanged(gatewayForm, address: sentAddress))
         }
     }
     private(set) var scheme: ServerAddress.Scheme = .https
@@ -73,6 +75,16 @@ final class SignInModel {
     /// restored from a backup); saving clears that.
     private var staleCertificate = false
     var advancedOpen = false
+    /// The kind of sign-in the sign-in page in front of the server takes from apps, and what is
+    /// typed for it: a username and password, or a Client ID and Client Secret.
+    private(set) var gatewayKind: GatewayKind = .none
+    var gatewayFirst = ""
+    var gatewaySecond = ""
+    /// The kind the saved headers make up; its values stay while its fields are left empty.
+    private(set) var gatewaySaved: GatewayKind = .none
+    /// The sign-in page the last failed attempt met, and the address it met it at.
+    private(set) var gatewayMet: Gateway?
+    private var gatewayMetFor: String?
 
     var busy = false
     var error: String?
@@ -96,6 +108,9 @@ final class SignInModel {
     var joinAgain = ""
     /// An account the invite made, kept until it signs in, since an invite works once.
     private var signedUp: (username: String, password: String)?
+    /// A sign-in received from another device, kept until signed in with: a hand-over works once,
+    /// so a certificate asked about afterwards does not redeem it again.
+    private var received: HandOverSignIn?
     private var receiving: Task<Void, Never>?
     /// What the saved server looked like, for telling a rename from a real change.
     private let saved: StoredServer?
@@ -116,11 +131,15 @@ final class SignInModel {
         useApiKey = server.mode == .apiKey
         homeAddress = server.homeAddress.map(ServerAddress.shown) ?? ""
         headers = savedHeaderNames.map { Header(name: $0, value: "", saved: true) }
+        // The saved sign-in page's kind; its values stay in the keychain and are kept while its
+        // fields are left empty.
+        gatewaySaved = session.gatewayKind(server.id)
+        gatewayKind = gatewaySaved
         let certificateKept = server.hasClientCertificate && CertificateCheck.isSaved(forServer: server.id)
         hadCertificate = certificateKept
         staleCertificate = server.hasClientCertificate && !certificateKept
         savedCertificateName = certificateKept ? server.clientCertificateName : nil
-        advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate
+        advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate || gatewaySaved != .none
         takesApiKeys = server.takesApiKeys
         if case .again(_, let note) = form { error = note }
     }
@@ -221,6 +240,7 @@ final class SignInModel {
         scheme = scheme == .https ? .http : .https
         schemePicked = true
         error = nil
+        useGatewayForm(addressChanged(gatewayForm, address: sentAddress))
     }
 
     /// How safe the connection is, for the line under the card.
@@ -249,6 +269,60 @@ final class SignInModel {
         headers[index].name = name
     }
 
+    // MARK: The sign-in page in front of the server
+
+    /// Picks the kind of sign-in the sign-in page takes. Another kind starts with empty fields,
+    /// since they mean other things.
+    func pickGateway(_ kind: GatewayKind) {
+        if kind != gatewayKind {
+            gatewayFirst = ""
+            gatewaySecond = ""
+        }
+        gatewayKind = kind
+        error = nil
+    }
+
+    /// The sign-in page fields as typed, with the kind saved for this server.
+    var gatewayDraft: GatewayDraft {
+        GatewayDraft(kind: gatewayKind, first: gatewayFirst, second: gatewaySecond, saved: gatewaySaved)
+    }
+
+    /// Whether the fields are set for a plain http address across the internet, where they would
+    /// cross readable and are never sent.
+    var gatewayInsecure: Bool {
+        guard gatewayKind != .none, let url else { return false }
+        return !gatewayAllowed(mainHttps: url.scheme?.lowercased() == "https", mainPrivate: ServerAddress.isPrivate(url))
+    }
+
+    private var gatewayForm: GatewayFormState {
+        GatewayFormState(advancedOpen: advancedOpen, kind: gatewayKind, detected: gatewayMet, detectedFor: gatewayMetFor)
+    }
+
+    private func useGatewayForm(_ state: GatewayFormState) {
+        advancedOpen = state.advancedOpen
+        gatewayKind = state.kind
+        gatewayMet = state.detected
+        gatewayMetFor = state.detectedFor
+    }
+
+    /// The address as a sign-in sends it, which what a sign-in met belongs to.
+    private var sentAddress: String {
+        url?.absoluteString ?? scheme.prefix + rest.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// An attempt at `attempt` that met a sign-in page opens Advanced at its fields, unless the
+    /// address has changed since.
+    private func met(_ attempt: String, _ gateway: Gateway?) {
+        useGatewayForm(reactToFailure(gatewayForm, attemptAddress: attempt, currentAddress: sentAddress, gateway: gateway))
+    }
+
+    /// The headers a family link's calls carry: the rows and the sign-in page fields, for the
+    /// link's address. Nothing is saved for a link's server yet.
+    private func linkHeaders(main: URL, rows: [HeaderRules.Row]) -> ResolvedHeaders {
+        resolveConnectionHeaders(rows: rows, gateway: gatewayDraft, saved: [:], mainHttps: main.scheme?.lowercased() == "https",
+                                 mainPrivate: ServerAddress.isPrivate(main))
+    }
+
     // MARK: Submitting
 
     /// The home address field, read: nil when blank, or the error words when unreadable.
@@ -268,6 +342,7 @@ final class SignInModel {
     func submit(_ session: Session, sync: ServerSync? = nil) async {
         guard ready, let url else { return }
         error = nil
+        let attempt = sentAddress
         let home: URL?
         switch readHome() {
         case .success(let read): home = read
@@ -295,7 +370,8 @@ final class SignInModel {
             username: username.trimmingCharacters(in: .whitespaces),
             secret: useApiKey ? apiKey.trimmingCharacters(in: .whitespacesAndNewlines) : password,
             mode: mode,
-            headers: rows.map { ($0.name, $0.saved && $0.value.isEmpty ? nil : $0.value) },
+            headers: rows,
+            gateway: gatewayDraft,
             certificate: certificate.map { ($0.data, $0.password) },
             removesCertificate: removesCertificate || (staleCertificate && certificate == nil),
             certificateName: certificate?.name)
@@ -321,6 +397,8 @@ final class SignInModel {
             }
             password = ""
             apiKey = ""
+            gatewayFirst = ""
+            gatewaySecond = ""
             signedIn = true
         } catch let untrusted as ServerTrust.Untrusted {
             question = untrusted
@@ -339,6 +417,8 @@ final class SignInModel {
                 self.error = legacyUnsafeMessage
             case .none:
                 self.error = userMessage(plainError(error))
+                // A sign-in page in front of the server opens Advanced at its fields.
+                met(attempt, SubsonicError(error).gateway)
             }
         }
     }
@@ -350,13 +430,16 @@ final class SignInModel {
             && username.trimmingCharacters(in: .whitespaces) == server.username && mode == server.mode
             && password.isEmpty && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && sameHeaders && certificate == nil && !removesCertificate
+            && gatewayKind == gatewaySaved && gatewayFirst.isEmpty && gatewaySecond.isEmpty
     }
 
     func trust(_ session: Session, sync: ServerSync? = nil) async {
         guard let question else { return }
         ServerTrust.shared.trust(question)
         self.question = nil
-        if joining {
+        if handOver != nil {
+            receive(session)
+        } else if joining {
             await signUp(session)
         } else {
             await submit(session, sync: sync)
@@ -383,6 +466,7 @@ final class SignInModel {
         rest = link.server
         if let home = link.home { homeAddress = home }
         signedUp = nil
+        received = nil
         invite = nil
         handOver = nil
         handOverStep = nil
@@ -408,6 +492,7 @@ final class SignInModel {
         invite = nil
         handOver = nil
         handOverStep = nil
+        received = nil
         error = nil
     }
 
@@ -435,12 +520,27 @@ final class SignInModel {
             return
         }
         let rows = headerRows() ?? []
+        let attempt = sentAddress
         if signedUp == nil {
-            var extra = Dictionary(rows.compactMap { $0.value.isEmpty ? nil : ($0.name, $0.value) }, uniquingKeysWith: { $1 })
-            extra["User-Agent"] = octoUserAgent(Session.appVersion)
-            let outcome = await joinWithInvite(address: url, token: invite.token,
+            // The invite is accepted as signing in would ask the server: through a session of its
+            // own, with the form's headers, sign-in page fields and certificates.
+            let client: SubsonicClient
+            switch linkHeaders(main: url, rows: rows) {
+            case .problem(let text):
+                error = text
+                return
+            case .ready(let made):
+                do {
+                    client = try session.linkClient(at: url, home: home, headers: made, certificate: certificate.map { ($0.data, $0.password) })
+                } catch {
+                    self.error = error.localizedDescription
+                    return
+                }
+            }
+            let outcome = await joinWithInvite(client: client, token: invite.token,
                                                displayName: joinName.trimmingCharacters(in: .whitespacesAndNewlines),
-                                               password: joinPassword, session: ServerTrust.shared.session, headers: extra, home: home)
+                                               password: joinPassword, home: home)
+            client.session.finishTasksAndInvalidate()
             switch outcome {
             case .signedUp(let name, let chosen, _):
                 signedUp = (name, chosen)
@@ -451,15 +551,17 @@ final class SignInModel {
                     error = "This server's certificate is not trusted."
                 }
                 return
-            case .failed(let words, _):
+            case .failed(let words, _, let gateway, _):
+                // A sign-in page that turns the invite away opens Advanced at its fields.
                 error = words
+                met(attempt, gateway)
                 return
             }
         }
         guard let account = signedUp else { return }
         let fields = Session.Form(
             address: url, homeAddress: home, label: nil, username: account.username, secret: account.password, mode: .token,
-            headers: rows.map { ($0.name, $0.saved && $0.value.isEmpty ? nil : $0.value) },
+            headers: rows, gateway: gatewayDraft,
             certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false, certificateName: certificate?.name)
         let previous = session.inUse != nil ? session.active : nil
         do {
@@ -467,6 +569,8 @@ final class SignInModel {
             notice = serverSwitch?.signInNotice(previous: previous)
             joinPassword = ""
             joinAgain = ""
+            gatewayFirst = ""
+            gatewaySecond = ""
             self.invite = nil
             signedUp = nil
             signedIn = true
@@ -476,35 +580,72 @@ final class SignInModel {
             error = failure.localizedDescription
         } catch {
             self.error = userMessage(plainError(error))
+            met(attempt, SubsonicError(error).gateway)
         }
     }
 
     /// Redeems the hand-over, waits for the other device to allow it, and signs in with what it
-    /// sent. Each step's words show as they come.
+    /// sent. Each step's words show as they come. The redeem goes through a session of its own
+    /// with the form's headers, sign-in page fields and certificates; a sign-in page that turns it
+    /// away opens Advanced at its fields, and Try again uses what is typed there. A sign-in
+    /// received already (before a certificate question) is not redeemed again.
     func receive(_ session: Session) {
         guard let link = handOver, !busy else { return }
-        guard ServerAddress.httpURL(link.base) != nil else { return }
+        guard let base = ServerAddress.httpURL(link.base) else { return }
+        let home: URL?
+        switch readHome() {
+        case .success(let read): home = read
+        case .failure(let failure):
+            error = failure.localizedDescription
+            return
+        }
+        let client: SubsonicClient
+        switch linkHeaders(main: base, rows: headerRows() ?? []) {
+        case .problem(let text):
+            error = text
+            return
+        case .ready(let made):
+            do {
+                client = try session.linkClient(at: base, home: home, headers: made, certificate: certificate.map { ($0.data, $0.password) })
+            } catch {
+                self.error = error.localizedDescription
+                return
+            }
+        }
         busy = true
         error = nil
-        let plain = Self.plainSession
+        let attempt = sentAddress
+        let kept = received
         let device = Session.device().name
         let step: @Sendable (String) async -> Void = { [weak self] words in await self?.show(step: words) }
-        let agent = octoUserAgent(Session.appVersion)
         receiving = Task { [weak self] in
-            let result = await receiveHandOver(link, session: plain, deviceName: device, platform: .iOS,
-                                               headers: ["User-Agent": agent], step: step)
-            await self?.finish(result, session: session)
+            let result: HandOverResult
+            if let kept {
+                result = .received(kept)
+            } else {
+                result = await receiveHandOver(link, connect: { client.at($0) }, deviceName: device, platform: .iOS, step: step)
+            }
+            client.session.finishTasksAndInvalidate()
+            await self?.finish(result, session: session, host: base.host, attempt: attempt)
         }
     }
 
     private func show(step words: String) { handOverStep = words }
 
-    private func finish(_ result: HandOverResult, session: Session) async {
+    private func finish(_ result: HandOverResult, session: Session, host: String?, attempt: String) async {
         defer { busy = false }
         switch result {
-        case .refused(let words):
+        case .refused(let words, let gateway, _):
             handOverStep = nil
+            // A certificate the phone does not trust is asked about, as signing in asks; trusting
+            // it tries again.
+            if gateway == nil, words == handOverUnreachable, let rejected = ServerTrust.shared.rejection(for: host) {
+                question = rejected
+                return
+            }
             error = words
+            // A sign-in page that turns the hand-over away opens Advanced at its fields.
+            met(attempt, gateway)
         case .received(let signIn):
             guard let address = ServerAddress.parse(signIn.server) else {
                 handOverStep = nil
@@ -525,14 +666,21 @@ final class SignInModel {
             case "ApiKey": .apiKey
             default: .token
             }
+            // The sign-in carries the form's headers, sign-in page fields and certificate.
             let fields = Session.Form(address: address, homeAddress: homeURL, label: nil, username: signIn.username,
-                                      secret: signIn.secret, mode: mode, headers: [], certificate: nil, removesCertificate: false)
+                                      secret: signIn.secret, mode: mode, headers: headerRows() ?? [], gateway: gatewayDraft,
+                                      certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false,
+                                      certificateName: certificate?.name)
+            received = signIn
             let previous = session.inUse != nil ? session.active : nil
             do {
                 _ = try await session.keepServer(fields, for: .signIn)
                 notice = serverSwitch?.signInNotice(previous: previous)
                 handOverStep = handOverSignedIn
                 handOver = nil
+                received = nil
+                gatewayFirst = ""
+                gatewaySecond = ""
                 signedIn = true
             } catch let untrusted as ServerTrust.Untrusted {
                 question = untrusted
@@ -542,6 +690,7 @@ final class SignInModel {
             } catch {
                 handOverStep = nil
                 self.error = userMessage(plainError(error))
+                met(attempt, SubsonicError(error).gateway)
             }
         }
     }
@@ -550,14 +699,6 @@ final class SignInModel {
     func leave() {
         receiving?.cancel()
     }
-
-    /// A session with no saved trust or certificates, for redeeming a hand-over.
-    private static let plainSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral.namingOcto(Session.appVersion)
-        configuration.timeoutIntervalForRequest = 20
-        configuration.httpShouldSetCookies = false
-        return URLSession(configuration: configuration)
-    }()
 }
 
 extension SignInModel.Form {

@@ -121,7 +121,7 @@ final class FamilyHub {
                 if saving { savedHere.insert(id) } else { savedHere.remove(id) }
                 router.show(saving ? "Saved \(title). Find it in Family, under Saved." : "Took \(title) off Saved")
             } catch {
-                let message = SubsonicError(error).message
+                let message = GatewayWords.failureFor(error) ?? SubsonicError(error).message
                 router.show(message.isEmpty ? "The server did not save it." : message)
             }
             await model.refresh()
@@ -149,7 +149,7 @@ final class FamilyHub {
                 try await client.removeFromMyLibrary(serverId)
                 router.show("Removed \(title) from your library", done: true)
             } catch {
-                let message = SubsonicError(error).message
+                let message = GatewayWords.failureFor(error) ?? SubsonicError(error).message
                 router.show(message.isEmpty ? "The server kept \(title)." : message)
             }
         }
