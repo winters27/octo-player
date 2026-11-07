@@ -67,14 +67,14 @@ public struct ThemeBase: Sendable, Equatable {
         page: 0xFF0E_1512, card: 0xFF17_211B, raised: 0xFF20_2D26, sheet: 0xFF21_3029, sheetAlpha: 1000,
         edge: 0xFF3A_4D42, text: 0xFFED_F2EA, secondary: 0xFFB5_C9AE, muted: 0xFF97_AC92,
         accent: 0xFF9A_CB86, complement: 0xFFE2_B062, third: 0xFF7F_B8A8,
-        glow: [0xFF24_502A, 0xFF5E_4A18, 0xFF1A_4640],
+        glow: [0xFF2E_6A36, 0xFF7A_6020, 0xFF0F_2A26],
         ink: 0xFFED_F2EA, inkSecondary: 560, inkTertiary: 250, offTrack: 390, shadow: 1000
     )
     private static let dusk = ThemeBase(
         page: 0xFF12_0E18, card: 0xFF1E_1726, raised: 0xFF29_2032, sheet: 0xFF2F_243B, sheetAlpha: 1000,
         edge: 0xFF47_395A, text: 0xFFF4_EEF8, secondary: 0xFFC9_B6DA, muted: 0xFFAB_9ABE,
         accent: 0xFFE7_A0C4, complement: 0xFFF2_BE85, third: 0xFF98_ADEB,
-        glow: [0xFF5A_2466, 0xFF7A_3E30, 0xFF26_3A78],
+        glow: [0xFF74_308A, 0xFF9A_5040, 0xFF1A_2A5C],
         ink: 0xFFF4_EEF8, inkSecondary: 550, inkTertiary: 250, offTrack: 380, shadow: 1000
     )
     private static let daylight = ThemeBase(
