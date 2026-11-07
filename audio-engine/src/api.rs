@@ -2,6 +2,7 @@
 //! an `Engine` object, the records it takes and gives, and the events it
 //! sends to a listener.
 
+use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -19,10 +20,19 @@ use crate::sound::model::{DspSettings, EqPreset, EqSettings, ReplayGainSettings}
 use crate::sound::replaygain::ReplayGainInfo;
 
 /// An extra request header for a stream, such as one a server's proxy needs.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+/// The value can be a password, so it is never shown: `Debug`, and the
+/// Kotlin `toString` made from it, give the name alone.
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
+#[uniffi::export(Debug)]
 pub struct HttpHeader {
     pub name: String,
     pub value: String,
+}
+
+impl fmt::Debug for HttpHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpHeader").field("name", &self.name).finish_non_exhaustive()
+    }
 }
 
 /// A certificate the listener chose to trust for one host, although the

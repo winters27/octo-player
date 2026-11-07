@@ -20,7 +20,7 @@ use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
 use crate::live::Live;
-use crate::source::http::HttpOptions;
+use crate::source::http::{Answer, HttpOptions, follow};
 use crate::source::ts::TsDemuxer;
 use crate::source::{Opened, Periods};
 
@@ -65,8 +65,10 @@ pub fn open(url: &str, http: HttpOptions) -> Result<Opened, Failure> {
 
 /// The same, `hops` playlists in after the address first asked for.
 pub(crate) fn open_hop(url: &str, http: HttpOptions, hops: u32) -> Result<Opened, Failure> {
-    let text = fetch_text(url, &http)?;
-    let media_url = match parse(&text, url) {
+    // Entries are read against where the playlist was found after any
+    // redirects; asking for it again starts at `url` itself.
+    let (text, found_at) = fetch_text(url, &http)?;
+    let media_url = match parse(&text, &found_at) {
         Playlist::Master(variants) => {
             let chosen = choose(&variants).ok_or_else(|| {
                 Failure::new(
@@ -93,8 +95,8 @@ pub(crate) fn open_hop(url: &str, http: HttpOptions, hops: u32) -> Result<Opened
             };
         }
     };
-    let text = fetch_text(&media_url, &http)?;
-    match parse(&text, &media_url) {
+    let (text, found_at) = fetch_text(&media_url, &http)?;
+    match parse(&text, &found_at) {
         Playlist::Media(media) => start(media_url, media, http),
         _ => Err(Failure::new(ErrorKind::Unsupported, "the HLS variant is not a media playlist")),
     }
@@ -399,7 +401,7 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
     loop {
         let media = match playlist.take() {
             Some(media) => media,
-            None => match fetch_text(&url, &shared.opts).map(|text| parse(&text, &url)) {
+            None => match fetch_text(&url, &shared.opts).map(|(text, found_at)| parse(&text, &found_at)) {
                 Ok(Playlist::Media(media)) => {
                     failures = 0;
                     media
@@ -544,7 +546,7 @@ fn fetch_retrying(shared: &Shared, url: &str, range: Option<(u64, u64)>, failure
             return Fetched::Gone;
         }
         match fetch_bytes(url, range, &shared.opts) {
-            Ok(bytes) => {
+            Ok((bytes, _)) => {
                 *failures = 0;
                 return Fetched::Bytes(bytes);
             }
@@ -573,34 +575,30 @@ fn wait_again(shared: &Shared, failures: u32) -> bool {
     shared.sleep(shared.opts.live_backoff * (1 << (failures - 1)))
 }
 
-fn get(
-    url: &str,
-    range: Option<(u64, u64)>,
-    opts: &HttpOptions,
-) -> Result<ureq::http::Response<ureq::Body>, Failure> {
-    let mut req = opts.agent.get(url);
-    for (name, value) in &opts.headers {
-        req = req.header(name, value);
-    }
+// A playlist or a segment, through the engine's own redirect following, and
+// the address that answered.
+fn get(url: &str, range: Option<(u64, u64)>, opts: &HttpOptions) -> Result<(Answer, String), Failure> {
+    let mut extra = Vec::new();
     if let Some((offset, len)) = range {
         let end = offset
             .checked_add(len.max(1) - 1)
             .ok_or_else(|| Failure::new(ErrorKind::InvalidArgument, "an HLS byte range runs past the end"))?;
-        req = req.header("Range", format!("bytes={offset}-{end}"));
+        extra.push(("Range", format!("bytes={offset}-{end}")));
     }
-    let response =
-        req.config().timeout_global(Some(Duration::from_secs(30))).build().call().map_err(|e| match e {
-            ureq::Error::StatusCode(status) => Failure::http(status),
-            other => Failure::new(ErrorKind::Network, other.to_string()),
-        })?;
+    let (response, at) = follow(&opts.agent, url, &opts.headers, &extra, Some(Duration::from_secs(30)))?;
     match response.status().as_u16() {
-        200..300 => Ok(response),
+        200..300 => Ok((response, at)),
         other => Err(Failure::http(other)),
     }
 }
 
-fn fetch_bytes(url: &str, range: Option<(u64, u64)>, opts: &HttpOptions) -> Result<Vec<u8>, Failure> {
-    let response = get(url, range, opts)?;
+// The body at `url`, and the address it came from after any redirects.
+fn fetch_bytes(
+    url: &str,
+    range: Option<(u64, u64)>,
+    opts: &HttpOptions,
+) -> Result<(Vec<u8>, String), Failure> {
+    let (response, at) = get(url, range, opts)?;
     let mut bytes = Vec::new();
     response
         .into_body()
@@ -608,12 +606,14 @@ fn fetch_bytes(url: &str, range: Option<(u64, u64)>, opts: &HttpOptions) -> Resu
         .take(MOST_BYTES)
         .read_to_end(&mut bytes)
         .map_err(|e| Failure::new(ErrorKind::Network, e.to_string()))?;
-    Ok(bytes)
+    Ok((bytes, at))
 }
 
-fn fetch_text(url: &str, opts: &HttpOptions) -> Result<String, Failure> {
-    let bytes = fetch_bytes(url, None, opts)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+// A playlist's text, and the address it came from, which its entries are
+// read against.
+fn fetch_text(url: &str, opts: &HttpOptions) -> Result<(String, String), Failure> {
+    let (bytes, at) = fetch_bytes(url, None, opts)?;
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), at))
 }
 
 // MPEG-TS: 188-byte packets, each starting with 0x47.
@@ -881,10 +881,12 @@ fn attributes(text: &str) -> Vec<(String, String)> {
     out
 }
 
-// `reference` as a full address, read against the playlist at `base`.
-fn resolve(base: &str, reference: &str) -> String {
+// `reference` as a full address, read against the address at `base`: a
+// playlist's, or one a redirect came from. One with a scheme of its own is
+// kept as it is, whatever the scheme, for the caller to judge.
+pub(crate) fn resolve(base: &str, reference: &str) -> String {
     let reference = reference.trim();
-    if reference.contains("://") {
+    if has_scheme(reference) {
         return reference.to_string();
     }
     let scheme_end = base.find("://").map_or(0, |i| i + 3);
@@ -901,6 +903,15 @@ fn resolve(base: &str, reference: &str) -> String {
     if dir.ends_with('/') { format!("{dir}{reference}") } else { format!("{dir}/{reference}") }
 }
 
+// Whether an address starts with a scheme of its own, as "https:" and
+// "ftp:" do, rather than being a path. "/go?to=http://x" is a path.
+fn has_scheme(reference: &str) -> bool {
+    let Some((scheme, _)) = reference.split_once(':') else { return false };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,6 +924,11 @@ mod tests {
         assert_eq!(resolve(base, "//cdn.example/x.aac"), "https://cdn.example/x.aac");
         assert_eq!(resolve(base, "http://o.example/y.aac"), "http://o.example/y.aac");
         assert_eq!(resolve("http://h.example", "a.m3u8"), "http://h.example/a.m3u8");
+        // A path whose query names another address is still a path, and an
+        // address with another scheme is left for the caller to refuse.
+        assert_eq!(resolve(base, "/go?to=http://x/a"), "https://h.example/go?to=http://x/a");
+        assert_eq!(resolve(base, "seg?at=1:2"), "https://h.example/live/radio/seg?at=1:2");
+        assert_eq!(resolve(base, "ftp://f.example/a"), "ftp://f.example/a");
     }
 
     #[test]

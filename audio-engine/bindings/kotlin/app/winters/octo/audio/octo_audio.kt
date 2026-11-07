@@ -958,6 +958,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_octo_audio_fn_method_loopvideo_width(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
+    external fun uniffi_octo_audio_fn_method_httpheader_uniffi_trait_debug(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_equalizer_presets(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_graphic_bands(uniffi_out_err: UniffiRustCallStatus, 
@@ -4083,6 +4085,8 @@ public object FfiConverterTypeHookReport: FfiConverterRustBuffer<HookReport> {
 
 /**
  * An extra request header for a stream, such as one a server's proxy needs.
+ * The value can be a password, so it is never shown: `Debug`, and the
+ * Kotlin `toString` made from it, give the name alone.
  */
 data class HttpHeader (
     val `name`: kotlin.String
@@ -4094,6 +4098,15 @@ data class HttpHeader (
 
     
 
+    // The local Rust `Display`/`Debug` implementation.
+    override fun toString(): String {
+        return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_httpheader_uniffi_trait_debug(FfiConverterTypeHttpHeader.lower(this),
+        _status)
+}
+    )
+    }
     
     companion object
 }
@@ -5679,6 +5692,11 @@ enum class ErrorKind {
      * A value passed in that makes no sense.
      */
     INVALID_ARGUMENT,
+    /**
+     * A web page answered instead of the song: the sign-in page of a
+     * gateway in front of the server, or a public Wi-Fi's own page.
+     */
+    SIGN_IN_PAGE,
     OTHER;
 
     
@@ -5873,8 +5891,8 @@ enum class NvidiaOverlay {
      */
     KEPT_OFF,
     /**
-     * Octo's profile is there but no longer keeps this exe out (the entry
-     * was dropped, or Octo now runs from another folder).
+     * Listed in Octo's profile, but the setting there no longer keeps the
+     * overlay off (changed in NVIDIA's own settings).
      */
     UNDONE;
 

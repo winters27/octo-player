@@ -19,6 +19,9 @@ pub enum ErrorKind {
     Device,
     /// A value passed in that makes no sense.
     InvalidArgument,
+    /// A web page answered instead of the song: the sign-in page of a
+    /// gateway in front of the server, or a public Wi-Fi's own page.
+    SignInPage,
     Other,
 }
 
@@ -39,6 +42,13 @@ impl Failure {
     pub fn http(status: u16) -> Self {
         let kind = if status == 404 || status == 410 { ErrorKind::NotFound } else { ErrorKind::Http };
         Self { kind, message: format!("server answered {status}"), status: Some(status) }
+    }
+
+    /// A sign-in page that answered, with this status, where a song should
+    /// have been. Asking again only meets it again.
+    pub fn sign_in_page(status: u16) -> Self {
+        let message = format!("a sign-in page answered {status} instead of the song");
+        Self { kind: ErrorKind::SignInPage, message, status: Some(status) }
     }
 }
 

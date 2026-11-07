@@ -142,6 +142,39 @@ fn a_live_hls_playlist_of_adts_segments_plays_on() {
 }
 
 #[test]
+fn an_hls_playlist_behind_a_redirect_reads_its_entries_from_where_it_landed() {
+    let segments = adts_segments("tone-440-44k-stereo.aac");
+    let polls = Arc::new(AtomicU64::new(0));
+    let count = polls.clone();
+    let server = ScriptServer::start(move |asked, conn, _| {
+        let t = asked.target.as_str();
+        if t == "/station/radio.m3u8" {
+            let moved = "HTTP/1.1 302 Found\r\nLocation: /edge/a1/radio.m3u8\r\nConnection: close\r\n\r\n";
+            let _ = conn.write_all(moved.as_bytes());
+        } else if t == "/edge/a1/radio.m3u8" {
+            // Entries relative to where the playlist really is.
+            let n = count.fetch_add(1, Ordering::SeqCst);
+            let mut text = format!("#EXTM3U\n#EXT-X-TARGETDURATION:0.3\n#EXT-X-MEDIA-SEQUENCE:{n}\n");
+            for seq in n..n + 4 {
+                text.push_str(&format!("#EXTINF:0.5,\nseg/{seq}.aac\n"));
+            }
+            answer(conn, "application/vnd.apple.mpegurl", text.as_bytes());
+        } else if let Some(seq) = number(t).filter(|_| t.starts_with("/edge/a1/seg/")) {
+            answer(conn, "audio/aac", &segments[seq as usize % segments.len()]);
+        } else {
+            not_found(conn);
+        }
+    });
+    let deck = Deck::open(1, server.url("/station/radio.m3u8"), 0.0, live());
+    read_secs(&deck, 2.0);
+    let asked = server.asked();
+    // Every fetch of the playlist starts again at the station's own address.
+    let starts = asked.iter().filter(|a| a.target == "/station/radio.m3u8").count();
+    assert!(starts >= 2 && polls.load(Ordering::SeqCst) >= 2, "{starts}");
+    assert!(asked.iter().all(|a| !a.target.starts_with("/station/seg/")));
+}
+
+#[test]
 fn a_live_hls_playlist_of_fmp4_segments_plays_across_discontinuities() {
     let dir = fixture("hls-fmp4");
     let init = std::fs::read(dir.join("init.mp4")).unwrap();

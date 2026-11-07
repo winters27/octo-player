@@ -496,3 +496,286 @@ Content-Type: audio/mpeg
     assert_eq!(server.asked().len(), 5);
     assert_eq!(out.len(), 5_000);
 }
+
+// What a song behind a gateway is asked with: the gateway's sign-in, a
+// Cloudflare service token's id and a header of the server's own.
+fn gateway_headers() -> Vec<(String, String)> {
+    let pairs = [
+        ("Authorization", "Basic YWxpY2U6cGFzcw=="),
+        ("CF-Access-Client-Id", "id.access"),
+        ("X-Octo-Key", "key"),
+    ];
+    pairs.into_iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
+}
+
+// Sends the request on to `to`.
+fn redirect(conn: &mut std::net::TcpStream, to: &str) {
+    let head = format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\n\r\n");
+    let _ = conn.write_all(head.as_bytes());
+}
+
+// Answers with `body` from where the request's range starts, as a server
+// with ranges does.
+fn song(conn: &mut std::net::TcpStream, asked: &crate::testing::http_server::Asked, body: &[u8]) {
+    let range = asked.header("range").and_then(|r| r.strip_prefix("bytes=")?.strip_suffix('-'));
+    let from = range.and_then(|r| r.parse::<usize>().ok()).unwrap_or(0).min(body.len());
+    let (len, last, sent) = (body.len(), body.len() - 1, body.len() - from);
+    let _ = write!(conn, "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{last}/{len}\r\n");
+    let _ = write!(conn, "Content-Length: {sent}\r\n\r\n");
+    let _ = conn.write_all(&body[from..]);
+}
+
+// A gateway's sign-in page, sent with this content type.
+fn login_page(conn: &mut std::net::TcpStream, content_type: &str) {
+    let body = "<!doctype html><title>Sign in</title><form method=post></form>";
+    let len = body.len();
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\n\r\n");
+    let _ = conn.write_all(head.as_bytes());
+    let _ = conn.write_all(body.as_bytes());
+}
+
+// A server that sends "/hop/0" on through `hops` redirects, one at a time,
+// before it answers with the song.
+fn hops_server(hops: u32, body: Vec<u8>) -> crate::testing::http_server::ScriptServer {
+    crate::testing::http_server::ScriptServer::start(move |asked, conn, _| {
+        let n = asked.target.strip_prefix("/hop/").and_then(|n| n.parse::<u32>().ok());
+        match n {
+            Some(n) if n < hops => redirect(conn, &format!("/hop/{}", n + 1)),
+            _ => song(conn, asked, &body),
+        }
+    })
+}
+
+// Red when: `.max_redirects(0)` is removed (ureq follows and drops
+// Authorization on the hop), or `follow` sends `headers` on the first hop only.
+#[test]
+fn a_redirect_on_the_same_server_keeps_every_header_and_a_seek_starts_at_the_song_again() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(3_000_000);
+    let file = body.clone();
+    let server = ScriptServer::start(move |asked, conn, _| match asked.target.as_str() {
+        "/rest/stream?id=1" => redirect(conn, "/files/song.flac"),
+        "/files/song.flac" => song(conn, asked, &file),
+        _ => {
+            let _ = conn.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+        }
+    });
+    let opts = HttpOptions { headers: gateway_headers(), ..quick() };
+    let mut source = HttpSource::open(&server.url("/rest/stream?id=1"), opts).unwrap();
+    let mut buf = vec![0u8; 1000];
+    source.read_exact(&mut buf).unwrap();
+    // Far ahead: a new request, which starts at the song's own address.
+    source.seek(SeekFrom::Start(2_500_000)).unwrap();
+    source.read_exact(&mut buf).unwrap();
+    assert_eq!(buf, body[2_500_000..2_501_000]);
+    let asked = server.asked();
+    for hop in &asked {
+        for (name, value) in gateway_headers() {
+            assert_eq!(hop.header(&name), Some(value.as_str()), "{name} left off {}", hop.target);
+        }
+        assert!(hop.header("range").is_some(), "no range asked of {}", hop.target);
+    }
+    let seek = asked.iter().filter(|a| a.header("range") == Some("bytes=2500000-"));
+    let again: Vec<&str> = seek.map(|a| a.target.as_str()).collect();
+    assert_eq!(again, ["/rest/stream?id=1", "/files/song.flac"]);
+}
+
+// Red when: `.max_redirects(0)` is removed (ureq keeps every header but
+// Authorization across hosts), or `origin` leaves out the port.
+#[test]
+fn a_redirect_to_another_server_takes_none_of_the_headers_but_the_range() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(100_000);
+    let file = body.clone();
+    let other = ScriptServer::start(move |asked, conn, _| song(conn, asked, &file));
+    let there = other.url("/song.flac");
+    let server = ScriptServer::start(move |_, conn, _| redirect(conn, &there));
+    let opts = HttpOptions { headers: gateway_headers(), ..quick() };
+    let mut source = HttpSource::open(&server.url("/rest/stream"), opts).unwrap();
+    assert!(read_all(&mut source) == body, "the song came through changed");
+    let first = &server.asked()[0];
+    assert_eq!(first.header("authorization"), Some("Basic YWxpY2U6cGFzcw=="));
+    // The same host on another port is another server.
+    let hop = &other.asked()[0];
+    for (name, _) in gateway_headers() {
+        assert_eq!(hop.header(&name), None, "{name} went to another server");
+    }
+    assert_eq!(hop.header("range"), Some("bytes=0-"));
+}
+
+// Red when: `redirect_target` follows only plain http (`to.starts_with("http://")`
+// in place of `is_remote`).
+#[test]
+fn a_redirect_from_http_to_https_still_plays() {
+    use crate::testing::http_server::ScriptServer;
+    let body = data(100_000);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let secure = TestServer::start_tls(body.clone(), Behaviour::default(), &certificate);
+    let there = secure.url();
+    let server = ScriptServer::start(move |_, conn, _| redirect(conn, &there));
+    let opts = trusting(&[("127.0.0.1", &certificate.fingerprint())]);
+    let mut source = HttpSource::open(&server.url("/rest/stream"), opts).unwrap();
+    assert!(read_all(&mut source) == body, "the song came through changed");
+    assert_eq!(secure.ranges_asked(), [0u64]);
+}
+
+// Red when: MOST_REDIRECTS is 9 or 11, or the check reads `hops > MOST_REDIRECTS`.
+#[test]
+fn ten_redirects_are_followed_and_an_eleventh_is_refused() {
+    let body = data(10_000);
+    let ten = hops_server(10, body.clone());
+    let mut source = HttpSource::open(&ten.url("/hop/0"), quick()).unwrap();
+    assert!(read_all(&mut source) == body, "the song came through changed");
+    assert_eq!(ten.asked().len(), 11);
+    let eleven = hops_server(11, body);
+    let err = HttpSource::open(&eleven.url("/hop/0"), quick()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::Http, Some(302)));
+    assert!(err.message.contains("too many redirects"), "{err}");
+    assert_eq!(eleven.asked().len(), 11, "the eleventh redirect was followed");
+}
+
+// Red when: the `is_remote` check in `redirect_target` is removed (ftp and
+// javascript: are tried), `has_scheme` goes back to `contains("://")`
+// (javascript: is read as a path and followed), or a missing Location
+// falls back to "/".
+#[test]
+fn a_redirect_to_nowhere_or_away_from_http_is_refused() {
+    use crate::testing::http_server::ScriptServer;
+    for location in [None, Some("ftp://files.example.com/song.flac"), Some("javascript:alert(1)")] {
+        let server = ScriptServer::start(move |_, conn, _| match location {
+            Some(to) => redirect(conn, to),
+            None => {
+                let _ = conn.write_all(b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+        let err = HttpSource::open(&server.url("/rest/stream"), quick()).err().unwrap();
+        assert_eq!((err.kind, err.status), (ErrorKind::Http, Some(302)), "{location:?}");
+        assert_eq!(server.asked().len(), 1, "{location:?}");
+    }
+}
+
+// Red when: the `!live && is_html` check in `HttpSource::open` is removed, or
+// `is_html` compares the whole header (the charset case then passes as audio).
+#[test]
+fn a_sign_in_page_in_place_of_a_song_fails_at_once() {
+    use crate::testing::http_server::ScriptServer;
+    // A gateway sends the song's address on to its sign-in page.
+    let server = ScriptServer::start(|asked, conn, _| match asked.target.as_str() {
+        "/rest/stream" => redirect(conn, "/if/flow/default-authentication-flow/"),
+        _ => login_page(conn, "text/html; charset=utf-8"),
+    });
+    let err = HttpSource::open(&server.url("/rest/stream"), quick()).err().unwrap();
+    assert_eq!((err.kind, err.status), (ErrorKind::SignInPage, Some(200)));
+    assert!(err.message.contains("200"), "{err}");
+    // The redirect and the page, and nothing asked again.
+    assert_eq!(server.asked().len(), 2);
+    // Answered straight away, in any case, through the way songs open.
+    let direct = ScriptServer::start(|_, conn, _| login_page(conn, "Text/HTML"));
+    let err = crate::source::open(&direct.url("/rest/stream"), quick()).err().unwrap();
+    assert_eq!(err.kind, ErrorKind::SignInPage);
+    assert_eq!(direct.asked().len(), 1);
+}
+
+// Red when: the HTML check in `HttpSource::open` drops its `!live &&`.
+#[test]
+fn a_live_station_answering_as_a_web_page_still_plays() {
+    use crate::testing::http_server::ScriptServer;
+    // Some stations label their sound text/html.
+    let server = ScriptServer::start(|_, conn, _| {
+        let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n");
+        let _ = conn.write_all(&[7u8; 20_000]);
+    });
+    let mut source = HttpSource::open(&server.url("/radio"), live()).unwrap();
+    let (audio, _) = read_live(&mut source, &TitleSlot::default(), 10_000);
+    assert!(audio == [7u8; 10_000], "the station's sound came through changed");
+}
+
+// Red when: the `200 | 206 if html` arm in `open_at` is removed (the page is
+// taken for the song's bytes), or `is_final` leaves out SignInPage; either
+// way the stream ends as a network failure instead.
+#[test]
+fn a_sign_in_page_met_on_a_later_request_ends_the_song() {
+    use crate::testing::http_server::ScriptServer;
+    // The first answer breaks off; by the time the stream asks again, a
+    // gateway wants a sign-in.
+    let body = data(200_000);
+    let first = body[..50_000].to_vec();
+    let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let server = ScriptServer::start(move |_, conn, _| {
+        if answers.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\n");
+            let _ = conn.write_all(&first);
+        } else {
+            login_page(conn, "text/html; charset=utf-8");
+        }
+    });
+    let opts = HttpOptions { max_retries: 1, ..quick() };
+    let mut source = HttpSource::open(&server.url("/rest/stream"), opts).unwrap();
+    let mut out = Vec::new();
+    let err = source.read_to_end(&mut out).unwrap_err();
+    assert!(out == body[..50_000], "the sound before the break came through changed");
+    let failure = err.get_ref().and_then(|e| e.downcast_ref::<Failure>()).unwrap();
+    assert_eq!((failure.kind, failure.status), (ErrorKind::SignInPage, Some(200)));
+    assert_eq!(server.asked().len(), 2, "the sign-in page was asked again");
+}
+
+// Red when: `origin` leaves out the port or the scheme, or `is_html` stops
+// trimming or splitting off parameters.
+#[test]
+fn origins_and_web_pages_are_told_apart() {
+    assert_eq!(origin("https://Music.Example.com/rest"), origin("https://music.example.com:443/x"));
+    assert_ne!(origin("http://music.example.com/rest"), origin("https://music.example.com/rest"));
+    assert_ne!(origin("http://127.0.0.1:4533/a"), origin("http://127.0.0.1:4534/a"));
+    assert!(is_html(Some("text/html; charset=utf-8")) && is_html(Some(" TEXT/HTML")));
+    assert!(!is_html(Some("audio/flac")) && !is_html(Some("application/xhtml+xml")) && !is_html(None));
+}
+
+// Red when: `HttpHeader` or `HttpOptions` derives `Debug` again.
+#[test]
+fn header_values_never_show_in_debug_output() {
+    let header = crate::api::HttpHeader { name: "Authorization".into(), value: "Basic c2VjcmV0".into() };
+    let shown = format!("{header:?}");
+    assert!(shown.contains("Authorization") && !shown.contains("c2VjcmV0"), "{shown}");
+    let opts = HttpOptions { headers: vec![("CF-Access-Client-Secret".into(), "s3cret".into())], ..quick() };
+    let shown = format!("{opts:?}");
+    assert!(shown.contains("CF-Access-Client-Secret") && !shown.contains("s3cret"), "{shown}");
+}
+
+// Red when: any log line in the engine formats a value with Debug, as
+// `log::debug!("{item:?}")` would (a queue item's Debug holds its signed
+// address).
+#[test]
+fn no_log_line_formats_a_value_with_debug() {
+    const LEVELS: [&str; 5] = ["trace", "debug", "info", "warn", "error"];
+    let mut dirs = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let mut found = Vec::new();
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (at, _) in text.match_indices("log::") {
+                let line_start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+                if text[line_start..at].trim_start().starts_with("//") {
+                    continue;
+                }
+                let call = &text[at..];
+                let Some(open) = call.find("!(") else { continue };
+                if !LEVELS.contains(&&call[5..open]) {
+                    continue;
+                }
+                let line = &call[..call.find(");").unwrap_or(call.len())];
+                if line.contains(":?") {
+                    found.push(format!("{}: {line}", path.display()));
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "log lines formatting a value with Debug:\n{}", found.join("\n"));
+}

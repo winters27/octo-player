@@ -11,6 +11,7 @@
 //! its in-stream titles are taken out of the audio.
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
@@ -21,12 +22,13 @@ use symphonia::core::io::MediaSource;
 
 use crate::error::{ErrorKind, Failure};
 use crate::live::Live;
+use crate::source::hls;
 use crate::source::icy::{IcySplitter, IcyStatus, StreamMeta};
 use crate::source::trust::{PinnedTls, Trust};
 use ureq::unversioned::transport::{Buffers, ConnectionDetails, Connector, NextTimeout, Transport};
 
 /// How a stream is fetched.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct HttpOptions {
     /// The client that fetches, with the certificates the engine trusts.
     pub agent: ureq::Agent,
@@ -39,7 +41,9 @@ pub struct HttpOptions {
     pub keep_behind: usize,
     /// Attempts in a row before giving up on a stream.
     pub max_retries: u32,
-    /// Extra request headers, such as a server's own.
+    /// Extra request headers, such as a server's own. They go only to the
+    /// origin (scheme, host and port) of the address opened, never to
+    /// another one a redirect names, and never show in `Debug`.
     pub headers: Vec<(String, String)>,
     /// Set while the reader is waiting on the network.
     pub starved: Option<Arc<AtomicBool>>,
@@ -80,6 +84,24 @@ impl Default for HttpOptions {
             stream_count: &crate::live::HTTP_STREAMS,
             hls_count: &crate::live::HLS_STREAMS,
         }
+    }
+}
+
+// By hand, so header values, which can be passwords, never reach a log:
+// only their names show.
+impl fmt::Debug for HttpOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let names: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("HttpOptions")
+            .field("stall_timeout", &self.stall_timeout)
+            .field("read_ahead", &self.read_ahead)
+            .field("keep_behind", &self.keep_behind)
+            .field("max_retries", &self.max_retries)
+            .field("headers", &names)
+            .field("live", &self.live)
+            .field("live_backoff", &self.live_backoff)
+            .field("hls", &self.hls)
+            .finish_non_exhaustive()
     }
 }
 
@@ -129,6 +151,9 @@ fn agent_with_idle_limit(trust: Arc<Trust>, idle: Duration) -> ureq::Agent {
     use ureq::unversioned::transport::{ConnectProxyConnector, Connector, TcpConnector};
     let config = ureq::Agent::config_builder()
         .http_status_as_error(false)
+        // A redirect comes back as an answer: `follow` takes each hop, and
+        // decides what it is sent with.
+        .max_redirects(0)
         .timeout_connect(Some(Duration::from_secs(10)))
         .timeout_send_request(Some(Duration::from_secs(10)))
         .timeout_recv_response(Some(Duration::from_secs(15)))
@@ -260,6 +285,9 @@ impl State {
 // in-stream titles.
 type Body = (ureq::BodyReader<'static>, Option<usize>);
 
+/// A server's answer, its body not read yet.
+pub(crate) type Answer = ureq::http::Response<ureq::Body>;
+
 // What asking for bytes from an offset gave.
 enum Opened {
     // The body, and how many bytes of it to skip to reach the offset.
@@ -287,6 +315,11 @@ impl HttpSource {
             other => return Err(Failure::http(other)),
         };
         let content_type = header("content-type");
+        // No song is a web page: one here is a sign-in page that answered in
+        // the server's place. Live radio plays whatever its station sends.
+        if !live && is_html(content_type.as_deref()) {
+            return Err(Failure::sign_in_page(status));
+        }
         let metaint = if live { metaint(&response) } else { None };
         let counted = Live::new(opts.stream_count);
         let shared = Arc::new(Shared {
@@ -574,7 +607,11 @@ impl Shared {
                 other => Err(Failure::http(other)),
             };
         }
+        // A sign-in page met on a later request, once a gateway's session has
+        // run out, ends the song as it would have at the start.
+        let html = is_html(response.headers().get("content-type").and_then(|v| v.to_str().ok()));
         match status {
+            200 | 206 if html => Err(Failure::sign_in_page(status)),
             206 => {
                 let start = response
                     .headers()
@@ -656,7 +693,7 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
                     shared.finish(generation);
                     return;
                 }
-                Err(failure) if failure.status.is_some_and(|s| (400..500).contains(&s)) => {
+                Err(failure) if is_final(&failure) => {
                     shared.fail(generation, failure);
                     return;
                 }
@@ -787,22 +824,114 @@ fn backoff(shared: &Shared, generation: u64, failures: u32) -> bool {
     true
 }
 
-fn request(url: &str, opts: &HttpOptions, from: u64) -> Result<ureq::http::Response<ureq::Body>, Failure> {
-    let mut req = opts.agent.get(url);
-    for (name, value) in &opts.headers {
-        req = req.header(name, value);
-    }
-    req = if opts.live {
+// Asks for the stream from byte `from`, at the stream's own address each
+// time: an address a redirect gave before is never asked straight away.
+fn request(url: &str, opts: &HttpOptions, from: u64) -> Result<Answer, Failure> {
+    let extra = if opts.live {
         // A live stream has no ranges; its server may send titles.
-        req.header("Icy-MetaData", "1")
+        ("Icy-MetaData", "1".to_string())
     } else {
         // Always ask for a range: a server that supports them says so with 206.
-        req.header("Range", format!("bytes={from}-"))
+        ("Range", format!("bytes={from}-"))
     };
-    req.call().map_err(|e| match e {
-        ureq::Error::StatusCode(status) => Failure::http(status),
-        other => Failure::new(ErrorKind::Network, other.to_string()),
-    })
+    follow(&opts.agent, url, &opts.headers, &[extra], None).map(|(response, _)| response)
+}
+
+// Redirects followed in a row before the answer counts as a refusal.
+const MOST_REDIRECTS: u32 = 10;
+
+/// Asks for `url`, following redirects here rather than in the client, at
+/// most MOST_REDIRECTS in a row. `headers` go only to hops at the origin
+/// (scheme, host and port) of `url` itself, never to another one a redirect
+/// names; `extra`, such as the range, goes on every hop. `limit` bounds
+/// each hop. Gives the first answer that is not a redirect, and the address
+/// that gave it.
+pub(crate) fn follow(
+    agent: &ureq::Agent,
+    url: &str,
+    headers: &[(String, String)],
+    extra: &[(&str, String)],
+    limit: Option<Duration>,
+) -> Result<(Answer, String), Failure> {
+    let home = origin(url);
+    let mut at = url.to_string();
+    let mut hops = 0;
+    loop {
+        let mut req = agent.get(at.as_str());
+        if home.is_some() && origin(&at) == home {
+            for (name, value) in headers {
+                req = req.header(name, value);
+            }
+        }
+        for (name, value) in extra {
+            req = req.header(*name, value);
+        }
+        let called = match limit {
+            Some(limit) => req.config().timeout_global(Some(limit)).build().call(),
+            None => req.call(),
+        };
+        let response = called.map_err(|e| match e {
+            ureq::Error::StatusCode(status) => Failure::http(status),
+            other => Failure::new(ErrorKind::Network, other.to_string()),
+        })?;
+        if !response.status().is_redirection() {
+            return Ok((response, at));
+        }
+        if hops == MOST_REDIRECTS {
+            let status = response.status().as_u16();
+            return Err(refused_redirect(status, "after too many redirects in a row"));
+        }
+        at = redirect_target(&at, &response)?;
+        hops += 1;
+    }
+}
+
+// Where a redirect from `from` sends the stream on to, read against `from`
+// when it is relative. Only an http or https address is followed.
+fn redirect_target(from: &str, response: &Answer) -> Result<String, Failure> {
+    let status = response.status().as_u16();
+    let location = response.headers().get("location").and_then(|v| v.to_str().ok()).map(str::trim);
+    let Some(location) = location.filter(|l| !l.is_empty()) else {
+        return Err(refused_redirect(status, "without saying where to"));
+    };
+    let to = hls::resolve(from, location);
+    if !super::is_remote(&to) {
+        return Err(refused_redirect(status, "sending the stream away from http"));
+    }
+    Ok(to)
+}
+
+// A redirect that is not followed: the server's answer, and why.
+fn refused_redirect(status: u16, why: &str) -> Failure {
+    let message = format!("server answered {status} {why}");
+    Failure { kind: ErrorKind::Http, message, status: Some(status) }
+}
+
+// The scheme, host and port of an address, by which a hop is the same
+// server or another; the port filled in where the scheme implies it.
+fn origin(url: &str) -> Option<(String, String, u16)> {
+    let uri: ureq::http::Uri = url.parse().ok()?;
+    let scheme = uri.scheme_str()?.to_ascii_lowercase();
+    let implied = match scheme.as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let host = uri.host()?.to_ascii_lowercase();
+    Some((scheme, host, uri.port_u16().unwrap_or(implied)))
+}
+
+// Whether a content type is a web page, whatever its case and parameters
+// ("text/html; charset=utf-8" is one).
+fn is_html(content_type: Option<&str>) -> bool {
+    let bare = content_type.and_then(|t| t.split(';').next()).map(str::trim);
+    bare.is_some_and(|t| t.eq_ignore_ascii_case("text/html"))
+}
+
+// A failure that asking again would only repeat: the server said no, or a
+// sign-in page answered in its place.
+fn is_final(failure: &Failure) -> bool {
+    failure.kind == ErrorKind::SignInPage || failure.status.is_some_and(|s| (400..500).contains(&s))
 }
 
 // How many audio bytes a live server puts between its in-stream titles.
