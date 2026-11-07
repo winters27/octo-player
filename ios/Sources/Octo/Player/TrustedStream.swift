@@ -110,7 +110,8 @@ final class TrustedStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        hop(response: response, newRequest: request, first: task.originalRequest?.url, cookies: signed.cookies, scope: signed.scope)
+        hop(response: response, newRequest: request, first: task.originalRequest?.url, cookies: signed.cookies, scope: signed.scope,
+            headers: signed.headers)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

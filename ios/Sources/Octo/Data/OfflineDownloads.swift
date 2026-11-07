@@ -445,6 +445,8 @@ final class OfflineDownloads {
         request.setValue(octoPurposeOffline, forHTTPHeaderField: octoPurposeHeader)
         request.allowsCellularAccess = !settings.offline.wifiOnly
         let task = transfer.downloadTask(with: request)
+        let client = server.client
+        bridge.signs(task) { client.headers(for: $0) }
         task.taskDescription = [downloadKey(next.sourceId, next.serverId), fileName, format ?? "", fileSize.map(String.init) ?? ""]
             .joined(separator: "\n")
         running = Running(row: next, task: task, fileName: fileName, format: format, fileSize: fileSize)
@@ -579,6 +581,16 @@ final class TransferBridge: NSObject, URLSessionDownloadDelegate, @unchecked Sen
     /// Finished files moved aside, and refusals, by transfer, until the transfer completes.
     private var parts: [Int: URL] = [:]
     private var refused = Set<Int>()
+    /// The headers of the client that signed each transfer started in this run, by transfer, for
+    /// its redirects; a transfer left from an earlier run has none.
+    private let lock = NSLock()
+    private var signers: [Int: @Sendable (URL) -> [String: String]] = [:]
+
+    /// Notes the client headers (its `headers(for:)`) a transfer's redirects get their sign-in
+    /// page headers from, until it completes.
+    func signs(_ task: URLSessionTask, with headers: @escaping @Sendable (URL) -> [String: String]) {
+        lock.withLock { signers[task.taskIdentifier] = headers }
+    }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
@@ -603,11 +615,21 @@ final class TransferBridge: NSObject, URLSessionDownloadDelegate, @unchecked Sen
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
-        ServerTrust.shared.redirected(request, first: task.originalRequest)
+        // The shared trust's rule for the server in use, then, at a gateway address, the signing
+        // client's sign-in page headers the request lacks.
+        let next = ServerTrust.shared.redirected(request, first: task.originalRequest)
+        guard let headers = signer(of: task) else { return next }
+        return addingGatewayLogin(next, headers: headers)
+    }
+
+    /// The client headers a transfer started in this run was signed with.
+    private func signer(of task: URLSessionTask) -> (@Sendable (URL) -> [String: String])? {
+        lock.withLock { signers[task.taskIdentifier] }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         ServerTrust.shared.noteEnd(of: task.originalRequest, error)
+        lock.withLock { signers[task.taskIdentifier] = nil }
         let part = parts.removeValue(forKey: task.taskIdentifier)
         let refusedNow = refused.remove(task.taskIdentifier) != nil
         Task { @MainActor [weak owner] in

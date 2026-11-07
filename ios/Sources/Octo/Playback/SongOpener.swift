@@ -112,22 +112,25 @@ struct StreamContext: Sendable {
     /// `streamRequest` does.
     func sign(_ ref: StreamRef) throws -> SignedStream {
         let (request, client) = try streamRequest(ref)
-        return SignedStream(request: client.prepared(request), cookies: client.cookies, scope: client.scope)
+        return SignedStream(request: client.prepared(request), cookies: client.cookies, scope: client.scope,
+                            headers: { client.headers(for: $0) })
     }
 }
 
 /// One request for a song's bytes, with where its answers keep a sign-in page's cookies: the
 /// store and scope of the client that signed it, so every answer to it, redirects included,
-/// writes into that client's store and no other. A request to an outside address carries an
-/// empty store and no scope.
+/// writes into that client's store and no other, and each redirect gets that client's headers
+/// for its address (`headers`, its `headers(for:)`). A request to an outside address carries an
+/// empty store, no scope and no headers.
 struct SignedStream: Sendable {
     let request: URLRequest
     let cookies: ServerCookies
     let scope: ServerScope
+    let headers: @Sendable (URL) -> [String: String]
 
     /// A request to an address outside the server: no server's headers or cookies go with it.
     static func outside(_ request: URLRequest) -> SignedStream {
-        SignedStream(request: request, cookies: ServerCookies(), scope: ServerScope())
+        SignedStream(request: request, cookies: ServerCookies(), scope: ServerScope(), headers: { _ in [:] })
     }
 
     /// The same request at another address of the same song (as a player's loader asks for it):

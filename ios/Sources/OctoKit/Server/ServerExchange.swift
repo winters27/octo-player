@@ -176,13 +176,26 @@ func carriesGatewayLogin(_ request: URLRequest?) -> Bool {
     (request?.allHTTPHeaderFields ?? [:]).keys.contains(where: GatewayNames.isGatewayName)
 }
 
+/// A request with each of a sign-in page's headers (`GatewayNames`) it lacks, from the headers the
+/// signing client gives its address (`headers`, the client's `headers(for:)`, which names them
+/// only at its gateway addresses). Every other header stays as it is.
+public func addingGatewayLogin(_ request: URLRequest, headers: (URL) -> [String: String]) -> URLRequest {
+    guard let url = request.url else { return request }
+    var out = request
+    for (name, value) in headers(url) where GatewayNames.isGatewayName(name) && out.value(forHTTPHeaderField: name) == nil {
+        out.setValue(value, forHTTPHeaderField: name)
+    }
+    return out
+}
+
 /// One redirect hop of a request to the server: the hop's sign-in page cookies are kept, the
 /// next request loses what may not go where it leads (every header but the plain ones once it
 /// leaves the server and where it was first sent, a sign-in page's headers anywhere but its
-/// gateway addresses), and gets the store's cookies for its address. Nil refuses the redirect:
-/// one that leads anywhere but http or https.
+/// gateway addresses), at a gateway address gets each sign-in page header it lacks from the
+/// signing client's `headers` (`addingGatewayLogin`), and gets the store's cookies for its
+/// address. Nil refuses the redirect: one that leads anywhere but http or https.
 public func hop(response: HTTPURLResponse, newRequest: URLRequest, first: URL?, cookies: ServerCookies,
-                scope: ServerScope) -> URLRequest? {
+                scope: ServerScope, headers: (URL) -> [String: String]) -> URLRequest? {
     guard let url = newRequest.url, let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
     storeCookies(of: response, in: cookies, scope: scope)
     var next = newRequest
@@ -190,7 +203,9 @@ public func hop(response: HTTPURLResponse, newRequest: URLRequest, first: URL?, 
     for name in scope.headersToDrop(next.allHTTPHeaderFields ?? [:], to: url, first: first) {
         next.setValue(nil, forHTTPHeaderField: name)
     }
-    if !scope.isGatewayOrigin(url) {
+    if scope.isGatewayOrigin(url) {
+        next = addingGatewayLogin(next, headers: headers)
+    } else {
         for name in (next.allHTTPHeaderFields ?? [:]).keys where GatewayNames.isGatewayName(name) {
             next.setValue(nil, forHTTPHeaderField: name)
         }
@@ -205,15 +220,13 @@ public func hop(response: HTTPURLResponse, newRequest: URLRequest, first: URL?, 
 /// recognizer and goes through `hop`. It answers nothing else, so the session's own delegate
 /// keeps the certificate checks, the client certificate and its notes on how a call ended.
 final class ExchangeHops: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let cookies: ServerCookies
-    private let scope: ServerScope
+    private let client: SubsonicClient
     private let first: URL?
     private let lock = NSLock()
     private var hops: [AnswerHop] = []
 
     init(client: SubsonicClient, first: URL?) {
-        cookies = client.cookies
-        scope = client.scope
+        self.client = client
         self.first = first
         super.init()
     }
@@ -223,7 +236,8 @@ final class ExchangeHops: NSObject, URLSessionTaskDelegate, @unchecked Sendable 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
         lock.withLock { hops.append(AnswerHop(response)) }
-        return hop(response: response, newRequest: request, first: first, cookies: cookies, scope: scope)
+        return hop(response: response, newRequest: request, first: first, cookies: client.cookies, scope: client.scope,
+                   headers: client.headers(for:))
     }
 }
 #endif

@@ -534,10 +534,11 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? {
         // Each hop keeps the server's rules for headers and its sign-in page's cookies, in the
-        // store of the client that signed the request.
-        let signed = sent(task)
+        // store of the client that signed the request, and gets that client's sign-in page
+        // headers at a gateway address.
+        let signed = sent(task) ?? .outside(request)
         return hop(response: response, newRequest: request, first: task.originalRequest?.url,
-                   cookies: signed?.cookies ?? ServerCookies(), scope: signed?.scope ?? ServerScope())
+                   cookies: signed.cookies, scope: signed.scope, headers: signed.headers)
     }
 
     /// What a task went out with, and so the store its answers keep cookies in.

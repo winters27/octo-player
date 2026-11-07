@@ -201,11 +201,27 @@ import Testing
         return request
     }
 
+    /// The client that signs the requests: the sign-in page's three headers and a proxy header,
+    /// for a server with this scope.
+    func signer(_ scope: ServerScope) -> SubsonicClient {
+        SubsonicClient(baseURL: scope.main ?? main, credentials: Credentials(username: "alice", password: "pw"),
+                       device: DeviceIdentity(id: "abc", name: "Phone"), appVersion: "1.0",
+                       customHeaders: ["Authorization": basic, "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "secret",
+                                       "X-Proxy-Token": "p"],
+                       scope: scope)
+    }
+
+    /// One hop with the headers of the client that signs for `scope`.
+    func hopped(_ response: HTTPURLResponse, _ request: URLRequest, first: URL?, cookies: ServerCookies = ServerCookies(),
+                scope: ServerScope) -> URLRequest? {
+        hop(response: response, newRequest: request, first: first, cookies: cookies, scope: scope, headers: signer(scope).headers(for:))
+    }
+
     @Test func aRedirectHopsCookieIsKeptAndGoesWithTheNextHop() throws {
         let cookies = ServerCookies()
         let to = "https://music.example.com/outpost.goauthentik.io/start?rd=x"
-        let next = try #require(hop(response: redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
-                                    first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
+        let next = try #require(hopped(redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), carried(to),
+                                       first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
         #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
         #expect(next.value(forHTTPHeaderField: "Authorization") == basic)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
@@ -215,9 +231,9 @@ import Testing
 
     @Test func aHopToTheHttpHomeLosesTheSignInPagesHeaders() throws {
         let to = "http://192.168.1.20:4533/rest/ping"
-        let next = try #require(hop(response: redirect(first, to: to), newRequest: carried(to), first: first, cookies: ServerCookies(),
-                                    scope: ServerScope(main: main, home: home)))
+        let next = try #require(hopped(redirect(first, to: to), carried(to), first: first, scope: ServerScope(main: main, home: home)))
         #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "CF-Access-Client-Id") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
         #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1")
     }
@@ -225,8 +241,8 @@ import Testing
     @Test func aHopElsewhereLosesEverythingButThePlainHeaders() throws {
         let cookies = ServerCookies()
         let to = "https://auth.example.com/if/flow/default-authentication-flow/"
-        let next = try #require(hop(response: redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
-                                    first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
+        let next = try #require(hopped(redirect(first, to: to, cookie: "authentik_proxy_a=1; Path=/"), carried(to),
+                                       first: first, cookies: cookies, scope: ServerScope(main: main, home: home)))
         #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
@@ -234,9 +250,9 @@ import Testing
         #expect(next.value(forHTTPHeaderField: "User-Agent") == "Octo/1.0 (iPhone)")
         // A cookie the other host sets on its own hop is never kept.
         let away = URL(string: to)!
-        _ = hop(response: redirect(away, to: "https://auth.example.com/next", cookie: "authentik_proxy_z=9; Path=/"),
-                newRequest: URLRequest(url: URL(string: "https://auth.example.com/next")!), first: first, cookies: cookies,
-                scope: ServerScope(main: main, home: home))
+        _ = hopped(redirect(away, to: "https://auth.example.com/next", cookie: "authentik_proxy_z=9; Path=/"),
+                   URLRequest(url: URL(string: "https://auth.example.com/next")!), first: first, cookies: cookies,
+                   scope: ServerScope(main: main, home: home))
         #expect(cookies.cookieHeader(for: away) == nil)
     }
 
@@ -247,19 +263,47 @@ import Testing
         let plainFirst = URL(string: "http://192.168.1.20:4533/rest/ping")!
         let cookies = ServerCookies()
         let to = "https://192.168.1.20/rest/ping"
-        let next = try #require(hop(response: redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
-                                    first: plainFirst, cookies: cookies, scope: ServerScope(main: lan, home: nil)))
+        let next = try #require(hopped(redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), carried(to),
+                                       first: plainFirst, cookies: cookies, scope: ServerScope(main: lan, home: nil)))
         #expect(next.value(forHTTPHeaderField: "Authorization") == basic)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
         #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == "abc")
         #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
-        // The http home of an https server moves up the same way.
-        let fromHome = URL(string: "http://192.168.1.20:4533/rest/stream")!
-        let upHome = "https://192.168.1.20/rest/stream"
-        let homeNext = try #require(hop(response: redirect(fromHome, to: upHome), newRequest: carried(upHome), first: fromHome,
-                                        cookies: ServerCookies(), scope: ServerScope(main: main, home: home)))
-        #expect(homeNext.value(forHTTPHeaderField: "Authorization") == basic)
-        #expect(homeNext.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+    }
+
+    /// The http home of an https server: its own request never carries the sign-in page's
+    /// headers, and its move up to https on the same host gets them from the signing client.
+    /// Red when `hop` only keeps and drops headers.
+    @Test func anHttpHomesMoveUpToHttpsGetsTheSignIn() throws {
+        let scope = ServerScope(main: main, home: home)
+        let sent = signer(scope).prepared(URLRequest(url: URL(string: "http://192.168.1.20:4533/rest/stream")!))
+        #expect(sent.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(sent.value(forHTTPHeaderField: "CF-Access-Client-Id") == nil)
+        #expect(sent.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        let fromHome = try #require(sent.url)
+        var up = sent
+        up.url = URL(string: "https://192.168.1.20/rest/stream")!
+        let next = try #require(hopped(redirect(fromHome, to: "https://192.168.1.20/rest/stream"), up, first: fromHome, scope: scope))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == basic)
+        #expect(next.value(forHTTPHeaderField: "CF-Access-Client-Id") == "id")
+        #expect(next.value(forHTTPHeaderField: "CF-Access-Client-Secret") == "secret")
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
+        #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == "abc")
+    }
+
+    /// Red when the sign-in is added on a hop to a host that is not the server's.
+    @Test func anHttpHomesMoveToAnotherHostGetsNoSignIn() throws {
+        let scope = ServerScope(main: main, home: home)
+        let sent = signer(scope).prepared(URLRequest(url: URL(string: "http://192.168.1.20:4533/rest/stream")!))
+        let fromHome = try #require(sent.url)
+        var away = sent
+        away.url = URL(string: "https://192.168.1.21/rest/stream")!
+        let next = try #require(hopped(redirect(fromHome, to: "https://192.168.1.21/rest/stream"), away, first: fromHome, scope: scope))
+        #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(next.value(forHTTPHeaderField: "CF-Access-Client-Id") == nil)
+        #expect(next.value(forHTTPHeaderField: "CF-Access-Client-Secret") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
+        #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
     }
 
     /// Red when the move up is counted for any host, not the address's own.
@@ -269,8 +313,8 @@ import Testing
         let cookies = ServerCookies()
         cookies.keep(["authentik_proxy_a=1; Path=/"], from: plainFirst)
         let to = "https://192.168.1.21/rest/ping"
-        let next = try #require(hop(response: redirect(plainFirst, to: to), newRequest: carried(to), first: plainFirst, cookies: cookies,
-                                    scope: ServerScope(main: lan, home: nil)))
+        let next = try #require(hopped(redirect(plainFirst, to: to), carried(to), first: plainFirst, cookies: cookies,
+                                       scope: ServerScope(main: lan, home: nil)))
         #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Octo-Device-Id") == nil)
@@ -283,15 +327,15 @@ import Testing
         let plain = URL(string: "http://music.example.com")!
         let plainFirst = URL(string: "http://music.example.com/rest/ping")!
         let to = "https://music.example.com/rest/ping"
-        let next = try #require(hop(response: redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), newRequest: carried(to),
-                                    first: plainFirst, cookies: ServerCookies(), scope: ServerScope(main: plain, home: nil)))
+        let next = try #require(hopped(redirect(plainFirst, to: to, cookie: "authentik_proxy_a=1; Path=/"), carried(to),
+                                       first: plainFirst, scope: ServerScope(main: plain, home: nil)))
         #expect(next.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(next.value(forHTTPHeaderField: "X-Proxy-Token") == "p")
         #expect(next.value(forHTTPHeaderField: "Cookie") == "octo_family=f1; authentik_proxy_a=1")
     }
 
     @Test func aHopToAnotherSchemeIsRefused() {
-        #expect(hop(response: redirect(first, to: "ftp://music.example.com/x"), newRequest: URLRequest(url: URL(string: "ftp://music.example.com/x")!),
-                    first: first, cookies: ServerCookies(), scope: ServerScope(main: main, home: home)) == nil)
+        #expect(hopped(redirect(first, to: "ftp://music.example.com/x"), URLRequest(url: URL(string: "ftp://music.example.com/x")!),
+                       first: first, scope: ServerScope(main: main, home: home)) == nil)
     }
 }
