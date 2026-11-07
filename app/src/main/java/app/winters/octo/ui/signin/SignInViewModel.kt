@@ -15,6 +15,7 @@ import app.winters.octo.connection.addressChanged
 import app.winters.octo.connection.reactToFailure
 import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.connection.ServerClients
+import app.winters.octo.connection.letGo
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.GatewayKind
@@ -305,8 +306,13 @@ class SignInViewModel @Inject constructor(
         viewModelScope.launch {
             val signIn = received ?: run {
                 val (http, security) = clients.forJoin(base, connection)
-                val got = withContext(Dispatchers.IO) {
-                    receiveHandOver(link, http, devices.current().name, FamilyPlatform.Android, step = { handOverStep = it })
+                // Its own client, let go once the hand-over has answered.
+                val got = try {
+                    withContext(Dispatchers.IO) {
+                        receiveHandOver(link, http, devices.current().name, FamilyPlatform.Android, step = { handOverStep = it })
+                    }
+                } finally {
+                    http.letGo()
                 }
                 if (got is HandOverResult.Received) return@run got.signIn.also { received = it }
                 val refused = got as HandOverResult.Refused
@@ -374,11 +380,18 @@ class SignInViewModel @Inject constructor(
         busy = true
         error = null
         viewModelScope.launch {
-            val (http, security) = clients.forJoin(url, connection)
             val invited = invite ?: return@launch
-            val account = signedUp ?: when (val joined = withContext(Dispatchers.IO) {
-                joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = connection.home)
-            }) {
+            // Its own client, let go once the family page has answered; its
+            // security still holds a certificate it refused, to ask about.
+            val (http, security) = clients.forJoin(url, connection)
+            val joined = try {
+                signedUp ?: withContext(Dispatchers.IO) {
+                    joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = connection.home)
+                }
+            } finally {
+                http.letGo()
+            }
+            val account = when (joined) {
                 is JoinOutcome.SignedUp -> joined.also { signedUp = it }
                 // A certificate of the server's own is asked about as signing
                 // in asks; trusting it signs up again.
@@ -611,7 +624,7 @@ class SignInViewModel @Inject constructor(
                 form == ServerForm.Add -> switcher.onItsOwn { sessions.add(request) }.also { failed ->
                     if (failed == null) notice = "Added ${addedName(request)}. Switch to it whenever you like."
                 }
-                else -> switcher.signIn(request).let { (failed, words) ->
+                else -> switcher.signIn(request, serverId.takeIf { form == ServerForm.SignIn }).let { (failed, words) ->
                     notice = words
                     failed
                 }

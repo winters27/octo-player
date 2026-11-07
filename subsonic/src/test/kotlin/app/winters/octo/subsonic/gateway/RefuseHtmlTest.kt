@@ -58,6 +58,59 @@ class RefuseHtmlTest {
         client().newCall(Request.Builder().url(own.url("/rest/stream.view?id=tr-1")).build()).execute().use { assertEquals("fLaC", it.body.string()) }
     }
 
+    private fun refusalOf(http: OkHttpClient): Throwable? =
+        runCatching { http.newCall(Request.Builder().url(own.url("/rest/stream.view?id=tr-1")).build()).execute().close() }.exceptionOrNull()
+
+    // A 401 or 403 a sign-in page gives at the server's address is
+    // refused once, named, with its status. Red when RefuseHtml judges 2xx
+    // answers only, or loses the recognizer's name.
+    @Test
+    fun aSignInPagesRefusalAtTheServersAddressIsRefusedAndNamed() {
+        own.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", HTML).body(AUTHENTIK_PAGE).build())
+        own.enqueue(MockResponse.Builder().code(403).addHeader("cf-access-aud", "aud").body("Forbidden").build())
+        val http = client()
+        val authentik = refusalOf(http)
+        assertTrue("got $authentik", authentik is SignInPageAnswer)
+        assertEquals(Gateway.Authentik, (authentik as SignInPageAnswer).gateway)
+        assertEquals(401, authentik.status)
+        val cloudflare = refusalOf(http)
+        assertTrue("got $cloudflare", cloudflare is SignInPageAnswer)
+        assertEquals(Gateway.CloudflareAccess, (cloudflare as SignInPageAnswer).gateway)
+        assertEquals(403, cloudflare.status)
+        assertEquals(2, own.requestCount)
+    }
+
+    // A 401 web page with no gateway marks and no sign-in sent is
+    // still a sign-in page. Red when RefuseHtml refuses only a 401 the
+    // recognizer names.
+    @Test
+    fun aRefusalAsAWebPageIsASignInPageEvenUnnamed() {
+        own.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", "text/html").body("<html><body>Please sign in</body></html>").build())
+        val error = refusalOf(client())
+        assertTrue("got $error", error is SignInPageAnswer)
+        assertEquals(Gateway.SignInPage, (error as SignInPageAnswer).gateway)
+        assertEquals(401, error.status)
+        assertEquals(1, own.requestCount)
+    }
+
+    // The server's own plain refusals, a missing page, and a sign-in
+    // page's refusal at another address pass as they are. Red when
+    // RefuseHtml refuses every 401 or 403, any HTML error, or looks past the
+    // server's addresses.
+    @Test
+    fun theServersOwnRefusalsAndOtherAddressesPassAsTheyAre() {
+        own.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", "application/json").body("""{"error":"no"}""").build())
+        own.enqueue(MockResponse.Builder().code(403).addHeader("Content-Type", "text/plain").body("Forbidden").build())
+        own.enqueue(MockResponse.Builder().code(404).addHeader("Content-Type", HTML).body("<html>gone</html>").build())
+        other.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", HTML).body(AUTHENTIK_PAGE).build())
+        val http = client()
+        val stream = Request.Builder().url(own.url("/rest/stream.view?id=tr-1")).build()
+        http.newCall(stream).execute().use { assertEquals(401, it.code) }
+        http.newCall(stream).execute().use { assertEquals(403, it.code) }
+        http.newCall(stream).execute().use { assertEquals(404, it.code) }
+        http.newCall(Request.Builder().url(other.url("/listen")).build()).execute().use { assertEquals(401, it.code) }
+    }
+
     @Test
     fun aStoredPageIsToldFromMedia() {
         assertTrue(looksLikeHtmlFile("<!DOCTYPE html>".toByteArray()))

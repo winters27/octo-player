@@ -68,7 +68,8 @@ import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.OCTO_LYRICS
-import app.winters.octo.server.isWarning
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.server.warnsInRow
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.server.TestOutcome
@@ -146,8 +147,9 @@ private fun ServerRow(app: AppState, server: SavedServer, inUse: Boolean) {
                 Txt(accountLine(server), DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
                 // The one in use has its kind said under the list, and one
                 // being switched to says so at the row's end, so neither
-                // says it here too unless it has a problem to tell.
-                val quiet = check.isWarning()
+                // says it here too, unless the one in use needs https for
+                // its sign-in page, which nothing else says.
+                val quiet = check.warnsInRow(inUse)
                 if (!switching && (!inUse || quiet)) {
                     Txt(statusLine(server, check, false, inUse), DesktopType.meta, if (quiet) OctoColors.SignalOrange else OctoColors.TextMuted, Modifier.padding(top = Space.Xxs))
                 }
@@ -273,7 +275,10 @@ fun switchServer(app: AppState, id: String) {
     if (server.signedOut) return signInTo(app, server)
     val page = if (app.navigator.current.page == Page.Settings) Page.Settings else Page.Home
     app.switchTo(id, page) { outcome ->
-        if (outcome is SwitchOutcome.NeedsPassword) signInTo(app, outcome.server, outcome.note)
+        if (outcome !is SwitchOutcome.NeedsPassword) return@switchTo
+        // Moving the address to https needs the address field, which the
+        // edit sheet has.
+        if (outcome.note == GatewayWords.NEEDS_HTTPS) editServer(app, outcome.server, outcome.note) else signInTo(app, outcome.server, outcome.note)
     }
 }
 
@@ -282,7 +287,7 @@ private enum class SheetKind { Add, Edit, SignIn }
 
 fun addServer(app: AppState) = serverSheet(app, SheetKind.Add, null)
 
-fun editServer(app: AppState, server: SavedServer) = serverSheet(app, SheetKind.Edit, server)
+fun editServer(app: AppState, server: SavedServer, note: String? = null) = serverSheet(app, SheetKind.Edit, server, note)
 
 // Asks for the password of a kept server, then makes it the one in use.
 fun signInTo(app: AppState, server: SavedServer, note: String? = null) = serverSheet(app, SheetKind.SignIn, server, note)
@@ -353,7 +358,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
             val outcome = when (kind) {
                 SheetKind.Add -> app.accounts.add(form.request())
                 SheetKind.Edit -> app.accounts.edit(server!!.id, form.request(), form.label, ticket)
-                SheetKind.SignIn -> app.accounts.signIn(form.request(), ticket)
+                SheetKind.SignIn -> app.accounts.signInAgain(server!!.id, form.request(), ticket)
             }
             form.busy = false
             when (outcome) {
@@ -510,11 +515,10 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
         busy = true
         problem = null
         scope.launch {
-            val outcome = app.accounts.changePassword(connection, draft.current, draft.new, family)
+            val outcome = app.changePassword(connection, draft.current, draft.new, family)
             busy = false
             if (outcome.result == PasswordChange.Changed) {
                 close()
-                app.passwordChanged()
                 app.notice = listOfNotNull(passwordChangeWords(outcome.result, family), outcome.note).joinToString(" ")
             } else {
                 problem = passwordChangeWords(outcome.result)

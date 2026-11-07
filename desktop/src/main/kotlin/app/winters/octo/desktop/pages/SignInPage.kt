@@ -140,7 +140,8 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         form.result = null
         val tried = form.attemptAddress
         scope.launch {
-            when (val done = app.accounts.signIn(form.request())) {
+            val kept = form.keptId
+            when (val done = if (kept != null) app.accounts.signInAgain(kept, form.request()) else app.accounts.signIn(form.request())) {
                 is SignInOutcome.Done -> {
                     form.password = ""
                     form.apiKey = ""

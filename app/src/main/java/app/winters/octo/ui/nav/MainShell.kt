@@ -2,6 +2,7 @@ package app.winters.octo.ui.nav
 
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.ui.family.FamilyShellViewModel
+import app.winters.octo.ui.signin.SignInShellViewModel
 import app.winters.octo.ui.family.FamilyRequestSheetHost
 import app.winters.octo.ui.family.FamilyScreen
 import app.winters.octo.subsonic.familyAppLink
@@ -194,6 +195,16 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         if (shared == null) return@LaunchedEffect
         selected = stacks.lastIndex
         if (stacks.last().lastOrNull() != ImportRoute) stacks.last().add(ImportRoute)
+    }
+    // A kept server that could not be signed in to at start as kept: its
+    // sign-in form, on the Settings tab, saying why.
+    val sessions = hiltViewModel<SignInShellViewModel>().sessions
+    val signInAsk by sessions.signInAsk.collectAsStateWithLifecycle()
+    LaunchedEffect(signInAsk) {
+        val ask = signInAsk ?: return@LaunchedEffect
+        sessions.signInAsked(ask)
+        selected = stacks.lastIndex
+        stacks.last().add(ServerFormRoute(ServerForm.SignIn, ask.serverId, ask.note))
     }
     val back: () -> Unit = { stack.removeLastOrNull() }
     val hasTrack = now.trackId != null

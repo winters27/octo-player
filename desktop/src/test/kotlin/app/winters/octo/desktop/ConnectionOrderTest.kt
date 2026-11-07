@@ -8,9 +8,11 @@ import app.winters.octo.desktop.server.FakeSecrets
 import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SignInRequest
+import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.server.PasswordChange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -18,10 +20,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import mockwebserver3.MockResponse
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -31,6 +35,7 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 // The window and the accounts agree on the server in use whatever order
 // changes finish in: an edit or switch begun before a later switch or
@@ -98,6 +103,24 @@ class ConnectionOrderTest {
         return app
     }
 
+    // The app on work, with `home` as its home address: home answers like
+    // the server only while `homeUp` says so, and work takes password
+    // changes. The home route is the one activate made.
+    private fun routedApp(homeUp: AtomicBoolean): AppState {
+        library(work)
+        work.answer("changePassword")
+        home.respond("ping") { if (homeUp.get()) home.okResponse(type = "octo") else MockResponse.Builder().code(503).build() }
+        settings = SettingsStore(File(temp.root, "settings.json"), 0)
+        val security = ServerSecurity(settings)
+        val http = security.install(OkHttpClient.Builder()).build()
+        accounts = Accounts(settings, FakeSecrets(), http, security)
+        val first = runBlocking { accounts.signIn(SignInRequest(work.address, "winters", "pw", home = home.address)) } as SignInOutcome.Done
+        workId = first.connection.server.id
+        val app = AppState(settings, accounts, http, scope, DesktopOs.Windows, player, OnlineLyrics(http, work.address.toHttpUrl()), restored = first.connection, listeningRoot = temp.root)
+        waitFor { app.library?.index != null }
+        return app
+    }
+
     private fun waitFor(what: () -> Boolean) {
         val until = System.currentTimeMillis() + 5_000
         while (!what() && System.currentTimeMillis() < until) Thread.sleep(20)
@@ -132,24 +155,27 @@ class ConnectionOrderTest {
         assertEquals("work", work.calls.single().headers["X-Token"])
     }
 
-    // T16: an edit finishing after a sign-out stays signed out. Red with no
-    // generation check in reconnected.
+    // An edit finishing after a sign-out stays signed out: saved, not made
+    // the one in use, and still signed out. Red when Accounts.keep makes it
+    // the one in use after a newer stop ticket, or clears a sign-out asked
+    // for after the edit began.
     @Test
     fun anEditFinishingAfterASignOutStaysSignedOut() {
         val app = app()
         val edit = startEdit()
         app.signOut()
         release.countDown()
-        val done = runBlocking { edit.await() } as SignInOutcome.Done
-        waitFor { accounts.active == null }
-        app.reconnected(done.connection)
+        val saved = runBlocking { edit.await() } as SignInOutcome.Saved
+        assertTrue(saved.server.signedOut)
         assertNull(app.connection)
         assertNull(settings.current.activeServer)
+        assertTrue(accounts.find(homeId)!!.signedOut)
     }
 
-    // T16: a switch begun before a sign-out finishes after it: signed out in
-    // the accounts and the window. Red with no generation check in arrive,
-    // or when a sign-out does not let go of a server made in use since.
+    // A switch begun before a sign-out finishes after it: signed out in the
+    // accounts and the window. Red with no generation check in arrive, or
+    // when a switch overtaken by a sign-out still makes its server the one
+    // in use.
     @Test
     fun aSwitchFinishingAfterASignOutStaysSignedOut() {
         val app = app()
@@ -168,20 +194,53 @@ class ConnectionOrderTest {
         assertNull(settings.current.activeServer)
     }
 
-    // T17: an edit of the server in use, a password change and a move of
-    // the home route each fetch the queue afresh. Red when any of the three
-    // calls goes.
+    // A sign-out from the window signs out the server it shows, not one an
+    // earlier change made the one in use before the window moved to it;
+    // that one is let go but keeps its password. Red when AppState.signOut
+    // signs out whatever the accounts have in use.
     @Test
-    fun aChangedConnectionPasswordOrRouteFetchesTheQueueAgain() {
+    fun aSignOutSignsOutTheServerTheWindowShows() {
+        val app = app()
+        assertTrue(runBlocking { accounts.switchTo(workId) } is SwitchOutcome.Done)
+        app.signOut()
+        waitFor { accounts.find(homeId)!!.signedOut }
+        assertFalse(accounts.find(workId)!!.signedOut)
+        assertNull(settings.current.activeServer)
+    }
+
+    // An edit of the server in use fetches the queue afresh. Red when
+    // reconnected stops calling for it.
+    @Test
+    fun anEditOfTheServerInUseFetchesTheQueueAgain() {
         val app = app()
         release.countDown()
         val done = runBlocking { accounts.edit(homeId, SignInRequest(home.address, "winters", "", headers = listOf(HeaderDraft("X-Token", "edited")))) } as SignInOutcome.Done
         app.reconnected(done.connection)
         assertEquals(1, player.reconnects)
         assertSame(done.connection, app.connection)
-        app.passwordChanged()
-        assertEquals(2, player.reconnects)
-        accounts.onRouteMoved!!.invoke()
-        assertEquals(3, player.reconnects)
+    }
+
+    // A password change through the app, and a real move of the
+    // home route activate made, each fetch the queue afresh. The home
+    // address starts out not answering, then answers, and a request that
+    // cannot reach the main address asks the route to look again. Red when
+    // AppState.changePassword stops calling for it, when activate's route no
+    // longer tells onRouteMoved, or when AppState stops listening to it.
+    @Test
+    fun aPasswordChangeAndAMoveOfTheHomeRouteFetchTheQueueAgain() {
+        val homeUp = AtomicBoolean(false)
+        val app = routedApp(homeUp)
+        // The sign-in's own look at the home address and the route's first
+        // check have both been answered "not here".
+        waitFor { home.calls.count { it.url.pathSegments.last() == "ping" } >= 2 }
+        val before = player.reconnects
+        val changed = runBlocking { app.changePassword(app.connection!!, "pw", "new") }
+        assertEquals(PasswordChange.Changed, changed.result)
+        assertEquals(before + 1, player.reconnects)
+        homeUp.set(true)
+        work.close()
+        runCatching { runBlocking { app.connection!!.client.ping() } }
+        waitFor { player.reconnects == before + 2 }
+        assertEquals(home.address, app.connection!!.client.baseUrl.toString())
     }
 }

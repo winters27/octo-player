@@ -153,12 +153,14 @@ class ServerSwitch @Inject constructor(
         }
     }.await()
 
-    // Signs in and makes the server the one in use. Answers what went wrong,
-    // or the notice to show: the switch's, when another was in use before.
-    suspend fun signIn(request: SignInRequest): Pair<SignInError?, String?> = scope.async {
+    // Signs in and makes the server the one in use: `keptId` names a kept
+    // server signed in to again, brought up to date rather than kept twice.
+    // Answers what went wrong, or the notice to show: the switch's, when
+    // another was in use before.
+    suspend fun signIn(request: SignInRequest, keptId: String? = null): Pair<SignInError?, String?> = scope.async {
         val before = (sessions.state.value as? SessionState.SignedIn)?.session
         stoppedMusic = false
-        val failed = sessions.signIn(request)
+        val failed = if (keptId != null) sessions.signInAgain(keptId, request) else sessions.signIn(request)
         if (failed != null) return@async failed to null
         val now = (sessions.state.value as? SessionState.SignedIn)?.session ?: return@async null to null
         val from = before?.takeIf { it.id != now.id }

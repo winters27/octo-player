@@ -220,6 +220,19 @@ class DesktopOfflineTest {
         assertTrue(File(folder.root, "kept").walk().none { it.isFile && it.name != DesktopOffline.INDEX })
     }
 
+    // Authentik's 401 page in place of a song is never kept. Red when
+    // the download keeps an answer whatever its status (the isSuccessful
+    // check in fetch).
+    @Test
+    fun aSignInPagesRefusalInPlaceOfASongIsNeverKept() {
+        server.respond("stream") { SignInPages.authentik() }
+        val offline = offline()
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("tried") { offline.status.failed == 1 }
+        assertNull(offline.localFile("tr-1"))
+        assertTrue(File(folder.root, "kept").walk().none { it.isFile && it.name != DesktopOffline.INDEX })
+    }
+
     // A sign-in page an older version kept in a song's place is dropped and
     // the song fetched again. Red when kept files are not looked at.
     @Test

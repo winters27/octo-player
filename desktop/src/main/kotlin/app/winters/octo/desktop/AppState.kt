@@ -80,6 +80,7 @@ import app.winters.octo.playback.stoppedLine
 import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
+import app.winters.octo.desktop.server.PasswordOutcome
 import app.winters.octo.desktop.server.ServerFactsModel
 import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.settings.SavedServer
@@ -99,6 +100,7 @@ import app.winters.octo.desktop.system.openInBrowser
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.playback.skippedLine
+import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.switchNotice
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
@@ -555,7 +557,13 @@ class AppState(
         // Songs queued at one of the server's addresses are asked for again
         // at the other once it moves between them.
         accounts.onRouteMoved = player::reconnect
-        restored?.let(::signedIn)
+        // The server in use when Octo closed that could not be signed in to
+        // as kept fills the sign-in page, saying why.
+        if (restored != null) {
+            signedIn(restored)
+        } else {
+            accounts.takeStartAsk()?.let { (id, note) -> accounts.find(id)?.let { fillSignIn(it, note) } }
+        }
     }
 
     // A song that could not play says so in the one notice line, and its
@@ -814,11 +822,14 @@ class AppState(
     // now, so a sign-in, edit or switch still on its way does not bring a
     // server back after.
     fun signOut() {
+        // The server the window shows, whatever a change still on its way
+        // made the one in use meanwhile; the ticket lets go of that one.
+        val shown = connection?.server?.id
         leaveServer()
         val stop = accounts.stopTicket()
         // The server is forgotten at once; the password store is left to
         // finish off the window's thread.
-        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut(stop = stop) }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { accounts.signOut(shown, stop) }
         signedOut()
     }
 
@@ -849,9 +860,14 @@ class AppState(
         }
     }
 
-    // Fills the sign-in page with a kept server, asking for its password.
+    // Fills the sign-in page with a kept server, asking for its password;
+    // signing in then brings that server up to date rather than keeping
+    // another.
     fun fillSignIn(server: SavedServer, note: String? = null) {
-        signInForm = SignInForm(server).also { form -> note?.let { form.result = false to it } }
+        signInForm = SignInForm(server).also { form ->
+            form.keptId = server.id
+            note?.let { form.result = false to it }
+        }
     }
 
     // Makes another kept server the one in use. It is asked first, so one out
@@ -875,6 +891,7 @@ class AppState(
                 is SwitchOutcome.Done -> arrive(outcome.connection, page)
                 is SwitchOutcome.Failed -> notice = outcome.message
                 is SwitchOutcome.NeedsPassword -> Unit
+                SwitchOutcome.Overtaken -> Unit
             }
             done(outcome)
         }
@@ -912,9 +929,13 @@ class AppState(
         }
     }
 
-    // The password of the server in use changed: songs queued with the old
-    // one are asked for again with the new.
-    fun passwordChanged() = player.reconnect()
+    // Changes the signed-in user's password on the server in use. Songs
+    // queued with the old one are asked for again with the new.
+    suspend fun changePassword(connection: Connection, current: String, new: String, family: Boolean = false): PasswordOutcome {
+        val outcome = accounts.changePassword(connection, current, new, family)
+        if (outcome.result == PasswordChange.Changed) player.reconnect()
+        return outcome
+    }
 
     // Signs out of a kept server that is not the one in use; the one in use
     // signs out as above.

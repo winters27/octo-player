@@ -8,6 +8,7 @@ import app.winters.octo.subsonic.gateway.RefuseHtml
 import app.winters.octo.subsonic.gatewayOrigins
 import app.winters.octo.subsonic.origin
 import app.winters.octo.subsonic.serverHeaders
+import app.winters.octo.subsonic.serverOrigins
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -83,7 +84,7 @@ class ConnectionSecurity @Inject constructor(
     fun configure(main: HttpUrl, settings: ConnectionSettings) {
         val addresses = listOfNotNull(main, settings.home)
         val identity = Identity(
-            origins = addresses.mapTo(HashSet(), ::origin),
+            origins = serverOrigins(main, settings.home),
             gatewayOrigins = gatewayOrigins(main, settings.home),
             headers = settings.headers.associate { it.name to it.value },
             pins = settings.pins.mapKeys { pinKey(it.key) },

@@ -41,6 +41,23 @@ class GatewayStreamsTest {
         assertEquals(headers.keys, queueItem(entry, secure).headers.map { it.name }.toSet())
     }
 
+    // An http home route hands the engine a sign-in page's headers only as
+    // secure headers, for a hop of the same server up to https; the main
+    // https address needs none. Red when ServerSongs leaves
+    // secureStreamHeaders out, or queueItem drops them.
+    @Test
+    fun anHttpHomeRouteGivesTheSignInPageHeadersForItsHttpsTwinOnly() {
+        var route = home
+        val client = SubsonicClient(main, Credentials("winters", "pw"), OkHttpClient(), route = { route })
+        val entry = QueueEntry(2, Song("s2", "Two"))
+        val songs = ServerSongs({ headers }, client = { client }, gatewayOrigins = { gatewayOrigins(main, home) })
+        val item = queueItem(entry, songs)
+        assertEquals(listOf("X-Token"), item.headers.map { it.name })
+        assertEquals(setOf("Authorization", "CF-Access-Client-Secret"), item.secureHeaders.map { it.name }.toSet())
+        route = main
+        assertTrue(queueItem(entry, songs).secureHeaders.isEmpty())
+    }
+
     // T18: the engine's sign-in page failure in the shared words. Red when
     // the mapping goes (it falls to "Other").
     @Test

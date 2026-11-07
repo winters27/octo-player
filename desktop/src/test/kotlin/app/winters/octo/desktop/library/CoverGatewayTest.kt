@@ -7,11 +7,14 @@ import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.gateway.Gateway
+import app.winters.octo.subsonic.gateway.SignInPageAnswer
 import coil3.ImageLoader
 import coil3.PlatformContext
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Surface
@@ -19,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -61,6 +65,25 @@ class CoverGatewayTest {
         val (loader, client) = covers()
         assertNull(coverBytes(loader, client, "c1", 100))
         assertNull(loader.diskCache!!.openSnapshot(coverKey(client.primaryUrl.host, "c1", coverBucket(100))))
+    }
+
+    // Authentik's 401 page in place of a cover is asked once, never
+    // kept, and named as a sign-in page by the covers client's refusal. Red
+    // (the naming) when RefuseHtml judges 2xx answers only.
+    @Test
+    fun aSignInPagesRefusalInPlaceOfACoverIsNamedAndNeverKept() = runBlocking {
+        server.respond("getCoverArt") { SignInPages.authentik() }
+        val (loader, client) = covers()
+        assertNull(coverBytes(loader, client, "c1", 100))
+        assertNull(loader.diskCache!!.openSnapshot(coverKey(client.primaryUrl.host, "c1", coverBucket(100))))
+        assertEquals(1, server.calls.count { it.url.pathSegments.last() == "getCoverArt" })
+        val security = ServerSecurity(SettingsStore(File(folder.root, "settings.json")))
+        security.configure(server.address.toHttpUrl(), null, emptyMap())
+        val http = security.install(OkHttpClient.Builder()).addInterceptor(security.refuseHtml()).build()
+        val refused = runCatching { http.newCall(Request.Builder().url(client.coverArtUrl("c1", 100)).build()).execute().close() }.exceptionOrNull()
+        assertTrue("got $refused", refused is SignInPageAnswer)
+        assertEquals(Gateway.Authentik, (refused as SignInPageAnswer).gateway)
+        assertEquals(401, refused.status)
     }
 
     // Red when an origin rule is added to the refusal.

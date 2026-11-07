@@ -13,13 +13,21 @@ import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.gateway.GatewayNames
+import app.winters.octo.subsonic.httpsTwin
 import app.winters.octo.subsonic.origin
 import app.winters.octo.playback.radioIsHls
 import okhttp3.HttpUrl
 
 // Where the engine fetches a song from: a file path, or a signed stream
-// address, with any extra request headers it needs.
-data class SongAddress(val source: String, val headers: Map<String, String> = emptyMap())
+// address, with any extra request headers it needs, and those it adds only
+// once a hop of the same server has moved the stream up to https (a
+// sign-in page's, for a plain http home address whose https twin may have
+// them).
+data class SongAddress(
+    val source: String,
+    val headers: Map<String, String> = emptyMap(),
+    val secureHeaders: Map<String, String> = emptyMap(),
+)
 
 // Turns a song into the address the engine plays it from, or null when it
 // cannot be played now (signed out, say).
@@ -50,7 +58,9 @@ class ServerSongs(
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
         val url = server.url("stream", mapOf("id" to id) + params())
-        return SongAddress(url.toString(), streamHeaders(headers(), url, gatewayOrigins()))
+        val all = headers()
+        val allowed = gatewayOrigins()
+        return SongAddress(url.toString(), streamHeaders(all, url, allowed), secureStreamHeaders(all, url, allowed))
     }
 }
 
@@ -59,6 +69,15 @@ class ServerSongs(
 // main one, or a home one over https).
 fun streamHeaders(headers: Map<String, String>, url: HttpUrl, gatewayOrigins: Set<String>): Map<String, String> =
     if (origin(url) in gatewayOrigins) headers else headers.filterKeys { !GatewayNames.isGatewayName(it) }
+
+// The headers a stream at plain http `url` carries only once a hop of the
+// same server moves it up to https: a sign-in page's, when `url`'s own
+// address may not have them and its https twin may. None otherwise.
+fun secureStreamHeaders(headers: Map<String, String>, url: HttpUrl, gatewayOrigins: Set<String>): Map<String, String> {
+    val twin = httpsTwin(url) ?: return emptyMap()
+    if (origin(url) in gatewayOrigins || twin !in gatewayOrigins) return emptyMap()
+    return headers.filterKeys(GatewayNames::isGatewayName)
+}
 
 // A song's id on the server, for asking the server about it: the library
 // copy of a song found online once it has one, and nothing for a file on
@@ -122,6 +141,7 @@ fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
         durationMs = knownLengthMs(song).takeIf { it > 0 && !live }?.toULong(),
         replayGain = gain,
         headers = address?.headers.orEmpty().map { (name, value) -> HttpHeader(name, value) },
+        secureHeaders = address?.secureHeaders.orEmpty().map { (name, value) -> HttpHeader(name, value) },
         genre = genreOf(song),
         bpm = song.bpm?.takeIf { it > 0 }?.toDouble(),
         live = live,

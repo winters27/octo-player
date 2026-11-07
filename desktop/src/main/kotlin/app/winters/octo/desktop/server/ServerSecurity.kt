@@ -12,8 +12,8 @@ import app.winters.octo.subsonic.HeaderScope
 import app.winters.octo.subsonic.gateway.GatewayCookies
 import app.winters.octo.subsonic.gateway.RefuseHtml
 import app.winters.octo.subsonic.gatewayOrigins
-import app.winters.octo.subsonic.origin
 import app.winters.octo.subsonic.serverHeaders
+import app.winters.octo.subsonic.serverOrigins
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -27,9 +27,9 @@ import javax.net.ssl.SSLContext
 data class CertificateQuestion(val host: String, val fingerprint: String)
 
 // What the network needs to know about the signed-in server, as on the
-// phone: its extra headers and the addresses they may go to (a sign-in
-// page's headers only to the main address, and to the home one over
-// https), the sign-in page's session cookies, the certificates the listener
+// phone: its extra headers and the addresses they may go to (each address
+// and the same host over https; a sign-in page's headers only to the main
+// address and over https), the sign-in page's session cookies, the certificates the listener
 // chose to trust, each for its own host, and this computer's id and name
 // for the server's own addresses. The one shared HTTP client (the server's
 // API, covers and lyrics) reads it on every request, so a change applies
@@ -85,7 +85,7 @@ class ServerSecurity(
         val kept = current?.takeIf { it.main == main && it.home == home && it.headers == headers && it.pins == pins }?.cookies
         val cookies = kept ?: GatewayCookies()
         val scope = HeaderScope(
-            origins = listOfNotNull(main, home).mapTo(HashSet(), ::origin),
+            origins = serverOrigins(main, home),
             headers = headers,
             device = device,
             gatewayOrigins = gatewayOrigins(main, home),

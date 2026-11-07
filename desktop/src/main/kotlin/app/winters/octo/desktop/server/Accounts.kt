@@ -100,8 +100,9 @@ class Connection(
     val family: Boolean get() = supports(OCTO_FAMILY)
 
     // Whether a sign-in page sits in front of the server, by the headers
-    // kept for it.
-    val behindSignInPage: Boolean get() = savedGatewayKind(headers.toList()) != GatewayKind.None
+    // kept for it: any name a sign-in page reads, whatever its case, as on
+    // the phones.
+    val behindSignInPage: Boolean get() = headers.keys.any(GatewayNames::isGatewayName)
 }
 
 // What testing a connection found: which server, which version, and the
@@ -175,6 +176,10 @@ sealed interface SwitchOutcome {
     class NeedsPassword(val server: SavedServer, val note: String? = null) : SwitchOutcome
 
     class Failed(val message: String) : SwitchOutcome
+
+    // A sign-out or removal of the server in use was asked for after this
+    // switch began: the window has left already, so nothing changes.
+    data object Overtaken : SwitchOutcome
 }
 
 // The sign-in page kind a kept server's saved headers make up, and which of
@@ -252,6 +257,15 @@ class Accounts(
     private val stopped = AtomicLong()
     @Volatile private var activeGeneration = 0L
 
+    // Held while the server in use changes hands, so a sign-in, edit or
+    // switch making its server the one in use and a sign-out or removal
+    // letting go of it never land halfway through each other.
+    private val handover = Any()
+
+    // The ticket each kept server was last signed out of or removed under,
+    // so a change begun before it never undoes it.
+    private val signedOutAt = ConcurrentHashMap<String, Long>()
+
     // A ticket for a sign-in, edit or switch, taken when it is asked for.
     fun ticket(): Long = tickets.incrementAndGet()
 
@@ -295,7 +309,7 @@ class Accounts(
     // Tests the connection, then keeps the server beside the others without
     // leaving the one in use. The same account again is brought up to date
     // rather than kept twice.
-    suspend fun add(request: SignInRequest): SignInOutcome = writer.withLock { keep(request, use = false, generation = 0) }
+    suspend fun add(request: SignInRequest, generation: Long = ticket()): SignInOutcome = writer.withLock { keep(request, use = false, generation) }
 
     // Changes a kept server's address, username, headers, sign-in page or
     // way of signing in, after a sign-in with the new details works. An
@@ -312,6 +326,22 @@ class Accounts(
                 request.withSecret(saved)
             }
             keep(filled, use = id == settings.current.activeServer, generation, replacing = old, label = label)
+        }
+
+    // Signs in again to a kept server and makes it the one in use: the same
+    // server, brought up to date with the form's details (an address moved
+    // to https, say). An empty password keeps the saved one, and empty
+    // sign-in page fields their saved values, as an edit does.
+    suspend fun signInAgain(id: String, request: SignInRequest, generation: Long = ticket()): SignInOutcome =
+        writer.withLock {
+            val old = find(id) ?: return@withLock SignInOutcome.Failed("That server isn't in your list any more.")
+            val filled = if (request.secret.isNotEmpty()) {
+                request
+            } else {
+                val saved = savedSecret(old) ?: return@withLock SignInOutcome.Failed(if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password.")
+                request.withSecret(saved)
+            }
+            keep(filled, use = true, generation, replacing = old)
         }
 
     // Gives a kept server a name of its own; an empty one shows its host.
@@ -377,16 +407,37 @@ class Accounts(
         base?.id?.takeIf { it != id }?.let { memory.remove(it); memoryHeaders.remove(it) }
         memory[id] = secret
         memoryHeaders[id] = reached.headers
-        settings.update { s ->
-            val list = if (base == null) s.servers + saved else s.servers.map { if (it.id == base.id) saved else it }
-            val inUse = when {
-                use -> id
-                // The server in use, edited under a new id, keeps being it.
-                s.activeServer != null && s.activeServer == base?.id -> id
-                else -> s.activeServer
+        val made = synchronized(handover) {
+            // Removed while this ran: it is not brought back.
+            if (base != null && find(base.id) == null) return@synchronized null
+            // A sign-out or removal of the server in use asked for after this
+            // change began leaves the server saved but not in use, and a
+            // sign-out of this server asked for after it began keeps it
+            // signed out, whatever the order the two reach the settings in.
+            val overtaken = use && generation <= stopped.get()
+            val stored = if (base != null && (signedOutAt[base.id] ?: 0L) > generation) saved.copy(signedOut = true) else saved
+            val activates = use && !overtaken && !stored.signedOut
+            settings.update { s ->
+                val list = if (base == null) s.servers + stored else s.servers.map { if (it.id == base.id) stored else it }
+                val inUse = when {
+                    activates -> id
+                    // The server in use, edited under a new id, keeps being
+                    // it, unless a sign-out of it came first.
+                    !overtaken && s.activeServer != null && s.activeServer == base?.id -> id
+                    else -> s.activeServer
+                }
+                s.copy(servers = list, activeServer = inUse)
             }
-            s.copy(servers = list, activeServer = inUse)
+            stored to if (activates) activate(stored, secret, reached.headers, generation) else null
         }
+        // Removed or signed out of meanwhile: nothing of this sign-in is
+        // kept, in memory or in the store, whatever address it was for.
+        if (made == null || made.first.signedOut) {
+            memory.remove(id)
+            memoryHeaders.remove(id)
+            withContext(keychain) { runCatching { secrets.delete(secretAccount(username, address)) } }
+        }
+        val (kept, connection) = made ?: return SignInOutcome.Failed("That server isn't in your list any more.")
         // Header values an older version filed by address go once no kept
         // server reads them there.
         if (headersKept) {
@@ -395,8 +446,7 @@ class Accounts(
                 if (base != null && base.address != address) dropAddressHeaders(base.address)
             }
         }
-        if (!use) return SignInOutcome.Saved(saved, note)
-        val connection = activate(saved, secret, reached.headers, generation)
+        if (connection == null) return SignInOutcome.Saved(kept, note)
         return SignInOutcome.Done(connection, remembered = request.rememberPassword && note == null, note = note)
     }
 
@@ -419,9 +469,15 @@ class Accounts(
         val headers = memoryHeaders[id] ?: withContext(keychain) { readHeaders(server) } ?: return SwitchOutcome.NeedsPassword(server)
         val main = server.address.toHttpUrlOrNull() ?: return SwitchOutcome.Failed("That server's address can't be read. Edit it and try again.")
         val home = server.home?.toHttpUrlOrNull()?.takeIf { it != main }
-        if (needsHttps(main, headers)) return SwitchOutcome.Failed(switchFailedWords(server.name, GatewayWords.NEEDS_HTTPS))
+        // A sign-in page's password that would cross the internet readable
+        // is never sent: its sign-in form opens saying why, as on the phones.
+        if (needsHttps(main, headers)) return SwitchOutcome.NeedsPassword(server, GatewayWords.NEEDS_HTTPS)
         val creds = Credentials(server.username, secret, server.authMode)
-        val (info, extensions) = checkClient(listOfNotNull(main, home), headers).use { own ->
+        // Each call gets as long as a look at a server's row (GLANCE_SECONDS,
+        // the phone's switch limit too): the switch holds the other changes
+        // while it asks, so a sign-in page that never answers holds them for
+        // seconds, not the minute the base client's read limit would allow.
+        val (info, extensions) = checkClient(listOfNotNull(main, home), headers, GLANCE_SECONDS).use { own ->
             val (reachedUrl, info) = try {
                 reach(own.http, main, home, creds)
             } catch (e: SubsonicException) {
@@ -443,10 +499,23 @@ class Accounts(
             openSubsonic = info.openSubsonic,
             extensions = extensions?.let { ServerFacts(info, it).extensionKeys } ?: server.extensions,
         )
-        memory[id] = secret
-        memoryHeaders[id] = headers
-        settings.update { s -> s.copy(servers = s.servers.map { if (it.id == id) fresh else it }, activeServer = id) }
-        return SwitchOutcome.Done(activate(fresh, secret, headers, generation))
+        return synchronized(handover) {
+            val now = find(id)
+            when {
+                // A sign-out or removal of the server in use asked for after
+                // this switch began: the window has left already.
+                generation <= stopped.get() -> SwitchOutcome.Overtaken
+                now == null -> SwitchOutcome.Failed("That server isn't in your list any more.")
+                // Signed out of while it was asked.
+                now.signedOut -> SwitchOutcome.NeedsPassword(now)
+                else -> {
+                    memory[id] = secret
+                    memoryHeaders[id] = headers
+                    settings.update { s -> s.copy(servers = s.servers.map { if (it.id == id) fresh else it }, activeServer = id) }
+                    SwitchOutcome.Done(activate(fresh, secret, headers, generation))
+                }
+            }
+        }
     }
 
     // The server in use, ready to use, or null when there is none or its
@@ -458,22 +527,43 @@ class Accounts(
         if (saved.signedOut) return null
         val password = memory[saved.id] ?: runCatching { secrets.read(secretAccount(saved.username, saved.address)) }.getOrNull() ?: return null
         val headers = memoryHeaders[saved.id] ?: readHeaders(saved) ?: return null
+        // A sign-in page's password that would cross the internet readable
+        // is never sent: the server is no longer the one in use, keeps its
+        // password, and its sign-in page opens saying why, as on the phones.
+        val main = saved.address.toHttpUrlOrNull()
+        if (main != null && needsHttps(main, headers)) {
+            settings.update { it.copy(activeServer = null) }
+            startAsk = saved.id to GatewayWords.NEEDS_HTTPS
+            return null
+        }
         return activate(saved, password, headers, ticket())
     }
+
+    // The kept server whose sign-in page opens at start, and why: the one
+    // in use when Octo closed, which could not be signed in to as kept.
+    @Volatile private var startAsk: Pair<String, String>? = null
+
+    // The same, taken once.
+    fun takeStartAsk(): Pair<String, String>? = startAsk.also { startAsk = null }
 
     // The server to fill the sign-in page with: the one in use, else the one
     // signed out of last, else the first kept.
     val last: SavedServer? get() = active ?: find(recent) ?: servers.firstOrNull()
 
     // Signs out of a kept server, the one in use unless another is named. It
-    // stays in the list; its password is forgotten at once from memory and
-    // from the store off the window's thread. Its header values are kept,
-    // so signing in again needs only the password. `stop` is the ticket a
-    // sign-out of the server in use took when asked for.
+    // stays in the list. Its password is forgotten from memory and the
+    // settings say it is signed out at once, so a quit while another change
+    // holds the accounts never brings it back; the password store forgets
+    // it once that change is done, off the window's thread. Its header
+    // values are kept, so signing in again needs only the password. `stop`
+    // is the ticket a sign-out of the server in use took when asked for; a
+    // change begun before it (or before this call, for any other server)
+    // never undoes it.
     suspend fun signOut(id: String? = settings.current.activeServer, stop: Long? = null) {
-        writer.withLock {
+        val old = synchronized(handover) {
             val old = find(id)
             if (old != null) {
+                signedOutAt[old.id] = stop ?: ticket()
                 forgetInMemory(old)
                 recent = old.id
                 settings.update { s ->
@@ -482,30 +572,39 @@ class Accounts(
                         activeServer = s.activeServer.takeIf { it != old.id },
                     )
                 }
-                withContext(keychain) { runCatching { secrets.delete(secretAccount(old.username, old.address)) } }
             }
             leaveOutdated(stop)
+            old
         }
+        if (old != null) writer.withLock { withContext(keychain) { runCatching { secrets.delete(secretAccount(old.username, old.address)) } } }
     }
 
     // Takes a server off the list, with its password and its header values.
-    // Its songs and playlists stay on the server; this computer's plays,
-    // queue and live lists for it are the caller's to keep or delete.
-    // `stop` as for signOut, when it is the server in use.
+    // It leaves the list and memory at once, as a sign-out does; the store
+    // lets its secrets go once the change before is done. Its songs and
+    // playlists stay on the server; this computer's plays, queue and live
+    // lists for it are the caller's to keep or delete. `stop` as for
+    // signOut, when it is the server in use.
     suspend fun remove(id: String, stop: Long? = null) {
-        writer.withLock {
+        val old = synchronized(handover) {
             val old = find(id)
             if (old != null) {
+                signedOutAt[old.id] = stop ?: ticket()
                 forgetInMemory(old)
                 if (recent == old.id) recent = null
                 settings.update { s -> s.copy(servers = s.servers.filterNot { it.id == old.id }, activeServer = s.activeServer.takeIf { it != old.id }) }
+            }
+            leaveOutdated(stop)
+            old
+        }
+        if (old != null) {
+            writer.withLock {
                 withContext(keychain) {
                     runCatching { secrets.delete(secretAccount(old.username, old.address)) }
                     runCatching { secrets.delete(headersAccount(old)) }
                     dropAddressHeaders(old.address)
                 }
             }
-            leaveOutdated(stop)
         }
     }
 
@@ -558,10 +657,13 @@ class Accounts(
     // its own client; any other through a client of its own with its own
     // headers. A signed-out one is not asked, so no wrong password is ever
     // sent to it, and neither is one whose sign-in page headers would cross
-    // the internet in plain http.
+    // the internet in plain http, in use or not.
     suspend fun check(id: String, inUse: Connection? = null): ServerCheck {
         val server = find(id) ?: return ServerCheck(Reach.Unknown)
-        if (inUse != null && inUse.server.id == id) return look(id, server, inUse.client)
+        if (inUse != null && inUse.server.id == id) {
+            if (needsHttps(inUse.client.primaryUrl, inUse.headers)) return ServerCheck(Reach.NeedsHttps)
+            return look(id, server, inUse.client)
+        }
         if (server.signedOut) return ServerCheck(Reach.Unknown)
         val secret = savedSecret(server) ?: return ServerCheck(Reach.Unknown)
         val headers = memoryHeaders[id] ?: withContext(keychain) { readHeaders(server) } ?: return ServerCheck(Reach.Unknown)

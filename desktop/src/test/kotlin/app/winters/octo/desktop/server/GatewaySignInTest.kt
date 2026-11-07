@@ -15,8 +15,11 @@ import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.gateway.basicCredentials
+import app.winters.octo.desktop.secrets.SecretStore
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import mockwebserver3.RecordedRequest
@@ -274,5 +277,74 @@ class GatewaySignInTest {
         client.ping()
         assertNull(server.calls.last().headers["Cookie"])
         assertNull(server.calls.last().headers["X-Token"])
+    }
+
+    // A sign-out while a held switch runs is in the settings at once,
+    // on disk too (a quit at any moment keeps it), and stays there once the
+    // switch is done: the server signed out of is signed out and none is in
+    // use. Only the password store waits its turn. Red when signOut writes
+    // the settings under the writer lock, or when a switch overtaken by the
+    // sign-out still makes its server the one in use.
+    @Test
+    fun aSignOutWhileAHeldSwitchRunsIsWrittenAtOnceAndStays() = runTest {
+        server.answer("ping", type = "octo")
+        other.answer("ping", type = "octo")
+        val held = HeldDeletes(secrets)
+        val security = ServerSecurity(settings)
+        val accounts = Accounts(settings, held, security.install(OkHttpClient.Builder()).build(), security)
+        val first = accounts.signIn(SignInRequest(server.address, "winters", "pw")) as SignInOutcome.Done
+        val second = accounts.add(SignInRequest(other.address, "guest", "pw2")) as SignInOutcome.Saved
+        val asked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        other.answerBy("ping") {
+            asked.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            other.ok(type = "octo")
+        }
+        val switch = async(Dispatchers.IO) { accounts.switchTo(second.server.id, accounts.ticket()) }
+        assertTrue(withContext(Dispatchers.IO) { asked.await(5, TimeUnit.SECONDS) })
+        held.hold = true
+        val id = first.connection.server.id
+        val stop = accounts.stopTicket()
+        val out = launch(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) { accounts.signOut(id, stop) }
+        fun signedOut(store: SettingsStore) = store.current.activeServer == null && store.current.servers.single { it.id == id }.signedOut
+        assertTrue("written at once", signedOut(settings))
+        assertTrue("on disk at once", signedOut(SettingsStore(settingsFile)))
+        release.countDown()
+        assertEquals(SwitchOutcome.Overtaken, switch.await())
+        assertTrue("still signed out once the switch is done", signedOut(settings))
+        assertTrue(signedOut(SettingsStore(settingsFile)))
+        assertNull(accounts.active)
+        held.letGo.countDown()
+        out.join()
+        assertNull(secrets.kept[secretAccount("winters", first.connection.server.address)])
+        assertEquals("the other keeps its password", "pw2", secrets.kept[secretAccount("guest", second.server.address)])
+    }
+
+    // The share line follows any header a sign-in page reads, whatever
+    // its case, as on the phones. Red when behindSignInPage goes by the
+    // saved kind (a Bearer token or a half Cloudflare pair would say
+    // nothing).
+    @Test
+    fun aServerBehindASignInPageIsKnownByAnyOfItsHeaders() {
+        fun behind(vararg headers: Pair<String, String>) =
+            Connection(server.client(), SavedServer(server.address, "winters"), mapOf(*headers)).behindSignInPage
+        assertTrue(behind("Authorization" to "Bearer t0k"))
+        assertTrue(behind("cf-access-client-id" to "id.access"))
+        assertTrue(behind("Authorization" to basicCredentials("alice", "pw")))
+        assertFalse(behind("X-Token" to "t"))
+        assertFalse(behind())
+    }
+}
+
+// A password store that holds each delete while `hold` is on, until let
+// go, so what a sign-out does before its turn at the store is seen alone.
+private class HeldDeletes(private val inner: FakeSecrets) : SecretStore by inner {
+    @Volatile var hold = false
+    val letGo = CountDownLatch(1)
+
+    override fun delete(account: String) {
+        if (hold) letGo.await(5, TimeUnit.SECONDS)
+        inner.delete(account)
     }
 }

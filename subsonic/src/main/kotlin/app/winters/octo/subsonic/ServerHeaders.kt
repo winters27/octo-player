@@ -41,13 +41,26 @@ class HeaderScope(
 // origin reach the same server.
 fun origin(url: HttpUrl): String = "${url.scheme}://${url.host.lowercase()}:${url.port}"
 
-// The addresses a sign-in page's headers may go to: the main address, and
-// the home address only when it is https. None at all when the main
+// The same host over https on its usual port: where a server at a plain
+// http address sends its visitors when it moves them up to https. It is
+// the same server, reached over TLS. Null for an https address.
+fun httpsTwin(url: HttpUrl): String? =
+    if (url.isHttps) null else origin(url.newBuilder().scheme("https").port(443).build())
+
+// The origins of a server at these addresses: each address's own, and the
+// https twin of each plain http one, so the server's headers and its
+// sign-in page's cookies follow a move up to https on the same host.
+fun serverOrigins(main: HttpUrl, home: HttpUrl?): Set<String> =
+    listOfNotNull(main, home).flatMapTo(HashSet()) { listOfNotNull(origin(it), httpsTwin(it)) }
+
+// The addresses a sign-in page's headers may go to: the main address and
+// its https twin, and the home address only over https (an https home
+// address, or the https twin of an http one). None at all when the main
 // address is plain http to a host outside the home network, where anyone
 // on the way could read them.
 fun gatewayOrigins(main: HttpUrl, home: HttpUrl?): Set<String> {
     if (!main.isHttps && !isPrivateHost(main)) return emptySet()
-    return setOfNotNull(origin(main), home?.takeIf { it.isHttps }?.let(::origin))
+    return setOfNotNull(origin(main), httpsTwin(main), home?.let { if (it.isHttps) origin(it) else httpsTwin(it) })
 }
 
 const val DEVICE_ID_HEADER = "X-Octo-Device-Id"

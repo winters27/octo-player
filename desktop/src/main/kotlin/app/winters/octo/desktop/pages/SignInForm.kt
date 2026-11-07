@@ -116,6 +116,11 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // The kept server the form started from, if any.
     val keptServer: SavedServer? get() = lastServer
 
+    // The kept server this form signs in to again, when it was filled in
+    // for one (AppState.fillSignIn): signing in then brings that server up
+    // to date rather than keeping another.
+    var keptId: String? = null
+
     init {
         if (last != null) {
             typeAddress(last.address.removeSuffix("/"))
@@ -321,6 +326,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     }
 
     private fun forgetServerDetails() {
+        keptId = null
         headers.clear()
         gatewayRows = emptyList()
         savedGateway = GatewayKind.None

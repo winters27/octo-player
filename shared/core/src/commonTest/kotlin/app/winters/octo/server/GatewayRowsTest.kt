@@ -36,6 +36,21 @@ class GatewayRowsTest {
         assertTrue(ServerCheck(Reach.NeedsHttps).isWarning())
     }
 
+    // The server in use says it needs https in its row, as a warning;
+    // its other troubles stay below the list. Red when the in-use branch of
+    // statusLine comes before NeedsHttps, or warnsInRow hides it.
+    @Test
+    fun theServerInUseSaysItNeedsHttpsInItsRow() {
+        val needs = ServerCheck(Reach.NeedsHttps)
+        assertEquals("Octo 0.9.3 · Needs https for its sign-in page", statusLine("octo", "0.9.3", false, needs, inUse = true))
+        assertTrue(needs.warnsInRow(inUse = true))
+        val page = ServerCheck(Reach.SignInPage(Gateway.Authentik, loginSent = false))
+        assertEquals("Octo 0.9.3", statusLine("octo", "0.9.3", false, page, inUse = true))
+        assertEquals(false, page.warnsInRow(inUse = true))
+        assertTrue(page.warnsInRow(inUse = false))
+        assertEquals("Signed out. Sign in again to use it.", statusLine("octo", "0.9.3", true, needs))
+    }
+
     @Test
     fun aPasswordChangeBehindASignInPageSaysWhatAnswered() = runTest {
         server.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", PAGE_TYPE).body(GATEWAY_PAGE).build())

@@ -4,6 +4,7 @@ import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.ServerClients
 import app.winters.octo.connection.fingerprint
+import app.winters.octo.connection.letGo
 import app.winters.octo.server.Reach
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Credentials
@@ -40,7 +41,15 @@ class ConnectionCheck @Inject constructor(
 ) {
     suspend fun look(main: HttpUrl, settings: ConnectionSettings, creds: Credentials): Checked {
         val (own, security) = clients.forJoin(main, settings, CHECK_SECONDS)
-        val home = settings.home
+        // The look's own client goes once it is done.
+        return try {
+            look(own, security, main, settings.home, creds)
+        } finally {
+            own.letGo()
+        }
+    }
+
+    private suspend fun look(own: OkHttpClient, security: ConnectionSecurity, main: HttpUrl, home: HttpUrl?, creds: Credentials): Checked {
         val reached = try {
             reachWith(own, main, home, creds)
         } catch (e: SubsonicException) {

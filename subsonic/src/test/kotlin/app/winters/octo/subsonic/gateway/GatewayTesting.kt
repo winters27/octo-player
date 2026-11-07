@@ -2,8 +2,8 @@ package app.winters.octo.subsonic.gateway
 
 import app.winters.octo.subsonic.HeaderScope
 import app.winters.octo.subsonic.gatewayOrigins
-import app.winters.octo.subsonic.origin
 import app.winters.octo.subsonic.serverHeaders
+import app.winters.octo.subsonic.serverOrigins
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
@@ -31,7 +31,7 @@ fun securedClient(
     home: HttpUrl? = null,
     cookies: GatewayCookies = GatewayCookies(),
 ): OkHttpClient {
-    val scope = HeaderScope(setOfNotNull(origin(main), home?.let(::origin)), headers, gatewayOrigins(main, home), cookies)
+    val scope = HeaderScope(serverOrigins(main, home), headers, gatewayOrigins(main, home), cookies)
     return OkHttpClient.Builder().serverHeaders { scope }.build()
 }
 

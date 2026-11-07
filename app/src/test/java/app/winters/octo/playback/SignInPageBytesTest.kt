@@ -10,6 +10,7 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
@@ -27,7 +28,10 @@ import app.winters.octo.offline.dropHtmlCopies
 import app.winters.octo.offline.isHtmlFile
 import app.winters.octo.offline.refuseHtmlStart
 import app.winters.octo.offline.startsLikeHtml
+import app.winters.octo.subsonic.OctoPurpose
+import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.SignInPageAnswer
+import app.winters.octo.subsonic.markedFor
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.HttpUrl
@@ -117,6 +121,85 @@ class SignInPageBytesTest {
         assertTrue(saved.keys.isEmpty())
         val failure = PlaybackException("Source error", error, PlaybackException.ERROR_CODE_IO_UNSPECIFIED)
         assertEquals(GatewayWords.PLAY_FAILURE, playFailureWords(failure))
+    }
+
+    // Authentik's own answer to an app it stops: a 401 with its page.
+    private fun authentikRefusal() =
+        MockResponse.Builder().code(401).addHeader("Content-Type", "text/html; charset=utf-8").body("<html><body aria-label=\"authentik\"></body></html>").build()
+
+    private fun signInPageOf(error: Throwable): SignInPageAnswer =
+        generateSequence(error) { it.cause }.filterIsInstance<SignInPageAnswer>().first()
+
+    // Authentik's 401 page in place of a song is one load, never tried
+    // again, never kept, named, and said as a sign-in page. Red when
+    // RefuseHtml judges 2xx answers only (Media3 would get an HTTP 401, try
+    // again and say it was refused).
+    @Test
+    fun aSongRefusedByASignInPageIsOneLoadNeverRetriedNorSavedAndSaysSo() {
+        server.enqueue(authentikRefusal())
+        val saved = cache()
+        val source = CacheDataSource(saved, OkHttpDataSource.Factory(bytes).createDataSource())
+        val error = assertThrows(IOException::class.java) { open(source, main.resolve("/rest/stream?id=1")!!) }
+        source.close()
+        assertEquals(Gateway.Authentik, signInPageOf(error).gateway)
+        assertEquals(401, signInPageOf(error).status)
+        assertEquals(1, server.requestCount)
+        assertEquals(C.TIME_UNSET, Retries { true }.getRetryDelayMsFor(loadError(error)))
+        assertTrue(saved.keys.isEmpty())
+        val failure = PlaybackException("Source error", error, PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)
+        assertEquals(GatewayWords.PLAY_FAILURE, playFailureWords(failure))
+    }
+
+    // A 401 web page that names no gateway is still a sign-in page.
+    // Red when RefuseHtml refuses only a 401 the recognizer names.
+    @Test
+    fun aRefusalAsAWebPageIsASignInPageEvenUnnamed() {
+        server.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", "text/html").body("<html><body>Please sign in</body></html>").build())
+        val source = OkHttpDataSource.Factory(bytes).createDataSource()
+        val error = assertThrows(IOException::class.java) { open(source, main.resolve("/rest/stream?id=1")!!) }
+        source.close()
+        assertEquals(Gateway.SignInPage, signInPageOf(error).gateway)
+        assertEquals(1, server.requestCount)
+    }
+
+    // The server's own refusal is no sign-in page: it stays an HTTP
+    // error, tried again as before. Red when RefuseHtml refuses every 401.
+    @Test
+    fun theServersOwnRefusalStaysAnHttpError() {
+        server.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", "application/json").body("""{"subsonic-response":{"status":"failed"}}""").build())
+        val source = OkHttpDataSource.Factory(bytes).createDataSource()
+        val error = assertThrows(HttpDataSource.InvalidResponseCodeException::class.java) { open(source, main.resolve("/rest/stream?id=1")!!) }
+        source.close()
+        assertEquals(401, error.responseCode)
+        assertFalse(signInPageIn(error))
+        assertTrue(Retries { true }.getRetryDelayMsFor(loadError(error)) != C.TIME_UNSET)
+    }
+
+    // Authentik's 401 page in place of a cover or loop is refused once
+    // and named. Red when RefuseHtml judges 2xx answers only.
+    @Test
+    fun aCoverRefusedByASignInPageIsRefusedOnceAndNamed() {
+        server.enqueue(authentikRefusal())
+        val error = assertThrows(SignInPageAnswer::class.java) {
+            bytes.newCall(Request.Builder().url(main.resolve("/rest/getCoverArt?id=al-1")!!).build()).execute().close()
+        }
+        assertEquals(Gateway.Authentik, error.gateway)
+        assertEquals(1, server.requestCount)
+    }
+
+    // An offline copy's download that Authentik refuses with its 401
+    // page is one request, named, so OfflineDownloads marks it Failed by
+    // signInPageIn (nothing written, no retry loop). Red when RefuseHtml
+    // judges 2xx answers only.
+    @Test
+    fun aDownloadRefusedByASignInPageIsOneRequestAndNamed() {
+        server.enqueue(authentikRefusal())
+        val source = OkHttpDataSource.Factory(bytes.markedFor(OctoPurpose.Offline)).createDataSource()
+        val error = assertThrows(IOException::class.java) { open(source, main.resolve("/rest/stream?id=1&format=raw")!!) }
+        source.close()
+        assertTrue(signInPageIn(error))
+        assertEquals(Gateway.Authentik, signInPageOf(error).gateway)
+        assertEquals(1, server.requestCount)
     }
 
     // Red when finalLoadError always says final.

@@ -41,7 +41,7 @@ import app.winters.octo.design.Spinner
 import app.winters.octo.playback.SwitchOutcome
 import app.winters.octo.server.ServerCheck
 import app.winters.octo.server.accountLine
-import app.winters.octo.server.isWarning
+import app.winters.octo.server.warnsInRow
 import app.winters.octo.server.statusLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.ui.common.Choice
@@ -183,7 +183,7 @@ private fun ServerRow(
                     Text(
                         statusLine(server.serverType, server.serverVersion, server.signedOut, check, switching, inUse),
                         style = OctoType.caption,
-                        color = if (!inUse && check.isWarning()) OctoColors.SignalOrange else OctoColors.TextMuted,
+                        color = if (check.warnsInRow(inUse)) OctoColors.SignalOrange else OctoColors.TextMuted,
                     )
                 }
                 when {
