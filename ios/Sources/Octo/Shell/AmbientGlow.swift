@@ -181,7 +181,7 @@ func glowMesh(_ colors: ArtworkColors, palette: ResolvedPalette, alpha: Double) 
     let perMille = Int((alpha * 1000).rounded())
     return colors.mesh.prefix(4).map { color in
         let argb = 0xFF00_0000 | color
-        return glowForCover(palette.theme, palette.light ? argb : ambientColor(argb), perMille)
+        return glowForCover(palette.theme, palette.light ? argb : ambientColor(argb), perMille, palette.accents.accent)
     }
 }
 
@@ -191,7 +191,7 @@ func restingMesh(_ palette: ResolvedPalette, alpha: Double) -> [UInt32] {
     guard palette.glow.count >= 3 else { return [] }
     let perMille = Int((alpha * 1000).rounded())
     return [palette.glow[0], palette.glow[1], palette.glow[2], palette.glow[0]].map {
-        glowForCover(palette.theme, $0, perMille)
+        glowForCover(palette.theme, $0, perMille, palette.accents.accent)
     }
 }
 
@@ -412,7 +412,7 @@ struct BarFilm {
         guard let colors = store.colors(for: song.coverArt), let first = colors.mesh.first else { return nil }
         let alpha = barTintAlpha(prefs.strength)
         let argb = 0xFF00_0000 | first
-        let tint = palette.light ? glowForCover(palette.theme, argb, Int((alpha * 1000).rounded())) : ambientColor(argb)
+        let tint = palette.light ? glowForCover(palette.theme, argb, Int((alpha * 1000).rounded()), palette.accents.accent) : ambientColor(argb)
         return Color(argb: tint).opacity(alpha)
     }
 }

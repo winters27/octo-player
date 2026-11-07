@@ -343,7 +343,8 @@ public func overArtPalette(_ palette: ResolvedPalette) -> ResolvedPalette {
 /// A cover's color for the page glow in `theme`, so every word role still reads with the glow at
 /// `alphaPerMille` over the page: on a dark theme the color darkened in steps (no change for a
 /// cover that already reads); on a light one mixed 70% toward the page, then lightened in steps.
-public func glowForCover(_ theme: ThemeChoice, _ art: UInt32, _ alphaPerMille: Int) -> UInt32 {
+/// `accent` is the accent drawn now, when it is not the theme's own; it must read too.
+public func glowForCover(_ theme: ThemeChoice, _ art: UInt32, _ alphaPerMille: Int, _ accent: UInt32? = nil) -> UInt32 {
     let p = resolvePalette(theme, .octo, nil, false)
     let start = theme.light ? mixArgb(art, p.page, 700) : art
     let lch = toLch(start)
@@ -358,7 +359,7 @@ public func glowForCover(_ theme: ThemeChoice, _ art: UInt32, _ alphaPerMille: I
         let under = overArgb(alphaArgb(glow, alphaPerMille), p.page)
         let reads = contrastRatio(p.text, under) >= 7.0 && contrastRatio(p.secondary, under) >= 7.0 &&
             contrastOn(p.muted, under) >= 4.5 &&
-            [p.accents.accent, p.complement, p.third].allSatisfy { contrastRatio($0, under) >= 4.5 }
+            ([p.accents.accent, p.complement, p.third] + (accent.map { [$0] } ?? [])).allSatisfy { contrastRatio($0, under) >= 4.5 }
         if reads { return glow }
     }
     return p.page

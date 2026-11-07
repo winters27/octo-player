@@ -263,9 +263,11 @@ private struct OverArt: ViewModifier {
     @Environment(\.octoPalette) private var palette
 
     func body(content: Content) -> some View {
-        content
-            .environment(\.octoPalette, overArtPalette(palette))
+        let dark = overArtPalette(palette)
+        return content
+            .environment(\.octoPalette, dark)
             .environment(\.colorScheme, .dark)
+            .tint(dark.color(.accent))
     }
 }
 
