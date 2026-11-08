@@ -74,6 +74,16 @@ fun ServerCheck?.isWarning(): Boolean = when (this?.reach) {
     else -> false
 }
 
+// The short words for a warning on its own, as the account card shows it:
+// the sign-in page by name when it is the trouble. Null when all is well.
+fun ServerCheck?.troubleWords(): String? = when (val reach = this?.reach) {
+    Reach.Unreachable -> "Can't reach"
+    Reach.WrongPassword -> "Didn't take the saved password"
+    Reach.NeedsHttps -> GatewayWords.ROW_NEEDS_HTTPS
+    is Reach.SignInPage -> GatewayWords.row(reach.gateway, reach.loginSent)
+    else -> null
+}
+
 // Whether a row's status line shows as a warning. The one in use warns
 // only that its sign-in page needs https or turns it away; its other
 // troubles are said below the list.

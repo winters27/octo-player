@@ -93,7 +93,7 @@ import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.SettingsPageInfo
 import app.winters.octo.desktop.nav.settingsPages
-import app.winters.octo.server.isWarning
+import app.winters.octo.server.troubleWords
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.system.LocalSystem
@@ -350,12 +350,11 @@ private fun AccountCard(app: AppState, onOpen: () -> Unit) {
     LaunchedEffect(inUse, home) { home?.refresh() }
     LaunchedEffect(inUse) { app.serverFacts.refresh() }
     val check = app.serverFacts.checks[inUse]?.takeIf { switching == null }
-    val cantReach = check.isWarning()
+    val trouble = check.troubleWords()
     val status = when {
         switching != null -> "Switching"
         check == null -> null
-        cantReach -> "Can't reach"
-        else -> "Connected"
+        else -> trouble ?: "Connected"
     }
     val covers = accountCovers(home?.data, switching != null)
     Row(
@@ -381,12 +380,14 @@ private fun AccountCard(app: AppState, onOpen: () -> Unit) {
                     when {
                         switching != null -> Spinner(size = StatusSlot, color = OctoColors.TextSecondary)
                         check == null -> Unit
-                        else -> Box(Modifier.size(FrameSize.NavMark).background(if (cantReach) OctoColors.SignalOrange else OctoColors.SignalGreen, CircleShape))
+                        else -> Box(Modifier.size(FrameSize.NavMark).background(if (trouble != null) OctoColors.SignalOrange else OctoColors.SignalGreen, CircleShape))
                     }
                 }
                 Txt(server.name, DesktopType.meta, OctoColors.TextSecondary, Modifier.weight(1f, fill = false), maxLines = 2)
-                if (cantReach) Txt("Can't reach", DesktopType.meta, OctoColors.SignalOrange)
             }
+            // On its own line, as a sign-in page's words are too long to sit
+            // beside the name on this narrow card.
+            if (trouble != null) Txt(trouble, DesktopType.meta, OctoColors.SignalOrange, Modifier.padding(top = Space.Xxs), maxLines = 2)
         }
     }
 }

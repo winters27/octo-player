@@ -58,6 +58,19 @@ class GatewayRowsTest {
         assertEquals("Signed out. Sign in again to use it.", statusLine("octo", "0.9.3", true, needs))
     }
 
+    // The account card names the sign-in page that turned the server away,
+    // and a wrong password as such, rather than calling either out of reach.
+    @Test
+    fun theAccountCardsTroubleNamesWhatAnswered() {
+        assertEquals("Authentik didn't accept the sign-in", ServerCheck(Reach.SignInPage(Gateway.Authentik, loginSent = true)).troubleWords())
+        assertEquals("Authentik is in front of this server", ServerCheck(Reach.SignInPage(Gateway.Authentik, loginSent = false)).troubleWords())
+        assertEquals("Needs https for its sign-in page", ServerCheck(Reach.NeedsHttps).troubleWords())
+        assertEquals("Didn't take the saved password", ServerCheck(Reach.WrongPassword).troubleWords())
+        assertEquals("Can't reach", ServerCheck(Reach.Unreachable).troubleWords())
+        assertEquals(null, ServerCheck(Reach.Answers, 40).troubleWords())
+        assertEquals(null, null.troubleWords())
+    }
+
     @Test
     fun aPasswordChangeBehindASignInPageSaysWhatAnswered() = runTest {
         server.enqueue(MockResponse.Builder().code(401).addHeader("Content-Type", PAGE_TYPE).body(GATEWAY_PAGE).build())

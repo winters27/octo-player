@@ -170,4 +170,28 @@ class SettingsAccountCardTest {
         shelves.countDown()
         until { tiles() == listOf("w-p1", "none", "none", "none") }
     }
+
+    // What the card says, as a screen reader hears it.
+    private fun cardWords(): String? {
+        var found: String? = null
+        fun walk(node: SemanticsNode) {
+            node.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()?.takeIf { it.startsWith("winters, ") }?.let { found = it }
+            node.children.forEach(::walk)
+        }
+        SwingUtilities.invokeAndWait { scene.semanticsOwners.forEach { walk(it.unmergedRootSemanticsNode) } }
+        return found
+    }
+
+    // A server that answers but no longer takes the saved password is named
+    // as such on the card, not called out of reach.
+    @Test(timeout = 60_000)
+    fun aRefusedPasswordIsNamedNotCalledOutOfReach() {
+        library(home, played = listOf("h-p1"), added = listOf("h-a1"))
+        library(work, played = listOf("w-p1"), added = emptyList())
+        start()
+        home.answerBy("ping") { home.failed(40, "Wrong username or password") }
+        onUi { app.openSettings() }
+        until { cardWords()?.endsWith("Didn't take the saved password") == true }
+        assertFalse(cardWords()!!.contains("Can't reach"))
+    }
 }
