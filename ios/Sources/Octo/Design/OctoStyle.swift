@@ -13,6 +13,7 @@ extension EnvironmentValues {
 struct OctoTone: ShapeStyle, Sendable, Hashable {
     enum Role: Sendable, Hashable {
         case background, backgroundSecondary, backgroundTertiary, surfaceRaised, sheetFill, edge, hairline
+        case panelFill, panelRim
         case textPrimary, textSecondary, textMuted, selectedWords
         case accent, accentHover, accentTonal, accentSelected, accentFill, onAccentFill, onAccent, focusRing, menuPress
         case complement, third, offTrack, highlight
@@ -41,6 +42,10 @@ extension ResolvedPalette {
         case .sheetFill: sheet
         case .edge: edge
         case .hairline: alphaArgb(ink, 80)
+        // A card on a light page is solid, or the shadows under it show through and gray it;
+        // its top edge is the theme's edge color, since dark ink there reads as a crease.
+        case .panelFill: light ? card : backgroundSecondary
+        case .panelRim: light ? alphaArgb(edge, 320) : alphaArgb(text, 80)
         case .textPrimary: text
         case .textSecondary: secondary
         case .textMuted: muted

@@ -86,13 +86,13 @@ struct SelectedRowBackground: View {
 }
 
 extension View {
-    /// A card on the page, no blur: a dark contour, a small shadow, the faint wash, and light
-    /// along its top edge.
+    /// A card on the page, no blur: a dark contour, a small shadow, the faint wash (a solid card
+    /// on a light theme), and light along its top edge.
     func glassPanel(radius: CGFloat = OctoRadius.row) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return background {
-            shape.fill(OctoColor.backgroundSecondary)
-                .overlay(alignment: .top) { Rectangle().fill(OctoColor.textPrimary.opacity(0.08)).frame(height: 1).clipShape(shape) }
+            shape.fill(OctoTone(.panelFill))
+                .overlay(alignment: .top) { Rectangle().fill(OctoTone(.panelRim)).frame(height: 1).clipShape(shape) }
                 .overlay { shape.stroke(OctoShade(0.4), lineWidth: 0.5) }
                 .elevation1(shape)
         }
