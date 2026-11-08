@@ -50,6 +50,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.jetbrains.skia.EncodedImageFormat
@@ -437,8 +438,15 @@ class PolishShotsTest {
             }
         }
 
+        // How long a sign-in to the pretend server may take.
+        private val SIGN_IN_MS = 10_000L
+
         fun signIn(settleMs: Long = 3_000) {
-            val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
+            // A sign-in that never answers fails here, rather than holding the
+            // whole run.
+            val outcome = runBlocking { withTimeoutOrNull(SIGN_IN_MS) { accounts.signIn(server.address, "winters", "pw") } }
+                ?: error("Signing in to the pretend server at ${server.address} gave no answer within $SIGN_IN_MS ms")
+            val done = outcome as? SignInOutcome.Done ?: error("Signing in to the pretend server failed: $outcome")
             SwingUtilities.invokeAndWait {
                 app.signedIn(done.connection)
                 liveList = app.liveLists.save(LiveList.new("Songs from everywhere, in every script, for a long drive", LibraryQuery(listOf(FilterPresets.genre("World"))), System.currentTimeMillis()))

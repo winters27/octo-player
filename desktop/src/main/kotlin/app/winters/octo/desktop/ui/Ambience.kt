@@ -160,7 +160,7 @@ internal object ThemeArt {
         val key = "theme|${theme.name}|" + trio.joinToString("|") { "%08X".format(it) } +
             "|${tuning.contrast}|${tuning.saturation}|${tuning.brightnessCap}"
         made?.takeIf { it.key == key }?.let { return it }
-        val image = runCatching { picture(trio) }.getOrNull()
+        val image = runCatching { picture(stops(theme, trio)) }.getOrNull()
         return try {
             WashCovers.prepared(key, image, tuning).also { next ->
                 // Whoever draws the one before draws from a hold of their own.
@@ -202,6 +202,19 @@ internal object ThemeArt {
         }
         val span = (high - low).coerceAtLeast(1e-9)
         Levels(FloatArray(count) { ((luminance[it] - low) / span).coerceIn(0.0, 1.0).toFloat() }, alphas).also { icon = it }
+    }
+
+    // How far a dark theme's darkest and brightest stops sit from the middle
+    // color, as a share of the way to its darkest and brightest colors, so
+    // its glow has the depth Octo's own has. A light theme uses its colors
+    // as they are.
+    private const val DARK_DEPTH = 0.5f
+
+    // The three stops the icon is drawn in for `theme`.
+    private fun stops(theme: ThemeChoice, trio: List<Int>): List<Int> {
+        if (theme.light) return trio
+        val middle = Color(trio[1])
+        return listOf(lerp(middle, Color(trio[0]), DARK_DEPTH).toArgb(), trio[1], lerp(middle, Color(trio[2]), DARK_DEPTH).toArgb())
     }
 
     // The icon in `trio` (darkest, middle, brightest), each pixel keeping
