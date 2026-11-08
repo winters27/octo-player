@@ -122,6 +122,21 @@ interface SourceDao {
         tracks.chunked(500).forEach { insertTracks(it) }
     }
 
+    // The same, for songs made as they are written: one album's rows at a time
+    // are held, not all of them.
+    @Transaction
+    suspend fun replaceSourceStreaming(
+        sourceId: String,
+        tracks: Sequence<SourceTrackEntity>,
+        albums: List<SourceAlbumEntity>,
+        artists: List<SourceArtistEntity>,
+    ) {
+        deleteSource(sourceId)
+        artists.chunked(500).forEach { insertArtists(it) }
+        albums.chunked(500).forEach { insertAlbums(it) }
+        tracks.chunked(500).forEach { insertTracks(it) }
+    }
+
     @Transaction
     suspend fun deleteSource(sourceId: String) {
         deleteTracks(sourceId)

@@ -59,10 +59,28 @@ fun rowsToTakeIn(
     rows.artists.filter { it.id !in haveArtists },
 )
 
+// A catalog whose song rows are made one album at a time as they are read, for
+// a caller that writes them out as it goes. A library of 100,000 songs is then
+// never all in memory as rows. The rows can be read once.
+class StreamedCatalog(
+    val trackCount: Int,
+    val tracks: Sequence<SourceTrackEntity>,
+    val albums: List<SourceAlbumEntity>,
+    val artists: List<SourceArtistEntity>,
+)
+
 // Turns what a server lists into its source's rows, shaped like the
 // phone's so the two merge: a song's artist id is its album artist's, its
 // keys come from the same functions, and times added are in seconds.
-fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
+//
+// With `consume`, the library's songs are let go of as their rows are made, so
+// the songs and the rows are never all in memory together. The library then
+// has no songs left.
+fun buildServerCatalog(sourceId: String, library: Library, consume: Boolean = false): ServerCatalog =
+    streamServerCatalog(sourceId, library, consume).let { ServerCatalog(it.tracks.toList(), it.albums, it.artists) }
+
+// The same rows as buildServerCatalog, with the songs left to be read.
+fun streamServerCatalog(sourceId: String, library: Library, consume: Boolean = false): StreamedCatalog {
     fun id(native: String) = "$sourceId:$native"
     fun art(coverId: String?, fallbackId: String? = null) =
         coverId?.takeIf(String::isNotEmpty)?.let { ArtworkRef.Server(sourceId, it, fallbackId = fallbackId).encode() }
@@ -70,13 +88,15 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     // A library that changes while it is read can repeat a song across pages.
     // A song the server marks as outside the library (Octo lists an album's
     // missing tracks with it) is not a library song, so it is not kept.
-    val songs = library.songs.filterNot { it.isExternal }.distinctBy { it.id }
+    // Songs are sorted into their albums in this one pass, in the order the
+    // albums first appear: a library of 100,000 songs is held once, not once
+    // more for every list made from it.
+    val byAlbum = groupByAlbum(if (consume) library.takeSongs() else library.songs)
 
     // A song whose album was added after the album list was read still
     // gets an album, made from its songs.
     val listed = library.albums.associateBy { it.id }
-    val unlisted = songs.filter { albumKey(it) !in listed }.groupBy(::albumKey)
-        .map { (key, group) -> albumFromSongs(key, group) }
+    val unlisted = byAlbum.filterKeys { it !in listed }.map { (key, group) -> albumFromSongs(key, group) }
 
     val albumsByKey = (listed.values + unlisted).associateBy { it.id }
     // Each artist's MusicBrainz id, where the server knows it.
@@ -85,7 +105,7 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
     // Each album's first song's own cover, drawn in place of the album's when
     // the server answers that with its stand-in picture. One per album, so
     // its songs still share one picture and one stored cover.
-    val firstSongCovers = songs.groupBy(::albumKey).mapValues { (_, group) -> inAlbumOrder(group).first().coverArt }
+    val firstSongCovers = byAlbum.mapValues { (_, group) -> group.minWith(albumOrder).coverArt }
 
     val albumRows = albumsByKey.values.associate { album ->
         val title = album.name.ifBlank { UNKNOWN_ALBUM }
@@ -109,81 +129,92 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
         )
     }
 
-    val tracks = songs.groupBy(::albumKey).flatMap { (key, group) ->
-        val album = albumRows.getValue(key)
-        val listedAlbum = albumsByKey[key]
-        val albumYear = listedAlbum?.let(::albumYears)
-        inAlbumOrder(group).mapIndexed { index, song ->
-            val title = song.title.ifBlank { "Untitled" }
-            val durationMs = song.duration * 1000L
-            val year = song.year.positive() ?: albumYear?.year
-            val genres = song.genres.ifEmpty { parseGenres(listOfNotNull(song.genre)) }
-            SourceTrackEntity(
-                id = id(song.id),
-                sourceId = sourceId,
-                nativeId = song.id,
-                title = title,
-                searchKey = searchKey(title),
-                sortKey = sortKey(title),
-                artist = (song.displayArtist ?: song.artist)?.takeIf(String::isNotBlank) ?: album.artist,
-                artistId = album.artistId,
-                album = album.title,
-                albumId = album.id,
-                trackNo = song.track.positive(),
-                discNo = song.discNumber.positive(),
-                year = year,
-                durationMs = durationMs,
-                // Navidrome's "created" for a song is when its scan first saw
-                // the file (the file's modified time only when the server is
-                // set to sort recently added by it). Subsonic and OpenSubsonic
-                // send nothing nearer to when the song was really got, so the
-                // merge takes the earliest time any copy has, usually the
-                // phone file's own.
-                addedAt = seconds(song.created) ?: album.addedAt,
-                mimeType = mimeFor(song.suffix) ?: song.contentType,
-                sizeBytes = song.size,
-                // The album's cover first, so an album's songs share one picture.
-                artwork = album.artwork ?: art(song.coverArt),
-                uri = null,
-                albumOrder = index,
-                relinkKey = relinkKey(album.artist, album.title, song.discNumber.positive(), song.track.positive(), title, durationMs),
-                genre = genres.firstOrNull() ?: song.genre?.trim().orEmpty(),
-                bitrate = song.bitRate.positive()?.times(1000),
-                sampleRate = song.samplingRate.positive(),
-                bitDepth = song.bitDepth.positive(),
-                playCount = song.playCount?.toInt(),
-                lastPlayedAt = epochMs(song.played),
-                starredAt = epochMs(song.starred),
-                trackGain = song.replayGain?.trackGain.finite(),
-                albumGain = song.replayGain?.albumGain.finite(),
-                trackPeak = song.replayGain?.trackPeak.finite()?.takeIf { it > 0f },
-                albumPeak = song.replayGain?.albumPeak.finite()?.takeIf { it > 0f },
-                baseGain = song.replayGain?.baseGain.finite(),
-                fallbackGain = song.replayGain?.fallbackGain.finite(),
-                rating = song.userRating?.coerceIn(0, 5),
-                // The album's first-edition year, which cannot be after this one's.
-                originalYear = albumYear?.original?.takeIf { year == null || it <= year },
-                genres = joinLines(genres),
-                artists = joinLines(song.artists.map { it.name.trim() }.filter(String::isNotEmpty)),
-                composer = song.displayComposer.orBlankNull(),
-                bpm = song.bpm.positive(),
-                comment = song.comment.orBlankNull(),
-                // The song's own mark only: an album is marked explicit when
-                // any one of its songs is, which says nothing of the others.
-                explicit = explicitOf(song.explicitStatus.orEmpty()),
-                discTitle = listedAlbum?.discTitles?.firstOrNull { it.disc == (song.discNumber.positive() ?: 1) }?.title.orBlankNull(),
-                mbRecordingId = musicId(song.musicBrainzId),
-                mbAlbumId = musicId(listedAlbum?.musicBrainzId),
-                mbArtistIds = joinLines(song.artists.mapNotNull { artistIds[it.id] }.distinct()),
-                personal = song.octoPersonal,
-            )
+    // How many songs each album artist has, before any are let go of.
+    val songsBy = HashMap<String, Int>()
+    byAlbum.forEach { (key, group) -> albumRows.getValue(key).artistId.let { songsBy[it] = (songsBy[it] ?: 0) + group.size } }
+    val trackCount = byAlbum.values.sumOf { it.size }
+
+    val tracks = sequence {
+        val albumsInOrder = byAlbum.entries.iterator()
+        while (albumsInOrder.hasNext()) {
+            val (key, group) = albumsInOrder.next()
+            val album = albumRows.getValue(key)
+            val listedAlbum = albumsByKey[key]
+            val albumYear = listedAlbum?.let(::albumYears)
+            // The same for every song of the album, so read once.
+            val albumMusicId = musicId(listedAlbum?.musicBrainzId)
+            inAlbumOrder(group).forEachIndexed { index, song ->
+                val title = song.title.ifBlank { "Untitled" }
+                val durationMs = song.duration * 1000L
+                val year = song.year.positive() ?: albumYear?.year
+                val genres = song.genres.ifEmpty { parseGenres(listOfNotNull(song.genre)) }
+                yield(SourceTrackEntity(
+                    id = id(song.id),
+                    sourceId = sourceId,
+                    nativeId = song.id,
+                    title = title,
+                    searchKey = searchKey(title),
+                    sortKey = sortKey(title),
+                    artist = (song.displayArtist ?: song.artist)?.takeIf(String::isNotBlank) ?: album.artist,
+                    artistId = album.artistId,
+                    album = album.title,
+                    albumId = album.id,
+                    trackNo = song.track.positive(),
+                    discNo = song.discNumber.positive(),
+                    year = year,
+                    durationMs = durationMs,
+                    // Navidrome's "created" for a song is when its scan first saw
+                    // the file (the file's modified time only when the server is
+                    // set to sort recently added by it). Subsonic and OpenSubsonic
+                    // send nothing nearer to when the song was really got, so the
+                    // merge takes the earliest time any copy has, usually the
+                    // phone file's own.
+                    addedAt = seconds(song.created) ?: album.addedAt,
+                    mimeType = mimeFor(song.suffix) ?: song.contentType,
+                    sizeBytes = song.size,
+                    // The album's cover first, so an album's songs share one picture.
+                    artwork = album.artwork ?: art(song.coverArt),
+                    uri = null,
+                    albumOrder = index,
+                    relinkKey = relinkKey(album.artist, album.title, song.discNumber.positive(), song.track.positive(), title, durationMs),
+                    genre = genres.firstOrNull() ?: song.genre?.trim().orEmpty(),
+                    bitrate = song.bitRate.positive()?.times(1000),
+                    sampleRate = song.samplingRate.positive(),
+                    bitDepth = song.bitDepth.positive(),
+                    playCount = song.playCount?.toInt(),
+                    lastPlayedAt = epochMs(song.played),
+                    starredAt = epochMs(song.starred),
+                    trackGain = song.replayGain?.trackGain.finite(),
+                    albumGain = song.replayGain?.albumGain.finite(),
+                    trackPeak = song.replayGain?.trackPeak.finite()?.takeIf { it > 0f },
+                    albumPeak = song.replayGain?.albumPeak.finite()?.takeIf { it > 0f },
+                    baseGain = song.replayGain?.baseGain.finite(),
+                    fallbackGain = song.replayGain?.fallbackGain.finite(),
+                    rating = song.userRating?.coerceIn(0, 5),
+                    // The album's first-edition year, which cannot be after this one's.
+                    originalYear = albumYear?.original?.takeIf { year == null || it <= year },
+                    genres = joinLines(genres),
+                    artists = joinLines(song.artists.map { it.name.trim() }.filter(String::isNotEmpty)),
+                    composer = song.displayComposer.orBlankNull(),
+                    bpm = song.bpm.positive(),
+                    comment = song.comment.orBlankNull(),
+                    // The song's own mark only: an album is marked explicit when
+                    // any one of its songs is, which says nothing of the others.
+                    explicit = explicitOf(song.explicitStatus.orEmpty()),
+                    discTitle = listedAlbum?.discTitles?.firstOrNull { it.disc == (song.discNumber.positive() ?: 1) }?.title.orBlankNull(),
+                    mbRecordingId = musicId(song.musicBrainzId),
+                    mbAlbumId = albumMusicId,
+                    mbArtistIds = joinLines(song.artists.mapNotNull { artistIds[it.id] }.distinct()),
+                    personal = song.octoPersonal,
+                ))
+            }
+            if (consume) albumsInOrder.remove()
         }
     }
 
     // Artists are the album artists, as the phone's are, named as the
     // server's artist list names them.
     val listedArtists = library.artists.associateBy { id(it.id) }
-    val songsBy = tracks.groupingBy { it.artistId }.eachCount()
     val artists = albumRows.values.groupBy { it.artistId }.map { (artistId, owned) ->
         val listedArtist = listedArtists[artistId]
         val name = listedArtist?.name?.takeIf(String::isNotBlank) ?: owned.first().artist
@@ -199,7 +230,20 @@ fun buildServerCatalog(sourceId: String, library: Library): ServerCatalog {
         )
     }
 
-    return ServerCatalog(tracks, albumRows.values.toList(), artists)
+    return StreamedCatalog(trackCount, tracks, albumRows.values.toList(), artists)
+}
+
+// Songs sorted into their albums, in the order the albums first appear. A
+// song listed twice, or one the server marks as outside the library, is left
+// out. The list handed in is not kept: it is gone once this returns.
+private fun groupByAlbum(songs: List<Song>): MutableMap<String, MutableList<Song>> {
+    val seen = HashSet<String>()
+    val byAlbum = LinkedHashMap<String, MutableList<Song>>()
+    for (song in songs) {
+        if (song.isExternal || !seen.add(song.id)) continue
+        byAlbum.getOrPut(albumKey(song)) { ArrayList(ALBUM_SONGS) }.add(song)
+    }
+    return byAlbum
 }
 
 private fun albumKey(song: Song): String = song.albumId?.takeIf(String::isNotEmpty) ?: "album:${searchKey(song.album.orEmpty())}"
@@ -223,12 +267,14 @@ private fun albumFromSongs(key: String, songs: List<Song>): Album {
 }
 
 // Disc, then track number, then title.
-private fun inAlbumOrder(songs: List<Song>): List<Song> =
-    songs.sortedWith(
-        compareBy<Song> { it.discNumber.positive() ?: 1 }
-            .thenBy { it.track.positive() ?: Int.MAX_VALUE }
-            .thenBy { sortKey(it.title) },
-    )
+private val albumOrder: Comparator<Song> = compareBy<Song> { it.discNumber.positive() ?: 1 }
+    .thenBy { it.track.positive() ?: Int.MAX_VALUE }
+    .thenBy { sortKey(it.title) }
+
+private fun inAlbumOrder(songs: List<Song>): List<Song> = songs.sortedWith(albumOrder)
+
+// Most albums have a dozen songs or fewer.
+private const val ALBUM_SONGS = 12
 
 // This edition's year and the first edition's, as an album gives them. The
 // older year field is this edition's; the release dates are OpenSubsonic's.
@@ -243,7 +289,7 @@ private fun albumYears(album: Album): AlbumYears {
 private fun String?.orBlankNull(): String? = this?.trim()?.takeIf(String::isNotEmpty)
 
 // A MusicBrainz id when the text is one, in lower case.
-private fun musicId(text: String?): String? = musicIds(listOfNotNull(text)).firstOrNull()
+private fun musicId(text: String?): String? = if (text.isNullOrBlank()) null else musicIds(listOf(text)).firstOrNull()
 
 // Servers send 0 for a number they do not know.
 private fun Int?.positive(): Int? = this?.takeIf { it > 0 }
