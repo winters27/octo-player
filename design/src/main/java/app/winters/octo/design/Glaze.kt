@@ -141,8 +141,12 @@ private fun GlazeBlur(): HazeBlurStyle {
 private fun saturation(amount: Float) =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(amount) })
 
+// The light lit into the glass's rim: the glass's accent on a dark theme; on
+// a light one the theme's edge color, since an accent this faint on a pale
+// page reads as a tint of its own (terracotta turns pink).
 @Composable
-private fun accent(alpha: Float) = OctoColors.GlassAccent.copy(alpha = alpha)
+private fun accent(alpha: Float): Color =
+    if (LocalOctoSurfaces.current.light) OctoColors.Edge.copy(alpha = alpha) else OctoColors.GlassAccent.copy(alpha = alpha)
 
 // What lies behind a glass when it is a picture the glass can draw itself
 // (the player's moving background, already far softer than the glass's

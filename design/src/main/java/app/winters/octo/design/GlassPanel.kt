@@ -13,14 +13,15 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 
 // The standard panel for a card on the page. No blur: the page behind it
-// is a flat colour, and blurring a flat colour changes nothing.
+// is a flat colour, and blurring a flat colour changes nothing. On a light
+// theme the card is solid, or the shadows under it show through and gray it.
 @Composable
 fun Modifier.glassPanel(shape: Shape): Modifier = this
     // A dark half-pixel just outside the edge separates it from the page.
     .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = shadowColor(0.40f)))
     .elevation1(shape)
     .clip(shape)
-    .background(OctoColors.BackgroundSecondary)
+    .background(if (LocalOctoSurfaces.current.light) OctoColors.BackgroundTertiary else OctoColors.BackgroundSecondary)
     // Light along the top edge only.
     .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(0.08f), offset = DpOffset(0.dp, 1.dp)))
 
