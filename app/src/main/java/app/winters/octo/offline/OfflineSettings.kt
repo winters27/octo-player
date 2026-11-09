@@ -39,7 +39,7 @@ data class OfflinePrefs(
     // Downloads come as the server's file unless a smaller copy is chosen.
     val downloadQuality: StreamQuality = StreamQuality.Original,
     // The file type a smaller download is made as.
-    val downloadFormat: TranscodeFormat = TranscodeFormat.Mp3,
+    val downloadFormat: TranscodeFormat = TranscodeFormat.Opus,
     val wifiOnly: Boolean = true,
     // Stream on Wi-Fi even when a downloaded copy is on the phone.
     val streamOnWifi: Boolean = false,

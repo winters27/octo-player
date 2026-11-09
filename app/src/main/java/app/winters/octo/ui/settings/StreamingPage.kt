@@ -121,7 +121,7 @@ private val TranscodeFormat.choice: Choice
         label,
         when (this) {
             TranscodeFormat.Mp3 -> "Plays everywhere"
-            TranscodeFormat.Opus -> "Sounds best at low bitrates; not every player reads it"
+            TranscodeFormat.Opus -> "Best quality for its size; a few older players do not read it"
             TranscodeFormat.Aac -> "Better than MP3 at the same size; plays on nearly everything"
         },
     )
