@@ -450,7 +450,8 @@ class OfflineDownloads @Inject constructor(
             return
         }
         dao.setState(row.sourceId, row.serverId, DownloadStatus.Downloading, 0f)
-        val request = streamRequest(copy.mimeType, bitrateOf(copy), settings.prefs.first().downloadQuality)
+        val prefs = settings.prefs.first()
+        val request = streamRequest(copy.mimeType, bitrateOf(copy), prefs.downloadQuality, prefs.downloadFormat)
         val ref = streams.refFor(copy).pin(request)
         val dir = downloadDir()
         val format = request.mimeType(copy.mimeType)

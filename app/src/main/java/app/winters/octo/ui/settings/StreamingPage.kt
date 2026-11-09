@@ -17,6 +17,7 @@ import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.START_AFTER_HELP
 import app.winters.octo.playback.StartAfter
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.playback.TranscodeFormat
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.ui.common.Choice
@@ -83,6 +84,7 @@ class OfflineViewModel @Inject constructor(
     fun setPrefetchWifi(count: Int) = change { setPrefetchWifi(count) }
     fun setPrefetchMobile(count: Int) = change { setPrefetchMobile(count) }
     fun setDownloadQuality(quality: StreamQuality) = change { setDownloadQuality(quality) }
+    fun setDownloadFormat(format: TranscodeFormat) = change { setDownloadFormat(format) }
     fun setWifiOnly(on: Boolean) = change { setWifiOnly(on) }
     fun setStreamOnWifi(on: Boolean) = change { setStreamOnWifi(on) }
     fun setKeepLiked(on: Boolean) = change { setKeepLiked(on) }
@@ -109,10 +111,20 @@ private fun ahead(count: Int): String = when (count) {
     else -> "$count songs"
 }
 
-private val StreamQuality.downloadLabel: String get() = kbps?.let { "$it kbps MP3" } ?: "Original"
+private fun StreamQuality.downloadLabel(format: TranscodeFormat): String = kbps?.let { "$it kbps ${format.label}" } ?: "Original"
 
-private val StreamQuality.downloadChoice: Choice
-    get() = kbps?.let { Choice(downloadLabel, "About ${Math.round(it * 0.03)} MB for a 4 minute song") } ?: Choice(ORIGINAL_LABEL)
+private fun StreamQuality.downloadChoice(format: TranscodeFormat): Choice =
+    kbps?.let { Choice(downloadLabel(format), "About ${Math.round(it * 0.03)} MB for a 4 minute song") } ?: Choice(ORIGINAL_LABEL)
+
+private val TranscodeFormat.choice: Choice
+    get() = Choice(
+        label,
+        when (this) {
+            TranscodeFormat.Mp3 -> "Plays everywhere"
+            TranscodeFormat.Opus -> "Sounds best at low bitrates; not every player reads it"
+            TranscodeFormat.Aac -> "Better than MP3 at the same size; plays on nearly everything"
+        },
+    )
 
 // How music from a server plays, the cache of songs played lately, fetching
 // the next songs ahead, and downloads. Each choice opens a sheet.
@@ -170,13 +182,25 @@ fun StreamingPage(
         }
 
         SettingsGroup(title = "Downloads", icon = OctoIcons.Download) {
-            ChoiceRow(SettingsIndex.DownloadQuality, value = kept.downloadQuality.downloadLabel, answers = qualities.map { it.downloadLabel }, onClick = {
+            ChoiceRow(SettingsIndex.DownloadQuality, value = kept.downloadQuality.downloadLabel(kept.downloadFormat), answers = qualities.map { it.downloadLabel(kept.downloadFormat) }, onClick = {
                 sheet.show(
-                    ChoiceRequest(SettingsIndex.DownloadQuality.title, qualities.map { it.downloadChoice }, qualities.indexOf(kept.downloadQuality)) {
+                    ChoiceRequest(SettingsIndex.DownloadQuality.title, qualities.map { it.downloadChoice(kept.downloadFormat) }, qualities.indexOf(kept.downloadQuality)) {
                         offline.setDownloadQuality(qualities[it])
                     },
                 )
             })
+            // The type a smaller download is made as. "Original" downloads
+            // keep the server's file whatever this says.
+            if (kept.downloadQuality != StreamQuality.Original) {
+                val formats = TranscodeFormat.entries
+                ChoiceRow(SettingsIndex.DownloadFormat, value = kept.downloadFormat.label, answers = formats.map { it.label }, onClick = {
+                    sheet.show(
+                        ChoiceRequest(SettingsIndex.DownloadFormat.title, formats.map { it.choice }, formats.indexOf(kept.downloadFormat)) {
+                            offline.setDownloadFormat(formats[it])
+                        },
+                    )
+                })
+            }
             SwitchRow(
                 SettingsIndex.WifiOnly,
                 checked = kept.wifiOnly,

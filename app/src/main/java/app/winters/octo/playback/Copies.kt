@@ -95,27 +95,44 @@ fun bitrateOf(copy: SourceTrackEntity): Int? {
     return (size * 8 / seconds).toInt()
 }
 
-// What to ask the server for: its file as it is, or an MP3 capped at
-// `maxKbps`. MP3 because every server that makes smaller streams offers it,
-// and a constant-bitrate MP3 has a length the player can seek in and blend.
-data class StreamRequest(val maxKbps: Int?) {
+// The file type a server makes when a song is sent smaller. Streaming asks
+// for MP3 only; downloads can choose another. `param` is the server's name
+// for it, and `mimeType` what it sends back.
+enum class TranscodeFormat(val param: String, val mimeType: String, val label: String) {
+    Mp3("mp3", "audio/mpeg", "MP3"),
+    Opus("opus", "audio/opus", "Opus"),
+    Aac("aac", "audio/aac", "AAC"),
+}
+
+// What to ask the server for: its file as it is, or a copy capped at
+// `maxKbps`. MP3 by default because every server that makes smaller streams
+// offers it, and a constant-bitrate MP3 has a length the player can seek in
+// and blend. A download may ask for `format` instead.
+data class StreamRequest(val maxKbps: Int?, val format: TranscodeFormat = TranscodeFormat.Mp3) {
     val params: Map<String, String>
         get() = if (maxKbps == null) {
             mapOf("format" to "raw")
         } else {
-            mapOf("format" to "mp3", "maxBitRate" to "$maxKbps", "estimateContentLength" to "true")
+            mapOf("format" to format.param, "maxBitRate" to "$maxKbps", "estimateContentLength" to "true")
         }
 
     // What the player will receive, for the quality badge.
-    fun mimeType(original: String?): String? = if (maxKbps == null) original else "audio/mpeg"
+    fun mimeType(original: String?): String? = if (maxKbps == null) original else format.mimeType
 }
 
-// A lossy file already within the size plays as it is: making it an MP3
-// would only lose quality.
-fun streamRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality): StreamRequest {
+// A lossy file already within the size plays as it is: making a copy of it
+// would only lose quality. A different format than the file's is still made
+// when asked for, since that is the point of choosing one.
+fun streamRequest(
+    mimeType: String?,
+    bitrate: Int?,
+    quality: StreamQuality,
+    format: TranscodeFormat = TranscodeFormat.Mp3,
+): StreamRequest {
     val cap = quality.kbps ?: return StreamRequest(null)
-    if (!isLossless(mimeType) && bitrate != null && bitrate / 1000 <= cap) return StreamRequest(null)
-    return StreamRequest(cap)
+    val sameKind = format == TranscodeFormat.Mp3 || mimeType?.lowercase()?.substringBefore(';')?.trim() == format.mimeType
+    if (sameKind && !isLossless(mimeType) && bitrate != null && bitrate / 1000 <= cap) return StreamRequest(null)
+    return StreamRequest(cap, format)
 }
 
 // The loudness a copy's source keeps for it, if any.

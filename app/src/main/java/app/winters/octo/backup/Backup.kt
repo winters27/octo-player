@@ -12,6 +12,7 @@ import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.playback.TranscodeFormat
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -99,6 +100,7 @@ data class OfflineBackup(
     val prefetchWifi: Int = offlineDefaults.prefetchWifi,
     val prefetchMobile: Int = offlineDefaults.prefetchMobile,
     val downloadQuality: StreamQuality = offlineDefaults.downloadQuality,
+    val downloadFormat: TranscodeFormat = offlineDefaults.downloadFormat,
     val wifiOnly: Boolean = offlineDefaults.wifiOnly,
     val streamOnWifi: Boolean = offlineDefaults.streamOnWifi,
     val keepLiked: Boolean = offlineDefaults.keepLiked,
@@ -110,6 +112,7 @@ data class OfflineBackup(
         prefetchWifi = prefetchWifi,
         prefetchMobile = prefetchMobile,
         downloadQuality = downloadQuality,
+        downloadFormat = downloadFormat,
         wifiOnly = wifiOnly,
         streamOnWifi = streamOnWifi,
         keepLiked = keepLiked,
@@ -124,6 +127,7 @@ fun OfflinePrefs.toBackup(playlistNames: Map<String, String>) = OfflineBackup(
     prefetchWifi = prefetchWifi,
     prefetchMobile = prefetchMobile,
     downloadQuality = downloadQuality,
+    downloadFormat = downloadFormat,
     wifiOnly = wifiOnly,
     streamOnWifi = streamOnWifi,
     keepLiked = keepLiked,
