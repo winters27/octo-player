@@ -38,6 +38,8 @@ fun streamUri(ref: StreamRef): String = buildString {
         ref.bitrate?.let { "bitrate" to "$it" },
         ref.size?.let { "size" to "$it" },
         ref.pinned?.let { "max" to (it.maxKbps?.toString() ?: RAW) },
+        // Only a format other than MP3 is written, so older addresses read the same.
+        ref.pinned?.takeIf { it.maxKbps != null && it.format != TranscodeFormat.Mp3 }?.let { "fmt" to it.format.param },
     )
     if (params.isNotEmpty()) append('?').append(params.joinToString("&") { (k, v) -> "$k=${encode(v)}" })
 }
@@ -56,7 +58,8 @@ fun parseStreamUri(uri: String): StreamRef? {
         val at = pair.indexOf('=')
         if (at < 0) decode(pair) to "" else decode(pair.substring(0, at)) to decode(pair.substring(at + 1))
     }
-    val pinned = query["max"]?.let { max -> if (max == RAW) StreamRequest(null) else max.toIntOrNull()?.let(::StreamRequest) }
+    val format = TranscodeFormat.entries.firstOrNull { it.param == query["fmt"] } ?: TranscodeFormat.Mp3
+    val pinned = query["max"]?.let { max -> if (max == RAW) StreamRequest(null) else max.toIntOrNull()?.let { StreamRequest(it, format) } }
     return StreamRef(
         sourceId = query["source"]?.ifEmpty { null },
         serverId = decode(id),
@@ -73,14 +76,24 @@ fun parseStreamUri(uri: String): StreamRef? {
 // one. Never the signed address, which has a new random part every time,
 // so the same song finds its saved copy.
 fun streamCacheKey(sourceId: String, ref: StreamRef, request: StreamRequest): String =
-    "$sourceId|${ref.serverId}|${ref.mimeType ?: "unknown"}|${request.maxKbps ?: RAW}" + (ref.size?.let { "|$it" } ?: "")
+    "$sourceId|${ref.serverId}|${ref.mimeType ?: "unknown"}|${requestToken(request)}" + (ref.size?.let { "|$it" } ?: "")
+
+// "raw", the cap in kbps for an MP3, or the format's name before it for
+// another ("opus128"), so each format is saved apart.
+private fun requestToken(request: StreamRequest): String = when {
+    request.maxKbps == null -> RAW
+    request.format == TranscodeFormat.Mp3 -> "${request.maxKbps}"
+    else -> "${request.format.param}${request.maxKbps}"
+}
+
+private val RequestToken = Regex("(?:${TranscodeFormat.entries.filter { it != TranscodeFormat.Mp3 }.joinToString("|") { it.param }})?[0-9]+")
 
 // A saved key less the file size, when it has one. The part before a size
 // is a request ("raw" or a number), which a file type never is.
 fun cacheKeyWithoutSize(key: String): String {
     val head = key.substringBeforeLast('|', "")
     val before = head.substringAfterLast('|')
-    return if (before == RAW || (before.isNotEmpty() && before.all(Char::isDigit))) head else key
+    return if (before == RAW || RequestToken.matches(before)) head else key
 }
 
 // What the phone has saved under a name, for picking the name a song reads

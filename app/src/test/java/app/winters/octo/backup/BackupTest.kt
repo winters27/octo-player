@@ -10,6 +10,7 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.playback.TranscodeFormat
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
@@ -354,6 +355,7 @@ class BackupTest {
             prefetchWifi = 5,
             prefetchMobile = 0,
             downloadQuality = StreamQuality.Kbps320,
+            downloadFormat = TranscodeFormat.Opus,
             wifiOnly = false,
             streamOnWifi = true,
             keepLiked = true,
@@ -392,6 +394,7 @@ class BackupTest {
             prefetchWifi = 7,
             prefetchMobile = 2,
             downloadQuality = StreamQuality.Kbps128,
+            downloadFormat = TranscodeFormat.Aac,
             wifiOnly = false,
             streamOnWifi = true,
             keepLiked = true,
