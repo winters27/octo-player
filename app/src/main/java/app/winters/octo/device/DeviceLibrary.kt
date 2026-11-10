@@ -171,8 +171,8 @@ class DeviceLibrary @Inject constructor(
                     "Octo",
                     "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
                         "${catalog.artists.size} artists, $lastReread files read, " +
-                        "${SystemClock.elapsedRealtime() - started} ms; library ${library.tracks.size} tracks, " +
-                        "${library.albums.size} albums, ${library.artists.size} artists",
+                        "${SystemClock.elapsedRealtime() - started} ms; library ${library.tracks} tracks, " +
+                        "${library.albums} albums, ${library.artists} artists",
                 )
             } finally {
                 _scanning.value = false

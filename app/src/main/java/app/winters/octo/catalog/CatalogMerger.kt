@@ -55,6 +55,71 @@ private const val SAME_LENGTH_MS = 3_000L
 // - Anything only one source has is passed through exactly as it was,
 //   apart from its year, which is its original year when it has one.
 fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
+    val plan = planMerge(sources.map { SourceRows(it.sourceId, it.onPhone, it.tracks.map(SourceTrackEntity::toMergeRow), it.albums, it.artists) })
+    // The first source's row for an id is the base the plan was made from.
+    val bases = HashMap<String, SourceTrackEntity>()
+    for (source in sources) for (track in source.tracks) bases.putIfAbsent(track.id, track)
+    return MergedCatalog(plan.songs.map { it.toTrack(bases.getValue(it.id)) }, plan.albums, plan.artists, plan.mergedIds)
+}
+
+// What matching needs from a source song, and nothing more: a library of
+// 100,000 songs held as whole rows ran a phone out of memory. The rest of
+// a song's row is read again, a few hundred at a time, when its library row
+// is written (`PlannedSong.toTrack`).
+data class MergeRow(
+    val id: String,
+    val albumId: String,
+    val artistId: String,
+    val title: String,
+    val artist: String,
+    val artists: String,
+    val albumOrder: Int,
+    val trackNo: Int?,
+    val discNo: Int?,
+    val year: Int?,
+    val originalYear: Int?,
+    val genre: String,
+    val rating: Int?,
+    val explicit: Boolean?,
+    val addedAt: Long,
+    val durationMs: Long,
+)
+
+fun SourceTrackEntity.toMergeRow() = MergeRow(
+    id, albumId, artistId, title, artist, artists, albumOrder, trackNo, discNo, year, originalYear, genre, rating, explicit, addedAt, durationMs,
+)
+
+// One source as matching sees it.
+class SourceRows(
+    val sourceId: String,
+    // Whether the source is the phone's own files.
+    val onPhone: Boolean,
+    val tracks: List<MergeRow>,
+    val albums: List<SourceAlbumEntity>,
+    val artists: List<SourceArtistEntity>,
+)
+
+// The merged library before its songs are built: which songs it has, in
+// what order, which library song every copy became, and the albums and
+// artists, which need nothing more from the songs than their counts.
+class MergePlan(
+    val songs: List<PlannedSong>,
+    val albums: List<AlbumEntity>,
+    val artists: List<ArtistEntity>,
+    val mergedIds: Map<String, String>,
+)
+
+// A library song that is decided but not built: its row needs the base
+// copy's row, which `toTrack` is given.
+class PlannedSong internal constructor(private val song: MergingSong, private val order: Int) {
+    val id: String get() = song.id
+
+    fun toTrack(base: SourceTrackEntity): TrackEntity = song.toTrack(base, order)
+}
+
+// Everything `mergeCatalogs` decides, with the same rules (see there), but
+// for songs held as `MergeRow`s and with each library song left unbuilt.
+fun planMerge(sources: List<SourceRows>): MergePlan {
     // Artists and albums match only across sources: two a source keeps
     // apart (say, two albums of the same name) stay apart.
     val artistBases = acrossSources(sources, { it.artists }, { it.id }, { matchKey(it.name) })
@@ -67,34 +132,33 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     // Every song so far by title and artist, for the second chance below.
     val everywhere = HashMap<String, MutableList<MergingSong>>()
     val mergedIds = HashMap<String, String>()
-    // Each copy's keys, read once, and once for copies tagged alike.
-    val keys = HashMap<String, SongKeys>()
-    val tagged = HashMap<Pair<String, String>, SongKeys>()
-    fun keysOf(track: SourceTrackEntity) = keys.getOrPut(track.id) {
-        tagged.getOrPut(track.artist to track.title) { SongIdentity.songKeys(track.artist, track.title) }
-    }
-    for (source in sources) {
+    for ((position, source) in sources.withIndex()) {
+        // Only a later source looks songs up by title and artist, so the last
+        // source's songs, the biggest set when a server is the only one, are
+        // not kept there.
+        val laterSourceFollows = position < sources.lastIndex
         // A song matches at most one copy from each source.
         val taken = HashSet<String>()
         for (track in source.tracks.sortedBy { it.albumOrder }) {
             val albumId = albumIdFor[track.albumId] ?: track.albumId
-            val trackKeys = keysOf(track)
+            val trackKeys = SongIdentity.songKeys(track.artist, track.title)
+            val matchKey = trackKeys.matchKey
             fun fits(song: MergingSong) = song.id !in taken && song.sources.none { it == source.sourceId } &&
-                keysOf(song.base).title == trackKeys.title &&
-                abs(song.base.durationMs - track.durationMs) <= SAME_LENGTH_MS
+                song.titleKey == trackKeys.title &&
+                abs(song.durationMs - track.durationMs) <= SAME_LENGTH_MS
             // First within the matched album. Failing that, the same song by
             // the same artist anywhere: sources often file an album under a
             // different album artist or edition name.
             val match = inAlbum[albumId]?.firstOrNull(::fits)
-                ?: everywhere[trackKeys.matchKey]?.firstOrNull(::fits)
+                ?: everywhere[matchKey]?.firstOrNull(::fits)
             if (match != null) {
                 match.add(track, source)
                 taken += match.id
                 mergedIds[track.id] = match.id
             } else {
-                val song = MergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId)
+                val song = MergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId, trackKeys.title)
                 inAlbum.getOrPut(albumId) { mutableListOf() } += song
-                everywhere.getOrPut(trackKeys.matchKey) { mutableListOf() } += song
+                if (laterSourceFollows) everywhere.getOrPut(matchKey) { mutableListOf() } += song
                 mergedIds[track.id] = song.id
             }
         }
@@ -103,28 +167,39 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     // Album order: an album filled from more than one source is put in
     // track number order when every song has one; otherwise its songs keep
     // the order they came in. Single-source albums keep their own order.
-    val tracks = ArrayList<TrackEntity>(mergedIds.size)
-    for ((_, songs) in inAlbum) {
-        val mixed = songs.flatMap { it.sources }.toSet().size > 1
+    val songs = ArrayList<PlannedSong>(mergedIds.size)
+    for ((_, group) in inAlbum) {
+        val mixed = group.flatMap { it.sources }.toSet().size > 1
         val ordered = when {
-            !mixed -> songs.map { it.toTrack(it.base.albumOrder) }
-            songs.all { it.trackNo != null } ->
-                songs.sortedWith(compareBy({ it.discNo ?: 1 }, { it.trackNo }))
-                    .mapIndexed { index, song -> song.toTrack(index) }
-            else -> songs.mapIndexed { index, song -> song.toTrack(index) }
+            !mixed -> group.map { PlannedSong(it, it.albumOrder) }
+            group.all { it.trackNo != null } ->
+                group.sortedWith(compareBy({ it.discNo ?: 1 }, { it.trackNo }))
+                    .mapIndexed { index, song -> PlannedSong(song, index) }
+            else -> group.mapIndexed { index, song -> PlannedSong(song, index) }
         }
-        tracks += ordered
+        songs += ordered
     }
-    val tracksByAlbum = tracks.groupBy { it.albumId }
+    // How many songs and how long each album and artist has now, counted
+    // once rather than once for each of them.
+    val songsInAlbum = HashMap<String, Int>()
+    val lengthOfAlbum = HashMap<String, Long>()
+    val songsOfArtist = HashMap<String, Int>()
+    for ((_, group) in inAlbum) {
+        for (song in group) {
+            songsInAlbum.merge(song.albumId, 1, Int::plus)
+            lengthOfAlbum.merge(song.albumId, song.durationMs, Long::plus)
+            songsOfArtist.merge(song.artistId, 1, Int::plus)
+        }
+    }
 
     // An album whose songs all turned out to be copies of songs already in
     // another album has nothing left, and is left out.
-    val albums = albumBases.bases.filter { it.id in tracksByAlbum }.map { base ->
+    val albums = albumBases.bases.filter { it.id in songsInAlbum }.map { base ->
         val extras = albumBases.extras[base.id].orEmpty()
-        val albumTracks = tracksByAlbum.getValue(base.id)
+        val songCount = songsInAlbum.getValue(base.id)
         // Counts are only worked out again for albums whose songs changed:
         // made from several sources, or with songs gone to another album.
-        val recount = extras.isNotEmpty() || albumTracks.size != base.songCount
+        val recount = extras.isNotEmpty() || songCount != base.songCount
         AlbumEntity(
             id = base.id,
             sourceId = base.sourceId,
@@ -135,13 +210,15 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
             artist = base.artist,
             artistId = artistIdFor[base.artistId] ?: base.artistId,
             year = base.year ?: extras.firstNotNullOfOrNull { it.year },
-            songCount = if (recount) albumTracks.size else base.songCount,
-            durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
+            songCount = if (recount) songCount else base.songCount,
+            durationMs = if (recount) lengthOfAlbum.getValue(base.id) else base.durationMs,
             addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
             artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
             releaseTypes = base.releaseTypes.ifEmpty { extras.firstOrNull { it.releaseTypes.isNotEmpty() }?.releaseTypes.orEmpty() },
         )
     }
+    val albumsOfArtist = HashMap<String, Int>()
+    for (album in albums) albumsOfArtist.merge(album.artistId, 1, Int::plus)
 
     // Artists from a later source with nothing left of their own are left
     // out too; the phone's artists always stay as they were.
@@ -149,8 +226,8 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
     val artists = artistBases.bases.mapNotNull { base ->
         val several = artistBases.extras[base.id].orEmpty().isNotEmpty()
         val later = base.sourceId != firstSource
-        val albumCount = albums.count { it.artistId == base.id }
-        val songCount = tracks.count { it.artistId == base.id }
+        val albumCount = albumsOfArtist[base.id] ?: 0
+        val songCount = songsOfArtist[base.id] ?: 0
         if (later && albumCount == 0 && songCount == 0) return@mapNotNull null
         ArtistEntity(
             id = base.id,
@@ -164,7 +241,7 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
         )
     }
 
-    return MergedCatalog(tracks, albums, artists, mergedIds)
+    return MergePlan(songs, albums, artists, mergedIds)
 }
 
 // Things matched across sources: the first copy of each (the base, whose
@@ -173,8 +250,8 @@ fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
 private class Matched<T>(val bases: List<T>, val extras: Map<String, List<T>>, val idFor: Map<String, String>)
 
 private fun <T> acrossSources(
-    sources: List<SourceCatalog>,
-    items: (SourceCatalog) -> List<T>,
+    sources: List<SourceRows>,
+    items: (SourceRows) -> List<T>,
     id: (T) -> String,
     key: (T) -> String,
 ): Matched<T> {
@@ -204,13 +281,17 @@ private fun <T> acrossSources(
 }
 
 // One library song while its copies are gathered.
-private class MergingSong(
-    val base: SourceTrackEntity,
-    source: SourceCatalog,
+internal class MergingSong(
+    base: MergeRow,
+    source: SourceRows,
     val albumId: String,
     val artistId: String,
+    // The base copy's title as songs are matched by it.
+    val titleKey: String,
 ) {
     val id = base.id
+    val durationMs = base.durationMs
+    val albumOrder = base.albumOrder
     val sources = mutableListOf(source.sourceId)
     var onPhone = source.onPhone
     var trackNo = base.trackNo
@@ -224,7 +305,7 @@ private class MergingSong(
     var artist = base.artist
     var credits = splitLines(base.artists).size
 
-    fun add(copy: SourceTrackEntity, source: SourceCatalog) {
+    fun add(copy: MergeRow, source: SourceRows) {
         sources += source.sourceId
         onPhone = onPhone || source.onPhone
         trackNo = trackNo ?: copy.trackNo
@@ -242,7 +323,7 @@ private class MergingSong(
         }
     }
 
-    fun toTrack(order: Int) = TrackEntity(
+    fun toTrack(base: SourceTrackEntity, order: Int) = TrackEntity(
         id = base.id,
         sourceId = base.sourceId,
         nativeId = base.nativeId,

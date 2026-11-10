@@ -171,15 +171,25 @@ interface CatalogDao {
     @Query("DELETE FROM file_tags WHERE mediaId IN (:ids)")
     suspend fun deleteFileTags(ids: List<Long>)
 
+    @Query("SELECT * FROM source_track WHERE id IN (:ids)")
+    suspend fun sourceTracks(ids: List<String>): List<SourceTrackEntity>
+
     // Swaps in the whole merged library at once, so screens never see a
-    // half-written one.
+    // half-written one. The library is planned and not yet built: each song's
+    // row is made from its base copy, read 500 at a time, so the library's
+    // songs are never all held. A copy that has gone since the plan was
+    // made (a source changed meanwhile) is left out; that change makes the
+    // next rebuild.
     @Transaction
-    suspend fun replaceAll(tracks: List<TrackEntity>, albums: List<AlbumEntity>, artists: List<ArtistEntity>) {
+    suspend fun replaceAllPlanned(songs: List<PlannedSong>, albums: List<AlbumEntity>, artists: List<ArtistEntity>) {
         deleteTracks()
         deleteAlbums()
         deleteArtists()
         artists.chunked(500).forEach { insertArtists(it) }
         albums.chunked(500).forEach { insertAlbums(it) }
-        tracks.chunked(500).forEach { insertTracks(it) }
+        songs.chunked(500).forEach { chunk ->
+            val bases = sourceTracks(chunk.map { it.id }).associateBy { it.id }
+            insertTracks(chunk.mapNotNull { song -> bases[song.id]?.let(song::toTrack) })
+        }
     }
 }
