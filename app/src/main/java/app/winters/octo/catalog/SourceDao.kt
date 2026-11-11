@@ -16,6 +16,14 @@ interface SourceDao {
     @Query("SELECT * FROM source_track WHERE sourceId = :sourceId")
     suspend fun tracks(sourceId: String): List<SourceTrackEntity>
 
+    // What merging needs from a source's songs, in the order they were
+    // saved. The rest of each row stays in the database (see `MergeRow`).
+    @Query(
+        "SELECT id, albumId, artistId, title, artist, artists, albumOrder, trackNo, discNo, year, originalYear, genre, rating, " +
+            "explicit, addedAt, durationMs FROM source_track WHERE sourceId = :sourceId ORDER BY rowid",
+    )
+    suspend fun mergeRows(sourceId: String): List<MergeRow>
+
     @Query("SELECT * FROM source_album WHERE sourceId = :sourceId")
     suspend fun albums(sourceId: String): List<SourceAlbumEntity>
 
@@ -90,6 +98,17 @@ interface SourceDao {
     @Query("UPDATE source_track SET mergedId = '' WHERE mergedId != '' AND sourceId NOT IN (:merged)")
     suspend fun forgetMergedExcept(merged: List<String>)
 
+    // Only a copy whose library song changed is written.
+    @Query("UPDATE source_track SET mergedId = :mergedId WHERE id = :id AND mergedId != :mergedId")
+    suspend fun setMergedId(id: String, mergedId: String)
+
+    // Each copy remembers its library song, so playback can find them all.
+    // One at a time, so the copies themselves are never held.
+    @Transaction
+    suspend fun setMergedIds(mergedIds: Map<String, String>) {
+        for ((id, mergedId) in mergedIds) setMergedId(id, mergedId)
+    }
+
     @Query("DELETE FROM source_track WHERE sourceId = :sourceId")
     suspend fun deleteTracks(sourceId: String)
 
@@ -113,6 +132,21 @@ interface SourceDao {
     suspend fun replaceSource(
         sourceId: String,
         tracks: List<SourceTrackEntity>,
+        albums: List<SourceAlbumEntity>,
+        artists: List<SourceArtistEntity>,
+    ) {
+        deleteSource(sourceId)
+        artists.chunked(500).forEach { insertArtists(it) }
+        albums.chunked(500).forEach { insertAlbums(it) }
+        tracks.chunked(500).forEach { insertTracks(it) }
+    }
+
+    // The same, for songs made as they are written: one album's rows at a time
+    // are held, not all of them.
+    @Transaction
+    suspend fun replaceSourceStreaming(
+        sourceId: String,
+        tracks: Sequence<SourceTrackEntity>,
         albums: List<SourceAlbumEntity>,
         artists: List<SourceArtistEntity>,
     ) {

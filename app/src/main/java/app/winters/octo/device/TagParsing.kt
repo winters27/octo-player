@@ -200,7 +200,7 @@ private val musicId = Regex("""[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 
 // Every MusicBrainz id in some values, however they are joined, in lower case.
 fun musicIds(values: List<String>?): List<String> =
-    values.orEmpty().flatMap { value -> musicId.findAll(value).map { it.value.lowercase() }.toList() }.distinct()
+    values.orEmpty().filter(String::isNotBlank).flatMap { value -> musicId.findAll(value).map { it.value.lowercase() }.toList() }.distinct()
 
 // What joins several genres into one tag value. "&" is not one, so "R&B"
 // and "Drum & Bass" stay whole.

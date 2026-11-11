@@ -407,8 +407,10 @@ class ServerSync @Inject constructor(
             // When the server last read its folders, before the copy, so a
             // look afterwards reads on only once it has read them again.
             val scan = lastScanOf(client)
-            val catalog = buildServerCatalog(sourceId, client.readLibrary())
-            sources.replaceSource(sourceId, catalog.tracks, catalog.albums, catalog.artists)
+            // Songs are turned into rows and written a few hundred at a time,
+            // so neither the songs nor the rows are ever held whole.
+            val catalog = streamServerCatalog(sourceId, client.readLibrary(slim = true), consume = true)
+            sources.replaceSourceStreaming(sourceId, catalog.tracks, catalog.albums, catalog.artists)
             val library = merge.rebuild()
             // Brings likes and stars together, and sends any plays still waiting.
             listening.afterSync()
@@ -423,7 +425,7 @@ class ServerSync @Inject constructor(
             context.syncData.edit { p ->
                 p[sourceKey(session.id)] = sourceId
                 p[syncedAtKey(session.id)] = System.currentTimeMillis()
-                p[songsKey(session.id)] = catalog.tracks.size
+                p[songsKey(session.id)] = catalog.trackCount
                 p[albumsKey(session.id)] = catalog.albums.size
                 p[rowsKey(session.id)] = ROWS_VERSION
                 p[copyOfKey(sourceId)] = session.id
@@ -434,9 +436,9 @@ class ServerSync @Inject constructor(
             // Counts only, like the phone scan's line.
             Log.i(
                 "Octo",
-                "server sync: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
+                "server sync: ${catalog.trackCount} tracks, ${catalog.albums.size} albums, " +
                     "${catalog.artists.size} artists, ${SystemClock.elapsedRealtime() - started} ms; " +
-                    "library ${library.tracks.size} tracks, ${library.albums.size} albums, ${library.artists.size} artists",
+                    "library ${library.tracks} tracks, ${library.albums} albums, ${library.artists} artists",
             )
         } catch (e: CancellationException) {
             throw e

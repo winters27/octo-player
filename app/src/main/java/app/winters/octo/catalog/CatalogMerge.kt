@@ -31,26 +31,32 @@ class CatalogMerge @Inject constructor(
 ) {
     private val lock = Mutex()
 
-    // Returns the merged library, so callers can tell how big it is.
-    suspend fun rebuild(): MergedCatalog = lock.withLock {
+    // Returns how big the merged library is. Songs are matched as slim rows
+    // and the library is written 500 songs at a time, so a library of 100,000
+    // songs is never held whole (it ran a phone out of memory).
+    suspend fun rebuild(): LibrarySize = lock.withLock {
         val server = serverInUse()
-        val all = sources.sourceIds()
+        val ids = sources.sourceIds()
             .filter { inLibrary(it, server) }
             .sortedBy { if (it == DEVICE) "" else it }
-            .map { id -> SourceCatalog(id, onPhone = id == DEVICE, sources.tracks(id), sources.albums(id), sources.artists(id)) }
-        val merged = withContext(Dispatchers.Default) { mergeCatalogs(all) }
-        catalog.replaceAll(merged.tracks, merged.albums, merged.artists)
-        sources.forgetMergedExcept(all.map { it.sourceId })
+        val plan = planned(ids)
+        catalog.replaceAllPlanned(plan.songs, plan.albums, plan.artists)
+        sources.forgetMergedExcept(ids)
         // Each copy remembers its library song, so playback can find them all.
-        val copies = all.flatMap { it.tracks }.map { it.copy(mergedId = merged.mergedIds[it.id] ?: it.id) }
-        copies.chunked(500).forEach { sources.insertTracks(it) }
+        sources.setMergedIds(plan.mergedIds)
         // Likes, plays and playlists follow songs whose ids changed.
         user.relinkAll()
         // So do favourite albums and artists, and pins on Home.
         favourites.relinkAll()
         // Songs with no rating on a server show the one made on the phone.
         user.showPhoneRatings()
-        merged
+        LibrarySize(plan.songs.size, plan.albums.size, plan.artists.size)
+    }
+
+    // A function of its own, so the rows are let go of once the plan is made.
+    private suspend fun planned(ids: List<String>): MergePlan {
+        val rows = ids.map { id -> SourceRows(id, onPhone = id == DEVICE, sources.mergeRows(id), sources.albums(id), sources.artists(id)) }
+        return withContext(Dispatchers.Default) { planMerge(rows) }
     }
 
     // Runs `block` between rebuilds, never during one, so it sees song ids
@@ -65,3 +71,6 @@ class CatalogMerge @Inject constructor(
 // Whether a source's music joins the library: the phone's own always, a
 // server's only while it is the one in use.
 fun inLibrary(sourceId: String, serverInUse: String?): Boolean = !isServerSource(sourceId) || sourceId == serverInUse
+
+// How many songs, albums and artists the library has.
+class LibrarySize(val tracks: Int, val albums: Int, val artists: Int)
