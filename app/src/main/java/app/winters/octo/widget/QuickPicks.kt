@@ -1,7 +1,12 @@
 package app.winters.octo.widget
 
 import app.winters.octo.catalog.CatalogDao
-import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.sort.SongScope
+import app.winters.octo.sort.SongSort
+import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
@@ -9,21 +14,26 @@ import javax.inject.Inject
 private const val RECENT_ALBUMS = 10
 private const val MIX_ALBUMS = 8
 
-// The songs behind each quick play shortcut.
-class QuickPicks @Inject constructor(
-    private val catalog: CatalogDao,
-    private val user: UserDao,
-) {
-    // The songs a shortcut plays, in order, and whether to shuffle them.
-    // Empty when there are none, and for Resume, which plays the queue.
-    suspend fun songsFor(pick: QuickPick): Pair<List<String>, Boolean> = when (pick) {
-        QuickPick.Liked -> user.likedTracks().first().map { it.id } to true
+// What each quick play shortcut plays.
+class QuickPicks @Inject constructor(private val catalog: CatalogDao, db: CatalogDatabase) {
+    private val queue = db.queueDao()
+
+    // Whether the library has any song, and any liked one: one row each.
+    suspend fun hasSongs(): Boolean = queue.anySong()
+
+    suspend fun hasLiked(): Boolean = queue.anyLiked()
+
+    // The list a shortcut plays, named by what it is, and whether to
+    // shuffle it. Null for Resume, which plays the queue, and when there is
+    // nothing to play.
+    suspend fun specFor(pick: QuickPick): Pair<ListSpec, Boolean>? = when (pick) {
+        QuickPick.Liked -> ListSpec.Songs(SongScope.Liked, SortList.Liked.default) to true
         // Newest album first, each in its own order.
-        QuickPick.RecentlyAdded -> catalog.recentAlbums(RECENT_ALBUMS).first().flatMap { catalog.albumTrackIds(it.id) } to false
-        QuickPick.AlbumMix -> catalog.randomAlbums(MIX_ALBUMS).flatMap { catalog.albumTrackIds(it.id) } to true
-        QuickPick.Resume -> emptyList<String>() to false
+        QuickPick.RecentlyAdded -> catalog.recentAlbums(RECENT_ALBUMS).first().map { it.id }.takeIf { it.isNotEmpty() }?.let { ListSpec.AlbumList(it) to false }
+        QuickPick.AlbumMix -> catalog.randomAlbums(MIX_ALBUMS).map { it.id }.takeIf { it.isNotEmpty() }?.let { ListSpec.AlbumList(it) to true }
+        QuickPick.Resume -> null
     }
 
     // Everything, for a play button with no queue to go back to.
-    suspend fun everything(): List<String> = catalog.allTrackIds()
+    fun everything(): ListSpec = ListSpec.Songs(SongScope.All, SortOrder(SongSort.Title, false))
 }

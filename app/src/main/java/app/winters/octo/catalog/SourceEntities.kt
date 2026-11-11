@@ -16,6 +16,10 @@ import androidx.room.PrimaryKey
     indices = [
         Index("mergedId"), Index("sourceId", "albumOrder", "seq", "id"), Index("sourceId", "seq"),
         Index("sourceId", "nativeId"), Index("albumId"), Index("artistId"), Index("keysVersion", "id"),
+        // A phone folder's files, and whether each is its song's own file.
+        Index("sourceId", "storageVolume", "folder", "mergedId", "id", name = "index_source_track_folder"),
+        // A source's copies grouped by song key, with their lengths.
+        Index("sourceId", "matchKey", "durationMs", name = "index_source_track_sourceId_matchKey"),
     ],
 )
 data class SourceTrackEntity(
@@ -95,9 +99,15 @@ data class SourceTrackEntity(
     @ColumnInfo(defaultValue = "") val titleKey: String = "",
     @ColumnInfo(defaultValue = "") val matchKey: String = "",
     @ColumnInfo(defaultValue = "0") val keysVersion: Int = 0,
+    // Where a phone file is, as the phone names it: its folder within its
+    // storage, its file name, and which storage. Null for a server's rows.
+    val folder: String? = null,
+    val fileName: String? = null,
+    val storageVolume: String? = null,
 )
 
-@Entity(tableName = "source_album", indices = [Index("sourceId", "seq")])
+// A source's albums in its order, and by the source's own ids.
+@Entity(tableName = "source_album", indices = [Index("sourceId", "seq"), Index("sourceId", "nativeId")])
 data class SourceAlbumEntity(
     @PrimaryKey val id: String,
     val sourceId: String,

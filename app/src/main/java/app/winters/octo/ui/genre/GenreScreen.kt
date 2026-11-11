@@ -24,13 +24,27 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.sort.SongScope
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
-import app.winters.octo.sort.Sorted
 import app.winters.octo.sort.SortedLibrary
+import app.winters.octo.ui.common.picked
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
+import app.winters.octo.ui.paging.tableChanges
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.PlayShuffleButtons
@@ -59,20 +73,40 @@ class GenreViewModel @AssistedInject constructor(
     dao: CatalogDao,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
+    loaders: ListLoaders,
+    reads: LibraryReads,
+    db: CatalogDatabase,
 ) : ViewModel() {
     val albums: StateFlow<List<AlbumEntity>> =
         dao.genreAlbums(name).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // The genre's songs in the chosen order, one order for every genre.
-    val tracks: StateFlow<Sorted<TrackEntity>?> =
-        sorted.songs(SortList.GenreSongs, SongScope.Genre(name)).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // The genre's chosen order, one order for every genre; null until read.
+    val order: StateFlow<SortOrder?> = sorted.settings.order(SortList.GenreSongs).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    private fun ids() = tracks.value?.items.orEmpty().map { it.id }
+    private var handle: ListHandle<SortOrder, TrackEntity>? = null
 
-    // Plays the genre's songs from one of them.
-    fun play(index: Int) = playback.playTracks(ids(), index, source = name)
+    // The genre's songs in pages, in the chosen order.
+    val tracks: StateFlow<ListHandle<SortOrder, TrackEntity>?> = order.filterNotNull().map { order ->
+        handle?.also { it.ask(order) } ?: ListHandle(
+            viewModelScope,
+            order,
+            { o -> loaders.songs(SongScope.Genre(name), o) },
+            reads,
+            { _, loader -> db.tableChanges(loader.tables) },
+        ).also { handle = it }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    fun shuffle() = playback.playTracks(ids(), shuffle = true, source = name)
+    private fun spec() = order.value?.let { ListSpec.Songs(SongScope.Genre(name), it) }
+
+    // Plays the genre's songs from the one tapped, or from the top.
+    fun play(item: ListItem<TrackEntity>?) {
+        val spec = spec() ?: return
+        playback.playList(spec, item?.let { ListStart.Row(it.row.id, it.key) }, source = name)
+    }
+
+    fun shuffle() {
+        spec()?.let { playback.playList(it, null, shuffle = true, source = name) }
+    }
 
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorted.setOrder(SortList.GenreSongs, order) }
@@ -97,28 +131,32 @@ fun GenreScreen(
     vm: GenreViewModel = hiltViewModel<GenreViewModel, GenreViewModel.Factory> { it.create(name) },
 ) {
     val albumList by vm.albums.collectAsStateWithLifecycle()
-    val sortedTracks by vm.tracks.collectAsStateWithLifecycle()
-    val tracks = sortedTracks?.items.orEmpty()
+    val handle by vm.tracks.collectAsStateWithLifecycle()
+    val order by vm.order.collectAsStateWithLifecycle()
     val state = rememberLazyListState()
+    val list = handle ?: return
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // The grid sits in the song list, so its rows are laid out here: as
         // many cards as fit, all the same width.
         val columns = ((maxWidth - 40.dp + CardGap) / (CardWidth + CardGap)).toInt().coerceAtLeast(1)
         val albumRows = albumList.chunked(columns)
+        val above = 1 + albumRows.size + 1
         // A new order scrolls back to the songs' own line, below the header
         // and the albums.
-        sortedTracks?.let { TopOnNewOrder(it.order, state, top = 1 + albumRows.size) }
-        val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
-        SelectableSongs(pickable) {
+        order?.let { TopOnNewOrder(it, state, top = 1 + albumRows.size) }
+        val meta by list.shown.collectAsStateWithLifecycle()
+        val count = meta?.count
+        val tracks = rememberListRows(list, state, above = above)
+        PagedPicks(list, tracks, pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null }, base = order?.let { ListSpec.Songs(SongScope.Genre(name), it) }) {
             LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
                 item(key = "header") {
                     PageHeader(
                         name,
                         onBack,
                         // What the genre holds, when it fits after its name.
-                        count = if (sortedTracks == null) null else listOfNotNull(albumList.size.takeIf { it > 0 }?.let(::albums), songs(tracks.size)).joinToString(" • "),
-                        actions = { PlayShuffleButtons({ vm.play(0) }, vm::shuffle, enabled = tracks.isNotEmpty()) },
+                        count = if (count == null) null else listOfNotNull(albumList.size.takeIf { it > 0 }?.let(::albums), songs(count)).joinToString(" • "),
+                        actions = { PlayShuffleButtons({ vm.play(null) }, vm::shuffle, enabled = (count ?: 0) > 0) },
                     )
                 }
                 items(albumRows, key = { "albums:${it.first().id}" }) { row ->
@@ -132,12 +170,10 @@ fun GenreScreen(
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
-                val sorted = sortedTracks
-                if (sorted != null && tracks.isNotEmpty()) {
-                    item(key = "songs") { SortBar(SortList.GenreSongs, sorted.order, vm::setOrder, title = "Songs") }
-                }
-                itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-                    Box(Modifier.animateItem()) { SongRow(track) { vm.play(index) } }
+                val sorted = order
+                item(key = "songs") { if (sorted != null && (count ?: 0) > 0) SortBar(SortList.GenreSongs, sorted, vm::setOrder, title = "Songs") }
+                listRows(tracks, null, heading = {}) { item ->
+                    if (item == null) RowPlaceholder() else SongRow(item.row) { vm.play(item) }
                 }
             }
         }

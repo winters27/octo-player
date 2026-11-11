@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.catalog.titleLookup
 import app.winters.octo.data.Session
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.SubsonicClient
@@ -105,10 +106,12 @@ internal fun CatalogDatabase.song(
     relinkKey: String = "rk-$id",
 ) = exec(
     """
-    INSERT INTO track (id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId, durationMs, addedAt, relinkKey)
-    VALUES (?, 'device', ?, ?, ?, ?, ?, ?, 'Album', ?, ?, 0, ?)
+    INSERT INTO track (id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId, durationMs, addedAt, relinkKey,
+        lookupKey, looseKey)
+    VALUES (?, 'device', ?, ?, ?, ?, ?, ?, 'Album', ?, ?, 0, ?, ?, ?)
     """,
     id, id, title, searchKey(title), searchKey(title), artist, artistId, albumId, durationMs, relinkKey,
+    titleLookup(title, artist).lookupKey, titleLookup(title, artist).looseKey,
 )
 
 // A source's copy of a library song (`mergedId`, empty for none).

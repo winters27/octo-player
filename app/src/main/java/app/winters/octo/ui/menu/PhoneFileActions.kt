@@ -24,6 +24,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.catalog.copiesInChunks
 import app.winters.octo.device.DeletePlan
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.device.PhoneFile
@@ -76,7 +77,9 @@ sealed interface PhoneAsk {
 
 // A delete under way: what goes, the queue as it was before the songs were
 // taken out of it, and on Android 10 the files still to go.
-private class Deleting(val plan: DeletePlan, val undo: QueueUndo?) {
+private class Deleting(val plan: DeletePlan) {
+    // Puts the songs back in the queue when no file went.
+    var undo: QueueUndo? = null
     var left: List<String> = plan.uris
     var deleted = 0
 }
@@ -98,7 +101,7 @@ class PhoneFilesViewModel @Inject constructor(
     private var waitingSound: Pair<String, PhoneSound>? = null
 
     private suspend fun filesOf(trackIds: List<String>): List<PhoneFile> =
-        withContext(Dispatchers.IO) { phoneFiles(sources.copiesOf(trackIds.distinct())) }
+        withContext(Dispatchers.IO) { phoneFiles(sources.copiesInChunks(trackIds)) }
 
     // ---- Deleting ----
 
@@ -117,7 +120,8 @@ class PhoneFilesViewModel @Inject constructor(
     fun begin(plan: DeletePlan) {
         if (deleting != null) return
         val beforeAnswer = Build.VERSION.SDK_INT < Build.VERSION_CODES.R
-        val run = Deleting(plan, if (beforeAnswer) queue.removeSongs(plan.trackIds.toSet()) else null)
+        val run = Deleting(plan)
+        if (beforeAnswer) queue.removeSongs(plan.trackIds.toSet()) { run.undo = it }
         deleting = run
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val request = try {

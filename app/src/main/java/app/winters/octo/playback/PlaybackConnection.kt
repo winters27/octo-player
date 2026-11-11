@@ -11,16 +11,28 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import app.winters.octo.catalog.CatalogDao
+import androidx.media3.session.SessionResult
+import app.winters.octo.sort.SongScope
+import app.winters.octo.sort.SongSort
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.ui.common.Feedback
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+// What a tapped row or a page header shows of a play, for the starting
+// state before anything is read.
+data class Shown(val title: String?, val artist: String? = null, val artwork: String? = null)
 
 // What the app shows about the song that is on.
 data class NowPlaying(
@@ -45,27 +57,51 @@ data class NowPlaying(
     val playWhenReady: Boolean = false,
     // A live station on now, with what it has on air.
     val live: LiveNow? = null,
+    // While a play just asked for is starting, what shows in place of the
+    // artist ("Starting"); the title and cover are the tapped song's.
+    val starting: String? = null,
 )
 
 // The app's line to the playback service. Screens ask it to play things and
-// read what is playing from it; the service does the rest.
+// read what is playing from it; the service does the rest. Open so a test
+// can stand in for the service and hear what a screen asks to play.
 @Singleton
-class PlaybackConnection @Inject constructor(
+open class PlaybackConnection @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val catalog: CatalogDao,
     private val lengths: RealLengths,
-    // Looked up when first used: reading songs the player's way leads back to this class.
-    private val playableSongs: dagger.Lazy<PlayableSongs>,
+    private val queue: QueueStore,
+    private val startingPlays: StartingPlays,
+    private val feedback: dagger.Lazy<Feedback>,
 ) {
-    private val playable get() = playableSongs.get()
     private val scope = MainScope()
+
+    // The play the app is starting, shown at once until its first song is
+    // the player's.
+    val starting: StateFlow<StartingPlay?> = startingPlays.starting
+
+    // Lists still being written into the queue, for Up next's quiet rows.
+    val building: StateFlow<List<BuildingRow>> = queue.building
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     // Requests made before the connection is up run as soon as it is.
     private val waiting = mutableListOf<(MediaController) -> Unit>()
 
     private val _now = MutableStateFlow(NowPlaying())
-    val now: StateFlow<NowPlaying> = _now
+
+    // What plays, or while a play is starting, the song it starts with as
+    // the screen knew it, with the starting words.
+    val now: StateFlow<NowPlaying> = combine(_now, startingPlays.starting) { now, starting ->
+        if (starting == null) {
+            now
+        } else {
+            now.copy(
+                title = starting.title ?: now.title,
+                artist = starting.artist ?: now.artist,
+                artwork = starting.artwork ?: now.artwork,
+                starting = starting.words,
+            )
+        }
+    }.stateIn(scope, SharingStarted.Eagerly, NowPlaying())
 
     // The current song and everything after it, in the order they will play.
     private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
@@ -97,6 +133,8 @@ class PlaybackConnection @Inject constructor(
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publish(player)
+            // A play that was starting ends once its first song is the player's.
+            startingPlays.playing(player.currentMediaItem?.entryId)
             if (events.containsAny(
                     Player.EVENT_POSITION_DISCONTINUITY,
                     Player.EVENT_MEDIA_ITEM_TRANSITION,
@@ -116,11 +154,27 @@ class PlaybackConnection @Inject constructor(
     fun connect() {
         if (future != null) return
         val token = SessionToken(context, ComponentName(context, OctoPlaybackService::class.java))
-        val pending = MediaController.Builder(context, token).buildAsync()
+        val pending = MediaController.Builder(context, token)
+            .setListener(
+                object : MediaController.Listener {
+                    // The service went away: a play still starting says it could not.
+                    override fun onDisconnected(controller: MediaController) {
+                        startingPlays.starting.value?.let { failed(it.token, START_FAILED_WORDS, false) }
+                    }
+                },
+            )
+            .buildAsync()
         future = pending
         pending.addListener(
             {
-                val ready = runCatching { pending.get() }.getOrNull() ?: return@addListener
+                val ready = runCatching { pending.get() }.getOrNull()
+                if (ready == null) {
+                    // A play that was starting cannot reach the service.
+                    future = null
+                    waiting.clear()
+                    startingPlays.starting.value?.let { failed(it.token, START_FAILED_WORDS, false) }
+                    return@addListener
+                }
                 controller = ready
                 ready.addListener(listener)
                 publish(ready)
@@ -141,61 +195,55 @@ class PlaybackConnection @Inject constructor(
         controller = null
     }
 
+    // A play that did not start: the starting state goes and, unless the
+    // route shows its own fallback, the words show.
+    private fun failed(token: Long, words: String?, handlesRefusal: Boolean) {
+        if (!startingPlays.end(token)) return
+        if (!handlesRefusal && words != null) feedback.get().show(words)
+    }
+
     fun positionMs(): Long = controller?.currentPosition ?: 0
 
     // How fast the player is playing now, 1 being normal.
     fun speed(): Float = controller?.playbackParameters?.speed ?: 1f
 
-    // Plays a list of songs, starting at one of them, or shuffled.
-    // `source` names the list for the queue's headings ("OK Computer").
-    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) =
-        play(trackIds, startIndex, shuffle, QueueSource.Played(source).encoded())
+    // Plays songs named one by one, from one of them, or shuffled: at most
+    // QUEUE_WINDOW of them, around the one it starts from.
+    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
+        if (trackIds.isEmpty()) return
+        val (ids, at) = idsAround(trackIds, startIndex)
+        playList(ListSpec.Ids(ids, source), if (shuffle) null else ListStart.At(at, 0), shuffle, source)
+    }
 
     // Plays a station's songs from one of them, under its name; as they run
-    // low, more of its kind are added. Shuffled, its songs are put in a new
-    // order, so the songs added later still come after them.
-    fun playStation(trackIds: List<String>, startIndex: Int, id: String, name: String, shuffle: Boolean = false) {
-        val ids = if (shuffle) trackIds.shuffled() else trackIds
-        play(ids, if (shuffle) 0 else startIndex, false, QueueSource.Station(id, name).encoded())
-    }
-
-    private fun play(trackIds: List<String>, startIndex: Int, shuffle: Boolean, word: String) {
-        if (trackIds.isEmpty()) return
-        withController { c ->
-            val items = trackIds.map { songRequest(it, word) }
-            c.shuffleModeEnabled = shuffle
-            if (shuffle) c.setMediaItems(items, true) else c.setMediaItems(items, startIndex, 0)
-            c.prepare()
-            c.play()
-        }
-    }
-
-    // Puts a list of songs in place of the queue, at one of them and a place
-    // in it, paused: for picking up a queue from another device.
-    fun loadQueue(trackIds: List<String>, index: Int, positionMs: Long) {
-        if (trackIds.isEmpty()) return
-        withController { c ->
-            c.shuffleModeEnabled = false
-            c.setMediaItems(trackIds.map(::songRequest), index.coerceIn(trackIds.indices), positionMs.coerceAtLeast(0))
-            c.pause()
-            c.prepare()
-        }
-    }
-
-    fun playAlbum(albumId: String, shuffle: Boolean = false) {
-        scope.launch { playTracks(catalog.albumTrackIds(albumId), 0, shuffle, catalog.album(albumId).first()?.title) }
+    // low, more of its kind are added. Shuffled, its songs play in a new
+    // order, and the songs added later still come after them.
+    fun playStation(trackIds: List<String>, startIndex: Int, id: String, name: String, shuffle: Boolean = false, handlesRefusal: Boolean = false) {
+        val ids = trackIds.take(QUEUE_WINDOW)
+        if (ids.isEmpty()) return
+        playList(
+            ListSpec.Ids(ids),
+            if (shuffle) null else ListStart.At(startIndex.coerceIn(ids.indices), 0),
+            shuffle,
+            source = name,
+            word = QueueSource.Station(id, name).encoded(),
+            handlesRefusal = handlesRefusal,
+        )
     }
 
     // Plays the stations a list holds, in its order, from the one tapped:
     // Back and Next go through them.
-    fun playLineup(stationIds: List<String>, startIndex: Int, source: String? = null) =
-        playTracks(stationIds, startIndex.coerceIn(0, (stationIds.size - 1).coerceAtLeast(0)), source = source)
+    fun playLineup(stationIds: List<String>, startIndex: Int, source: String? = null) {
+        if (stationIds.isEmpty()) return
+        val ids = stationIds.take(QUEUE_WINDOW)
+        playList(ListSpec.Ids(ids, source), ListStart.At(startIndex.coerceIn(ids.indices), 0), source = source)
+    }
 
     // With nothing queued, the play button shuffles the whole library. A
     // station that is connecting counts as playing, so the button stops it.
     fun togglePlayPause() = withController { c ->
         when {
-            c.mediaItemCount == 0 -> scope.launch { playTracks(catalog.allTrackIds(), shuffle = true) }
+            c.mediaItemCount == 0 -> playList(ListSpec.Songs(SongScope.All, SortOrder(SongSort.Title, false)), null, shuffle = true)
             c.isPlaying -> c.pause()
             c.playWhenReady && c.currentMediaItem?.mediaId?.let(::isRadio) == true -> c.pause()
             else -> {
@@ -245,15 +293,7 @@ class PlaybackConnection @Inject constructor(
 
     fun previous() = withController { it.seekToPrevious() }
 
-    // Asked of the service by name, so it can tell "Play next" from "Add to
-    // queue" and put the songs right after the current one under shuffle too.
-    fun playNext(trackIds: List<String>) = withController { c ->
-        if (trackIds.isNotEmpty()) c.sendCustomCommand(PLAY_NEXT, playNextArgs(trackIds))
-    }
-
-    fun playLast(trackIds: List<String>) = withController { c -> c.addMediaItems(trackIds.map(::songRequest)) }
-
-    // Moves from the "Up next" list, by position in the queue. Taking songs
+    // Moves from the "Up next" list, by position in the window. Taking songs
     // out goes through QueueEditor, by each song's key.
     fun moveInQueue(from: Int, to: Int) = withController { it.moveMediaItem(from, to) }
 
@@ -263,51 +303,123 @@ class PlaybackConnection @Inject constructor(
         c.play()
     }
 
-    // ---- Adding with an undo ----
+    // Plays an entry anywhere in the queue, past the window too.
+    fun playEntry(key: String) = withController { c ->
+        entryOfKey(key)?.let { c.sendCustomCommand(PLAY_ENTRY, Bundle().apply { putLong(ARG_ENTRY, it) }) }
+    }
 
-    // Puts songs next, like playNext, then hands `inserted` how many went in and a way to take
-    // those same songs back out, wherever they have moved to since. The ids are read as the
-    // player reads them (songs it cannot play are left out, a found song plays as its library
-    // copy), so undo looks for what really went in. Nothing went in: nothing is handed on.
-    fun playNextUndoable(trackIds: List<String>, inserted: (count: Int, undo: () -> Unit) -> Unit) {
-        if (trackIds.isEmpty()) return
-        scope.launch {
-            val played = playable.items(trackIds).map { it.mediaId }
-            if (played.isEmpty()) return@launch
-            withController { c ->
-                // Through the same command as Play next, so it lands right after the current song
-                // in shuffled order too. It goes in just after the current song in the list, which
-                // is where undo looks first.
-                val at = (c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount)
-                c.sendCustomCommand(PLAY_NEXT, playNextArgs(trackIds))
-                inserted(played.size) { removeInserted(played, at) }
+    // ---- Up next past the songs the player holds ----
+
+    // Up to `limit` of the queue's songs after (or before) the entry
+    // `fromKey` in the order that plays, read from Room, nearest first.
+    suspend fun queueRows(fromKey: String, forward: Boolean, limit: Int): List<QueueEntry> {
+        val queueId = queue.inUse.value
+        val entry = entryOfKey(fromKey) ?: return emptyList()
+        if (queueId == 0L) return emptyList()
+        return queue.inTurn {
+            val row = queue.dao.entry(queueId, entry) ?: return@inTurn emptyList()
+            val account = queue.dao.accountOn(queueId)
+            val order = if (account?.shuffle == true) QueueOrder.Shuffle else QueueOrder.Play
+            queue.page(queueId, order, row, forward, limit, Floors.of(account)).mapNotNull { r ->
+                val t = queue.dao.track(r.trackId) ?: return@mapNotNull null
+                QueueEntry(entryKey(r.entry), -1, t.id, t.title, t.artist, t.artwork, if (r.durationMs > 0) r.durationMs else t.durationMs, t.explicit == true)
             }
         }
     }
 
-    private fun removeInserted(trackIds: List<String>, insertedAt: Int) = withController { c ->
-        val queue = List(c.mediaItemCount) { c.getMediaItemAt(it).mediaId }
-        val start = findInserted(queue, trackIds, insertedAt) ?: return@withController
-        c.removeMediaItems(start, start + trackIds.size)
+    // How many songs come after the entry `fromKey` in the order that plays,
+    // and how long they play.
+    suspend fun queueTail(fromKey: String): Pair<Int, Long> {
+        val queueId = queue.inUse.value
+        val entry = entryOfKey(fromKey) ?: return 0 to 0L
+        if (queueId == 0L) return 0 to 0L
+        return queue.inTurn {
+            val row = queue.dao.entry(queueId, entry) ?: return@inTurn 0 to 0L
+            val account = queue.dao.accountOn(queueId)
+            val order = if (account?.shuffle == true) QueueOrder.Shuffle else QueueOrder.Play
+            queue.tail(queueId, order, row, Floors.of(account))
+        }
     }
 
-    // Puts songs at the end of the queue, like playLast, then hands `inserted` how many went in
-    // and a way to take those same songs back out. They go before any Autoplay songs still to
-    // come, as the player puts them, which is where undo looks first.
-    fun playLastUndoable(trackIds: List<String>, inserted: (count: Int, undo: () -> Unit) -> Unit) {
-        if (trackIds.isEmpty()) return
+    // ---- Playing a list ----
+
+    // Plays a list named by what it is (`spec`), from `start` (a tapped
+    // row, a song the page knows comes first, a place, or the list's first
+    // row), or shuffled, in place of the queue. Every play of a list goes
+    // through here; the tap only posts. The starting state shows at once
+    // with `shown` (what the screen holds of the row or the list) until the
+    // first song is the player's, the play is refused (its words show,
+    // unless `handlesRefusal`: the route shows its own fallback), or it
+    // fails to reach the service. `answered` hears how the play went: a
+    // server folder's says whether its songs stopped at their limit, and a
+    // refusal its words.
+    open fun playList(
+        spec: ListSpec,
+        start: ListStart? = null,
+        shuffle: Boolean = false,
+        source: String? = null,
+        playWhenReady: Boolean = true,
+        pageOwner: String? = null,
+        shownOverWindow: Boolean = false,
+        handlesRefusal: Boolean = false,
+        shown: Shown? = null,
+        word: String? = null,
+        answered: ((PlayAnswer) -> Unit)? = null,
+    ) {
         scope.launch {
-            val played = playable.items(trackIds).map { it.mediaId }
-            if (played.isEmpty()) return@launch
+            val token = withContext(Dispatchers.IO) { queue.claimList() }
+            startingPlays.start(StartingPlay(token, shown?.title, shown?.artist, shown?.artwork))
+            val args = playListArgs(spec, start, shuffle, source, playWhenReady, pageOwner, shownOverWindow, token, word)
             withController { c ->
-                val at = endOfOwnSongs(c)
-                c.addMediaItems(trackIds.map(::songRequest))
-                inserted(played.size) { removeInserted(played, at) }
+                val result = c.sendCustomCommand(PLAY_LIST, args)
+                result.addListener(
+                    {
+                        val answer = runCatching { result.get() }.getOrNull()
+                        when {
+                            answer == null || answer.resultCode != SessionResult.RESULT_SUCCESS -> failed(token, START_FAILED_WORDS, handlesRefusal)
+                            answer.extras.getString(ARG_REFUSAL) != null -> failed(token, answer.extras.getString(ARG_REFUSAL), handlesRefusal)
+                            !answer.extras.getBoolean(ARG_STARTED, false) -> startingPlays.end(token)
+                        }
+                        answered?.invoke(
+                            if (answer == null || answer.resultCode != SessionResult.RESULT_SUCCESS) {
+                                PlayAnswer(false, refusal = START_FAILED_WORDS)
+                            } else {
+                                PlayAnswer(answer.extras.getBoolean(ARG_STARTED, false), answer.extras.getBoolean(ARG_CUT, false), answer.extras.getString(ARG_REFUSAL))
+                            },
+                        )
+                    },
+                    ContextCompat.getMainExecutor(context),
+                )
             }
         }
     }
 
-    // ---- End of adding with an undo ----
+    // Puts a list next, or at the end of the queue before Autoplay's songs,
+    // then hands `inserted` how many went in and a way to take them back
+    // out. A list too big to put in whole is added as it is written; the
+    // count is then what it held when added.
+    fun addList(
+        spec: ListSpec,
+        next: Boolean,
+        source: String? = null,
+        inserted: (count: Int, undo: () -> Unit) -> Unit = { _, _ -> },
+        shownOverWindow: Boolean = false,
+    ) = withController { c ->
+        val result = c.sendCustomCommand(if (next) ADD_NEXT else ADD_LAST, addListArgs(spec, source, shownOverWindow))
+        result.addListener(
+            {
+                val answer = runCatching { result.get() }.getOrNull() ?: return@addListener
+                if (answer.resultCode != SessionResult.RESULT_SUCCESS) return@addListener
+                val listId = answer.extras.getLong(ARG_LIST, 0)
+                val count = answer.extras.getInt(ARG_COUNT, 0)
+                if (listId == 0L && count == 0) return@addListener
+                inserted(count) {
+                    withController { it.sendCustomCommand(REMOVE_ENTRIES, Bundle().apply { putLong(ARG_LIST, listId) }) }
+                }
+            },
+            ContextCompat.getMainExecutor(context),
+        )
+    }
 
     private fun withController(action: (MediaController) -> Unit) {
         val ready = controller
@@ -395,6 +507,15 @@ class PlaybackConnection @Inject constructor(
     // songs to unless it plays them bit for bit.
     private fun outputRate(): Int? =
         context.getSystemService(AudioManager::class.java)?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()
+}
+
+// At most QUEUE_WINDOW of a list of songs, those around `startIndex`, and
+// where that one is among them.
+fun idsAround(trackIds: List<String>, startIndex: Int): Pair<List<String>, Int> {
+    val start = startIndex.coerceIn(0, (trackIds.size - 1).coerceAtLeast(0))
+    if (trackIds.size <= QUEUE_WINDOW) return trackIds to start
+    val from = (start - QUEUE_WINDOW / 2).coerceIn(0, trackIds.size - QUEUE_WINDOW)
+    return trackIds.subList(from, from + QUEUE_WINDOW) to start - from
 }
 
 // Where songs added to the end of the queue go: before the first Autoplay

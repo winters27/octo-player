@@ -164,6 +164,7 @@ private fun AccountCard(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
     val copyRun by vm.copyRun.collectAsStateWithLifecycle()
     val access by vm.library.access.collectAsStateWithLifecycle()
     val songs by vm.songCount.collectAsStateWithLifecycle()
+    val phoneProblem by vm.library.problem.collectAsStateWithLifecycle()
     val now by rememberClock()
 
     SettingsGroup(separatorInset = IconRowInset) {
@@ -209,10 +210,11 @@ private fun AccountCard(onOpen: (NavKey) -> Unit, vm: SettingsViewModel) {
                 )
             }
         }
+        // A scan that could not be saved says why, as a copy does.
         AccountRow(
             icon = OctoIcons.Phone,
             title = phoneLine(access, songs),
-            lines = emptyList(),
+            lines = listOfNotNull(phoneProblem?.let { it to OctoColors.Error }),
             onClick = { onOpen(routeFor(SettingsPage.Library)) },
         )
     }

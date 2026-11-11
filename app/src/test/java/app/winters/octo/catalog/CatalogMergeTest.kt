@@ -368,10 +368,13 @@ class CatalogMergeTest {
         db.testMerge(server).rebuild()
         db.exec("INSERT INTO rating_note (sourceRowId, rating) VALUES ('device:s0', 5)")
         db = reopen(db, dir)
-        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
+        // The open deletes nothing; the next merge clears the note no copy
+        // keeps before it claims.
+        assertEquals(1L, db.longOf("SELECT COUNT(*) FROM rating_note"))
         db.put(library(DEVICE, 4))
         db.testMerge(server).rebuild()
         assertEquals(0, ratingOf("device:s0"))
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM rating_note"))
     }
 
     @Test
@@ -436,8 +439,12 @@ class CatalogMergeTest {
             merge.awaitStage(server, 9)
             fail("the copy should not be swapped in")
         } catch (e: StageAborted) {
-            // 20 staged songs, and 20 library songs (6 phone songs, 14 more from the copy).
-            assertEquals(NotEnoughSpace((20L + 20L) * SWAP_BYTES_PER_SONG * 2).userMessage(), e.reason)
+            // 20 staged songs, and 20 library songs (6 phone songs, 14 more
+            // from the copy), asked as a first copy: the library holds no
+            // song before its first merge. The log's room beside it is its
+            // checkpoint's span and two groups, each this small save's songs.
+            val log = LOG_CHECKPOINT_BYTES + 2 * (20L + 20L) * SAVE_LOG_BYTES_PER_SONG
+            assertEquals(NotEnoughSpace((20L + 20L) * FIRST_COPY_BYTES_PER_SONG + log).userMessage(), e.reason)
         }
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM stage_track"))
         assertEquals(STAGE_NONE, db.stringOf("SELECT stage FROM source_meta WHERE sourceId = ?", server))
@@ -632,6 +639,8 @@ class CatalogMergeTest {
         } catch (e: StageAborted) {
             assertEquals("Another server is in use now.", e.reason)
         }
+        // Its rows leave the stage after the merge.
+        merge.awaitStageClear("server:old.test")
         assertNull(db.stringOf("SELECT id FROM stage_track LIMIT 1"))
     }
 

@@ -1,5 +1,7 @@
 package app.winters.octo.server
 
+import app.winters.octo.catalog.ApplyPending
+import app.winters.octo.catalog.ResumedCopy
 import app.winters.octo.catalog.StageProgress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -168,6 +170,43 @@ class CopyTrackerTest {
         assertNotNull(tracker.outcome.value)
         tracker.clearArrived(token)
         assertNull(tracker.outcome.value)
+    }
+
+    // A resumed run is one pass at its Save step from its first write, its
+    // bar at how much was in, never moving back; a resume that stops again
+    // says why and its run ends.
+    @Test
+    fun aResumedRunStartsAtItsSaveStep() {
+        val states = ArrayList<CopyRunState>()
+        tracker.seen = { it?.let(states::add) }
+        val failed = ArrayList<String>()
+        val resumes = CopyResumes(tracker, { "Home" }, {}, { failed += it }) { _, _, _, _ -> }
+        val report = resumes.resuming(ResumedCopy("server:h", 3, "acc", firstCopy = true, scan = null, saved = 0.5f))
+        val first = states.first()
+        assertEquals(CopyStep.Save, first.step)
+        assertTrue(first.whole && first.arriving)
+        assertEquals(READ_SHARE + BUILD_SHARE + ADD_SHARE + SAVE_SHARE * 0.5f, first.fraction!!, 1e-6f)
+        assertEquals(1, states.size)
+        report.saved(0.4f)
+        assertEquals("a lower part moved the bar back", first.fraction, tracker.run.value!!.fraction)
+        report.saved(0.75f)
+        assertTrue(tracker.run.value!!.fraction!! > first.fraction!!)
+        report.ended(ApplyPending("The disk is full."))
+        assertEquals(listOf("The disk is full."), failed)
+        assertEquals("The disk is full.", (tracker.outcome.value as CopyOutcome.Failed).reason)
+        assertNull(tracker.run.value)
+    }
+
+    // The Save step's bar moves through its share by how much of the save
+    // is in, and holds at its start until its groups are planned.
+    @Test
+    fun theSaveStepMovesThroughItsShare() {
+        val start = READ_SHARE + BUILD_SHARE + ADD_SHARE
+        assertEquals(start, copyFraction(CopyStep.Save, 0, null)!!, 0f)
+        assertEquals(start, copyFraction(CopyStep.Save, 0, SAVE_PARTS)!!, 0f)
+        assertEquals(start + SAVE_SHARE / 2, copyFraction(CopyStep.Save, SAVE_PARTS / 2, SAVE_PARTS)!!, 1e-6f)
+        assertEquals(1f, copyFraction(CopyStep.Save, SAVE_PARTS, SAVE_PARTS)!!, 1e-6f)
+        assertNull("the Save step has no count", copyCount(CopyStep.Save, 5, 10))
     }
 
     // Nothing in the copy's state can grow with the library.

@@ -4,6 +4,7 @@ import androidx.media3.common.MediaItem
 import app.winters.octo.home.HomeSection
 import app.winters.octo.home.HomeSectionEntry
 import app.winters.octo.ui.liveradio.LIVE_NEAR_TITLE
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -36,11 +37,44 @@ fun carRadioShelves(stations: List<MediaItem>, live: List<MediaItem>, near: List
 // What `pick` chose, kept until `key` changes, so a car's Home does not
 // reshuffle while it shows.
 class CarPicks<T>(private val pick: suspend () -> T) {
+    // How many times it picked, for a test.
+    @Volatile var picked = 0
+        private set
+
     private val lock = Mutex()
     private var kept: Pair<Any?, T>? = null
 
     suspend fun forKey(key: Any?): T = lock.withLock {
-        kept?.takeIf { it.first == key }?.second ?: pick().also { kept = key to it }
+        kept?.takeIf { it.first == key }?.second ?: pick().also {
+            kept = key to it
+            picked++
+        }
+    }
+}
+
+// The car's random shelves (`pick`), kept until the library's size (as
+// PickCount reads it) or the time of its last server copy changes.
+class CarHomePicks<T>(applyStamp: StateFlow<Long>, count: suspend () -> Int, private val syncedAt: suspend () -> Long?, pick: suspend () -> T) {
+    val picks = CarPicks(pick)
+    private val size = PickCount(applyStamp, count)
+
+    suspend fun now(): T = picks.forKey(size.now() to syncedAt())
+}
+
+// The library's size as the car's random shelves key on it: read while no
+// save is applying (`applyStamp` even, and the same before and after the
+// read), else the size read last, so a save that lands in many groups
+// changes the key once, at its end or at a stop.
+class PickCount(private val applyStamp: StateFlow<Long>, private val count: suspend () -> Int) {
+    @Volatile private var kept: Int? = null
+
+    suspend fun now(): Int {
+        val stamp = applyStamp.value
+        if (stamp % 2 == 0L) {
+            val read = count()
+            if (applyStamp.value == stamp) return read.also { kept = it }
+        }
+        return kept ?: count().also { kept = it }
     }
 }
 

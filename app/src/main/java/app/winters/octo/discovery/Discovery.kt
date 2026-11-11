@@ -3,31 +3,37 @@ package app.winters.octo.discovery
 import app.winters.octo.animated.AnimatedArts
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
+import app.winters.octo.catalog.keptFind
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.onlineArtwork
 import app.winters.octo.catalog.searchKey
+import app.winters.octo.data.Drains
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
 import app.winters.octo.data.runsOcto
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.Arriving
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.arriving
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
+import app.winters.octo.subsonic.AlbumWithSongs
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
+import app.winters.octo.ui.paging.serverAlbumVote
 import dagger.Lazy
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -36,6 +42,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
+import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import app.winters.octo.subsonic.OCTO_STATIONS
@@ -120,8 +128,6 @@ data class ServerLists(
     val groups: List<Pair<OctoListGroup, List<Station>>> = emptyList(),
 )
 
-class OnlineAlbumPage(val album: OnlineAlbum, val songs: List<TrackEntity>)
-
 class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
 
 // Radio answers remembered for "Suggested by" before the oldest are dropped,
@@ -137,6 +143,7 @@ private const val SUGGESTION_LIFETIME_MS = 12 * 60 * 60 * 1000L
 // cannot answer, and answers nothing when no server is signed in.
 @Singleton
 class Discovery @Inject constructor(
+    private val db: CatalogDatabase,
     private val sessions: SessionRepository,
     private val sources: SourceDao,
     private val catalog: CatalogDao,
@@ -144,7 +151,13 @@ class Discovery @Inject constructor(
     // Taken lazily: ServerSync needs PlaylistSync, which needs this.
     private val sync: Lazy<ServerSync>,
     private val animatedArts: AnimatedArts,
+    private val drains: Drains,
+    // Finds whose rows are kept behind the answer that found them.
+    private val finds: FindMap,
 ) {
+    // Names each drained answer read here, so two never share a file.
+    private val drained = AtomicLong()
+
     // Lists the server no longer has, found out on their own page, by id.
     private val _gone = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val gone: SharedFlow<String> = _gone.asSharedFlow()
@@ -277,38 +290,24 @@ class Discovery @Inject constructor(
         return resolve(client, sourceId, client.stationSongs(id, STATION_BATCH, after.mapNotNull(serverIds::get)))
     }
 
-    // The songs a station, or a Made for you list, has lined up now.
-    suspend fun stationSongs(id: String): List<TrackEntity> {
-        val (client, sourceId) = server() ?: return emptyList()
-        return resolve(client, sourceId, client.playlist(id).entry)
-    }
-
-    suspend fun album(id: String): OnlineAlbumPage? {
-        val (client, sourceId) = server() ?: return null
-        val album = client.album(id)
-        animatedArts.note(client, album.id, album.animatedArt)
-        val info = OnlineAlbum(
-            album.id, album.name, album.artist, album.artistId, album.year, album.songCount,
-            onlineArtwork(sourceId, album.coverArt),
-        )
-        return OnlineAlbumPage(info, resolve(client, sourceId, album.song))
-    }
-
-    // A library album as the server lists it now, found from its songs
-    // (`trackIds`): the library's songs and, as finds, the ones it lacks
-    // (see outsideAlbumSongs), in the server's order. Null when no Octo
-    // server is signed in (only Octo lists songs outside the library) or
-    // none of the songs came from it.
-    suspend fun libraryAlbum(trackIds: List<String>): List<TrackEntity>? {
+    // A library album as the server lists it now, by its id: the library's
+    // songs and, as finds, the ones it lacks (see outsideAlbumSongs), in the
+    // server's order. The album asked for is the server's that most of its
+    // songs came from (serverAlbumOf). Null when no Octo server is signed in
+    // (only Octo lists songs outside the library) or none of its songs came
+    // from it. The answer is drained to a file and held only when the
+    // listing itself names at most `most` songs; a longer one answers null,
+    // and the page shows the library's songs. So only an album page holding
+    // at most WHOLE_ALBUM_MAX of the library's songs asks for it, with that
+    // limit; a bigger one reads the listing a page at a time (AlbumListing).
+    suspend fun libraryAlbum(albumId: String, most: Int): List<TrackEntity>? {
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return null
         if (!session.runsOcto) return null
         val (client, sourceId) = server() ?: return null
-        val copies = trackIds.chunked(900).flatMap { sources.copiesOf(it) }.filter { it.sourceId == sourceId }
-        val albumRow = copies.groupingBy { it.albumId }.eachCount().maxByOrNull { it.value }?.key ?: return null
-        val native = sources.albumNativeId(albumRow) ?: return null
-        val album = client.album(native)
+        val native = serverAlbumOf(db, albumId, sourceId) ?: return null
+        val (album, sent) = drains.use("library-album-${drained.incrementAndGet()}.json") { file -> client.listingUpTo(native, file, most) }
         animatedArts.note(client, native, album.animatedArt)
-        val sent = album.song
+        sent ?: return null
         return outsideAlbumSongs(sent, resolve(client, sourceId, sent))
     }
 
@@ -350,6 +349,9 @@ class Discovery @Inject constructor(
 
     fun suggestedBy(trackId: String): String? = suggested[trackId]
 
+    // Radio sources a server list's read found, by the songs they resolved to.
+    internal fun noteSuggestions(by: Map<String, String>) = suggested.putAll(by)
+
     // Songs from the server as the app shows them, in the order sent: a
     // library song as it is in the library, anything else as a find. A find
     // already downloaded is the library song it became.
@@ -373,18 +375,7 @@ class Discovery @Inject constructor(
     }
 
     // What each song sent is, in order, with the finds among them kept.
-    private suspend fun resolveEach(sourceId: String, songs: List<Song>): List<Resolved> {
-        if (songs.isEmpty()) return emptyList()
-        val links = songs.map { it.id }.distinct().chunked(900)
-            .flatMap { sources.libraryLinks(sourceId, it) }
-            .associate { it.serverId to it.trackId }
-        val unlinked = songs.filter { it.id !in links }
-        val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().sorted().chunked(900).flatMap { catalog.tracksWithKeys(it) }
-        val resolved = resolveSongs(songs, sourceId, links, candidates, System.currentTimeMillis())
-        // Finds as stored, so a length learned from playing one shows.
-        val kept = online.keep(resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id }).associateBy { it.id }
-        return resolved.map { r -> if (r is Resolved.Found) kept[r.song.id]?.let(Resolved::Found) ?: r else r }
-    }
+    private suspend fun resolveEach(sourceId: String, songs: List<Song>): List<Resolved> = resolveEachRead(sources, catalog, online, finds, sourceId, songs)
 
     // The server's id for a song: a find's own, a library song's server copy,
     // or, for a song only on the phone, the same song as the server knows it:
@@ -431,6 +422,57 @@ class Discovery @Inject constructor(
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
         return client to serverSourceId(client.primaryUrl)
     }
+}
+
+// What each song sent is, in order (Discovery.resolveEach), read with no
+// write: the finds among them as the app keeps them, so a length learned
+// from playing one shows, held in the find map with their rows kept behind
+// the answer, so a play of them waits for no write.
+internal suspend fun resolveEachRead(
+    sources: SourceDao,
+    catalog: CatalogDao,
+    online: OnlineDao,
+    finds: FindMap,
+    sourceId: String,
+    songs: List<Song>,
+): List<Resolved> {
+    if (songs.isEmpty()) return emptyList()
+    val links = songs.map { it.id }.distinct().chunked(900)
+        .flatMap { sources.libraryLinks(sourceId, it) }
+        .associate { it.serverId to it.trackId }
+    val unlinked = songs.filter { it.id !in links }
+    val candidates = unlinked.flatMap { titleKeys(it.title) }.distinct().sorted().chunked(900).flatMap { catalog.tracksWithKeys(it) }
+    val resolved = resolveSongs(songs, sourceId, links, candidates, System.currentTimeMillis())
+    val found = resolved.filterIsInstance<Resolved.Found>().map { it.song }.distinctBy { it.id }
+    val before = found.map { it.id }.chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
+    val kept = found.map { f -> before[f.id]?.let { keptFind(f, it) } ?: f }.associateBy { it.id }
+    finds.post(kept.values)
+    return resolved.map { r -> if (r is Resolved.Found) kept[r.song.id]?.let(Resolved::Found) ?: r else r }
+}
+
+// The server's own id of the album on server `sourceId` that most of a
+// library album's songs came from, their copies counted a page of songs at
+// a time (serverAlbumVote); null when none came from it.
+internal suspend fun serverAlbumOf(db: CatalogDatabase, albumId: String, sourceId: String): String? =
+    serverAlbumVote(db, albumId, sourceId)?.let { db.sourceDao().albumNativeId(it) }
+
+// An album's listing, drained to `file` and read a page at a time: the
+// album, and its songs when the listing names at most `most` of them, or
+// null for its songs when it names more, holding no more than a page of
+// those past the limit.
+internal suspend fun SubsonicClient.listingUpTo(id: String, file: File, most: Int): Pair<AlbumWithSongs, List<Song>?> {
+    val sent = ArrayList<Song>()
+    var over = false
+    val album = albumInto(id, file) { page ->
+        if (over) return@albumInto
+        if (sent.size + page.size > most) {
+            over = true
+            sent.clear()
+        } else {
+            sent += page
+        }
+    }
+    return album to sent.takeUnless { over }
 }
 
 // Which source suggested each track, newest last: past the cap the oldest

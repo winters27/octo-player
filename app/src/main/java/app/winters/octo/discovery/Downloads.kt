@@ -10,6 +10,7 @@ import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FIND_PREFIX
+import app.winters.octo.catalog.HoldKind
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.SongIdentity
@@ -19,6 +20,7 @@ import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
+import app.winters.octo.playback.FindMap
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.server.sourceId
@@ -98,6 +100,9 @@ class Downloads @Inject constructor(
     // The server downloads sheet, told when a song is asked for so its
     // list looks now. Lazy: it only follows, and nothing here waits on it.
     private val serverDownloads: Lazy<app.winters.octo.data.ServerDownloads>,
+    // Finds a start plays before their rows are written: a write to one's
+    // row waits for its keep.
+    private val finds: FindMap,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -131,7 +136,7 @@ class Downloads @Inject constructor(
             override suspend fun takeIn(libraryId: String): String? = sync.get().takeInSong(libraryId)
 
             override suspend fun adopt(findId: String, trackId: String) {
-                val find = online.song(findId) ?: return
+                val find = online.song(findId) ?: finds[findId] ?: return
                 if (find.adoptedId.isNotEmpty()) return
                 val track = catalog.tracksByIdsUnordered(listOf(trackId)).firstOrNull() ?: return
                 adoptAs(find.id, track)
@@ -218,7 +223,7 @@ class Downloads @Inject constructor(
         val client = client() ?: return false
         return try {
             client.star(listOf(track.id.removePrefix(FIND_PREFIX)))
-            online.setRequested(track.id, System.currentTimeMillis())
+            markRequested(online, finds, listOf(track.id), System.currentTimeMillis())
             hint.added()
             arrivals.askedSong(track.id, track.title)
             tracker.retry(track.id)
@@ -237,12 +242,41 @@ class Downloads @Inject constructor(
         return try {
             client.starAlbums(listOf(albumId))
             val now = System.currentTimeMillis()
-            val finds = songs.filter { isFind(it.id) }
-            finds.forEach { online.setRequested(it.id, now) }
+            val asked = songs.filter { isFind(it.id) }
+            markRequested(online, finds, asked.map { it.id }, now)
             hint.added()
-            val coming = finds.filter { state(it.id) != DownloadState.Done }
+            val coming = asked.filter { state(it.id) != DownloadState.Done }
             arrivals.askedAlbum(title.ifBlank { coming.firstOrNull()?.album.orEmpty() }, coming.map { it.id })
             coming.forEach { tracker.retry(it.id) }
+            serverDownloads.get().wake()
+            follow()
+            true
+        } catch (e: SubsonicException) {
+            false
+        }
+    }
+
+    // The same for an album too big to hold: `pages` hands its finds a page
+    // at a time, each page asked for and followed in turn, and the album
+    // settles in one line once its last page has joined.
+    suspend fun requestAlbumPaged(albumId: String, title: String, pages: suspend (suspend (List<TrackEntity>) -> Unit) -> Unit): Boolean {
+        val client = client() ?: return false
+        return try {
+            client.starAlbums(listOf(albumId))
+            val now = System.currentTimeMillis()
+            hint.added()
+            val ask = arrivals.opened(title)
+            try {
+                pages { page ->
+                    val asked = page.filter { isFind(it.id) }
+                    markRequested(online, finds, asked.map { it.id }, now)
+                    val coming = asked.filter { state(it.id) != DownloadState.Done }
+                    arrivals.joined(ask, coming.map { it.id })
+                    coming.forEach { tracker.retry(it.id) }
+                }
+            } finally {
+                arrivals.closed(ask)?.let(feedback::done)
+            }
             serverDownloads.get().wake()
             follow()
             true
@@ -271,7 +305,7 @@ class Downloads @Inject constructor(
         adoptWaiting(
             waiting,
             page = { key, after -> catalog.tracksWithKeyPage(key, after, FIND_PAGE) },
-            locked = { block -> merge.get().betweenRebuilds(block) },
+            locked = { block -> merge.get().betweenRebuilds(HoldKind.Page, block) },
             adopt = { find, track -> adoptAs(find.id, track) },
         )
     }
@@ -279,7 +313,7 @@ class Downloads @Inject constructor(
     // A find became this library song: the two are linked. Downloading is
     // not liking, so the song is not hearted; that stays the listener's call.
     private suspend fun adoptAs(findId: String, track: TrackEntity) {
-        online.adopt(findId, track.id)
+        adoptFind(online, finds, findId, track.id)
     }
 
     // Follows the downloads asked for: by asking the server how they are
@@ -439,6 +473,21 @@ fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<
     return waiting.mapNotNull { find ->
         byTitle.candidates(find.title, find.artist).firstOrNull { sameSong(find.title, find.artist, find.durationMs, it) }?.let { find.id to it }
     }.toMap()
+}
+
+// Marks finds asked for at `at`: each waits for its row's keep when a
+// start holds it (FindMap), so the mark finds the row.
+internal suspend fun markRequested(online: OnlineDao, finds: FindMap, ids: List<String>, at: Long) {
+    for (id in ids) {
+        finds.awaitKept(id)
+        online.setRequested(id, at)
+    }
+}
+
+// Links a find to the library song it became, after its row's keep.
+internal suspend fun adoptFind(online: OnlineDao, finds: FindMap, findId: String, trackId: String) {
+    finds.awaitKept(findId)
+    online.adopt(findId, trackId)
 }
 
 // How many library songs one read of the finds' walk takes.

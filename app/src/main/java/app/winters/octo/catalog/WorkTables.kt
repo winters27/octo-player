@@ -1,5 +1,6 @@
 package app.winters.octo.catalog
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
@@ -44,8 +45,10 @@ data class SyncSongEntity(
     val json: String,
 )
 
+// A listed album, `seq` its place in the server's list, `place` its place
+// in the source once the copy's walk of the list has given it one.
 @Entity(tableName = "sync_album", indices = [Index("seq")])
-data class SyncAlbumEntity(@PrimaryKey val id: String, val seq: Long, val json: String)
+data class SyncAlbumEntity(@PrimaryKey val id: String, val seq: Long, val json: String, val place: Long? = null)
 
 @Entity(tableName = "sync_artist", indices = [Index("seq")])
 data class SyncArtistEntity(@PrimaryKey val id: String, val seq: Long, val json: String)
@@ -74,6 +77,7 @@ data class SyncStarredEntity(val generation: Long, val kind: String, val id: Str
 // One library song while a merge gathers its copies: the base copy's
 // columns with the merge's rules applied so far. `track.year` is the
 // edition's year; the library shows the original year when there is one.
+// A save's find reads the lowest song filed under a relink key here.
 @Entity(
     tableName = "merge_candidate",
     primaryKeys = ["id"],
@@ -83,6 +87,7 @@ data class SyncStarredEntity(val generation: Long, val kind: String, val id: Str
         Index("albumId", "discKey", "trackNo", "seq"),
         Index("albumId", "seq"),
         Index("seq"),
+        Index("relinkKey", "id"),
     ],
 )
 data class MergeCandidateEntity(
@@ -109,11 +114,12 @@ data class MergeCandidateEntity(
 @Entity(tableName = "merged_id_next", indices = [Index("mergedId")])
 data class MergedIdNextEntity(@PrimaryKey val sourceRowId: String, val mergedId: String)
 
-// The merge's albums and artists, before the swap.
-@Entity(tableName = "album_next", primaryKeys = ["id"])
+// The merge's albums and artists, before the swap. A save's find reads
+// those filed under a search key.
+@Entity(tableName = "album_next", primaryKeys = ["id"], indices = [Index("searchKey", "id")])
 data class AlbumNextEntity(@Embedded val album: AlbumEntity)
 
-@Entity(tableName = "artist_next", primaryKeys = ["id"])
+@Entity(tableName = "artist_next", primaryKeys = ["id"], indices = [Index("searchKey", "id")])
 data class ArtistNextEntity(@Embedded val artist: ArtistEntity)
 
 // Rows taken in while a copy was being built, so the copy keeps them.
@@ -144,6 +150,15 @@ data class SourceMetaEntity(
     val stagedTracks: Int,
     val stagedAlbums: Int,
     val stagedArtists: Int,
+    // While the copy swapped in last is leaving the stage: the source's
+    // next copy waits for it before staging anything.
+    @ColumnInfo(defaultValue = "0") val stageClearing: Boolean = false,
+    // How many of the stage's songs, albums and artists were placed other
+    // than where their source rows are, or more: the swap writes a table's
+    // places only when its count is above 0.
+    @ColumnInfo(defaultValue = "0") val movedTracks: Int = 0,
+    @ColumnInfo(defaultValue = "0") val movedAlbums: Int = 0,
+    @ColumnInfo(defaultValue = "0") val movedArtists: Int = 0,
 )
 
 // Each kept account's last copy: of which source, when, how much came,
@@ -162,7 +177,35 @@ data class AccountSyncEntity(
 )
 
 // The merge's own record: the inputs it last merged, whether a merge is
-// between its claim and its swap, and the server the library was last
-// merged for ("" for none, null before any merge recorded it).
+// between its claim and its swap, the server the library was last merged
+// for ("" for none, null before any merge recorded it), and how many swaps
+// have changed the library's rows, which only grows.
+//
+// While a save is part applied, from its first group's commit to its
+// last's, it keeps what it needs to finish here: the claim it applies (its
+// sources with their ranks and whether each is a staged copy, the copies it
+// claimed with their generations and counts, and the server), the skip key
+// it ends with, the account whose copy it saves, whether that is the
+// account's first copy, and the server's scan the copy read. `applyClaim`
+// is null when no save is part applied. A save stopped part way keeps the
+// stop's words in `applyStopped` until it resumes.
+//
+// Also kept: the account the play totals were last counted for, and the
+// mark of the launch that last opened the library, which every work owner
+// minted in that launch leads with.
 @Entity(tableName = "merge_state")
-data class MergeStateEntity(@PrimaryKey val id: Int, val skipKey: String?, val claimActive: Boolean, val server: String? = null)
+data class MergeStateEntity(
+    @PrimaryKey val id: Int,
+    val skipKey: String?,
+    val claimActive: Boolean,
+    val server: String? = null,
+    @ColumnInfo(defaultValue = "0") val swapCount: Long = 0,
+    val applyClaim: String? = null,
+    val applySkipKey: String? = null,
+    val applyAccount: String? = null,
+    @ColumnInfo(defaultValue = "0") val applyFirstCopy: Boolean = false,
+    val applyScan: String? = null,
+    val applyStopped: String? = null,
+    val totalsAccount: String? = null,
+    @ColumnInfo(defaultValue = "0") val launchMark: Long = 0,
+)

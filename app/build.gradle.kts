@@ -101,10 +101,23 @@ tasks.withType<Test>().configureEach {
     if (project.hasProperty("octoHeapProof")) {
         maxHeapSize = (project.findProperty("octoHeapProof") as String).ifEmpty { "256m" }
         systemProperty("octo.heapProof", "true")
+        // The save bounds the bound section runs, comma-separated (all of
+        // them without it).
+        project.findProperty("octoSaveBounds")?.let { systemProperty("octo.saveBounds", it as String) }
+        // The cases the bound section runs ("switch", "retag"; both without it).
+        project.findProperty("octoSaveCases")?.let { systemProperty("octo.saveCases", it as String) }
+        // A smaller library for a dry run of the save sections.
+        project.findProperty("octoProofSongs")?.let { systemProperty("octo.proofSongs", it as String) }
+        // Long titles, album and artist names in the proof library.
+        if (project.hasProperty("octoProofLongTitles")) systemProperty("octo.proofLongTitles", "true")
+        // Where the bound section keeps each case's libraries between runs.
+        project.findProperty("octoSaveFixtures")?.let { systemProperty("octo.saveFixtures", file(it as String).absolutePath) }
     }
     if (project.hasProperty("octoProofServer")) {
         systemProperty("octo.proofServer", (project.findProperty("octoProofServer") as String).ifEmpty { "true" })
         project.findProperty("octoProofDelay")?.let { systemProperty("octo.proofDelay", it as String) }
+        // The proof library as it is after the server read its folders again.
+        if (project.hasProperty("octoProofServerChange")) systemProperty("octo.proofServerChange", "true")
     }
     // The grep gate reads the app's own sources.
     systemProperty("octo.mainSources", file("src/main/java").absolutePath)
@@ -158,6 +171,11 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
+    // Reads long server answers and backups as they stream in.
+    implementation(libs.moshi)
+    // Long lists shown a page at a time.
+    implementation(libs.androidx.paging.runtime)
+    implementation(libs.androidx.paging.compose)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     debugImplementation(libs.compose.ui.tooling)
@@ -168,6 +186,12 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     // The SQLite of the oldest phones Octo runs on, for checking queries there.
     testImplementation(libs.sqlite.jdbc)
+    testImplementation(libs.androidx.paging.testing)
+    // Compose content and the player, run on Robolectric.
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.media3.test.utils)
+    testImplementation(libs.media3.test.utils.robolectric)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(platform(libs.compose.bom))

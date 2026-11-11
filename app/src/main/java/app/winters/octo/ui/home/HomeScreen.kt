@@ -102,6 +102,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
+    val playCountsProblem by vm.playCountsProblem.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
     val keptStations by vm.keptStations.collectAsStateWithLifecycle()
     val copyCard by vm.copyCard.collectAsStateWithLifecycle()
@@ -163,25 +164,30 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                     // The shelves in the order kept in Settings, the hidden
                     // ones left out. Nothing is drawn until the order is read.
                     val order = sections
-                    order?.filter { it.shown }.orEmpty().forEach { entry ->
+                    val shown = order?.filter { it.shown }.orEmpty()
+                    // Play counts that cannot be read now say so once, where
+                    // the first shelf made from them would be.
+                    val problemAt = playCountsProblem?.let { shown.firstOrNull { it.section in PlayCountShelves }?.section }
+                    shown.forEach { entry ->
                         val title = entry.section.title
+                        if (entry.section == problemAt) playCountsCard(title, playCountsProblem.orEmpty(), vm::retryPlayCounts)
                         when (entry.section) {
                             HomeSection.Pinned -> pinnedShelf(pinned, onOpen)
-                            HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
+                            HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed.orEmpty(), onOpen, onTitle = { onOpen(HistoryRoute()) })
                             HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.Stations -> stationShelf(title, vm.stations.filter { it.streamUrl == null }, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.InternetRadio -> liveRadio(title)
                             HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
                                 stationShelf(title, vm.mixes[entry.section.mixGroup].orEmpty(), vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
-                            HomeSection.MostPlayed -> songShelf(title, mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
+                            HomeSection.MostPlayed -> songShelf(title, mostPlayed.orEmpty(), vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                             HomeSection.FavoriteAlbums -> shelf(title, favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                             HomeSection.Charts -> songShelf(title, vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
                             HomeSection.Artists -> artistShelf(vm, onOpen)
                             HomeSection.SomethingDifferent -> shelf(title, vm.surprise, onOpen)
-                            HomeSection.NotPlayedLately -> shelf(title, rediscovery.notPlayedLately, onOpen)
-                            HomeSection.NeverFinished -> shelf(title, rediscovery.neverFinished, onOpen)
-                            HomeSection.NeverPlayed -> shelf(title, rediscovery.neverPlayed, onOpen)
+                            HomeSection.NotPlayedLately -> shelf(title, rediscovery?.notPlayedLately.orEmpty(), onOpen)
+                            HomeSection.NeverFinished -> shelf(title, rediscovery?.neverFinished.orEmpty(), onOpen)
+                            HomeSection.NeverPlayed -> shelf(title, rediscovery?.neverPlayed.orEmpty(), onOpen)
                         }
                     }
                 }
@@ -229,6 +235,33 @@ private fun LazyListScope.shelf(
             items(albums, key = { it.id }) { album ->
                 AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
             }
+        }
+    }
+}
+
+// The shelves made from play counts.
+private val PlayCountShelves = setOf(
+    HomeSection.RecentlyPlayed,
+    HomeSection.MostPlayed,
+    HomeSection.NotPlayedLately,
+    HomeSection.NeverFinished,
+    HomeSection.NeverPlayed,
+)
+
+// Play counts that cannot be brought up to date, under the shelf's title:
+// why, and Try again.
+private fun LazyListScope.playCountsCard(title: String, words: String, onTryAgain: () -> Unit) {
+    moving(key = "title:$title") { ShelfTitle(title, null) }
+    moving(key = "play-counts") {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth()
+                .glassPanel(RoundedCornerShape(20.dp))
+                .padding(20.dp),
+        ) {
+            Text(words, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            AccentButton("Try again", onClick = onTryAgain, size = ButtonSize.Medium, modifier = Modifier.padding(top = 12.dp))
         }
     }
 }

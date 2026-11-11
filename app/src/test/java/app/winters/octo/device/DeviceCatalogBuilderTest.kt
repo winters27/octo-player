@@ -3,7 +3,12 @@ package app.winters.octo.device
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+// The build's rules, each case built through the scan's own steps with
+// albums built whole and put in order through the database (ScanBuild).
+@RunWith(RobolectricTestRunner::class)
 class DeviceCatalogBuilderTest {
     private fun row(
         id: Long,

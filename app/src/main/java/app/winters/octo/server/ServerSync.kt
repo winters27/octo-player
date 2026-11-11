@@ -14,7 +14,10 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.AccountSyncEntity
+import app.winters.octo.catalog.ApplyPending
 import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.catalog.ResumedCopy
+import app.winters.octo.catalog.SaveResumes
 import app.winters.octo.catalog.StageAborted
 import app.winters.octo.listening.FavouriteSync
 import app.winters.octo.listening.ListeningSync
@@ -209,8 +212,24 @@ internal suspend fun copyPlan(sourceId: String, copyAllAnyway: Boolean, finish: 
     return copyAllAnyway || need() != CopyNeed.AfterSync
 }
 
-// Why a copy failed, in words.
-internal fun copyProblem(e: Exception): String = if (e is StageAborted) e.reason else e.userMessage()
+// Deletes the rows of sources no longer kept (`gone`), under the source-write
+// gate. While a save part applied holds the sources' writes (its resume
+// stopped: ApplyPending), they stay for the next drop, which every server
+// change and every removal runs. Answers whether they went.
+internal suspend fun dropSources(merge: CatalogMerge, sources: SourceDao, gone: List<String>): Boolean = try {
+    merge.sourceWrite { gone.forEach { sources.deleteSource(it) } }
+    true
+} catch (e: ApplyPending) {
+    Log.w("Octo", "server sync: a removed server's rows wait for a save part way")
+    false
+}
+
+// Why a copy failed, in words: a save stopped part way says why it stopped.
+internal fun copyProblem(e: Throwable): String = when (e) {
+    is StageAborted -> e.reason
+    is ApplyPending -> e.reason
+    else -> e.userMessage()
+}
 
 // One copy of a sync job, start to end, as `tracker` shows it: it starts at
 // Connect with `guess` at whether it copies the whole library, learns what
@@ -351,6 +370,11 @@ class ServerSync @Inject constructor(
 
     private val switch = LibrarySwitch(merge::mergedFor, { merge.rebuild() }, _problem) { signedIn()?.sourceId.orEmpty() }
 
+    init {
+        // A save of a copy resumed by the merge shows and finishes here.
+        merge.resumes = resumes()
+    }
+
     // Whose library the screens show now: the id of the server in use once
     // its music has joined, or PHONE_LIBRARY. Null until the first is in place.
     private val _ready = MutableStateFlow<String?>(null)
@@ -448,10 +472,72 @@ class ServerSync @Inject constructor(
     // then copies whole before it ends (WholeCopyOwed).
     fun syncNow() = startSync(whole = true)
 
-    // Try again on a first copy that failed: its card goes and a copy starts.
+    // Try again on a first copy that failed: its card goes, and a save the
+    // copy left part way is resumed (and finished as the copy would have
+    // been); with none, a copy starts.
     fun tryAgain() {
         tracker.clearOutcome()
-        syncNow()
+        scope.launch {
+            val resumed = try {
+                merge.resumeSave()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "a resume of the library's save failed: ${e.javaClass.simpleName}")
+                true
+            }
+            if (!resumed) syncNow()
+        }
+    }
+
+    // A save of a server's copy that stopped part way, resumed by the merge:
+    // shown as that copy at its Save step (CopyResumes), and finished as a
+    // copy is (CopyRun.complete) once it is in, as a sync job, one at a time
+    // with every copy and its steps. Signed out of its account (or with
+    // another server in use), its music is in and its steps wait for the
+    // account's next sign-in (CopyNeed.AfterSync).
+    private fun resumes(): SaveResumes = CopyResumes(
+        tracker,
+        nameOf = { account -> sessions.servers.value.find(account)?.name ?: signedIn()?.takeIf { it.id == account }?.name.orEmpty() },
+        began = { front.planned(true) },
+        failed = { words -> _problem.value = words },
+        finish = ::finishResumed,
+    )
+
+    private fun finishResumed(resumed: ResumedCopy, token: Long, pass: Int, report: CopyReport) {
+        synchronized(this) {
+            val before = job
+            job = scope.launch {
+                before?.join()
+                _syncing.value = true
+                try {
+                    val session = signedIn()?.takeIf { it.id == resumed.account && it.sourceId == resumed.sourceId }
+                    if (session == null) {
+                        copies.resumedIn(resumed.account, resumed.sourceId, ROWS_VERSION)
+                        report.staged(copies.liveTrackCount(resumed.sourceId), copies.liveAlbumCount(resumed.sourceId))
+                        report.swapped()
+                    } else {
+                        val done = CopyRun(copy, copies, afterSyncSteps()).complete(resumed.account, resumed.sourceId, copied = true, resumed.scan, swapped = {}, report)
+                        report.staged(done.songs, done.albums)
+                        lookedAt[session.id] = SystemClock.elapsedRealtime()
+                    }
+                    _problem.value = null
+                    tracker.passDone(token, pass)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _problem.value = copyProblem(e)
+                    tracker.passFailed(token, pass, copyProblem(e))
+                    Log.w("Octo", "server sync failed after a resumed save: ${e.javaClass.simpleName}")
+                } finally {
+                    _syncing.value = false
+                    tracker.end(token)
+                    stopPlainNotice()
+                    val ended = tracker.outcome.value?.takeIf { it.token == token }
+                    if (ended != null && !front.inFront.value) CopyNotices.closing(context, ended)
+                }
+            }
+        }
     }
 
     // The done card of the run `token` was put away.
@@ -795,8 +881,7 @@ class ServerSync @Inject constructor(
         val gone = sources.sourceIds().filter { isServerSource(it) && it !in kept }
         // Their songs are no library songs already; the rows just go, never
         // while a merge reads the sources.
-        if (gone.isNotEmpty()) merge.sourceWrite { gone.forEach { sources.deleteSource(it) } }
-        if (gone.isNotEmpty()) context.syncData.edit { p -> gone.forEach { p.remove(copyOfKey(it)) } }
+        if (gone.isNotEmpty() && dropSources(merge, sources, gone)) context.syncData.edit { p -> gone.forEach { p.remove(copyOfKey(it)) } }
         // Playlists kept with a server that is gone stay, only on the phone.
         playlists.keepOnly(kept)
     }

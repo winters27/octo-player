@@ -20,7 +20,22 @@ fun findId(serverId: String) = "$FIND_PREFIX$serverId"
 
 fun isFind(trackId: String) = trackId.startsWith(FIND_PREFIX)
 
-@Entity(tableName = "online_song", indices = [Index("sourceId"), Index("requestedAt")])
+// A find is needed while any playlist row holds it, in any item set (one
+// being written names it before it is shown), while any queue holds it (a
+// parked account's included), and while a playlist's edit log names it.
+// The playlist rows, the queue's entries and the edit log are each probed
+// on their song id index.
+internal const val PRUNE_FINDS_SQL = """
+    DELETE FROM online_song WHERE sourceId NOT IN (:kept) OR (
+        sourceId = :sourceId AND requestedAt = 0 AND seenAt < :before
+        AND NOT EXISTS (SELECT 1 FROM playlist_item i WHERE i.trackId = online_song.id)
+        AND NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.trackId = online_song.id)
+        AND NOT EXISTS (SELECT 1 FROM playlist_edit_log e WHERE e.trackId = online_song.id)
+    )
+"""
+
+// The finds a library song adopted are found by its id when the id moves.
+@Entity(tableName = "online_song", indices = [Index("sourceId"), Index("requestedAt"), Index("adoptedId")])
 data class OnlineSongEntity(
     // "find:<server id>", the id it has in the queue.
     @PrimaryKey val id: String,
@@ -98,14 +113,7 @@ interface OnlineDao {
     // ones nothing needs: not asked for, and not in the saved queue or a
     // playlist. Another kept server's wait for it (its queue and playlists
     // may hold them).
-    @Query(
-        """
-        DELETE FROM online_song WHERE sourceId NOT IN (:kept) OR (
-            sourceId = :sourceId AND requestedAt = 0 AND seenAt < :before AND id NOT IN (SELECT trackId FROM queue_item)
-            AND id NOT IN (SELECT trackId FROM playlist_item)
-        )
-        """,
-    )
+    @Query(PRUNE_FINDS_SQL)
     suspend fun prune(sourceId: String, kept: List<String>, before: Long)
 
     @Query("DELETE FROM online_song")

@@ -1,6 +1,9 @@
 package app.winters.octo.server
 
 import androidx.annotation.VisibleForTesting
+import app.winters.octo.catalog.ResumeReport
+import app.winters.octo.catalog.ResumedCopy
+import app.winters.octo.catalog.SaveResumes
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicLong
@@ -22,6 +25,39 @@ interface CopyReport {
 
     companion object {
         val None: CopyReport = object : CopyReport {}
+    }
+}
+
+// A save of a server's copy that stopped part way, as the copy's surfaces
+// show its resume: a run at the copy's Save step from how much was in
+// (CopyTracker.beginResume), how much of the save is in after each group,
+// and once it is in, `finish` with the run's token, pass and report, which
+// finishes the copy as a copy is and says how that ended. A resume that
+// stops again says why (`failed`) and its run ends.
+class CopyResumes(
+    private val tracker: CopyTracker,
+    private val nameOf: (account: String) -> String,
+    private val began: () -> Unit,
+    private val failed: (words: String) -> Unit,
+    private val finish: (copy: ResumedCopy, token: Long, pass: Int, report: CopyReport) -> Unit,
+) : SaveResumes {
+    override fun resuming(copy: ResumedCopy): ResumeReport {
+        val (token, pass) = tracker.beginResume(copy.account, nameOf(copy.account), arriving = copy.firstCopy, saved = copy.saved)
+        began()
+        val report = tracker.report(token, pass)
+        return object : ResumeReport {
+            override fun saved(part: Float) = report.at(CopyStep.Save, savedParts(part), SAVE_PARTS)
+
+            override fun ended(failure: Throwable?) {
+                if (failure == null) {
+                    finish(copy, token, pass, report)
+                } else {
+                    failed(copyProblem(failure))
+                    tracker.passFailed(token, pass, copyProblem(failure))
+                    tracker.end(token)
+                }
+            }
+        }
     }
 }
 
@@ -71,6 +107,36 @@ class CopyTracker @Inject constructor() {
         _run.value = state
         seen(state)
         return token
+    }
+
+    // A run for a whole copy whose save stopped part way and is resumed:
+    // its one pass is at the Save step from its first write, with `saved` of
+    // the save in already (0 to 1), so its bar goes on from where the stop
+    // left it; `arriving` for the account's first copy. Answers its token and
+    // pass.
+    fun beginResume(account: String, server: String, arriving: Boolean, saved: Float): Pair<Long, Int> {
+        val token = tokens.incrementAndGet()
+        val done = savedParts(saved)
+        val state = CopyRunState(
+            token = token,
+            pass = 1,
+            account = account,
+            server = server,
+            arriving = arriving,
+            whole = true,
+            step = CopyStep.Save,
+            done = done,
+            of = SAVE_PARTS,
+            fraction = copyFraction(CopyStep.Save, done, SAVE_PARTS),
+            artwork = null,
+            songs = 0,
+            albums = 0,
+            dismissed = false,
+        )
+        if (arriving) clearOutcome()
+        _run.value = state
+        seen(state)
+        return token to 1
     }
 
     // The job's next copy starts at Connect, `whole` a guess until it is

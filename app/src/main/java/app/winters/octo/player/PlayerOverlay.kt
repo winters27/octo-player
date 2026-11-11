@@ -1063,7 +1063,8 @@ private fun TitleBlock(now: NowPlaying, calm: Boolean, onOpenArtist: (String) ->
                 overflow = TextOverflow.Clip,
             )
             Text(
-                song.artist.orEmpty(),
+                // While a play starts, the words say so in the artist's place.
+                song.starting ?: song.artist.orEmpty(),
                 style = OctoType.body,
                 color = accentInk,
                 maxLines = 1,

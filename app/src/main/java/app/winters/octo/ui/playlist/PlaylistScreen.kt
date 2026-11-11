@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.SwipeToDismissBox
@@ -28,13 +27,16 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.PlaylistEntity
-import app.winters.octo.catalog.PlaylistTrack
+import app.winters.octo.catalog.PlaylistRowView
+import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
-import app.winters.octo.catalog.isFind
-import app.winters.octo.catalog.mosaicCovers
+import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.elevation3
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playlists.PlaylistSync
@@ -45,29 +47,28 @@ import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.LocalSongSelection
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.RemoveBackground
-import app.winters.octo.ui.common.SelectableSongs
 import app.winters.octo.ui.common.SongRow
+import app.winters.octo.ui.common.picked
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.menu.SongMenuContext
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.rememberListRows
+import app.winters.octo.ui.paging.tableChanges
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-
-// A playlist as its page shows it. `playlist` is null once it is deleted.
-data class PlaylistPage(
-    val playlist: PlaylistEntity?,
-    val tracks: List<PlaylistTrack>,
-) {
-    val covers = mosaicCovers(tracks.map { it.track.albumId to it.track.artwork })
-    val durationMs = tracks.sumOf { it.track.durationMs }
-}
 
 @HiltViewModel(assistedFactory = PlaylistViewModel.Factory::class)
 class PlaylistViewModel @AssistedInject constructor(
@@ -77,11 +78,28 @@ class PlaylistViewModel @AssistedInject constructor(
     private val playback: PlaybackConnection,
     private val feedback: Feedback,
     sync: PlaylistSync,
+    loaders: ListLoaders,
+    reads: LibraryReads,
+    db: CatalogDatabase,
+    owners: WorkOwners,
 ) : ViewModel() {
-    // Null until first read.
-    val page: StateFlow<PlaylistPage?> =
-        combine(userDao.playlist(id), userDao.playlistTracks(id), ::PlaylistPage)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // The playlist's row; null once it is deleted, and before first read.
+    val playlist: StateFlow<Loaded<PlaylistEntity?>> =
+        userDao.playlist(id).map { Loaded(it) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Loaded(null, read = false))
+
+    // Its count, length and covers.
+    val summary: StateFlow<PlaylistSummary?> =
+        store.summary(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Its songs in pages, each generation reading the set it pinned when it
+    // began, under a walk of its own.
+    val rows: ListHandle<Unit, PlaylistRowView> = ListHandle(
+        viewModelScope,
+        Unit,
+        { loaders.playlist(id, owners.walk()) },
+        reads,
+        { _, loader -> db.tableChanges(loader.tables) },
+    )
 
     // How many of its songs the server's copy goes without, being only on the phone.
     val phoneOnly: StateFlow<Int> =
@@ -95,31 +113,37 @@ class PlaylistViewModel @AssistedInject constructor(
     // playlist unless the last sync found the listener may.
     fun takesOut(playlist: PlaylistEntity): Boolean = !playlist.family || playlist.familyMayRemove
 
-    private fun ids() = page.value?.tracks.orEmpty().map { it.track.id }
+    private fun name() = summary.value?.name ?: playlist.value.value?.name
 
-    fun play(index: Int) = playback.playTracks(ids(), index, source = page.value?.playlist?.name)
+    fun play(item: ListItem<PlaylistRowView>?) =
+        playback.playList(ListSpec.Playlist(id), item?.let { ListStart.Row(it.row.track.id, it.key) }, source = name())
 
-    fun shuffle() = playback.playTracks(ids(), shuffle = true, source = page.value?.playlist?.name)
+    fun shuffle() = playback.playList(ListSpec.Playlist(id), null, shuffle = true, source = name())
 
-    // Takes a song out, with an Undo that puts it back in its place.
-    fun remove(itemId: Long) {
-        val name = page.value?.playlist?.name ?: "the playlist"
-        store.remove(id, itemId) { row ->
+    // Takes a song out by its row's key, with an Undo that puts it back in
+    // its place.
+    fun remove(itemKey: Long) {
+        val name = name() ?: "the playlist"
+        store.remove(id, itemKey) { row ->
             feedback.undoable("Removed from $name") { store.restore(id, row) }
         }
     }
 
     // Takes picked songs out, with an Undo that puts them all back.
-    fun removeMany(itemIds: List<Long>) {
-        if (itemIds.isEmpty()) return
-        val name = page.value?.playlist?.name ?: "the playlist"
-        store.removeAll(id, itemIds) { rows ->
+    fun removeMany(itemKeys: List<Long>) {
+        if (itemKeys.isEmpty()) return
+        val name = name() ?: "the playlist"
+        store.removeAll(id, itemKeys) { rows ->
             val text = if (rows.size == 1) "Removed from $name" else "Removed ${rows.size} songs from $name"
             feedback.undoable(text) { store.restoreAll(id, rows) }
         }
     }
 
-    fun move(itemId: Long, targetId: Long) = store.move(id, itemId, targetId)
+    fun move(itemKey: Long, targetKey: Long) = store.move(id, itemKey, targetKey)
+
+    override fun onCleared() {
+        rows.close()
+    }
 
     @AssistedFactory
     interface Factory {
@@ -127,78 +151,98 @@ class PlaylistViewModel @AssistedInject constructor(
     }
 }
 
+// A value once read: `read` false before the first read.
+data class Loaded<T>(val value: T, val read: Boolean = true)
+
 private val RowShape = RoundedCornerShape(12.dp)
 
-// One playlist: its songs in order. Drag a song by its handle to move it
-// (not in a family playlist, which keeps the server's order), swipe it left
-// to take it out, tap it to play from there.
+// One playlist: its songs in order, in pages. Drag a song by its handle to
+// move it (not in a family playlist, which keeps the server's order), swipe
+// it left to take it out, tap it to play from there.
 @Composable
 fun PlaylistScreen(
     id: String,
     onBack: () -> Unit,
     vm: PlaylistViewModel = hiltViewModel<PlaylistViewModel, PlaylistViewModel.Factory> { it.create(id) },
+    keep: KeepDownloadedViewModel = hiltViewModel(),
 ) {
-    val page by vm.page.collectAsStateWithLifecycle()
+    val counts by remember(id) { keep.playlistCounts(id) }.collectAsStateWithLifecycle(null)
+    val loaded by vm.playlist.collectAsStateWithLifecycle()
+    val summary by vm.summary.collectAsStateWithLifecycle()
     val phoneOnly by vm.phoneOnly.collectAsStateWithLifecycle()
     val serverAvailable by vm.serverAvailable.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     // Leaves the page once the playlist is deleted.
-    val gone = page?.let { it.playlist == null } ?: false
+    val gone = loaded.read && loaded.value == null
     LaunchedEffect(gone) { if (gone) onBack() }
 
     Box(Modifier.fillMaxSize()) {
-        val current = page
-        val playlist = current?.playlist
-        if (current != null && playlist != null) {
-            val tracks = current.tracks
+        val playlist = loaded.value
+        if (playlist != null) {
             val takesOut = vm.takesOut(playlist)
-            // The rows as drawn. A drag moves them at once; the playlist catches up on drop.
-            var rows by remember(tracks) { mutableStateOf(tracks) }
+            val songCount = summary?.songCount ?: 0
+            val covers = summary?.covers.orEmpty()
             val haptics = LocalHapticFeedback.current
             val listState = rememberLazyListState()
+            val items = rememberListRows(vm.rows, listState, above = 1)
+            // A drag moves the row on screen at once, from one place to
+            // another among the rows read; the playlist catches up on drop.
+            var drag by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+            fun shownAt(i: Int): Int {
+                val (from, to) = drag ?: return i
+                return when {
+                    i == to -> from
+                    from < to && i in from until to -> i + 1
+                    from > to && i in (to + 1)..from -> i - 1
+                    else -> i
+                }
+            }
             val reorder = rememberReorderableLazyListState(listState) { from, to ->
-                val a = rows.indexOfFirst { it.itemId == from.key }
-                val b = rows.indexOfFirst { it.itemId == to.key }
+                val a = from.index - 1
+                val b = to.index - 1
                 if (a >= 0 && b >= 0) {
-                    rows = rows.toMutableList().apply { add(b, removeAt(a)) }
+                    drag = ((drag?.first ?: a) to b)
                     haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
                 }
             }
+            val drop = {
+                drag?.let { (from, to) ->
+                    val moving = items.peek(from)
+                    val target = items.peek(to)
+                    if (moving != null && target != null && moving.key != target.key) vm.move(moving.key.id.toLong(), target.key.id.toLong())
+                }
+                drag = null
+            }
 
             // Songs are picked by their row, since a song can be here twice.
-            val pickable = remember(rows) { rows.map { Pickable(it.itemId.toString(), it.track) } }
-            SelectableSongs(
-                pickable,
-                onRemove = if (!takesOut) {
-                    null
-                } else {
-                    ({ picked ->
-                        val gone = picked.mapNotNull { it.key.toLongOrNull() }.toSet()
-                        rows = rows.filterNot { it.itemId in gone }
-                        vm.removeMany(gone.toList())
-                    })
-                },
+            PagedPicks(
+                vm.rows,
+                items,
+                pickOf = { key, item -> if (item.key.id == key) Pickable(key, item.row.track, item.key).picked() else null },
+                base = ListSpec.Playlist(id),
+                idOf = { it.key },
+                freshKey = { loader, picked -> picked.rowKey?.let { loader.rekey(it) } },
+                onRemove = if (!takesOut) null else ({ picked -> vm.removeMany(picked.mapNotNull { it.key.toLongOrNull() }) }),
             ) {
                 val selecting = LocalSongSelection.current?.active == true
                 LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = screenPadding(extraTop = DetailTopGap)) {
                     item(key = "header") {
                         ListHeader(
                             title = playlist.name,
-                            songCount = tracks.size,
-                            durationMs = current.durationMs,
-                            onPlay = { vm.play(0) },
+                            songCount = songCount,
+                            durationMs = summary?.durationMs ?: 0,
+                            onPlay = { vm.play(null) },
                             onShuffle = vm::shuffle,
                             onMore = {
                                 val onServer = playlist.sourceId != null
-                                val canDownload = tracks.any { !it.track.onPhone && !isFind(it.track.id) }
                                 sheets.show(
                                     PlaylistSheet.Options(
                                         playlist.id,
                                         playlist.name,
                                         onServer,
                                         canSave = serverAvailable && !onServer,
-                                        canDownload = canDownload,
-                                        keep = tracks.map { it.track },
+                                        canDownload = (counts?.serverOnly ?: 0) > 0,
+                                        keep = true,
                                         family = playlist.family,
                                         canRename = !playlist.family || playlist.familyMayRename,
                                         canDelete = !playlist.family || playlist.familyMayDelete,
@@ -209,35 +253,31 @@ fun PlaylistScreen(
                             // server's copy lacks, join the size and length.
                             facts = listOfNotNull(
                                 if (playlist.family) "By Family" else null,
-                                keepPlaylistProgress(playlist.id, tracks.map { it.track }),
+                                keepPlaylistProgress(playlist.id),
                                 if (playlist.sourceId != null && phoneOnly > 0) phoneOnlyNote(phoneOnly) else null,
                             ),
                         ) { modifier, shape ->
-                            PlaylistArtwork(playlist.id, playlist.name, current.covers, 240.dp, modifier, shape, footer = phonePlaylistFooter(tracks.size), glyph = playlistGlyph(playlist.octoNotice, null)) {
-                                PlaylistCover(current.covers, 240.dp, modifier, shape)
+                            PlaylistArtwork(playlist.id, playlist.name, covers, 240.dp, modifier, shape, footer = phonePlaylistFooter(songCount), glyph = playlistGlyph(playlist.octoNotice, null)) {
+                                PlaylistCover(covers, 240.dp, modifier, shape)
                             }
                         }
                     }
-                    if (rows.isEmpty()) {
+                    if (summary != null && songCount == 0) {
                         item(key = "empty") { EmptyNote("This playlist is empty. Long press any song and choose Add to playlist.") }
                     }
-                    items(rows, key = { it.itemId }) { entry ->
-                        ReorderableItem(reorder, key = entry.itemId) { dragging ->
-                            // Moves the song into the place of the one it landed on.
-                            val drop = {
-                                val landed = rows.indexOfFirst { it.itemId == entry.itemId }
-                                val target = tracks.getOrNull(landed)?.itemId
-                                if (target != null && target != entry.itemId) vm.move(entry.itemId, target)
-                            }
+                    items(items.itemCount, key = { i -> items.peek(shownAt(i))?.key?.token ?: "row:$i" }) { i ->
+                        val entry = items[shownAt(i)]
+                        if (entry == null) {
+                            RowPlaceholder()
+                            return@items
+                        }
+                        ReorderableItem(reorder, key = entry.key.token) { dragging ->
                             val swipe = rememberSwipeToDismissBoxState()
                             SwipeToDismissBox(
                                 state = swipe,
                                 enableDismissFromStartToEnd = false,
                                 gesturesEnabled = !dragging && !selecting && takesOut,
-                                onDismiss = {
-                                    rows = rows - entry
-                                    vm.remove(entry.itemId)
-                                },
+                                onDismiss = { vm.remove(entry.key.id.toLong()) },
                                 backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
                             ) {
                                 // Solid under the row while it moves, so it hides what it
@@ -256,14 +296,14 @@ fun PlaylistScreen(
                                         ),
                                 ) {
                                     SongRow(
-                                        entry.track,
+                                        entry.row.track,
                                         // No moving songs while picking them, or in a family playlist.
-                                        trailing = if (selecting || playlist.family) null else ({ DragHandle(Modifier.draggableHandle(onDragStopped = drop)) }),
-                                        menuContext = SongMenuContext(playlistId = playlist.id, playlistItemId = entry.itemId.takeIf { takesOut }),
-                                        selectKey = entry.itemId.toString(),
+                                        trailing = if (selecting || playlist.family) null else ({ DragHandle(Modifier.draggableHandle(onDragStopped = { drop() })) }),
+                                        menuContext = SongMenuContext(playlistId = playlist.id, playlistItemId = entry.key.id.toLong().takeIf { takesOut }),
+                                        selectKey = entry.key.id,
                                         // A swipe left takes the song out here.
                                         queueSwipe = false,
-                                    ) { vm.play(tracks.indexOf(entry)) }
+                                    ) { vm.play(entry) }
                                 }
                             }
                         }

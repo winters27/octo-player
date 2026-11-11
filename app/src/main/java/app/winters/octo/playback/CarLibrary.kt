@@ -9,14 +9,15 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.ServerHeadEntity
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.catalog.isFind
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.catalog.UserDao
-import app.winters.octo.catalog.byLatestPlay
-import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.runsOcto
@@ -29,13 +30,18 @@ import app.winters.octo.discovery.ChartLists
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.SearchTopSongs
+import app.winters.octo.discovery.ServerListKind
+import app.winters.octo.discovery.ServerReads
 import app.winters.octo.discovery.Station
-import app.winters.octo.discovery.wholeAlbum
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.favourites.PinnedItem
 import app.winters.octo.home.HomeSection
 import app.winters.octo.home.mixGroup
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.listening.PlayShelves
+import app.winters.octo.listening.PlayTotals
+import app.winters.octo.listening.TotalsAnswer
+import app.winters.octo.listening.TotalsFailed
 import app.winters.octo.liveradio.LiveRadioStore
 import app.winters.octo.liveradio.LiveShelfEntry
 import app.winters.octo.liveradio.Places
@@ -45,10 +51,9 @@ import app.winters.octo.liveradio.radioId
 import app.winters.octo.liveradio.usesMiles
 import app.winters.octo.livelists.LiveListSongs
 import app.winters.octo.livelists.LiveListStore
-import app.winters.octo.offline.DownloadStatus
+import app.winters.octo.livelists.LiveShown
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.player.PlayerSettings
-import app.winters.octo.catalog.mosaicCovers
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.playlists.PlaylistArtSettings
 import app.winters.octo.server.QueueSync
@@ -57,30 +62,34 @@ import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.sort.SongScope
 import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.SortSettings
 import app.winters.octo.sort.SortedLibrary
-import app.winters.octo.sort.sortDownloads
 import app.winters.octo.sort.sortFavourites
 import app.winters.octo.sort.sortPlaylists
-import app.winters.octo.ui.album.albumSongsShown
 import app.winters.octo.ui.common.adoptedFinds
 import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.home.HomePrefs
-import app.winters.octo.ui.home.homeRediscovery
 import app.winters.octo.ui.home.songCountLine
 import app.winters.octo.ui.liveradio.LIVE_NEAR_TITLE
+import app.winters.octo.ui.paging.ListLoader
+import app.winters.octo.ui.paging.ListLoaders
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -91,9 +100,15 @@ private const val SURPRISE_ALBUMS = 20
 private const val SURPRISE_ARTISTS = 16
 private const val ARTIST_TOP_SHOWN = 5
 
+// A list the car could not have, with the phone's words for why.
+class CarWords(val words: String) : Exception(words)
+
 // The music as a car sees it: the phone's Home, Radio, Playlists and
 // Library as four tabs, every list in the phone's order, lists that play
-// from the chosen song, the server's lists and stations, and search.
+// from the chosen song, the server's lists and stations, and search. A long
+// list is never held: its answer is read a page at a time from the loader
+// the phone's own page reads (CarPaged), and it plays as a list by what it
+// is, through the queue.
 @Singleton
 class CarLibrary @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -126,12 +141,35 @@ class CarLibrary @Inject constructor(
     private val lists: CarLists,
     private val search: CarSearch,
     private val artSettings: PlaylistArtSettings,
-    private val libraryRadio: LibraryRadio,
+    private val loaders: ListLoaders,
+    private val likes: LikeStore,
+    private val owners: WorkOwners,
+    private val servers: ServerReads,
+    private val totals: PlayTotals,
+    merge: CatalogMerge,
+    // Finds a start plays before their rows are written.
+    private val finds: FindMap,
 ) {
     // The cover style the listener chose for playlists, as the phone draws them.
     @Volatile private var coverStyle = PlaylistCoverStyle.Designed
     private val look = CarLook(context) { coverStyle }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val reads = CarReads(merge, totals)
+
+    // The long lists, each read a page at a time from the phone's loader.
+    private val pages = CarPages(
+        loaders, lists, owners, servers, liveSongs,
+        liveRules = { id -> liveLists.lists.map { all -> all.firstOrNull { it.id == id }?.query } },
+        catalog = catalog,
+        look = look,
+        doneAmong = { ids -> offline.doneAmong(ids) },
+        adopted = { adoptedFinds(downloads.phases.value) },
+        order = ::order,
+        albumWithFinds = ::albumWithFinds,
+        libraryOnly = ::libraryOnly,
+        scope = scope,
+        keptState = { merge.swapStamp.value to offline.doneVersion.value },
+    )
 
     // Told when a list fetched behind another (a whole album, top songs)
     // came back changing it.
@@ -151,7 +189,7 @@ class CarLibrary @Inject constructor(
         listOf(
             CarInput.Library to carLibraryInput(serverSync.ready, serverSync.last.map { it?.at }, catalog.libraryTrackCount()),
             CarInput.Playlists to playlists.playlists.map { all -> all.map { Triple(it.id, it.name, it.songCount) } },
-            CarInput.Liked to user.likedIds(),
+            CarInput.Liked to likes.changes,
             CarInput.Favorites to combine(favourites.likedAlbumIds(), favourites.likedArtistIds(), ::Pair),
             CarInput.LiveLists to liveLists.lists,
             CarInput.Kept to liveRadio.kept,
@@ -165,11 +203,12 @@ class CarLibrary @Inject constructor(
             ) { it.toList() },
             CarInput.Pins to pins.shown,
             CarInput.Adopted to downloads.phases.map(::adoptedFinds),
-            CarInput.Downloads to offline.done,
+            CarInput.Downloads to offline.doneVersion,
             CarInput.LibraryOnly to player.prefs.map { it.libraryOnly },
             CarInput.Offer to serverQueue.offer.map(::resumeOfferKey),
             CarInput.CoverStyle to artSettings.style,
             CarInput.Copy to combine(serverSync.copyWait, serverSync.copyRun, ::carCopyKey),
+            CarInput.Totals to totals.failed,
         ),
     )
 
@@ -188,6 +227,8 @@ class CarLibrary @Inject constructor(
     suspend fun children(parentId: String, limit: Int?, ownAccord: Boolean = true): List<MediaItem> {
         val node = parseCarId(parentId) ?: return emptyList()
         if (needsServer(node) && !signedIn()) throw CarNotSignedIn()
+        val whole = wholeListOf(node)
+        if (isPaged(whole)) return pagedAnswer(node, whole, ownAccord)
         return when (node) {
             CarNode.Root -> carTabs(limit).let { tabs -> tabs.tabs.map { tab(it, tabs) } }
             CarNode.More -> carTabs(limit).more.map { tab(it, null) }
@@ -213,8 +254,8 @@ class CarLibrary @Inject constructor(
         part = { node, range, firstTitle, style, covers -> look.part(node, range, firstTitle, style, covers) },
     )
 
-    // A part opens what its row was cut from, built the same way, so it
-    // holds exactly the items its row names.
+    // A part of a list held whole opens what its row was cut from, built the
+    // same way, so it holds exactly the items its row names.
     private suspend fun partOf(node: CarNode.Part): List<MediaItem> {
         val items = when (val parent = node.parent) {
             CarNode.Playlists -> playlistsTab()
@@ -225,12 +266,54 @@ class CarLibrary @Inject constructor(
         return carPartItems(node.index, items)
     }
 
+    // The list a letter or a part of a list belongs to.
+    private fun wholeListOf(node: CarNode): CarNode = when (node) {
+        is CarNode.Heading -> wholeListOf(node.parent)
+        is CarNode.Part -> wholeListOf(node.parent)
+        else -> node
+    }
+
+    // The lists that can hold any number of songs: read a page at a time.
+    private fun isPaged(node: CarNode): Boolean = when (node) {
+        CarNode.Songs, CarNode.Liked, CarNode.Downloads, is CarNode.Genre, is CarNode.Album, is CarNode.Playlist,
+        is CarNode.LiveList, is CarNode.OctoList, is CarNode.Station, is CarNode.OnlineAlbum,
+        -> true
+        else -> false
+    }
+
+    // The answer for a long list (`whole`) or one of its letters or parts,
+    // as one state of the library. A list opened of the car's own accord is
+    // read from the server again where the server lists it; an empty library
+    // list says the server's music is on its way while it is.
+    private suspend fun pagedAnswer(node: CarNode, whole: CarNode, ownAccord: Boolean): List<MediaItem> {
+        val paged = pages.paged(whole, ownAccord && node == whole) ?: return emptyList()
+        try {
+            if (node == whole && CarInput.Copy in carInputsOf(node)) {
+                val empty = paged.listing.lead.isEmpty() && paged.listing.loader.after(null, 1).isEmpty()
+                carCopyAnswer(node, if (empty) 0 else 1, ::copyStatus)?.let { return listOf(it) }
+            }
+            return reads.answer(node, whole, paged.listing, splitRows)
+        } finally {
+            withContext(NonCancellable) { paged.release() }
+        }
+    }
+
+    // Whether a library album shows the songs it lacks, from the server's
+    // listing: an Octo server signed in, and Library songs only off.
+    private suspend fun albumWithFinds(): Boolean =
+        (sessions.state.value as? SessionState.SignedIn)?.session?.runsOcto == true && !libraryOnly()
+
+    private suspend fun order(list: SortList): SortOrder = sorting.order(list).first()
+
     // A list's items, each built when an answer needs it, with the letters
-    // the phone files them under when it is sorted by name.
+    // the phone files them under when it is sorted by name. Every list here
+    // is album-, artist- or answer-sized.
     private suspend fun listed(node: CarNode, ownAccord: Boolean): CarListing? {
         val adopted = adoptedFinds(downloads.phases.value)
-        val done = offline.done.value
-        fun song(track: TrackEntity, list: CarNode) = look.song(track, list, isOutsideLibrary(track.id, adopted), track.id in done)
+        suspend fun songs(tracks: List<TrackEntity>, list: CarNode): List<MediaItem> {
+            val done = offline.doneAmong(tracks.map { it.id })
+            return tracks.map { look.song(it, list, isOutsideLibrary(it.id, adopted), it.id in done) }
+        }
         fun of(items: List<MediaItem>, style: CarStyle? = null) = CarListing.of(items, style)
         return when (node) {
             CarNode.Albums -> sorted.albums(SortList.Albums).first().let { s ->
@@ -239,36 +322,28 @@ class CarLibrary @Inject constructor(
             CarNode.Artists -> sorted.artists().first().let { s ->
                 CarListing(s.items.size, carLetters(s.headings), countLine = ::artistCountLine, coverOf = { s.items[it].artwork }) { look.artist(s.items[it]) }
             }
-            CarNode.Songs -> sorted.songs(SortList.Songs, SongScope.All).first().let { s ->
-                CarListing(s.items.size, carLetters(s.headings), countLine = ::songCountLine, coverOf = { s.items[it].artwork }) { song(s.items[it], node) }
-            }
             CarNode.Genres -> of(catalog.genres().first().map(look::genre))
-            is CarNode.Genre -> {
-                val albums = catalog.genreAlbums(node.name).first().map { look.grouped(look.album(it), "Albums") }
-                val songs = genreSongs(node.name).map { look.grouped(song(it, node), "Songs") }
-                of(albums + songs)
-            }
             CarNode.FavoriteAlbums -> of(favoriteAlbums().map(look::album), CarStyle.Grid)
             CarNode.FavoriteArtists -> of(favoriteArtists().map(look::artist))
-            CarNode.Liked -> of(likedSongs().map { song(it, node) })
-            CarNode.Downloads -> of(downloadedSongs().map { song(it, node) })
-            CarNode.MostPlayed -> of(byPlayCount(history.tracks.first(), HISTORY_SHELF).map { song(it, node) })
-            CarNode.Chart -> of(shelves.current().chart.map { song(it, node) })
-            is CarNode.Album -> of(albumSongs(node.id, listening = true).map { song(it, node) })
+            CarNode.MostPlayed -> of(songs(playShelves().mostPlayed, node))
+            CarNode.Chart -> of(songs(shelves.current().chart, node))
             is CarNode.Artist -> of(artistPage(node, adopted))
-            is CarNode.Playlist -> of(user.playlistTracks(node.id).first().map { song(it.track, node) })
-            is CarNode.LiveList -> of(liveListSongs(node.id).map { song(it, node) })
-            is CarNode.OctoList, is CarNode.Station -> serverSongs(node)?.let { songs -> of(songs.map { song(it, node) }) }
-            is CarNode.ChartList -> of(chartSongs(node).map { song(it, node) })
-            is CarNode.OnlineAlbum -> onlineAlbum(node)?.let { songs -> of(songs.map { song(it, node) }) }
+            is CarNode.ChartList -> of(songs(chartSongs(node), node))
             is CarNode.OnlineArtist -> of(onlineArtistPage(node, adopted))
             is CarNode.Found -> of(search.kept(node.token)?.let { foundAll(it, node.kind) }.orEmpty())
-            is CarNode.Top -> of(search.kept(node.token)?.top?.songs.orEmpty().map { song(it.track, node) })
+            is CarNode.Top -> of(songs(search.kept(node.token)?.top?.songs.orEmpty().map { it.track }, node))
             // The server is asked again only when the car opens the row
             // itself; a read for a change shows the last answer.
-            is CarNode.Retry -> of((if (ownAccord) search.retry(node.token) else search.kept(node.token))?.let(::outsideRows).orEmpty())
+            is CarNode.Retry -> of((if (ownAccord) search.retry(node.token) else search.kept(node.token))?.let { outsideRows(it) }.orEmpty())
             else -> null
         }
+    }
+
+    // What was played, from the stored totals: Home's and the car's shelves.
+    // While they cannot be brought up to date, TotalsFailed says why.
+    private suspend fun playShelves(): PlayShelves = when (val answer = history.shelves.first()) {
+        is TotalsAnswer.Value -> answer.value
+        is TotalsAnswer.Problem -> throw TotalsFailed(answer.words)
     }
 
     // One item by its id, for a car that asks about a single place or song.
@@ -283,8 +358,8 @@ class CarLibrary @Inject constructor(
             is CarNode.Album -> catalog.album(node.id).first()?.let(look::album)
             is CarNode.Artist -> catalog.artist(node.id).first()?.let(look::artist)
             is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let(look::playlist)
-            is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveCovers(it)) }
-            is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, adoptedFinds(downloads.phases.value)), it.id in offline.done.value) }
+            is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveSongs.covers(it.id, it.query)) }
+            is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, adoptedFinds(downloads.phases.value)), offline.isDone(it.id)) }
             is CarNode.OctoList -> look.folder(node, node.name)
             is CarNode.Station -> look.radio(node)
             is CarNode.ChartList -> look.folder(node, node.name)
@@ -301,6 +376,7 @@ class CarLibrary @Inject constructor(
     // phone's lists too), or the phone's words for the failure.
     fun browseWords(parentId: String, failure: Throwable): String {
         val node = parseCarId(parentId)
+        carTotalsWords(failure, totals::foreground)?.let { return it }
         return when {
             failure is CarNotSignedIn -> CAR_SIGN_IN
             failure is app.winters.octo.subsonic.SubsonicException.NotFound && (node is CarNode.OctoList || node is CarNode.Station) -> {
@@ -329,10 +405,10 @@ class CarLibrary @Inject constructor(
     // (the library's, then those it holds part of, then the rest),
     // playlists, and the server's artists last when the library has none.
     // Each kind with more than shown ends with "See all".
-    fun searchItems(answer: CarSearchAnswer): List<MediaItem> {
+    suspend fun searchItems(answer: CarSearchAnswer): List<MediaItem> {
         val adopted = adoptedFinds(downloads.phases.value)
-        val done = offline.done.value
         val rows = carSearchRows(answer)
+        val done = offline.doneAmong(rows.flatMap { row -> row.entries.mapNotNull { (it as? SearchEntry.Song)?.track?.id } })
         return rows.flatMap { row ->
             val items = row.entries.map { entry ->
                 when (entry) {
@@ -352,9 +428,9 @@ class CarLibrary @Inject constructor(
     }
 
     // A kind of a search whole, for its "See all".
-    private fun foundAll(answer: CarSearchAnswer, kind: FoundKind): List<MediaItem> {
+    private suspend fun foundAll(answer: CarSearchAnswer, kind: FoundKind): List<MediaItem> {
         val adopted = adoptedFinds(downloads.phases.value)
-        val done = offline.done.value
+        val done = if (kind == FoundKind.Songs) offline.doneAmong(foundSongs(answer).map { it.id }) else emptySet()
         val list = CarNode.Found(answer.token, FoundKind.Songs)
         return when (kind) {
             FoundKind.Artists -> answer.library.artists.map(look::artist) + answer.outside?.artists.orEmpty().map(look::onlineArtist)
@@ -376,40 +452,39 @@ class CarLibrary @Inject constructor(
             (found.partAlbums + found.albums).map { look.grouped(look.onlineAlbum(it), "Albums") }
     }
 
-    // The lists the car's choices play from (CarPlays). `fresh` asks the
-    // server again; otherwise what the car was shown serves.
+    // The lists the car's choices play from (CarPlays), each by what it is,
+    // so the queue reads it a page at a time. `fresh` asks the server again;
+    // otherwise what the car was shown serves.
     private suspend fun playList(node: CarNode, fresh: Boolean): CarList? = when (node) {
-        is CarNode.Album -> catalog.album(node.id).first()?.let { album -> CarList(albumSongs(node.id, listening = false).map { it.id }, QueueSource.Played(album.title)) }
+        is CarNode.Album -> catalog.album(node.id).first()?.let { album -> pages.albumPlay(node, album.title) }
         is CarNode.Artist -> artistTop(node, fetchBehind = false)?.let { top ->
-            CarList(top.map { it.id }, QueueSource.Played(catalog.artist(node.id).first()?.name))
+            carIds(top.map { it.id }, QueueSource.Played(catalog.artist(node.id).first()?.name))
         }
         is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let { list ->
-            CarList(user.playlistTracks(node.id).first().map { it.track.id }, QueueSource.Played(list.name))
+            CarList(ListSpec.Playlist(node.id), QueueSource.Played(list.name))
         }
-        CarNode.Liked -> CarList(likedSongs().map { it.id }, QueueSource.Played(CAR_LIKED))
+        CarNode.Liked -> CarList(ListSpec.Songs(SongScope.Liked, order(SortList.Liked)), QueueSource.Played(CAR_LIKED))
         is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { list ->
-            CarList(liveSongs.now(list).map { it.id }, QueueSource.Played(list.name))
+            CarList(ListSpec.Live(list.id, list.query, list.name), QueueSource.Played(list.name))
         }
-        CarNode.MostPlayed -> CarList(byPlayCount(history.tracks.first(), HISTORY_SHELF).map { it.id }, NoSource)
-        CarNode.Songs -> CarList(sorted.songs(SortList.Songs, SongScope.All).first().items.map { it.id }, QueueSource.Played("Songs"))
-        CarNode.Downloads -> CarList(downloadedSongs().map { it.id }, NoSource)
-        is CarNode.Genre -> CarList(genreSongs(node.name).map { it.id }, QueueSource.Played(node.name))
-        CarNode.Chart -> CarList(shelves.current().chart.map { it.id }, NoSource)
+        CarNode.MostPlayed -> carIds(playShelves().mostPlayed.map { it.id }, NoSource)
+        CarNode.Songs -> CarList(ListSpec.Songs(SongScope.All, order(SortList.Songs)), QueueSource.Played("Songs"))
+        CarNode.Downloads -> CarList(ListSpec.Downloads(order(SortList.Downloads)), NoSource)
+        is CarNode.Genre -> CarList(ListSpec.Songs(SongScope.Genre(node.name), order(SortList.GenreSongs)), QueueSource.Played(node.name))
+        CarNode.Chart -> carIds(shelves.current().chart.map { it.id }, NoSource)
         is CarNode.ChartList -> {
             val kept = if (fresh) null else lists.keptFor<List<TrackEntity>>(node)
             val songs = kept ?: chartSongs(node)
-            CarList(songs.map(TrackEntity::id), QueueSource.Played(node.name), network = kept == null)
+            carIds(songs.map(TrackEntity::id), QueueSource.Played(node.name), network = kept == null)
         }
-        is CarNode.OctoList -> networkSongs(node, fresh)?.let { (songs, network) -> CarList(songs.map { it.id }, QueueSource.Played(node.name), network) }
-        is CarNode.Station -> networkSongs(node, fresh)?.let { (songs, network) -> CarList(songs.map { it.id }, QueueSource.Station(node.id, node.name), network) }
-        is CarNode.OnlineAlbum -> {
-            val kept = if (fresh) null else lists.keptFor<OnlineSongs>(node)
-            val got = kept ?: onlineAlbumPage(node)
-            got?.let { CarList(albumSongsShown(it.songs, libraryOnly()).map(TrackEntity::id), QueueSource.Played(it.title), network = kept == null) }
-        }
-        is CarNode.OnlineArtist -> lists.keptFor<OnlineArtistView>(node)?.let { CarList(it.top.map(TrackEntity::id), QueueSource.Played(it.name)) }
-        is CarNode.Found -> search.kept(node.token)?.let { CarList(foundSongs(it).map(TrackEntity::id), NoSource) }
-        is CarNode.Top -> search.kept(node.token)?.top?.let { top -> CarList(top.songs.map { it.track.id }, NoSource) }
+        // A list or an album the server answers for plays as the car was
+        // shown it, from the car's own read; a station is asked again.
+        is CarNode.OctoList -> CarList(ListSpec.Online(OnlineKind.List, node.id), QueueSource.Played(node.name), network = true)
+        is CarNode.Station -> CarList(ListSpec.Online(OnlineKind.Station, node.id), QueueSource.Station(node.id, node.name), network = true)
+        is CarNode.OnlineAlbum -> pages.onlineAlbumPlay(node, fresh)
+        is CarNode.OnlineArtist -> lists.keptFor<OnlineArtistView>(node)?.let { carIds(it.top.map(TrackEntity::id), QueueSource.Played(it.name)) }
+        is CarNode.Found -> search.kept(node.token)?.let { carIds(foundSongs(it).map(TrackEntity::id), NoSource) }
+        is CarNode.Top -> search.kept(node.token)?.top?.let { top -> carIds(top.songs.map { it.track.id }, NoSource) }
         is CarNode.Live -> liveLineup(node)
         is CarNode.Near -> nearLineup(node)
         CarNode.Resume -> resumeList()
@@ -426,21 +501,6 @@ class CarLibrary @Inject constructor(
         else -> null
     }
 
-    // An Octo list's or a station's songs: what the car was shown, for a
-    // song chosen inside it, or asked of the server again.
-    private suspend fun networkSongs(node: CarNode, fresh: Boolean): Pair<List<TrackEntity>, Boolean>? {
-        if (!fresh) lists.keptFor<List<TrackEntity>>(node)?.let { return it to false }
-        return serverSongs(node)?.let { it to true }
-    }
-
-    private suspend fun serverSongs(node: CarNode): List<TrackEntity>? {
-        val id = when (node) {
-            is CarNode.OctoList -> node.id
-            is CarNode.Station -> node.id
-            else -> return null
-        }
-        return lists.fetch(node) { discovery.stationSongs(id) }
-    }
 
     private suspend fun chartSongs(node: CarNode.ChartList): List<TrackEntity> = lists.fetch(node) {
         when (val answer = charts.answer(node.id)) {
@@ -449,16 +509,6 @@ class CarLibrary @Inject constructor(
             is ChartAnswer.Failed -> throw IllegalStateException(answer.refusal ?: "No chart")
         }
     }
-
-    // An album the server has beyond the library: its name and songs.
-    data class OnlineSongs(val title: String, val songs: List<TrackEntity>)
-
-    private suspend fun onlineAlbumPage(node: CarNode.OnlineAlbum): OnlineSongs? =
-        lists.fetch(node) { discovery.album(node.id)?.let { OnlineSongs(it.album.title, it.songs) } ?: OnlineSongs("", emptyList()) }
-            .takeIf { it.title.isNotEmpty() || it.songs.isNotEmpty() }
-
-    private suspend fun onlineAlbum(node: CarNode.OnlineAlbum): List<TrackEntity>? =
-        onlineAlbumPage(node)?.let { albumSongsShown(it.songs, libraryOnly()) }
 
     // An artist beyond the library as the server gives them: their name,
     // top songs and albums; empty when no server answered.
@@ -473,37 +523,18 @@ class CarLibrary @Inject constructor(
     private suspend fun onlineArtistPage(node: CarNode.OnlineArtist, adopted: Set<String>): List<MediaItem> {
         val view = onlineArtistView(node)
         val only = libraryOnly()
-        val done = offline.done.value
         val top = view.top.filter { !only || !isOutsideLibrary(it.id, emptySet()) }.take(ARTIST_TOP_SHOWN)
+        val done = offline.doneAmong(top.map { it.id })
         return top.map { look.grouped(look.song(it, node, isOutsideLibrary(it.id, adopted), it.id in done), "Top songs") } +
             view.albums.map { look.grouped(look.onlineAlbum(it), "Albums") }
-    }
-
-    // A library album whole, as the phone's album page lists it: its songs
-    // and, from an Octo server, the ones the library lacks in their places;
-    // with Library songs only, the library's alone. `listening` asks the
-    // server again behind the answer.
-    private suspend fun albumSongs(id: String, listening: Boolean): List<TrackEntity> {
-        val library = catalog.albumTracks(id).first()
-        val octo = (sessions.state.value as? SessionState.SignedIn)?.session?.runsOcto == true
-        val server = if (!octo) {
-            null
-        } else if (listening) {
-            lists.behind(CarNode.Album(id), { discovery.libraryAlbum(library.map { it.id }) }) { listChanged(carId(CarNode.Album(id))) }
-        } else {
-            lists.keptFor<Behind<List<TrackEntity>>>(CarNode.Album(id))?.value
-        }
-        val whole = wholeAlbum(library, server.orEmpty(), downloads.adoptions.value.orEmpty())
-        return albumSongsShown(whole, libraryOnly())
     }
 
     // An artist's page: their top songs from the server when it ranks them,
     // then their albums in the order the phone's artist page uses.
     private suspend fun artistPage(node: CarNode.Artist, adopted: Set<String>): List<MediaItem> {
-        val done = offline.done.value
-        val top = artistTop(node, fetchBehind = true).orEmpty()
-            .take(ARTIST_TOP_SHOWN)
-            .map { look.grouped(look.song(it, node, isOutsideLibrary(it.id, adopted), it.id in done), "Top songs") }
+        val shown = artistTop(node, fetchBehind = true).orEmpty().take(ARTIST_TOP_SHOWN)
+        val done = offline.doneAmong(shown.map { it.id })
+        val top = shown.map { look.grouped(look.song(it, node, isOutsideLibrary(it.id, adopted), it.id in done), "Top songs") }
         val albums = sorted.albums(SortList.ArtistAlbums, artistId = node.id).first().items.map { look.grouped(look.album(it), "Albums") }
         return top + albums
     }
@@ -562,14 +593,17 @@ class CarLibrary @Inject constructor(
         return homeShelves(setOf(section))[section].orEmpty()
     }
 
-    // Each of `wanted` of Home's shelves as the phone's Home fills it.
+    // Each of `wanted` of Home's shelves as the phone's Home fills it. The
+    // shelves of what was played come from the stored totals, read once;
+    // while those cannot be brought up to date, they are left out, and the
+    // car hears when they are back.
     private suspend fun homeShelves(wanted: Set<HomeSection>): Map<HomeSection, List<MediaItem>> {
         val server = shelves.current()
         val adopted = adoptedFinds(downloads.phases.value)
-        val done = offline.done.value
+        val played = if (wanted.any { it in PLAYED }) playedShelves() else null
+        val done = offline.doneAmong(played?.mostPlayed.orEmpty().map { it.id } + server.chart.take(CHARTS_ROW).map { it.id })
         fun song(track: TrackEntity, list: CarNode) = look.song(track, list, isOutsideLibrary(track.id, adopted), track.id in done)
-        // Worked out once for the three shelves that read it.
-        val rediscovered = if (wanted.any { it in REDISCOVERY }) rediscovery() else null
+        val rediscovered = played?.rediscovery
         val out = LinkedHashMap<HomeSection, List<MediaItem>>()
         for (section in wanted) {
             out[section] = when (section) {
@@ -580,14 +614,14 @@ class CarLibrary @Inject constructor(
                         is PinnedItem.Playlist -> if (isToolPlaylist(pin.playlist.name)) null else look.playlist(pin.playlist)
                     }
                 }
-                HomeSection.RecentlyPlayed -> byLatestPlay(history.albums.first(), HISTORY_SHELF).map(look::album)
+                HomeSection.RecentlyPlayed -> played?.recentlyPlayed.orEmpty().take(HISTORY_SHELF).map(look::album)
                 HomeSection.MadeForYou -> server.madeForYou.map(::homeStation)
                 HomeSection.Stations -> radioStations(server).map(::homeStation)
                 HomeSection.InternetRadio -> liveEntries(server).map { look.live(it, sourceIdNow()) }
                 HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
                     server.groups.firstOrNull { it.first == section.mixGroup }?.second.orEmpty().map(::homeStation)
                 HomeSection.RecentlyAdded -> catalog.recentAlbums(HISTORY_SHELF).first().map(look::album)
-                HomeSection.MostPlayed -> byPlayCount(history.tracks.first(), HISTORY_SHELF).map { song(it, CarNode.MostPlayed) }
+                HomeSection.MostPlayed -> played?.mostPlayed.orEmpty().take(HISTORY_SHELF).map { song(it, CarNode.MostPlayed) }
                 HomeSection.FavoriteAlbums -> favourites.likedAlbums().first().sortedByDescending { it.likedAt }.take(FAVORITES_SHELF).map { look.album(it.album) }
                 HomeSection.Charts -> server.chart.take(CHARTS_ROW).map { song(it, CarNode.Chart) }
                 HomeSection.Artists -> picks().second.map(look::artist)
@@ -600,14 +634,23 @@ class CarLibrary @Inject constructor(
         return out
     }
 
-    private suspend fun rediscovery() = homeRediscovery(catalog.albums().first(), history.tracks.first(), System.currentTimeMillis())
+    private suspend fun playedShelves(): PlayShelves? = try {
+        playShelves()
+    } catch (e: TotalsFailed) {
+        totals.foreground()
+        null
+    }
 
     // Home's random shelves (Something different, Artists), picked once and
     // again only when the library changes size or is copied anew, as the
-    // phone's Home picks them, so the car's Home does not reshuffle.
-    private val picker = CarPicks { catalog.randomAlbums(SURPRISE_ALBUMS) to catalog.randomArtists(SURPRISE_ARTISTS) }
+    // phone's Home picks them, so the car's Home does not reshuffle. The
+    // size is read only while no save is applying, so a save picks them
+    // again once, at its end.
+    private val picker = CarHomePicks(merge.applyStamp, { catalog.libraryTrackCount().first() }, { serverSync.last.first()?.at }) {
+        catalog.randomAlbums(SURPRISE_ALBUMS) to catalog.randomArtists(SURPRISE_ARTISTS)
+    }
 
-    private suspend fun picks() = picker.forKey(catalog.libraryTrackCount().first() to serverSync.last.first()?.at)
+    private suspend fun picks() = picker.now()
 
     private fun homeStation(station: Station): MediaItem = look.homeStation(station)
 
@@ -638,25 +681,28 @@ class CarLibrary @Inject constructor(
         val near = shelves.current().near
         val start = near.indexOfFirst { it.uuid == node.uuid }.takeIf { it >= 0 } ?: return null
         scope.launch { runCatching { radioCatalog.started(node.uuid) } }
-        return CarList(near.map { it.radioId() }, QueueSource.Played(LIVE_NEAR_TITLE), start = start)
+        return carIds(near.map { it.radioId() }, QueueSource.Played(LIVE_NEAR_TITLE), start = start)
     }
 
-    private suspend fun resumeList(): CarList? {
-        val offer = serverQueue.offer.value ?: return CarList(emptyList(), NoSource, network = true)
-        val queue = serverQueue.take(offer) ?: return CarList(emptyList(), NoSource, network = true)
-        return CarList(queue.trackIds, NoSource, network = true, positionMs = queue.positionMs, start = queue.index)
+    // The other device's queue, read from the server again into the play's
+    // own copy, from its song where it was left. The offer is put away.
+    private suspend fun resumeList(): CarList {
+        val offer = serverQueue.offer.value ?: return carIds(emptyList(), NoSource, network = true)
+        serverQueue.taken(offer)
+        return CarList(ListSpec.ServerQueue, NoSource, network = true)
     }
 
     // Playlists: Liked songs, the live lists, the playlists in the phone's
     // order (less the server's library action lists, which act on songs
-    // added), then the lists Octo made, under each kind's heading.
+    // added), then the lists Octo made, under each kind's heading. Each
+    // list's covers are found by a walk that stops at four.
     private suspend fun playlistsTab(): List<MediaItem> {
         val liked = user.likedCount().first()
-        val live = liveLists.lists.first().map { list -> look.liveList(list, liveCovers(list)) }
+        val live = liveLists.lists.first().map { list -> look.liveList(list, liveSongs.covers(list.id, list.query)) }
         val order = sorting.order(SortList.Playlists).first()
         val own = sortPlaylists(playlists.playlists.first().filterNot { isToolPlaylist(it.name) }, order).map(look::playlist)
         val octo = shelves.current().groups.flatMap { (group, items) -> items.map { look.grouped(look.station(it), group.title) } }
-        val likedCovers = mosaicCovers(user.likedTracks().first().map { it.albumId to it.artwork })
+        val likedCovers = if (liked > 0) likes.likedCovers() else emptyList()
         return listOfNotNull(liked.takeIf { it > 0 }?.let { look.liked(it, likedCovers) }) + live + own + octo
     }
 
@@ -697,33 +743,9 @@ class CarLibrary @Inject constructor(
         favourites.likedArtists().first(), sorting.order(SortList.Favourites).first(), { it.likedAt }, { it.artist.sortKey }, { it.artist.id },
     ).map { it.artist }
 
-    private suspend fun likedSongs(): List<TrackEntity> = sorted.songs(SortList.Liked, SongScope.Liked).first().items
-
-    private suspend fun genreSongs(name: String): List<TrackEntity> = sorted.songs(SortList.GenreSongs, SongScope.Genre(name)).first().items
-
-    private suspend fun liveListSongs(id: String): List<TrackEntity> =
-        liveLists.lists.first().firstOrNull { it.id == id }?.let { liveSongs.now(it) }.orEmpty()
-
-    // The covers of a live list's first albums, for its picture.
-    private suspend fun liveCovers(list: app.winters.octo.livelists.LiveList): List<String> =
-        mosaicCovers(liveSongs.now(list).map { it.albumId to it.artwork })
-
-    // The phone's downloads that are ready, in the Downloads page's order.
-    private suspend fun downloadedSongs(): List<TrackEntity> {
-        val rows = sortDownloads(offline.rows.first(), sorting.order(SortList.Downloads).first()).filter { it.state == DownloadStatus.Done }
-        val tracks = catalog.tracksByIds(rows.map { it.trackId }).associateBy { it.id }
-        return rows.mapNotNull { tracks[it.trackId] }
-    }
-
-    // "Start radio" on a song a car shows, by the song's car id.
-    suspend fun radioFor(id: String): CarPlayAnswer {
-        val song = parseCarId(id) as? CarNode.Song
-        return carRadio(song?.let { trackOf(it.trackId) }) { seed -> libraryRadio.songsLike(listOf(seed), RADIO_LENGTH, before = listOf(seed.id)) }
-    }
-
     // A song by id: one in the library, or one found beyond it.
     private suspend fun trackOf(id: String): TrackEntity? =
-        if (isFind(id)) online.byIds(listOf(id)).firstOrNull()?.asTrack() else catalog.track(id)
+        if (isFind(id)) (online.byIds(listOf(id)).firstOrNull() ?: finds[id])?.asTrack() else catalog.track(id)
 
     // A song among a search's: the library's songs, then those found outside.
     private fun foundSongs(answer: CarSearchAnswer): List<TrackEntity> = answer.library.songs + answer.outside?.songs.orEmpty()
@@ -736,6 +758,16 @@ class CarLibrary @Inject constructor(
         (sessions.state.value as? SessionState.SignedIn)?.session?.client?.primaryUrl?.let(::serverSourceId)
 }
 
+// What a car is told for play counts that could not be brought up to date,
+// or for a list's own worded problem: their words, at once, with the counts
+// asked to build again (`again`), so the car hears when they are back; null
+// for any other failure.
+internal fun carTotalsWords(failure: Throwable, again: () -> Unit): String? = when (failure) {
+    is TotalsFailed -> failure.words.also { again() }
+    is CarWords -> failure.words.also { again() }
+    else -> null
+}
+
 // The Live radio shelf played from the station with `key`, and the radio
 // catalog's station to tell it started (one kept on the phone); null when
 // the station has left the shelf.
@@ -745,7 +777,7 @@ internal fun liveLineupOf(entries: List<LiveShelfEntry>, key: String): Pair<CarL
         is LiveShelfEntry.Kept -> entry.station.uuid
         is LiveShelfEntry.Server -> entry.kept?.uuid
     }
-    return CarList(entries.map { it.radioId() }, QueueSource.Played(HomeSection.InternetRadio.title), start = start) to started
+    return carIds(entries.map { it.radioId() }, QueueSource.Played(HomeSection.InternetRadio.title), start = start) to started
 }
 
 // Each kind of input as it changes: a kind is heard when its value differs
@@ -771,5 +803,7 @@ internal fun carRadioStations(stations: List<Station>, lists: List<Station>): Li
     return stations.filter { it.streamUrl == null }.map { it.copy(songCount = it.songCount ?: counts[it.id]) }
 }
 
-// Home's shelves that read the albums to come back to.
-private val REDISCOVERY = setOf(HomeSection.NotPlayedLately, HomeSection.NeverFinished, HomeSection.NeverPlayed)
+// Home's shelves of what was played, read from the stored totals together.
+private val PLAYED = setOf(
+    HomeSection.RecentlyPlayed, HomeSection.MostPlayed, HomeSection.NotPlayedLately, HomeSection.NeverFinished, HomeSection.NeverPlayed,
+)

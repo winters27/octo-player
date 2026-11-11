@@ -1,5 +1,6 @@
 package app.winters.octo.radio
 
+import app.winters.octo.catalog.searchKey
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.ln
@@ -67,7 +68,7 @@ private const val RARER_RUN = 2
 private const val FAVORITE_BOOST = 1.15
 
 // A big library is sampled, and only the best matches are drawn from.
-private const val CANDIDATE_CAP = 4000
+const val RADIO_CANDIDATES = 4000
 private const val KEEP_AT_LEAST = 200
 private const val KEEP_PER_PICK = 8
 
@@ -99,27 +100,73 @@ class RadioInput(
 
 private class Scored(val song: RadioSong, val score: Double)
 
+// What a radio draws from the library: how many songs it has, the songs
+// that could fit (sharing a genre or an artist with the seeds, at most
+// RADIO_CANDIDATES of them, sampled at random from a bigger set), how
+// telling each genre is, the artists with a song rated one star (the
+// suggestions' among them), and which songs the library has. `rarity` is
+// null when no song has more than one genre: a song's one genre then
+// carries all of its genre weight, whatever the rarity.
+class RadioPool(
+    val librarySize: Int,
+    val candidates: List<RadioSong>,
+    val rarity: Map<String, Double>?,
+    val disliked: Set<String>,
+    val owned: Set<String>,
+) {
+    companion object {
+        // The pool from the whole library and the server's suggestions.
+        fun of(library: List<RadioSong>, suggested: List<RadioSong>, seeds: List<RadioSong>, random: Random): RadioPool {
+            val everything = library + suggested
+            val seedGenres = seeds.flatMapTo(HashSet()) { it.genreKeys }
+            val seedArtists = seeds.flatMapTo(HashSet()) { it.artistKeys }
+            val fromLibrary = library
+                .filter { song -> song.genreKeys.any(seedGenres::contains) || song.artistKeys.any(seedArtists::contains) }
+                .let { if (it.size > RADIO_CANDIDATES) it.shuffled(random).take(RADIO_CANDIDATES) else it }
+            return RadioPool(
+                librarySize = library.size,
+                candidates = fromLibrary,
+                rarity = genreRarity(everything),
+                disliked = everything.filter { it.rating == 1 }.flatMapTo(HashSet()) { it.artistKeys },
+                owned = library.mapTo(HashSet()) { it.id },
+            )
+        }
+    }
+}
+
+// The keys a radio compares genres and artists by, for an app that walks
+// its library for the pool itself.
+fun radioGenreKey(genre: String): String = searchKey(genre)
+
+fun radioArtistKey(name: String): String? = artistKey(name)
+
 // Up to `count` songs like the seeds, in play order. Empty when nothing is
 // alike at all (the seeds have no genre and the server suggested nothing).
 fun radioMix(input: RadioInput, count: Int, random: Random = Random.Default): List<RadioSong> {
     if (count <= 0 || input.seeds.isEmpty()) return emptyList()
-    val everything = input.library + input.suggested
-    val rarity = genreRarity(everything)
+    return radioMixPooled(RadioPool.of(input.library, input.suggested, input.seeds, random), input, count, random)
+}
+
+// The same from a pool already drawn from the library; `input.library` is
+// not read. Throws when the pool has no rarity and a song has two genres.
+fun radioMixPooled(pool: RadioPool, input: RadioInput, count: Int, random: Random = Random.Default): List<RadioSong> {
+    if (count <= 0 || input.seeds.isEmpty()) return emptyList()
+    if (pool.rarity == null) {
+        (input.seeds + input.suggested + pool.candidates).firstOrNull { it.genreKeys.size > 1 }?.let {
+            throw IllegalArgumentException("a pool with no rarity has a song of ${it.genreKeys.size} genres")
+        }
+    }
+    val rarity = pool.rarity.orEmpty()
     val seedFeatures = HashMap<String, Double>()
     input.seeds.forEach { features(it, rarity, seedFeatures) }
     val seedNorm = sqrt(seedFeatures.values.sumOf { it * it })
-    val seedGenres = input.seeds.flatMapTo(HashSet()) { it.genreKeys }
-    val seedArtists = input.seeds.flatMapTo(HashSet()) { it.artistKeys }
-    val disliked = everything.filter { it.rating == 1 }.flatMapTo(HashSet()) { it.artistKeys }
+    val disliked = pool.disliked
     val rank = HashMap<String, Int>()
     input.suggested.forEachIndexed { index, song -> rank.putIfAbsent(song.id, index) }
     val skip = input.exclude + input.seeds.first().id
-    val owned = input.library.mapTo(HashSet()) { it.id }
+    val owned = pool.owned
 
-    // Library songs that could fit: sharing a genre or an artist with the seeds.
-    val fromLibrary = input.library
-        .filter { song -> song.genreKeys.any(seedGenres::contains) || song.artistKeys.any(seedArtists::contains) }
-        .let { if (it.size > CANDIDATE_CAP) it.shuffled(random).take(CANDIDATE_CAP) else it }
+    val fromLibrary = pool.candidates
     val scored = (input.suggested + fromLibrary).distinctBy { it.id }
         .filter { it.id !in skip && it.rating != 1 && !isRadioFiller(it.title, it.durationMs, it.genres) }
         .map { song ->
@@ -146,7 +193,7 @@ fun radioMix(input: RadioInput, count: Int, random: Random = Random.Default): Li
     val spare = lately.take(keep)
     // Variety moves the artist and album spacing; another version of the
     // same song always waits the usual spacing.
-    val titleGap = radioSpacing(input.library.size)
+    val titleGap = radioSpacing(pool.librarySize)
     val gap = (titleGap * input.tuning.variety.scale).roundToInt().coerceAtLeast(2)
     val beforeOutside = input.beforeOutside ?: input.before.map { it.id !in owned }
     return pick(known, fromNew.filterNot(heardLately), spare + fromNew.filter(heardLately), input.before, count,
@@ -174,7 +221,9 @@ internal fun pacedShare(share: Double, outside: Int, library: Int, slots: Int): 
     if (slots <= 0 || outside + library == 0) return share
     if (outside + library < slots) return outside.toDouble() / (outside + library)
     val most = (outside.toDouble() / slots).coerceIn(0.0, 1.0)
-    val least = (1.0 - library.toDouble() / slots).coerceIn(0.0, 1.0)
+    // When the two kinds just fill the slots, the least and the most are
+    // one share, which rounding can leave the least a hair above.
+    val least = (1.0 - library.toDouble() / slots).coerceIn(0.0, 1.0).coerceAtMost(most)
     return share.coerceIn(least, most)
 }
 

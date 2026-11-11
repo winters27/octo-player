@@ -1,6 +1,6 @@
 package app.winters.octo.playback
 
-import androidx.annotation.VisibleForTesting
+import app.winters.octo.catalog.SongIds
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.listening.ListeningSync
@@ -14,11 +14,14 @@ import javax.inject.Singleton
 
 // Rates library songs, 1 to 5 stars or 0 for none. The phone keeps the
 // rating, the library shows it at once, and the song's server copies follow.
-// A song found online cannot be rated.
+// A song found online cannot be rated. A rating is written on the song its
+// id names now (SongIds), its key read and its rows written between groups
+// of a save, and the server's copies follow that id.
 @Singleton
 class RatingStore @Inject constructor(
     private val user: UserDao,
     private val listening: ListeningSync,
+    private val ids: SongIds,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -28,26 +31,29 @@ class RatingStore @Inject constructor(
         scope.launch {
             // The server copies are noted as rated too, so a merge before
             // the next sync still shows this rating.
-            val relinkKey = user.relinkKeyOf(trackId) ?: return@launch
-            user.noteTap(trackId, stars, relinkKey, System.currentTimeMillis())
-            listening.ratingChanged(trackId)
+            val id = ids.write {
+                val id = ids.song(trackId)
+                val relinkKey = user.relinkKeyOf(id) ?: return@write null
+                user.noteTap(id, stars, relinkKey, System.currentTimeMillis())
+                id
+            } ?: return@launch
+            listening.ratingChanged(id)
         }
     }
 
-    // A rating brought back from a backup. The phone keeps it as a tap
-    // would, but one the song's server copies already show is not sent,
+    // A rating brought back from a backup, written before it returns so a
+    // restore writes its ratings a page at a time. The phone keeps it as a
+    // tap would, but one the song's server copies already show is not sent,
     // so restoring a big library sends only the ratings that differ.
-    fun restore(trackId: String, rating: Int) {
-        scope.launch { restoreNow(trackId, rating) }
-    }
-
     // Answers whether the restored rating goes to the server.
-    @VisibleForTesting
     internal suspend fun restoreNow(trackId: String, rating: Int): Boolean {
         if (isFind(trackId)) return false
-        val relinkKey = user.relinkKeyOf(trackId) ?: return false
-        val sent = user.noteRestored(trackId, cleanRating(rating), relinkKey, System.currentTimeMillis())
-        if (sent) listening.ratingChanged(trackId)
+        val (id, sent) = ids.write {
+            val id = ids.song(trackId)
+            val relinkKey = user.relinkKeyOf(id) ?: return@write null
+            id to user.noteRestored(id, cleanRating(rating), relinkKey, System.currentTimeMillis())
+        } ?: return false
+        if (sent) listening.ratingChanged(id)
         return sent
     }
 }

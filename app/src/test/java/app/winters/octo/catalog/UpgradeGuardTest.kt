@@ -39,7 +39,7 @@ class UpgradeGuardTest {
         val file = version18(rows = 100)
         val guard = UpgradeGuard(file) { 1_000L }
         assertFalse(guard.check())
-        assertEquals(UpgradeState.NeedsSpace(file.length() * 2), guard.state.value)
+        assertEquals(UpgradeState.NeedsSpace(file.length() * 3), guard.state.value)
         // Nothing was opened for writing beyond the check: still version 18.
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
     }
@@ -77,7 +77,7 @@ class UpgradeGuardTest {
         val size = file.length()
         val guard = UpgradeGuard(file) { 10L }
         assertFalse(guard.check())
-        assertEquals(UpgradeState.NeedsSpace(size * 2), guard.state.value)
+        assertEquals(UpgradeState.NeedsSpace(size * 3), guard.state.value)
         // The check left the file as it was.
         assertEquals(size, file.length())
     }
@@ -164,7 +164,7 @@ class UpgradeGuardTest {
         val opened = CountDownLatch(1)
         thread { helper.writableDatabase; opened.countDown() }
         assertFalse(opened.await(200, TimeUnit.MILLISECONDS))
-        assertEquals(UpgradeState.NeedsSpace(file.length() * 2), guard.state.value)
+        assertEquals(UpgradeState.NeedsSpace(file.length() * 3), guard.state.value)
         free = Long.MAX_VALUE
         assertTrue(guard.retry())
         assertTrue(opened.await(5, TimeUnit.SECONDS))

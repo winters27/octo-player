@@ -177,7 +177,7 @@ data class Backup(
     val keptStations: List<LiveStation> = emptyList(),
 )
 
-private val BackupJson = Json {
+internal val BackupJson = Json {
     prettyPrint = true
     encodeDefaults = true
     ignoreUnknownKeys = true
@@ -343,8 +343,16 @@ fun planRestore(
     )
 }
 
+// How many playlists, playlist songs, likes and ratings a backup holds,
+// counted from its lists, or as its read counted them.
+data class BackupSizes(val playlists: Int, val playlistSongs: Int, val likes: Int, val ratings: Int) {
+    companion object {
+        fun of(backup: Backup) = BackupSizes(backup.playlists.size, backup.playlists.sumOf { it.songs.size }, backup.likes.size, backup.ratings.size)
+    }
+}
+
 // What a backup holds, a line each, for showing before it is restored.
-fun describeBackup(backup: Backup): List<String> = buildList {
+fun describeBackup(backup: Backup, sizes: BackupSizes = BackupSizes.of(backup)): List<String> = buildList {
     val settings = listOfNotNull(
         "player".takeIf { backup.player != null },
         "streaming".takeIf { backup.streaming != null },
@@ -362,11 +370,11 @@ fun describeBackup(backup: Backup): List<String> = buildList {
         if (sound.perOutput && outputs > 0) add(plural(outputs, "output with its own sound", "outputs with their own sound"))
     }
     if (backup.presets.isNotEmpty()) add(plural(backup.presets.size, "equalizer preset", "equalizer presets"))
-    if (backup.playlists.isNotEmpty()) {
-        add(plural(backup.playlists.size, "playlist", "playlists") + ", " + plural(backup.playlists.sumOf { it.songs.size }, "song", "songs"))
+    if (sizes.playlists > 0) {
+        add(plural(sizes.playlists, "playlist", "playlists") + ", " + plural(sizes.playlistSongs, "song", "songs"))
     }
-    if (backup.likes.isNotEmpty()) add(plural(backup.likes.size, "liked song", "liked songs"))
-    if (backup.ratings.isNotEmpty()) add(plural(backup.ratings.size, "rating", "ratings"))
+    if (sizes.likes > 0) add(plural(sizes.likes, "liked song", "liked songs"))
+    if (sizes.ratings > 0) add(plural(sizes.ratings, "rating", "ratings"))
     if (backup.favouriteAlbums.isNotEmpty()) add(plural(backup.favouriteAlbums.size, "favorite album", "favorite albums"))
     if (backup.favouriteArtists.isNotEmpty()) add(plural(backup.favouriteArtists.size, "favorite artist", "favorite artists"))
     if (backup.pins.isNotEmpty()) add(plural(backup.pins.size, "pin on Home", "pins on Home"))
@@ -380,29 +388,66 @@ fun describeBackup(backup: Backup): List<String> = buildList {
     backup.server?.let { add("Server: ${it.address} as ${it.username}. Sign in again to use it.") }
 }
 
+// How much of a backup a library has, counted.
+data class PlanCounts(
+    val playlistsPlanned: Boolean,
+    val playlistSongs: Int,
+    val playlistSongsTotal: Int,
+    val skippedPlaylists: List<String>,
+    val likes: Int,
+    val likesTotal: Int,
+    val ratings: Int,
+    val ratingsTotal: Int,
+    val favouriteAlbums: Int,
+    val favouriteAlbumsTotal: Int,
+    val favouriteArtists: Int,
+    val favouriteArtistsTotal: Int,
+    val pins: Int,
+    val pinsTotal: Int,
+    val lyricsOffsets: Int,
+    val lyricsOffsetsTotal: Int,
+    val keptPlaylists: Int,
+    val keptPlaylistsTotal: Int,
+)
+
 // How much of a backup this library has, a line each, like "Playlists:
 // 331 of 340 songs found".
-fun describePlan(plan: RestorePlan): List<String> = buildList {
-    if (plan.playlists.isNotEmpty()) {
+fun describePlan(plan: RestorePlan): List<String> = describeCounts(
+    PlanCounts(
+        playlistsPlanned = plan.playlists.isNotEmpty(),
+        playlistSongs = plan.playlistSongs,
+        playlistSongsTotal = plan.playlistSongsTotal,
+        skippedPlaylists = plan.skippedPlaylists,
+        likes = plan.likes.size, likesTotal = plan.likesTotal, ratings = plan.ratings.size, ratingsTotal = plan.ratingsTotal,
+        favouriteAlbums = plan.favouriteAlbums.size, favouriteAlbumsTotal = plan.favouriteAlbumsTotal,
+        favouriteArtists = plan.favouriteArtists.size, favouriteArtistsTotal = plan.favouriteArtistsTotal,
+        pins = plan.pins.size, pinsTotal = plan.pinsTotal,
+        lyricsOffsets = plan.lyricsOffsets.size, lyricsOffsetsTotal = plan.lyricsOffsetsTotal,
+        keptPlaylists = plan.keptPlaylists.size, keptPlaylistsTotal = plan.keptPlaylistsTotal,
+    ),
+)
+
+fun describeCounts(plan: PlanCounts): List<String> = buildList {
+    if (plan.playlistsPlanned) {
         add("Playlists: ${plan.playlistSongs.grouped()} of ${plural(plan.playlistSongsTotal, "song", "songs")} found")
     }
     if (plan.skippedPlaylists.isNotEmpty()) {
         add("Already here, left as they are: ${plan.skippedPlaylists.joinToString(", ")}")
     }
-    if (plan.likesTotal > 0) add("Likes: ${plan.likes.size.grouped()} of ${plan.likesTotal.grouped()} found")
-    if (plan.ratingsTotal > 0) add("Ratings: ${plan.ratings.size.grouped()} of ${plan.ratingsTotal.grouped()} found")
+    if (plan.likesTotal > 0) add("Likes: ${plan.likes.grouped()} of ${plan.likesTotal.grouped()} found")
+    if (plan.ratingsTotal > 0) add("Ratings: ${plan.ratings.grouped()} of ${plan.ratingsTotal.grouped()} found")
     if (plan.favouriteAlbumsTotal > 0) {
-        add("Favorite albums: ${plan.favouriteAlbums.size.grouped()} of ${plan.favouriteAlbumsTotal.grouped()} found")
+        add("Favorite albums: ${plan.favouriteAlbums.grouped()} of ${plan.favouriteAlbumsTotal.grouped()} found")
     }
     if (plan.favouriteArtistsTotal > 0) {
-        add("Favorite artists: ${plan.favouriteArtists.size.grouped()} of ${plan.favouriteArtistsTotal.grouped()} found")
+        add("Favorite artists: ${plan.favouriteArtists.grouped()} of ${plan.favouriteArtistsTotal.grouped()} found")
     }
-    if (plan.pinsTotal > 0) add("Pins: ${plan.pins.size.grouped()} of ${plan.pinsTotal.grouped()} found")
+    if (plan.pinsTotal > 0) add("Pins: ${plan.pins.grouped()} of ${plan.pinsTotal.grouped()} found")
     if (plan.lyricsOffsetsTotal > 0) {
-        add("Lyrics timing: ${plan.lyricsOffsets.size.grouped()} of ${plan.lyricsOffsetsTotal.grouped()} songs found")
+        add("Lyrics timing: ${plan.lyricsOffsets.grouped()} of ${plan.lyricsOffsetsTotal.grouped()} songs found")
     }
     if (plan.keptPlaylistsTotal > 0) {
-        add("Kept downloaded: ${plan.keptPlaylists.size.grouped()} of ${plural(plan.keptPlaylistsTotal, "playlist", "playlists")} found")
+        add("Kept downloaded: ${plan.keptPlaylists.grouped()} of ${plural(plan.keptPlaylistsTotal, "playlist", "playlists")} found")
     }
 }
 

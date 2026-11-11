@@ -3,6 +3,7 @@ package app.winters.octo
 import android.app.Application
 import app.winters.octo.admin.ServerUpdates
 import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.UpgradeGuard
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
@@ -13,8 +14,10 @@ import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.family.FamilyHub
 import app.winters.octo.listening.ListenBrainzSync
+import app.winters.octo.listening.PlayTotals
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
@@ -52,6 +55,9 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var serverUpdates: ServerUpdates
     @Inject lateinit var animatedArts: AnimatedArts
     @Inject lateinit var upgradeGuard: UpgradeGuard
+    @Inject lateinit var merge: CatalogMerge
+    @Inject lateinit var totals: PlayTotals
+    @Inject lateinit var playlistSync: PlaylistSync
     private var allStarted = false
 
     override fun onCreate() {
@@ -67,6 +73,12 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     fun startAll() {
         if (allStarted) return
         allStarted = true
+        // Song keys an older Octo stored are worked out again, merge or not.
+        merge.start()
+        // Every song's plays are counted, then kept counted as they change.
+        totals.start()
+        // Playlist rows and server answers a write or a read cut off last time left go.
+        playlistSync.start()
         // Keep the library in step with the music on the phone.
         deviceLibrary.start()
         // And with the server's, when one is connected.

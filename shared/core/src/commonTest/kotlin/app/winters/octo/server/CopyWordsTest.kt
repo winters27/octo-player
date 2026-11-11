@@ -62,6 +62,17 @@ class CopyWordsTest {
             }
         }
         assertTrue(copyFraction(CopyStep.Save, 0, null)!! >= last)
+        // Saving moves through the rest as its groups go in, and ends where
+        // the steps after a copy begin.
+        assertEquals(copyFraction(CopyStep.Save, 0, null)!!, copyFraction(CopyStep.Save, 0, SAVE_PARTS)!!, 1e-6f)
+        last = copyFraction(CopyStep.Save, 0, SAVE_PARTS)!!
+        for (done in 0L..SAVE_PARTS step SAVE_PARTS / 10) {
+            val f = copyFraction(CopyStep.Save, done, SAVE_PARTS)!!
+            assertTrue("save $done: $f after $last", f >= last)
+            last = f
+        }
+        assertEquals(copyFraction(CopyStep.Settle, 0, null)!!, last, 1e-6f)
+        assertNull("the Save step has no count", copyCount(CopyStep.Save, SAVE_PARTS / 2, SAVE_PARTS))
     }
 
     // Reading never reaches its end while a page may still come, even when

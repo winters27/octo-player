@@ -12,9 +12,9 @@ sealed interface NotificationHeart {
     data object None : NotificationHeart
 }
 
-fun notificationHeart(trackId: String?, liked: Set<String>, downloads: Map<String, DownloadState>): NotificationHeart = when {
+fun notificationHeart(trackId: String?, liked: Boolean, downloads: Map<String, DownloadState>): NotificationHeart = when {
     trackId == null || isRadio(trackId) -> NotificationHeart.None
-    !isFind(trackId) -> NotificationHeart.Like(trackId in liked)
+    !isFind(trackId) -> NotificationHeart.Like(liked)
     (downloads[trackId] ?: DownloadState.None) == DownloadState.None -> NotificationHeart.Download
     else -> NotificationHeart.None
 }

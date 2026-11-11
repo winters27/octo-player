@@ -20,9 +20,11 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.LocalActivity
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -39,7 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.catalog.SourceTrackEntity
-import app.winters.octo.data.canRunAll
+import app.winters.octo.data.canPutBack
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
@@ -66,12 +68,17 @@ import app.winters.octo.ui.common.rememberOpenedBeside
 
 private val SheetWidth = 328.dp
 
-// How long a preview list gets before the rest is only counted.
-private const val PREVIEW_LINES = 100
-
 @Composable
 fun HealthSheetHost(vm: HealthViewModel) {
     val open = vm.sheet != null
+    // An outcome's window offers its Undo until it closes; then what puts
+    // the run back is kept only if something else still offers it. The
+    // window is the same one across a change of the screen's settings.
+    val offered = (vm.sheet as? HealthSheet.Done)?.outcome?.undo?.owner
+    val activity = LocalActivity.current
+    DisposableEffect(offered) {
+        onDispose { if (offered != null && activity?.isChangingConfigurations != true) vm.letGo(offered) }
+    }
     GlassPopup(
         visible = open,
         anchor = rememberOpenedBeside(open),
@@ -91,10 +98,10 @@ fun HealthSheetHost(vm: HealthViewModel) {
             ) { SheetWords(sheet.words) }
             is HealthSheet.Upgrade -> SheetPage(
                 title = HealthCheck.NoLength.title(),
-                buttons = { SheetButtons(HealthCheck.NoLength.fixAllLabel(sheet.asks.size), onConfirm = { vm.upgrade(sheet.asks) }, onCancel = vm::close) },
+                buttons = { SheetButtons(HealthCheck.NoLength.fixAllLabel(sheet.asks.count), onConfirm = { vm.upgrade(sheet.asks) }, onCancel = vm::close) },
             ) {
                 SheetWords(HealthCheck.NoLength.fixMeaning())
-                PreviewLines(sheet.asks.map { it.title to null })
+                PreviewLines(sheet.asks.first.map { it.title to null }, sheet.asks.count)
             }
             HealthSheet.LookUp -> LookUpSheet(vm)
             HealthSheet.Running -> RunningSheet(vm)
@@ -104,8 +111,8 @@ fun HealthSheetHost(vm: HealthViewModel) {
                 SheetPage(
                     title = "Done",
                     buttons = {
-                        if (actions.canRunAll(undo)) {
-                            SheetButtons("Undo", onConfirm = { vm.run(undo, undo = true, on = sheet.server) }, onCancel = vm::close, cancel = "Close")
+                        if (undo != null && actions.canPutBack(undo)) {
+                            SheetButtons("Undo", onConfirm = { vm.undo(undo, sheet.server) }, onCancel = vm::close, cancel = "Close")
                         } else {
                             AccentButton("Close", onClick = vm::close)
                         }
@@ -169,23 +176,26 @@ private fun copyLine(copy: SourceTrackEntity): String {
     return if (album.isEmpty()) copyName(copy, ServerCopyHealth) else "${copyName(copy, ServerCopyHealth)}, on $album"
 }
 
-// Every finding's fix, one line each, and the one button that does them all.
+// Every finding's fix: the first page of them, one line each, how many
+// more, and the one button that does them all.
 @Composable
 private fun FixAllSheet(sheet: HealthSheet.FixAll, vm: HealthViewModel) {
     val preview = sheet.preview
     SheetPage(
         title = sheet.check.title(),
-        buttons = { SheetButtons(sheet.check.fixAllLabel(preview.count), onConfirm = { vm.run(preview.steps) }, onCancel = vm::close) },
+        buttons = { SheetButtons(sheet.check.fixAllLabel(preview.count), onConfirm = { vm.runFixAll(preview) }, onCancel = vm::close) },
     ) {
         SheetWords(sheet.check.fixMeaning())
-        PreviewLines(preview.lines)
+        PreviewLines(preview.lines, preview.count)
     }
 }
 
+// The first lines of `count`, then how many more there are.
 @Composable
-private fun PreviewLines(lines: List<Pair<String, String?>>) {
-    lines.take(PREVIEW_LINES).forEach { (title, detail) -> SheetLine(title, detail) }
-    if (lines.size > PREVIEW_LINES) SheetWords("And ${countText(lines.size - PREVIEW_LINES, "more", "more")}.", muted = true)
+private fun PreviewLines(lines: List<Pair<String, String?>>, count: Int) {
+    val shown = lines.take(PREVIEW_LINES)
+    shown.forEach { (title, detail) -> SheetLine(title, detail) }
+    if (count > shown.size) SheetWords("And ${countText(count - shown.size, "more", "more")}.", muted = true)
 }
 
 // Songs being looked up, then everything found, each change ticked or not

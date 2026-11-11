@@ -3,8 +3,11 @@ package app.winters.octo.listening
 import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.LikedAlbumEntity
 import app.winters.octo.catalog.LikedTrackEntity
+import app.winters.octo.catalog.SongIds
 import app.winters.octo.catalog.TrackRatingEntity
 import app.winters.octo.catalog.longOf
+import app.winters.octo.catalog.renameLikeASave
+import app.winters.octo.testing.testMerge
 import app.winters.octo.data.SessionState
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.testing.openTestCatalog
@@ -123,7 +126,7 @@ class AfterSyncTest {
                         db.song("device:9", relinkKey = "rk-x")
                         db.exec("UPDATE source_track SET mergedId = 'device:9' WHERE id = ?", serverOnly)
                         db.exec("DELETE FROM track WHERE id = ?", serverOnly)
-                        db.userDao().relinkAll()
+                        db.renameLikeASave(serverOnly, "device:9", raise = false)
                     }
                 }
             }
@@ -303,7 +306,7 @@ class AfterSyncTest {
             db.copy(source, "s4", "device:4", rating = 2)
             val dao = db.listeningDao()
             // Signed out for the sends, so only what is kept is looked at.
-            val ratings = RatingStore(db.userDao(), ListeningSync({ null }, db.sourceDao(), db.userDao(), db.dao(), dao, store(dao), rebuilds))
+            val ratings = RatingStore(db.userDao(), ListeningSync({ null }, db.sourceDao(), db.userDao(), db.dao(), dao, store(dao), rebuilds), SongIds(db, db.testMerge(null)))
             assertFalse(ratings.restoreNow("device:1", 4))
             assertTrue(ratings.restoreNow("device:2", 5))
             assertTrue(ratings.restoreNow("device:3", 3))
@@ -345,7 +348,7 @@ class AfterSyncTest {
     @Test
     fun aBackupRestoresRatingsAsRestores() {
         val text = File(System.getProperty("octo.mainSources")!!, "app/winters/octo/backup/Backups.kt").readText()
-        assertTrue(text.contains("ratings.restore("))
+        assertTrue(text.contains("ratings.restoreNow("))
         assertFalse(text.contains("ratings.rate("))
     }
 

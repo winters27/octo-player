@@ -1,7 +1,6 @@
 package app.winters.octo.listening
 
 import app.winters.octo.catalog.PlayedAt
-import app.winters.octo.catalog.PlayedTrack
 import app.winters.octo.catalog.ServerPlayedTrack
 import app.winters.octo.catalog.TrackEntity
 import java.time.Instant
@@ -11,17 +10,15 @@ import java.util.Locale
 import kotlin.math.abs
 
 // The History page's lists, from the plays on the phone and the server's
-// record together, as the Home shelves use them.
+// record together, as the Home shelves use them. PlayHistory reads them a
+// page at a time (PlayShelves.kt); the most played within a range count
+// each song by playsSince (PlayWalk.kt).
 
 // One play in the history: the song, and when it started.
 data class HistoryPlay(val track: TrackEntity, val at: Long)
 
 // A day's plays under its heading, newest first.
 data class HistoryDay(val label: String, val plays: List<HistoryPlay>)
-
-// Octo sends its own plays to the server with their start time, which the
-// server may keep to the second only.
-private const val SAME_PLAY_SLACK_MS = 1_000L
 
 // The latest plays, newest first. The phone knows every play it made; the
 // server adds only the last time each song was played anywhere, which joins
@@ -33,7 +30,7 @@ fun recentHistory(local: List<PlayedAt>, server: List<ServerPlayedTrack>, limit:
     val horizon = if (local.size >= limit) local.minOfOrNull { it.startedAt } ?: Long.MIN_VALUE else Long.MIN_VALUE
     val elsewhere = server.mapNotNull { copy ->
         val at = copy.serverLastPlayedAt ?: return@mapNotNull null
-        val window = copy.track.durationMs.coerceAtLeast(0) + SAME_PLAY_SLACK_MS
+        val window = copy.track.durationMs.coerceAtLeast(0) + OWN_PLAY_SLACK_MS
         val ours = mine[copy.track.id].orEmpty().any { abs(it - at) <= window }
         if (ours || at < horizon) null else HistoryPlay(copy.track, at)
     }
@@ -64,53 +61,4 @@ fun rangeStart(range: HistoryRange, now: Long, zone: ZoneId): Long? = when (rang
     HistoryRange.FourWeeks -> now - 28L * 24 * 60 * 60 * 1000
     HistoryRange.SixMonths -> Instant.ofEpochMilli(now).atZone(zone).minusMonths(6).toInstant().toEpochMilli()
     HistoryRange.AllTime -> null
-}
-
-// The most played songs, most first, then the one played last, from the
-// phone's plays counted since `since` (all of them when it is null).
-//
-// For all time, the server's counts join as the Home shelf has them. The
-// server keeps no dates for its plays but the last one, so within a range a
-// song played elsewhere counts one more play when that last play falls in
-// the range and was not the phone's own.
-fun mostPlayed(
-    local: List<PlayedTrack>,
-    server: List<ServerPlayedTrack>,
-    sent: Map<String, SentPlays>,
-    since: Long?,
-    limit: Int,
-): List<PlayedTrack> {
-    val merged = if (since == null) withServerPlays(local, server, sent) else withServerPlaysSince(local, server, sent, since)
-    return merged
-        .sortedWith(
-            compareByDescending<PlayedTrack> { it.plays }
-                .thenByDescending { it.lastPlayedAt }
-                .thenBy { it.track.id },
-        )
-        .take(limit)
-}
-
-private fun withServerPlaysSince(
-    local: List<PlayedTrack>,
-    server: List<ServerPlayedTrack>,
-    sent: Map<String, SentPlays>,
-    since: Long,
-): List<PlayedTrack> {
-    val byId = local.associateByTo(LinkedHashMap()) { it.track.id }
-    server.forEach { copy ->
-        val last = copy.serverLastPlayedAt ?: return@forEach
-        if (last < since) return@forEach
-        // Plays the server holds that are not the phone's own.
-        val others = copy.serverPlays - sent[copy.serverId].heldBy(last)
-        if (others <= 0) return@forEach
-        val mine = byId[copy.track.id]
-        // The phone's latest play in the range is the server's last: its own.
-        if (mine != null && abs(mine.lastPlayedAt - last) <= SAME_PLAY_SLACK_MS) return@forEach
-        byId[copy.track.id] = if (mine == null) {
-            PlayedTrack(copy.track, 1, last)
-        } else {
-            mine.copy(plays = mine.plays + 1, lastPlayedAt = maxOf(mine.lastPlayedAt, last))
-        }
-    }
-    return byId.values.toList()
 }

@@ -1,5 +1,6 @@
 package app.winters.octo.catalog
 
+import androidx.annotation.VisibleForTesting
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
@@ -32,19 +33,8 @@ interface CatalogDao {
     @Query("SELECT * FROM artist ORDER BY sortKey")
     fun artists(): Flow<List<ArtistEntity>>
 
-    // Lists in the order the listener chose. The queries are built in
-    // sort/SortQueries.kt from fixed pieces only. A query that reads likes
-    // also watches them, so the others do not run again on every like.
-
-    @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class])
-    fun sortedTracks(query: RoomRawQuery): Flow<List<SortedTrack>>
-
-    // Every song in one genre, for picking songs to keep playing.
-    @Query("SELECT id FROM track WHERE genre = :name COLLATE NOCASE")
-    suspend fun genreTrackIds(name: String): List<String>
-
-    @RawQuery(observedEntities = [TrackEntity::class, AlbumEntity::class, ArtistEntity::class, LikedTrackEntity::class])
-    fun sortedTracksWithLikes(query: RoomRawQuery): Flow<List<SortedTrack>>
+    // Albums and artists in the order the listener chose. The queries are
+    // built in sort/SortQueries.kt from fixed pieces only.
 
     @RawQuery(observedEntities = [AlbumEntity::class, ArtistEntity::class])
     fun sortedAlbums(query: RoomRawQuery): Flow<List<SortedAlbum>>
@@ -101,18 +91,16 @@ interface CatalogDao {
     @Query("SELECT * FROM album WHERE artistId = :artistId ORDER BY year DESC, sortKey")
     fun artistAlbums(artistId: String): Flow<List<AlbumEntity>>
 
-    // Genres by name, leaving out songs with none. Each source already keeps
-    // one spelling per genre; case is ignored here too so sources agree.
-    @Query(
-        "SELECT genre AS name, COUNT(*) AS songCount, MIN(artwork) AS artwork FROM track WHERE genre != '' " +
-            "GROUP BY genre COLLATE NOCASE ORDER BY genre COLLATE NOCASE",
-    )
+    // Genres by name, leaving out songs with none. The genre column ignores
+    // case, so spellings that differ only in case are one genre, walked in
+    // the genre index's order with no sort; each shows its smallest
+    // spelling.
+    @Query(GENRES_SQL)
     fun genres(): Flow<List<GenreSummary>>
 
-    @Query(
-        "SELECT * FROM album WHERE id IN (SELECT albumId FROM track WHERE genre = :name COLLATE NOCASE) " +
-            "ORDER BY sortKey",
-    )
+    // The albums holding a song of the genre, by name, each found by one
+    // probe of its songs.
+    @Query(GENRE_ALBUMS_SQL)
     fun genreAlbums(name: String): Flow<List<AlbumEntity>>
 
     @Query("SELECT * FROM artist WHERE searchKey LIKE '%' || :q || '%' ORDER BY sortKey LIMIT :limit")
@@ -171,6 +159,9 @@ interface CatalogDao {
     @Insert
     suspend fun insertArtists(rows: List<ArtistEntity>)
 
+    // Every saved file's tags at once, for checks; a scan reads them a page
+    // at a time.
+    @VisibleForTesting
     @Query("SELECT * FROM file_tags")
     suspend fun fileTags(): List<FileTagsEntity>
 

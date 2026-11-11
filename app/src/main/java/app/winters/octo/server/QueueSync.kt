@@ -7,15 +7,16 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.data.Drains
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
-import app.winters.octo.discovery.Discovery
 import app.winters.octo.playback.QueueSnapshot
 import app.winters.octo.subsonic.INDEX_BASED_QUEUE
 import app.winters.octo.subsonic.PlayQueue
 import app.winters.octo.subsonic.PlayQueueByIndex
 import app.winters.octo.subsonic.Song
+import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -71,11 +72,45 @@ fun serverQueueOf(snapshot: QueueSnapshot, serverIdOf: (String) -> String?): Ser
     return ServerQueue(serverIds, if (next >= 0) next else kept.lastIndex, 0)
 }
 
+// The queue saved on the server as an offer reads it, never holding its
+// songs: the answer drained to a file, read once for its head and how many
+// songs it has, then once more for the song it was on (by place, or the
+// first with the current song's id, else the first), as remoteQueueOf has
+// it. Its songs are that one song. Null when the server keeps no queue.
+internal suspend fun offeredQueue(client: SubsonicClient, byIndex: Boolean, drains: Drains): RemoteQueue? =
+    drains.use("server-offer-${System.nanoTime()}.json") { file ->
+        client.drainPlayQueue(byIndex, file)
+        var count = 0
+        val head = client.readPlayQueue(file, byIndex) { songs -> count += songs.size }
+        if (count == 0) return@use null
+        val wanted = if (byIndex) (head.currentIndex ?: 0).coerceIn(0, count - 1) else -1
+        var at = 0
+        var byId: Song? = null
+        var first: Song? = null
+        var indexed: Song? = null
+        client.readPlayQueue(file, byIndex) { songs ->
+            for (song in songs) {
+                if (at == 0) first = song
+                if (at == wanted) indexed = song
+                if (!byIndex && byId == null && song.id == head.currentId) byId = song
+                at++
+            }
+        }
+        val current = if (byIndex) indexed else byId ?: first
+        current?.let {
+            RemoteQueue(
+                songs = listOf(it),
+                index = 0,
+                // A position only means something in the song it was saved for.
+                positionMs = if (byIndex || byId != null) head.positionMs.coerceAtLeast(0) else 0,
+                changedAt = serverTime(head.changed),
+                changedBy = head.changedBy,
+            )
+        }
+    }
+
 // An offer to carry on from another device.
 class ResumeOffer(val device: String, val title: String, val artist: String?, internal val remote: RemoteQueue)
-
-// A queue ready to load: library songs or finds, the current one, and where in it.
-class ResumeQueue(val trackIds: List<String>, val index: Int, val positionMs: Long)
 
 private val Context.queueData by preferencesDataStore("server_queue")
 
@@ -87,7 +122,7 @@ class QueueSync @Inject constructor(
     @ApplicationContext private val context: Context,
     private val sessions: SessionRepository,
     private val sources: SourceDao,
-    private val discovery: Discovery,
+    private val drains: Drains,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val saving = Mutex()
@@ -202,16 +237,11 @@ class QueueSync @Inject constructor(
         }
     }
 
-    // The songs to load for an offer taken up, and the offer is put away.
-    suspend fun take(offer: ResumeOffer): ResumeQueue? {
-        answered(offer)
-        val remote = offer.remote
-        val tracks = discovery.resolveFromServer(remote.songs)
-        if (tracks.isEmpty()) return null
-        val current = remote.current?.let { discovery.resolveFromServer(listOf(it)).firstOrNull() }
-        val index = current?.let { song -> tracks.indexOfFirst { it.id == song.id } }?.takeIf { it >= 0 }
-        return ResumeQueue(tracks.map { it.id }, index ?: 0, if (index != null) remote.positionMs else 0)
-    }
+    // An offer taken up: put away, so the same queue is not offered again.
+    // The queue itself is read again when it plays (ListSpec.ServerQueue).
+    suspend fun taken(offer: ResumeOffer) = answered(offer)
+
+    private suspend fun offered(session: Session): RemoteQueue? = offeredQueue(session.client, session.hasExtension(INDEX_BASED_QUEUE), drains)
 
     // Not now: the same queue is not offered again.
     fun dismiss(offer: ResumeOffer) {
@@ -235,10 +265,8 @@ class QueueSync @Inject constructor(
             _offer.value = null
             return
         }
-        val client = session.client
         val remote = try {
-            if (session.hasExtension(INDEX_BASED_QUEUE)) client.playQueueByIndex()?.let(::remoteQueueOf)
-            else client.playQueue()?.let(::remoteQueueOf)
+            offered(session)
         } catch (e: SubsonicException) {
             return
         }
@@ -272,10 +300,7 @@ class QueueSync @Inject constructor(
             lastSent = session.id to queue
             // The server's time for this save is how this phone knows its own
             // queue later, whatever name other phones running it give.
-            val stamp = runCatching {
-                if (session.hasExtension(INDEX_BASED_QUEUE)) session.client.playQueueByIndex()?.let(::remoteQueueOf)
-                else session.client.playQueue()?.let(::remoteQueueOf)
-            }.getOrNull()?.changedAt
+            val stamp = runCatching { offered(session) }.getOrNull()?.changedAt
             context.queueData.edit {
                 it[savedKey(session.id)] = System.currentTimeMillis()
                 if (stamp != null) it[stampKey(session.id)] = stamp

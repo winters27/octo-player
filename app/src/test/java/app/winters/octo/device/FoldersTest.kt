@@ -1,22 +1,11 @@
 package app.winters.octo.device
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FoldersTest {
-    private fun file(id: Long, folder: String?) = DeviceFile(
-        id = id,
-        uri = "content://media/external/audio/media/$id",
-        fileName = "$id.flac",
-        folder = folder,
-        modifiedAt = 0,
-        sizeBytes = 0,
-        durationMs = 0,
-        addedAtSeconds = 0,
-        mimeType = null,
-        fallback = FileTags(),
-    )
-
     @Test
     fun topFolderIsTheFirstLevel() {
         assertEquals("Music", topFolder("Music/Kavinsky/Nightcall/"))
@@ -26,39 +15,42 @@ class FoldersTest {
 
     @Test
     fun switchedOffFoldersAreLeftOut() {
-        val files = listOf(file(1, "Music/A/"), file(2, "WhatsApp/Media/"), file(3, "Music/"))
-        assertEquals(listOf(1L, 3L), files.withoutFolders(setOf("WhatsApp")).map { it.id })
-        assertEquals(3, files.withoutFolders(emptySet()).size)
+        val folders = listOf("Music/A/", "WhatsApp/Media/", "Music/")
+        assertEquals(listOf("Music/A/", "Music/"), folders.filterNot { switchedOff(it, setOf("WhatsApp")) })
+        assertTrue(folders.none { switchedOff(it, emptySet()) })
+        assertFalse(switchedOff(null, setOf("WhatsApp")))
+        assertTrue(switchedOff(null, setOf("")))
     }
 
     @Test
     fun folderListKeepsSwitchedOffFoldersAndCounts() {
-        val files = listOf(file(1, "Music/A/"), file(2, "Music/B/"), file(3, "WhatsApp/"))
-        val folders = files.folders(setOf("WhatsApp"))
+        val counter = FolderCounter()
+        listOf("Music/A/", "Music/B/", "WhatsApp/").forEach(counter::add)
+        val folders = counter.folders(setOf("WhatsApp"))
         assertEquals(listOf("Music", "WhatsApp"), folders.map { it.name })
         assertEquals(listOf(2, 1), folders.map { it.songs })
         assertEquals(listOf(true, false), folders.map { it.included })
     }
 
     @Test
+    fun foldersWithAsManySongsKeepTheOrderFirstSeen() {
+        val counter = FolderCounter()
+        listOf("Podcasts/", "Music/", "Download/", "Music/").forEach(counter::add)
+        assertEquals(listOf("Music", "Podcasts", "Download"), counter.folders(emptySet()).map { it.name })
+    }
+
+    @Test
     fun pathsLeaveOutTheStorageWhenThereIsOnlyOne() {
-        val files = listOf(file(1, "Music/Kavinsky/"), file(2, "Music/").copy(volume = "external_primary"))
-        assertEquals(
-            mapOf(1L to listOf("Music", "Kavinsky"), 2L to listOf("Music")),
-            files.folderPaths(),
-        )
+        val paths = PhonePaths(listOf(null, "external_primary"))
+        assertEquals(listOf("Music", "Kavinsky"), paths.of("Music/Kavinsky/", null))
+        assertEquals(listOf("Music"), paths.of("Music/", "external_primary"))
     }
 
     @Test
     fun pathsStartWithTheStorageWhenThereAreSeveral() {
-        val files = listOf(
-            file(1, "Music/").copy(volume = "external_primary"),
-            file(2, "Music/").copy(volume = "1a2b-3c4d"),
-        )
-        assertEquals(
-            mapOf(1L to listOf("Internal storage", "Music"), 2L to listOf("SD card", "Music")),
-            files.folderPaths(),
-        )
+        val paths = PhonePaths(listOf("external_primary", "1a2b-3c4d"))
+        assertEquals(listOf("Internal storage", "Music"), paths.of("Music/", "external_primary"))
+        assertEquals(listOf("SD card", "Music"), paths.of("Music/", "1a2b-3c4d"))
     }
 
     @Test

@@ -255,8 +255,9 @@ internal fun fixedTail(actions: (@Composable RowScope.() -> Unit)?): List<LineIt
 )
 
 // Round Play and Shuffle as two items at the end of a control line; they
-// never move.
-fun playShuffleItems(onPlay: () -> Unit, onShuffle: () -> Unit, enabled: Boolean = true, loading: Boolean = false): List<LineItem> = listOf(
-    LineItem("play") { _ -> HeaderButton(app.winters.octo.design.OctoIcons.Play, "Play", onPlay, enabled = enabled, loading = loading) },
-    LineItem("shuffle") { _ -> HeaderButton(app.winters.octo.design.OctoIcons.Shuffle, "Shuffle", onShuffle, enabled = enabled && !loading) },
+// never move. `loading` shows on Play, `shuffling` on Shuffle (a Shuffle
+// waiting for its start), each keeping the other from a tap meanwhile.
+fun playShuffleItems(onPlay: () -> Unit, onShuffle: () -> Unit, enabled: Boolean = true, loading: Boolean = false, shuffling: Boolean = false): List<LineItem> = listOf(
+    LineItem("play") { _ -> HeaderButton(app.winters.octo.design.OctoIcons.Play, "Play", onPlay, enabled = enabled && !shuffling, loading = loading) },
+    LineItem("shuffle") { _ -> HeaderButton(app.winters.octo.design.OctoIcons.Shuffle, "Shuffle", onShuffle, enabled = enabled && !loading, loading = shuffling) },
 )

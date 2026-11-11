@@ -77,16 +77,23 @@ sealed interface CopyOutcome {
 const val READ_SHARE = 0.23f
 const val BUILD_SHARE = 0.22f
 const val ADD_SHARE = 0.38f
+const val SAVE_SHARE = 1f - READ_SHARE - BUILD_SHARE - ADD_SHARE
+
+// How a Save step counts how far it is: `done` of SAVE_PARTS of the save,
+// once its groups are planned. A save stopped part way and resumed goes on
+// from what was in, so its count never moves back.
+const val SAVE_PARTS = 1_000_000L
 
 // How far a whole copy is at `done` of `of` in `step`, or null while it
 // cannot be told (reaching the server, reading before the total is known).
-// Saving holds at its start: the library takes the copy in one go.
+// Saving holds at its start until its groups are planned, then moves
+// through its share as they go in.
 fun copyFraction(step: CopyStep, done: Long, of: Long?): Float? = when (step) {
     CopyStep.Connect -> null
     CopyStep.Read -> of?.let { READ_SHARE * readFraction(done, it) }
     CopyStep.Build -> READ_SHARE + BUILD_SHARE * part(done, of)
     CopyStep.Add -> READ_SHARE + BUILD_SHARE + ADD_SHARE * part(done, of)
-    CopyStep.Save -> READ_SHARE + BUILD_SHARE + ADD_SHARE
+    CopyStep.Save -> READ_SHARE + BUILD_SHARE + ADD_SHARE + SAVE_SHARE * part(done, of)
     CopyStep.Settle -> 1f
 }
 

@@ -1,5 +1,6 @@
 package app.winters.octo.testing
 
+import app.winters.octo.catalog.SAVE_RENAME_TRIGGERS
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -22,15 +23,19 @@ object OldSqlite {
         return conn
     }
 
-    // Every CREATE statement in a schema file, tables then their indexes.
+    // Every CREATE statement in a schema file, tables then their indexes,
+    // and from version 19 on the triggers that move a row written with a
+    // renamed id, last, as the app makes them (SAVE_RENAME_TRIGGERS). The
+    // current SQLite's schema (CurrentSqlite) is this one too.
     fun schemaStatements(version: Int): List<String> {
         val db = Json.parseToJsonElement(schemaFile(version).readText()).jsonObject["database"]!!.jsonObject
-        return db["entities"]!!.jsonArray.flatMap { e ->
+        val tables = db["entities"]!!.jsonArray.flatMap { e ->
             val entity = e.jsonObject
             val name = entity["tableName"]!!.jsonPrimitive.content
             listOf(entity["createSql"]!!.jsonPrimitive.content.replace("\${TABLE_NAME}", name)) +
                 (entity["indices"]?.jsonArray ?: emptyList()).map { it.jsonObject["createSql"]!!.jsonPrimitive.content.replace("\${TABLE_NAME}", name) }
         }
+        return if (version >= 19) tables + SAVE_RENAME_TRIGGERS else tables
     }
 
     // The query plan's detail lines.

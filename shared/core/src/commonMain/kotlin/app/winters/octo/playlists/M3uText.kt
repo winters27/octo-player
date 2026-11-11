@@ -35,21 +35,33 @@ data class M3uEntry(
 // skipped. Takes Windows and Unix line endings and a leading byte order mark.
 fun parseM3u(text: String): List<M3uEntry> {
     val entries = ArrayList<M3uEntry>()
-    var info: Triple<Int?, String?, String?>? = null
-    text.removePrefix(BYTE_ORDER_MARK).lineSequence().forEachIndexed { index, raw ->
+    val lines = M3uLines()
+    text.removePrefix(BYTE_ORDER_MARK).lineSequence().forEachIndexed { index, raw -> lines.line(raw, index + 1)?.let(entries::add) }
+    return entries
+}
+
+// Reads an M3U a line at a time, as parseM3u reads its text, for a file too
+// long to hold: each line in turn with its number from 1 (the file's own
+// byte order mark already gone), answering the entry a location line ends.
+class M3uLines {
+    private var info: Triple<Int?, String?, String?>? = null
+
+    fun line(raw: String, number: Int): M3uEntry? {
         val line = raw.trim().removePrefix(BYTE_ORDER_MARK)
-        when {
-            line.isEmpty() -> Unit
-            line.startsWith("#EXTINF:", ignoreCase = true) -> info = extInf(line.substring("#EXTINF:".length))
-            line.startsWith("#") -> Unit
+        return when {
+            line.isEmpty() -> null
+            line.startsWith("#EXTINF:", ignoreCase = true) -> {
+                info = extInf(line.substring("#EXTINF:".length))
+                null
+            }
+            line.startsWith("#") -> null
             else -> {
                 val (seconds, artist, title) = info ?: Triple(null, null, null)
-                entries += M3uEntry(line, seconds, artist, title, index + 1)
                 info = null
+                M3uEntry(line, seconds, artist, title, number)
             }
         }
     }
-    return entries
 }
 
 // "215,Kavinsky - Nightcall", or with attributes before the comma, like
@@ -126,8 +138,10 @@ data class M3uMatch(val trackIds: List<String>, val missed: List<M3uEntry>)
 // A library song as the matching sees it: its id, title, artist and length.
 data class M3uSong(val id: String, val title: String, val artist: String, val durationMs: Long)
 
-// Lengths further apart than this are different recordings.
-private const val SAME_LENGTH_MS = 10_000L
+// Lengths further apart than this are different recordings: m3uFits never
+// lets a song with a known length answer a question whose known length is
+// further from it.
+const val M3U_SAME_LENGTH_MS = 10_000L
 
 // Leading track numbers on a file name, like "01 ", "01 - " or "1. ".
 private val TrackNumber = Regex("""^\d{1,3}\s*[-.)_]?\s+""")
@@ -154,8 +168,7 @@ fun matchM3u(entries: List<M3uEntry>, library: List<M3uSong>, paths: Map<String,
     val missed = ArrayList<M3uEntry>()
     for (entry in entries) {
         val found = byPath(entry, byFileName)
-            ?: entry.title?.let { byTitleAndArtist(it, entry.artist, (entry.seconds ?: 0) * 1000L, byTitle) }
-            ?: byFileNameAsTitle(entry, byTitle)
+            ?: m3uQuestions(entry).firstNotNullOfOrNull { byTitleAndArtist(it, byTitle) }
         if (found != null) ids += found else missed += entry
     }
     return M3uMatch(ids, missed)
@@ -168,38 +181,62 @@ private fun byPath(entry: M3uEntry, byFileName: Map<String, List<Pair<String, Li
     return candidates.maxBy { (_, known) -> sharedEnding(parts, known) }.first
 }
 
-private fun sharedEnding(a: List<String>, b: List<String>): Int {
+// How many of two paths' parts agree, counted from the end.
+fun sharedEnding(a: List<String>, b: List<String>): Int {
     var n = 0
     while (n < a.size && n < b.size && a[a.size - 1 - n] == b[b.size - 1 - n]) n++
     return n
 }
 
+// One title an entry is looked for by, with its artist when one is given,
+// and its length in milliseconds (0 when not known).
+data class M3uQuestion(val title: String, val artist: String?, val lengthMs: Long) {
+    val hasArtist: Boolean get() = !artist.isNullOrBlank()
+}
+
+// The titles an entry is looked for by when its path finds nothing, in
+// turn: its #EXTINF title and artist; then its file's own name (track
+// numbers and underscores gone) as "Artist - Title"; then as a title, with
+// the #EXTINF artist.
+fun m3uQuestions(entry: M3uEntry): List<M3uQuestion> {
+    val lengthMs = (entry.seconds ?: 0) * 1000L
+    val questions = ArrayList<M3uQuestion>(3)
+    entry.title?.let { questions += M3uQuestion(it, entry.artist, lengthMs) }
+    val name = baseName(entry.location).replace('_', ' ').replace(TrackNumber, "").trim()
+    if (name.isEmpty()) return questions
+    val split = name.indexOf(" - ")
+    if (split > 0) questions += M3uQuestion(name.substring(split + 3).trim(), name.substring(0, split).trim(), lengthMs)
+    questions += M3uQuestion(name, entry.artist, lengthMs)
+    return questions
+}
+
+// Whether a library song can answer a question at all: the same kind of
+// recording (`versions`, the question's versionOf), and a length within
+// M3U_SAME_LENGTH_MS when both are known.
+fun m3uFits(question: M3uQuestion, versions: Set<String>, song: M3uSong): Boolean =
+    versionOf(song.title) == versions &&
+        (question.lengthMs <= 0 || song.durationMs <= 0 || abs(question.lengthMs - song.durationMs) <= M3U_SAME_LENGTH_MS)
+
+// The answer a question with an artist likes best: the artist and the
+// title both agree.
+fun m3uSameSong(question: M3uQuestion, song: M3uSong): Boolean =
+    m3uSameArtist(question, song) && SongIdentity.sameTitle(question.title, song.title).isSame
+
+// Its second choice: the artist agrees.
+fun m3uSameArtist(question: M3uQuestion, song: M3uSong): Boolean = sameArtist(question.artist.orEmpty(), song.artist)
+
 // A library song with this title, by this artist when one is given, and of
 // about this length when it is known. Without an artist, a title only
 // counts when it points at one song, or one of the right length.
-private fun byTitleAndArtist(title: String, artist: String?, lengthMs: Long, byTitle: Map<String, List<M3uSong>>): String? {
-    val versions = versionOf(title)
-    val candidates = titleKeys(title).flatMap { byTitle[it].orEmpty() }.distinctBy { it.id }
-        .filter { versionOf(it.title) == versions }
-        .filter { lengthMs <= 0 || it.durationMs <= 0 || abs(lengthMs - it.durationMs) <= SAME_LENGTH_MS }
-    if (!artist.isNullOrBlank()) {
-        return candidates.firstOrNull { sameArtist(artist, it.artist) && SongIdentity.sameTitle(title, it.title).isSame }?.id
-            ?: candidates.firstOrNull { sameArtist(artist, it.artist) }?.id
+private fun byTitleAndArtist(question: M3uQuestion, byTitle: Map<String, List<M3uSong>>): String? {
+    val versions = versionOf(question.title)
+    val candidates = titleKeys(question.title).flatMap { byTitle[it].orEmpty() }.distinctBy { it.id }
+        .filter { m3uFits(question, versions, it) }
+    if (question.hasArtist) {
+        return candidates.firstOrNull { m3uSameSong(question, it) }?.id
+            ?: candidates.firstOrNull { m3uSameArtist(question, it) }?.id
     }
     return candidates.singleOrNull()?.id
-}
-
-private fun byFileNameAsTitle(entry: M3uEntry, byTitle: Map<String, List<M3uSong>>): String? {
-    val name = baseName(entry.location).replace('_', ' ').replace(TrackNumber, "").trim()
-    if (name.isEmpty()) return null
-    val lengthMs = (entry.seconds ?: 0) * 1000L
-    val split = name.indexOf(" - ")
-    if (split > 0) {
-        val artist = name.substring(0, split).trim()
-        val title = name.substring(split + 3).trim()
-        byTitleAndArtist(title, artist, lengthMs, byTitle)?.let { return it }
-    }
-    return byTitleAndArtist(name, entry.artist, lengthMs, byTitle)
 }
 
 // How a missed entry is listed: its #EXTINF artist and title, or its location.

@@ -28,11 +28,18 @@ sealed interface UpgradeState {
 }
 
 // Keeps the library from opening while the upgrade it needs would run out
-// of disk partway. The 18 to 19 upgrade copies the song tables before it
-// drops the old ones, all in one transaction: at its most it takes about
-// 1.6 times the database file on top of it (MigrationSpaceTest), so it asks
-// for twice the file and its log. Until there is room, every open of the
-// database waits (GuardedOpenHelperFactory) and the app says how much to free.
+// of disk partway. The 18 to 19 upgrade copies the song tables and the
+// tables of likes, ratings, downloads, plays and finds into new ones with
+// more indexes before it drops the old ones, all in one transaction: at its
+// most it takes about 2.3 times the database file on top of it
+// (MigrationSpaceTest; a file mostly of plays and finds takes about 1.4
+// times, MigrationTest), so it asks for three times the file and its log.
+// Three things can grow beyond that share and are asked for on top,
+// counted from the file: a family playlist's base, one line of ids that
+// becomes a row per song, and
+// the saved queue's and the playlists' rows, copied into bigger ones. Until
+// there is room, every open of the database waits (GuardedOpenHelperFactory)
+// and the app says how much to free.
 @Singleton
 class UpgradeGuard internal constructor(
     private val file: File,
@@ -119,10 +126,11 @@ class UpgradeGuard internal constructor(
     // be reported so), and after that (answering false) is the caller's to
     // pass on.
     fun ranOutOfSpace(full: Boolean): Boolean = synchronized(lock) {
-        val raised = maxOf(wholeFileNeed(), freeSpace.bytes() + file.length())
+        val usual = upgradeNeed()
+        val raised = maxOf(usual, freeSpace.bytes() + file.length())
         when {
             full -> floor = maxOf(floor, raised)
-            freeSpace.bytes() < wholeFileNeed() -> Unit
+            freeSpace.bytes() < usual -> Unit
             writeErrorCounted -> return false
             else -> {
                 writeErrorCounted = true
@@ -149,7 +157,11 @@ class UpgradeGuard internal constructor(
         return if (needed <= freeSpace.bytes()) UpgradeState.Clear else UpgradeState.NeedsSpace(needed)
     }
 
-    private fun need(): Long = maxOf(floor, writeErrorAsk, wholeFileNeed())
+    private fun need(): Long = maxOf(floor, writeErrorAsk, upgradeNeed())
+
+    // The most the upgrade takes: a share of the whole file, and the rows it
+    // writes that the file holds in a smaller form.
+    private fun upgradeNeed(): Long = wholeFileNeed() + baseRowsNeed() + queueRowsNeed() + playlistRowsNeed()
 
     // The version the database reports, read without changing the file: a
     // file SQLite finds damaged is left as it is (Android's default handler
@@ -161,8 +173,43 @@ class UpgradeGuard internal constructor(
         0
     }
 
-    private fun wholeFileNeed(): Long = (file.length() + File(file.path + "-wal").length()) * 2
+    private fun wholeFileNeed(): Long = (file.length() + File(file.path + "-wal").length()) * UPGRADE_FILE_FACTOR
+
+    // Each family playlist's base becomes a row per id, and the line it was
+    // stays in the log until the upgrade lands: twice the rows, as if every
+    // id were different, and the characters at two bytes each.
+    private fun baseRowsNeed(): Long = readFile(
+        "SELECT TOTAL(length(syncedSongs)), TOTAL(length(syncedSongs) - length(replace(syncedSongs, char(10), '')) + 1) " +
+            "FROM playlist WHERE typeof(syncedSongs) = 'text'",
+    ) { chars, ids -> 2 * (ids * SYNCED_ROW_BYTES + chars * 2) }
+
+    // The saved queue's songs, each copied into a row with its keys and
+    // three index entries.
+    private fun queueRowsNeed(): Long = readFile("SELECT COUNT(*), 0 FROM queue_item") { songs, _ -> songs * QUEUE_ROW_BYTES }
+
+    // Every playlist row, copied into one with four index entries while the
+    // old row is still there.
+    private fun playlistRowsNeed(): Long = readFile("SELECT COUNT(*), 0 FROM playlist_item") { rows, _ -> rows * PLAYLIST_ROW_BYTES }
+
+    // One row of two numbers from the file, read without changing it, the
+    // way reportedVersion opens it. Nothing when it cannot be read.
+    private fun readFile(sql: String, need: (Long, Long) -> Long): Long = try {
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY, DatabaseErrorHandler { }).use { db ->
+            db.rawQuery(sql, null).use { c -> if (c.moveToFirst()) need(c.getLong(0), c.getLong(1)) else 0L }
+        }
+    } catch (e: SQLiteException) {
+        0L
+    }
 }
+
+// How many times the database file the upgrade asks for on top of the
+// file, and what a base row, a queue row and a playlist row take with
+// their index entries and the log (MigrationSpaceTest measured about 100,
+// 160 and 270 bytes).
+private const val UPGRADE_FILE_FACTOR = 3L
+private const val SYNCED_ROW_BYTES = 100L
+private const val QUEUE_ROW_BYTES = 200L
+internal const val PLAYLIST_ROW_BYTES = 350L
 
 private const val WRITE_ERROR = "write-error"
 

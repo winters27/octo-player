@@ -48,13 +48,15 @@ class ServerCatalogParityTest {
                 val albums = dao.stageAlbums(SOURCE).map { it.row }
                 val artists = dao.stageArtists(SOURCE).map { it.row }
 
-                assertEquals(today.tracks.indices.map { it.toLong() }, tracks.map { it.seq })
+                // In today's order, their places rising and spaced for songs
+                // that come between them later.
+                assertTrue(tracks.zipWithNext().all { (a, b) -> a.seq < b.seq })
                 assertEquals(today.tracks, tracks.map { it.copy(seq = 0, titleKey = "", matchKey = "", keysVersion = 0) })
                 assertEquals(today.tracks.map { it.withKeys() }.map { Triple(it.titleKey, it.matchKey, it.keysVersion) }, tracks.map { Triple(it.titleKey, it.matchKey, it.keysVersion) })
                 assertEquals(today.albums, albums.map { it.copy(seq = 0) })
                 assertTrue(albums.zipWithNext().all { (a, b) -> a.seq < b.seq })
                 assertEquals(today.artists, artists.map { it.copy(seq = 0) })
-                assertEquals(today.artists.indices.map { it.toLong() }, artists.map { it.seq })
+                assertTrue(artists.zipWithNext().all { (a, b) -> a.seq < b.seq })
                 assertEquals(CopyCounts(today.tracks.size, today.albums.size, today.artists.size), counts)
                 // Built songs leave the copy's pages as they go.
                 assertEquals(0, dao.syncSongCount())

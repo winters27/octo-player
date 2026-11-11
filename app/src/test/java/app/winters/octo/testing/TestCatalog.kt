@@ -6,8 +6,13 @@ import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import app.winters.octo.catalog.AddedRows
 import app.winters.octo.catalog.CATALOG_FILE
 import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.catalog.PlaylistEdits
+import app.winters.octo.catalog.PlaylistSets
+import app.winters.octo.catalog.SongToAdd
+import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.catalogSetup
 import java.io.File
 import java.nio.file.Files
@@ -15,12 +20,21 @@ import java.nio.file.Files
 // A library database in a file of its own, opened the way the app opens
 // one (write-ahead logging, the migration, the open cleanup). Robolectric
 // runs tests on the main thread, where Room refuses reads that block, so
-// tests may read directly.
+// tests may read directly. Every statement is counted at the database
+// (`counted`, CountingOpenHelperFactory).
 fun openTestCatalog(dir: File = Files.createTempDirectory("catalog").toFile()): CatalogDatabase =
     Room.databaseBuilder(testContext(), CatalogDatabase::class.java, File(dir, CATALOG_FILE).path)
         .catalogSetup()
+        .openHelperFactory(CountingOpenHelperFactory())
         .allowMainThreadQueries()
         .build()
+
+// A playlist's one-row edits, as the app makes them.
+fun CatalogDatabase.edits(): PlaylistEdits = PlaylistEdits(this, PlaylistSets(this))
+
+// Appends songs to a playlist as the app's add does.
+suspend fun CatalogDatabase.addSongs(playlistId: String, tracks: List<TrackEntity>, now: Long): AddedRows? =
+    edits().add(playlistId, { emit -> emit(tracks.map { SongToAdd(it.id, it.relinkKey) }) }, distinct = false, newOnly = false, now = now)
 
 // The test app's context, taking an absolute path as a database's name as
 // it is. Android reads only a leading "/" as one, so it would refuse a

@@ -103,15 +103,18 @@ internal class CatalogMerger(
         for (source in sources) {
             // From the third source on, every song is open to it again: none
             // has a copy from it yet. Matches below mark theirs taken.
-            if (source.rank > 1) db.openHelper.writableDatabase.execSQL("UPDATE merge_candidate SET lastSourceRank = 0")
+            if (source.rank > 1) reopenSongs()
             // The first page starts below every row: any id sorts after "".
             var after = PageKey(Int.MIN_VALUE, Long.MIN_VALUE, "")
             while (true) {
                 val page = work.trackPage(trackPageQuery(source.trackTable, source.sourceId, after))
                 if (page.isEmpty()) break
+                // A song that comes in new files under its title's lookup
+                // keys, read before the page's transaction takes the lock.
+                val lookups = page.map { titleLookup(it.title, it.artist) }
                 db.withTransaction {
                     PageWriter(db.openHelper.writableDatabase).use { writer ->
-                        for (track in page) place(track, source, writer, placed, albumIdFor, artistIdFor)
+                        page.forEachIndexed { i, track -> place(track, lookups[i], source, writer, placed, albumIdFor, artistIdFor) }
                     }
                 }
                 if (!firstWritten) {
@@ -148,6 +151,7 @@ internal class CatalogMerger(
 
     private fun place(
         track: SourceTrackEntity,
+        lookup: TitleLookup,
         source: MergeSource,
         writer: PageWriter,
         placed: Placed,
@@ -167,13 +171,13 @@ internal class CatalogMerger(
                 ?: writer.fit(FIT_ANYWHERE_SQL, keys.matchKey, keys.titleKey, track.durationMs)
         }
         if (match != null) {
-            writer.add(match.id, track, source)
+            writer.add(match, track, source)
             writer.link(track.id, match.id)
             placed.mixed += match.albumId
             return
         }
         val artistId = artistIdFor[track.artistId] ?: track.artistId
-        writer.create(track, keys, source, albumId, artistId, placed.nextSeq++)
+        writer.create(track, keys, lookup, source, albumId, artistId, placed.nextSeq++)
         writer.link(track.id, track.id)
         val firstRank = placed.albumMadeBy.getOrPut(albumId) { source.rank }
         if (firstRank != source.rank) placed.mixed += albumId
@@ -299,9 +303,38 @@ internal class CatalogMerger(
         return count
     }
 
+    // Every song placed so far is open to the next source again, a page of
+    // them a transaction in the order they were placed, so no write holds
+    // the lock for every song and none runs outside a transaction.
+    private suspend fun reopenSongs() {
+        var after = Long.MIN_VALUE
+        while (true) {
+            val end = db.withTransaction {
+                val sql = db.openHelper.writableDatabase
+                val last = sql.query(REOPEN_PAGE_END_SQL, arrayOf<Any?>(after)).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+                if (last == null) {
+                    sql.execSQL(REOPEN_REST_SQL, arrayOf<Any?>(after))
+                } else {
+                    sql.execSQL(REOPEN_PAGE_SQL, arrayOf<Any?>(after, last))
+                }
+                last
+            } ?: return
+            after = end
+        }
+    }
+
     private fun exists(sql: SupportSQLiteDatabase, query: String, vararg args: Any?): Boolean =
         sql.query(query, args).use { it.moveToFirst() && it.getLong(0) != 0L }
 }
+
+// Where a page of placed songs ends, by the order they were placed: the
+// last of the page's MERGE_PAGE songs, none when fewer are left. Then the
+// page, or every song left, opened to the next source.
+internal const val REOPEN_PAGE_END_SQL =
+    "SELECT seq FROM merge_candidate WHERE seq > ?1 ORDER BY seq LIMIT 1 OFFSET ${MERGE_PAGE - 1}"
+internal const val REOPEN_PAGE_SQL =
+    "UPDATE merge_candidate SET lastSourceRank = 0 WHERE seq > ?1 AND seq <= ?2 AND lastSourceRank != 0"
+internal const val REOPEN_REST_SQL = "UPDATE merge_candidate SET lastSourceRank = 0 WHERE seq > ?1 AND lastSourceRank != 0"
 
 // Where a page of a source's songs ends: its last row's place in album,
 // source order and id.
@@ -350,8 +383,9 @@ private suspend fun <T> acrossSources(
     return Matched(bases, extras, idFor)
 }
 
-// A library song a copy matched: its id, and the album it is in.
-private class Fit(val id: String, val albumId: String)
+// A library song a copy matched: its id, the album it is in, its title and
+// how many artists its credit names.
+private class Fit(val id: String, val albumId: String, val title: String, val credits: Int)
 
 // The statements one page of placing songs runs, compiled once a page.
 private class PageWriter(private val sql: SupportSQLiteDatabase) : Closeable {
@@ -361,26 +395,40 @@ private class PageWriter(private val sql: SupportSQLiteDatabase) : Closeable {
 
     fun fit(query: String, key: String, titleKey: String, durationMs: Long): Fit? =
         sql.query(query, arrayOf<Any?>(key, titleKey, durationMs - SAME_LENGTH_MS, durationMs + SAME_LENGTH_MS)).use { c: Cursor ->
-            if (c.moveToFirst()) Fit(c.getString(0), c.getString(1)) else null
+            if (c.moveToFirst()) Fit(c.getString(0), c.getString(1), c.getString(2), c.getInt(3)) else null
         }
 
-    // A copy joins a library song: today's rules for each field.
-    fun add(id: String, copy: SourceTrackEntity, source: MergeSource) {
+    // A copy joins a library song: today's rules for each field. A copy
+    // whose credit names more artists gives the song its artist, and with
+    // it the title's lookup keys read with that artist; the statement
+    // takes them on the same rule, reading the row it changes.
+    fun add(match: Fit, copy: SourceTrackEntity, source: MergeSource) {
+        val credits = splitLines(copy.artists).size
+        val keys = if (credits > match.credits && copy.artist.isNotBlank()) titleLookup(match.title, copy.artist) else null
         addCopy.bindAll(
             copy.trackNo, copy.discNo, copy.year, copy.originalYear, copy.genre, copy.rating, copy.explicit,
-            copy.addedAt, splitLines(copy.artists).size, copy.artist.isNotBlank(), copy.artist, source.onPhone,
-            source.rank, id,
+            copy.addedAt, credits, copy.artist.isNotBlank(), copy.artist, source.onPhone,
+            source.rank, match.id, keys?.lookupKey, keys?.looseKey,
         )
         addCopy.executeUpdateDelete()
     }
 
-    // A copy no song matched becomes a library song of its own.
-    fun create(base: SourceTrackEntity, keys: SourceTrackEntity, source: MergeSource, albumId: String, artistId: String, seq: Long) {
+    // A copy no song matched becomes a library song of its own, filed under
+    // its title's lookup keys (`lookup`, read with its artist).
+    fun create(
+        base: SourceTrackEntity,
+        keys: SourceTrackEntity,
+        lookup: TitleLookup,
+        source: MergeSource,
+        albumId: String,
+        artistId: String,
+        seq: Long,
+    ) {
         insert.bindAll(
             base.id, base.sourceId, base.nativeId, base.title, base.searchKey, base.sortKey, base.artist, artistId,
             base.album, albumId, base.trackNo, base.discNo, base.year, base.durationMs, base.addedAt, base.mimeType,
             base.sizeBytes, base.artwork, base.uri, base.albumOrder, base.relinkKey, base.genre, source.onPhone,
-            base.rating?.takeIf { it in 1..5 } ?: 0, base.explicit,
+            base.rating?.takeIf { it in 1..5 } ?: 0, base.explicit, "", "", lookup.lookupKey, lookup.looseKey,
             seq, keys.titleKey, keys.matchKey, base.originalYear, splitLines(base.artists).size, base.discNo ?: 1,
             source.rank, source.rank, false,
         )
@@ -444,15 +492,17 @@ private fun seqPageQuery(table: String, sourceId: String, after: Long): RoomRawQ
 // length allowed, the first placed. In the copy's album first, then
 // anywhere by the same artist.
 internal const val FIT_IN_ALBUM_SQL =
-    "SELECT id, albumId FROM merge_candidate WHERE albumId = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
+    "SELECT id, albumId, title, credits FROM merge_candidate WHERE albumId = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
         "AND durationMs BETWEEN ?3 AND ?4 ORDER BY seq LIMIT 1"
 
 internal const val FIT_ANYWHERE_SQL =
-    "SELECT id, albumId FROM merge_candidate WHERE matchKey = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
+    "SELECT id, albumId, title, credits FROM merge_candidate WHERE matchKey = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
         "AND durationMs BETWEEN ?3 AND ?4 ORDER BY seq LIMIT 1"
 
 // Every value on the right reads the row as it was, so discKey follows the
-// disc number the row ends with.
+// disc number the row ends with, and the lookup keys (?15, ?16) are taken
+// exactly when the artist is. Both are null when the copy gives the song
+// no artist, so a row that took an artist without its keys fails.
 internal const val ADD_COPY_SQL = """
     UPDATE merge_candidate SET
         trackNo = COALESCE(trackNo, ?1),
@@ -466,6 +516,8 @@ internal const val ADD_COPY_SQL = """
         addedAt = CASE WHEN addedAt > 0 AND ?8 > 0 THEN MIN(addedAt, ?8) WHEN addedAt > 0 THEN addedAt
             WHEN ?8 > 0 THEN ?8 ELSE 0 END,
         artist = CASE WHEN ?9 > credits AND ?10 THEN ?11 ELSE artist END,
+        lookupKey = CASE WHEN ?9 > credits AND ?10 THEN ?15 ELSE lookupKey END,
+        looseKey = CASE WHEN ?9 > credits AND ?10 THEN ?16 ELSE looseKey END,
         credits = CASE WHEN ?9 > credits AND ?10 THEN ?9 ELSE credits END,
         onPhone = onPhone OR ?12,
         lastSourceRank = ?13,
@@ -476,7 +528,7 @@ internal const val ADD_COPY_SQL = """
 internal val CANDIDATE_COLUMNS = listOf(
     "id", "sourceId", "nativeId", "title", "searchKey", "sortKey", "artist", "artistId", "album", "albumId",
     "trackNo", "discNo", "year", "durationMs", "addedAt", "mimeType", "sizeBytes", "artwork", "uri", "albumOrder",
-    "relinkKey", "genre", "onPhone", "rating", "explicit",
+    "relinkKey", "genre", "onPhone", "rating", "explicit", "artistSortKey", "albumSortKey", "lookupKey", "looseKey",
     "seq", "titleKey", "matchKey", "originalYear", "credits", "discKey", "lastSourceRank", "createdRank", "mixed",
 )
 

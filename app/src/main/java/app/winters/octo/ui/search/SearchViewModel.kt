@@ -21,8 +21,11 @@ import app.winters.octo.discovery.RankedTracks
 import app.winters.octo.discovery.SearchTopSongs
 import app.winters.octo.discovery.searchedArtist
 import app.winters.octo.discovery.showsAddHint
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playback.QUEUE_WINDOW
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.load
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -83,6 +86,10 @@ class SearchResults(
     // library knew when they were looked up. Those are left out of the
     // songs not in the library, so no song is listed twice.
     val listedFinds: Set<String> = emptySet(),
+    // The search key and the filter the songs were found with, so a play
+    // names the same search.
+    val query: String = "",
+    val filter: SearchFilter = SearchFilter.All,
 ) {
     val isEmpty get() = artists.isEmpty() && albums.isEmpty() && songs.isEmpty() && playlists.isEmpty()
 }
@@ -180,6 +187,8 @@ class SearchViewModel @Inject constructor(
                     moreSongs = songs.size > caps.songs,
                     morePlaylists = named.size > caps.playlists,
                     listedFinds = listedFinds(downloads.adoptions.value.orEmpty(), shown),
+                    query = q,
+                    filter = filter,
                 )
             }
         }
@@ -309,11 +318,18 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch { recents.clear() }
     }
 
-    // Plays the found songs from the one tapped.
+    // Plays the found songs from the one tapped: the songs shown when they
+    // fit a queue's window, else the search itself, read again a page at a
+    // time.
     fun playSong(track: TrackEntity) {
-        val songs = results.value?.songs ?: return
+        val found = results.value ?: return
+        val songs = found.songs
         keepSearch()
-        playback.playTracks(songs.map { it.id }, songs.indexOf(track).coerceAtLeast(0))
+        if (songs.size <= QUEUE_WINDOW) {
+            playback.playList(ListSpec.Ids(songs.map { it.id }), ListStart.Row(track.id, null))
+        } else {
+            playback.playList(ListSpec.Search(found.query, found.filter), ListStart.Row(track.id, null), shownOverWindow = true)
+        }
     }
 
     // Plays a ranked list from the song tapped.

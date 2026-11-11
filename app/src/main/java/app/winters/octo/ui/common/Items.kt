@@ -170,10 +170,11 @@ private fun AlbumCard(
 @Composable
 fun SongCard(track: TrackEntity, onClick: () -> Unit) {
     val menu = LocalSongMenu.current
+    val faint = isOutOfReach(track)
     Column(
         Modifier
             .width(150.dp)
-            .alpha(if (LocalOfflineMarks.current.isOutOfReach(track)) OutOfReachAlpha else 1f)
+            .alpha(if (faint) OutOfReachAlpha else 1f)
             .pressOrHold(LocalHapticFeedback.current, LocalPressSpot.current, onClick) { menu.open(track.id) },
     ) {
         ArtworkFill(track.artwork, outside = isOutsideLibrary(track.id))
@@ -331,6 +332,7 @@ private fun SongLine(
     val picked = selection?.isPicked(selectKey) == true
     val interaction = remember { MutableInteractionSource() }
     val squeeze by rememberPressSqueeze(interaction)
+    val faint = isOutOfReach(song)
     Box(
         Modifier.graphicsLayer {
             // Held down, the row gives a little and springs back.
@@ -375,7 +377,7 @@ private fun SongLine(
                 .heightIn(min = 56.dp)
                 .padding(horizontal = ListRowSide, vertical = 4.dp)
                 // With no connection, a song that cannot play is drawn faint.
-                .alpha(if (LocalOfflineMarks.current.isOutOfReach(song)) OutOfReachAlpha else 1f),
+                .alpha(if (faint) OutOfReachAlpha else 1f),
             contentAlignment = Alignment.CenterStart,
         ) {
             if (swap == null) {

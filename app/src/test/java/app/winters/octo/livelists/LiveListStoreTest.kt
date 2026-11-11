@@ -3,8 +3,6 @@ package app.winters.octo.livelists
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
-import app.winters.octo.catalog.PlayedTrack
-import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionState
 import app.winters.octo.query.FilterPresets
@@ -25,8 +23,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// The phone's live lists: kept per account, read back after a restart, and
-// the songs each picks, following likes and plays.
+// The phone's live lists: kept per account and read back after a restart.
+// The songs each picks are LiveListSongsTest's.
 class LiveListStoreTest {
     private val account = MutableStateFlow("one")
     private var now = 1_000L
@@ -88,33 +86,4 @@ class LiveListStoreTest {
         assertEquals(accountKey("winters", "https://music.example/"), a)
     }
 
-    private fun track(id: String, mime: String = "audio/mpeg", added: Long = 0) = TrackEntity(
-        id = id, sourceId = "device", nativeId = id, title = "Song $id", searchKey = id, sortKey = id,
-        artist = "Artist", artistId = "ar", album = "Album $id", albumId = "al$id", trackNo = null, discNo = null, year = null,
-        durationMs = 200_000, addedAt = added, mimeType = mime, sizeBytes = null, artwork = null, uri = null,
-    )
-
-    @Test
-    fun aListsSongsFollowLikesAndPlays() = runBlocking {
-        val tracks = MutableStateFlow(listOf(track("1", "audio/flac"), track("2"), track("3", "audio/flac")))
-        val liked = MutableStateFlow(listOf("1"))
-        val played = MutableStateFlow(emptyList<PlayedTrack>())
-        val songs = LiveListSongs(tracks, liked, played)
-        val lossless = LiveList.new("Lossless favorites", LibraryQuery(listOf(FilterPresets.Favourites, FilterPresets.Lossless)), 0)
-        assertEquals(listOf("1"), songs.now(lossless).map { it.id })
-        liked.value = listOf("1", "2", "3")
-        assertEquals(listOf("1", "3"), songs.now(lossless).map { it.id })
-
-        val playedOften = LiveList.new("Played", LibraryQuery(listOf(FilterPresets.playedAtLeast(5))), 0)
-        assertEquals(emptyList<String>(), songs.now(playedOften).map { it.id })
-        played.value = listOf(PlayedTrack(track("2"), 7, System.currentTimeMillis()))
-        assertEquals(listOf("2"), songs.now(playedOften).map { it.id })
-
-        // The editor's preview follows its rules as they change.
-        val rules = MutableStateFlow(LibraryQuery(listOf(FilterPresets.Lossless)))
-        val preview = songs.songs(rules)
-        assertEquals(listOf("1", "3"), preview.first().map { it.id })
-        rules.value = LibraryQuery(listOf(FilterPresets.Lossless), text = "Song 3")
-        assertEquals(listOf("3"), preview.first().map { it.id })
-    }
 }

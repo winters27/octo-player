@@ -119,52 +119,54 @@ class HistoryTest {
         assertNull(rangeStart(HistoryRange.AllTime, now, zone))
     }
 
-    private fun counted(id: String, plays: Int, last: Long) = PlayedTrack(track(id), plays, last)
+    // One song's plays as a walk reads them: the phone's, and its copies
+    // with how many of Octo's sent plays each record holds.
+    private fun song(id: String, phone: Pair<Int, Long>? = null, vararg copies: Triple<Int, Long?, Int>) = SongPlays(
+        id,
+        phone?.let { (plays, last) -> PhonePlays(id, "", "", id, "", 200_000, plays, last) },
+        copies.mapIndexed { i, (plays, last, held) -> CopyPlays(id, i + 1L, "s$id", plays, last, held, "", "", id, "", 200_000) },
+    )
 
     @Test
     fun allTimeAddsTheServersCounts() {
-        val top = mostPlayed(listOf(counted("a", 2, 100)), listOf(server("a", 5, 50), server("b", 4, 70)), emptyMap(), null, 10)
-        assertEquals(listOf("a" to 7, "b" to 4), top.map { it.track.id to it.plays })
+        assertEquals(7, totalOf(song("a", 2 to 100L, Triple(5, 50L, 0)))?.plays)
+        assertEquals(4, totalOf(song("b", null, Triple(4, 70L, 0)))?.plays)
     }
 
     @Test
     fun aRangeCountsOnlyThePhonesPlaysInIt() {
         // The phone's plays arrive already counted from the range's start.
         val since = 1_000L
-        val top = mostPlayed(listOf(counted("a", 2, 5_000), counted("b", 3, 4_000)), emptyList(), emptyMap(), since, 10)
-        assertEquals(listOf("b" to 3, "a" to 2), top.map { it.track.id to it.plays })
+        assertEquals(2 to 5_000L, playsSince(song("a", 2 to 5_000L), since))
+        assertEquals(3 to 4_000L, playsSince(song("b", 3 to 4_000L), since))
     }
 
     @Test
     fun aRangeCountsAServerPlayElsewhereOnceWhenItFallsInside() {
         val since = 1_000_000L
-        val server = listOf(server("a", 40, 2_000_000), server("b", 9, 500_000))
-        val top = mostPlayed(listOf(counted("a", 1, 1_500_000)), server, emptyMap(), since, 10)
         // "a": one on the phone plus one elsewhere; "b" was last played before the range.
-        assertEquals(listOf("a" to 2), top.map { it.track.id to it.plays })
+        assertEquals(2 to 2_000_000L, playsSince(song("a", 1 to 1_500_000L, Triple(40, 2_000_000L, 0)), since))
+        assertNull(playsSince(song("b", null, Triple(9, 500_000L, 0)), since))
     }
 
     @Test
     fun aRangeDoesNotCountThePhonesOwnPlayTwice() {
         val since = 1_000L
         // The server's last play is the phone's, sent to it.
-        val top = mostPlayed(listOf(counted("a", 1, 2_000)), listOf(server("a", 1, 2_000)), emptyMap(), since, 10)
-        assertEquals(listOf("a" to 1), top.map { it.track.id to it.plays })
+        assertEquals(1 to 2_000L, playsSince(song("a", 1 to 2_000L, Triple(1, 2_000L, 0)), since))
     }
 
     @Test
     fun aRangeLeavesOutServerPlaysThatAreAllThePhonesOwn() {
-        val since = 1_000L
-        val sent = mapOf("sa" to SentPlays(folded = 3))
-        val top = mostPlayed(emptyList(), listOf(server("a", 3, 2_000)), sent, since, 10)
-        assertEquals(emptyList<PlayedTrack>(), top)
+        assertNull(playsSince(song("a", null, Triple(3, 2_000L, 3)), 1_000L))
     }
 
     @Test
     fun theListStopsAtItsLimitMostFirst() {
-        val songs = (1..30).map { counted("s$it", it, it.toLong()) }
-        val top = mostPlayed(songs, emptyList(), emptyMap(), 0L, 10)
-        assertEquals(10, top.size)
-        assertEquals("s30", top.first().track.id)
+        val top = TopOf(10, compareByDescending<PlayedTrack> { it.plays }.thenByDescending { it.lastPlayedAt }.thenBy { it.track.id })
+        (1..30).forEach { top.offer(PlayedTrack(track("s$it"), it, it.toLong())) }
+        val kept = top.sorted()
+        assertEquals(10, kept.size)
+        assertEquals("s30", kept.first().track.id)
     }
 }

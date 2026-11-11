@@ -5,6 +5,7 @@ import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.catalog.matchKey
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
@@ -13,6 +14,10 @@ import app.winters.octo.discovery.Discovered
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.SearchTopSongs
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.sort.SongScope
+import app.winters.octo.sort.SongSort
+import app.winters.octo.sort.SortOrder
+import app.winters.octo.ui.paging.ListLoaders
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -46,23 +51,25 @@ fun voiceAsk(query: String?, focus: String?, artist: String?, album: String?, ti
     title?.trim()?.ifEmpty { null },
 )
 
-// What a request plays: its songs, whether shuffled, and its queue heading.
-data class VoicePlay(val ids: List<String>, val shuffle: Boolean, val source: QueueSource)
+// What a request plays: the list, by what it is (so the queue reads it a
+// page at a time), whether shuffled, and its queue heading.
+data class VoicePlay(val spec: ListSpec, val shuffle: Boolean, val source: QueueSource)
+
+// Every song, in title order: what saying nothing in particular shuffles.
+val EVERY_SONG = ListSpec.Songs(SongScope.All, SortOrder(SongSort.Title, false), null)
 
 // Where a spoken request is looked up.
 internal interface VoiceSource {
-    suspend fun allTrackIds(): List<String>
+    // Whether a list of the library holds any song, by a read of its first.
+    suspend fun hasSongs(spec: ListSpec): Boolean
     suspend fun albums(key: String): List<AlbumEntity>
     suspend fun artists(key: String): List<ArtistEntity>
     suspend fun songs(key: String): List<TrackEntity>
-    suspend fun albumTrackIds(albumId: String): List<String>
-    suspend fun artistTrackIds(artistId: String): List<String>
 
     // Whether music outside the library may play: a server, and Library
     // songs only off.
     suspend fun outsideAllowed(): Boolean
     suspend fun outside(words: String): Discovered?
-    suspend fun outsideAlbumSongs(albumId: String): List<String>
     suspend fun outsideArtistTop(name: String, artistId: String): List<String>
 }
 
@@ -71,9 +78,10 @@ internal interface VoiceSource {
 // exactly (case, accents and punctuation aside), then songs that match. With
 // the assistant's focus, only that kind is looked for. When the library has
 // nothing and music outside it may play, the server is asked: an album
-// named exactly plays its songs, an artist named exactly their top songs,
-// and otherwise the songs it found. Saying nothing in particular shuffles
-// the whole library. Null when nothing is found.
+// named exactly plays as the server lists it, an artist named exactly their
+// top songs, and otherwise the songs it found. Saying nothing in particular
+// shuffles the whole library. Null when nothing is found. A list is named
+// by what it is, never read whole.
 @Singleton
 class CarVoice internal constructor(private val source: VoiceSource) {
     @Inject constructor(
@@ -82,11 +90,13 @@ class CarVoice internal constructor(private val source: VoiceSource) {
         discovery: Discovery,
         tops: SearchTopSongs,
         player: PlayerSettings,
-    ) : this(AppVoiceSource(catalog, sessions, discovery, tops, player))
+        loaders: ListLoaders,
+        owners: WorkOwners,
+    ) : this(AppVoiceSource(catalog, sessions, discovery, tops, player, loaders, owners))
 
     suspend fun play(ask: VoiceAsk): VoicePlay? {
         if (ask.words.isEmpty() && ask.artist == null && ask.album == null && ask.title == null) {
-            return source.allTrackIds().takeIf { it.isNotEmpty() }?.let { VoicePlay(it, true, NoSource) }
+            return VoicePlay(EVERY_SONG, true, NoSource).takeIf { source.hasSongs(EVERY_SONG) }
         }
         library(ask)?.let { return it }
         if (!source.outsideAllowed()) return null
@@ -101,13 +111,13 @@ class CarVoice internal constructor(private val source: VoiceSource) {
 
     private suspend fun library(ask: VoiceAsk): VoicePlay? {
         val album = if (ask.focus == VoiceFocus.Any || ask.focus == VoiceFocus.Album) libraryAlbum(ask) else null
-        if (album != null) return VoicePlay(source.albumTrackIds(album.id), false, QueueSource.Played(album.title)).orNull()
+        if (album != null) return VoicePlay(ListSpec.Album(album.id, withFinds = false), false, QueueSource.Played(album.title)).orNull()
         val artist = if (ask.focus == VoiceFocus.Any || ask.focus == VoiceFocus.Artist) libraryArtist(ask) else null
-        if (artist != null) return VoicePlay(source.artistTrackIds(artist.id), true, QueueSource.Played(artist.name)).orNull()
+        if (artist != null) return VoicePlay(ListSpec.Artist(artist.id, ArtistOrder.Albums), true, QueueSource.Played(artist.name)).orNull()
         if (ask.focus == VoiceFocus.Album || ask.focus == VoiceFocus.Artist) return null
         val title = ask.title ?: ask.words
         val songs = source.songs(searchKey(title)).filter { ask.artist == null || SongIdentity.sameArtistName(it.artist, ask.artist) }
-        return VoicePlay(songs.map { it.id }, false, NoSource).orNull()
+        return VoicePlay(ListSpec.Ids(songs.map { it.id }), false, NoSource).orNull()
     }
 
     private suspend fun libraryAlbum(ask: VoiceAsk): AlbumEntity? {
@@ -135,18 +145,24 @@ class CarVoice internal constructor(private val source: VoiceSource) {
         if (ask.focus == VoiceFocus.Any || ask.focus == VoiceFocus.Album) {
             val key = matchKey(ask.album ?: ask.words)
             val album = (found.albums + found.partAlbums).firstOrNull { key.isNotEmpty() && matchKey(it.title) == key }
-            if (album != null) return VoicePlay(source.outsideAlbumSongs(album.id), false, QueueSource.Played(album.title)).orNull()
+            // Read from the server when it plays, as the album page reads it.
+            if (album != null) return VoicePlay(ListSpec.Online(OnlineKind.Album, album.id), false, QueueSource.Played(album.title))
         }
         if (ask.focus == VoiceFocus.Any || ask.focus == VoiceFocus.Artist) {
             val name = ask.artist ?: ask.words
             val artist = found.artists.firstOrNull { SongIdentity.sameArtistName(it.name, name) }
-            if (artist != null) return VoicePlay(source.outsideArtistTop(artist.name, artist.id), false, QueueSource.Played(artist.name)).orNull()
+            if (artist != null) return VoicePlay(ListSpec.Ids(source.outsideArtistTop(artist.name, artist.id)), false, QueueSource.Played(artist.name)).orNull()
         }
         if (ask.focus == VoiceFocus.Album || ask.focus == VoiceFocus.Artist) return null
-        return VoicePlay(found.songs.map { it.id }, false, NoSource).orNull()
+        return VoicePlay(ListSpec.Ids(found.songs.map { it.id }), false, NoSource).orNull()
     }
 
-    private fun VoicePlay.orNull(): VoicePlay? = takeIf { it.ids.isNotEmpty() }
+    // The request when its list holds a song: songs named one by one hold
+    // at least one (at most QUEUE_WINDOW are kept), a library list is asked.
+    private suspend fun VoicePlay.orNull(): VoicePlay? = when (val list = spec) {
+        is ListSpec.Ids -> takeIf { list.ids.isNotEmpty() }?.copy(spec = ListSpec.Ids(list.ids.take(QUEUE_WINDOW), list.source))
+        else -> takeIf { this@CarVoice.source.hasSongs(list) }
+    }
 }
 
 private class AppVoiceSource(
@@ -155,8 +171,10 @@ private class AppVoiceSource(
     private val discovery: Discovery,
     private val tops: SearchTopSongs,
     private val player: PlayerSettings,
+    private val loaders: ListLoaders,
+    private val owners: WorkOwners,
 ) : VoiceSource {
-    override suspend fun allTrackIds(): List<String> = catalog.allTrackIds()
+    override suspend fun hasSongs(spec: ListSpec): Boolean = loaders.forSpec(spec, owners.walk())?.after(null, 1)?.isNotEmpty() == true
 
     override suspend fun albums(key: String): List<AlbumEntity> = catalog.searchAlbums(key, 5)
 
@@ -164,17 +182,10 @@ private class AppVoiceSource(
 
     override suspend fun songs(key: String): List<TrackEntity> = catalog.searchTracks(key, 50)
 
-    override suspend fun albumTrackIds(albumId: String): List<String> = catalog.albumTrackIds(albumId)
-
-    override suspend fun artistTrackIds(artistId: String): List<String> =
-        catalog.artistAlbums(artistId).first().flatMap { catalog.albumTrackIds(it.id) }
-
     override suspend fun outsideAllowed(): Boolean =
         sessions.state.value is SessionState.SignedIn && !player.prefs.first().libraryOnly
 
     override suspend fun outside(words: String): Discovered? = discovery.search(words)
-
-    override suspend fun outsideAlbumSongs(albumId: String): List<String> = discovery.album(albumId)?.songs.orEmpty().map { it.id }
 
     override suspend fun outsideArtistTop(name: String, artistId: String): List<String> =
         tops.forArtist(name, null, artistId)?.songs.orEmpty().map { it.track.id }

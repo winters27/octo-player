@@ -31,6 +31,16 @@ class CopyNoticeTest {
         assertTrue(copyNotice(run(CopyStep.Settle)).indeterminate)
     }
 
+    // Saving's bar stands for how much of the save is in once its groups
+    // are planned.
+    @Test
+    fun theBarShowsHowMuchOfTheSaveIsIn() {
+        val saving = copyNotice(run(CopyStep.Save, SAVE_PARTS / 2, SAVE_PARTS))
+        assertFalse(saving.indeterminate)
+        assertEquals((copyFraction(CopyStep.Save, SAVE_PARTS / 2, SAVE_PARTS)!! * NOTICE_MAX).toInt(), saving.progress)
+        assertTrue(saving.progress > (copyFraction(CopyStep.Save, 0, null)!! * NOTICE_MAX).toInt())
+    }
+
     @Test
     fun theNoticeIsPostedAgainOnAStepAWholePercentOrEveryTenthPage() {
         val base = run(CopyStep.Read, 1_000, 200_000)

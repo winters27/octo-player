@@ -1,153 +1,165 @@
 package app.winters.octo.device
 
 import app.winters.octo.catalog.AlbumEntity
-import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.catalog.joinLines
 import app.winters.octo.catalog.relinkKey
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.catalog.sortKey
+import app.winters.octo.server.sortKeyHex
 import java.security.MessageDigest
 
 const val DEVICE = "device"
-private const val UNKNOWN_ARTIST = "Unknown artist"
+internal const val UNKNOWN_ARTIST = "Unknown artist"
 private const val UNKNOWN_ALBUM = "Unknown album"
-private const val VARIOUS_ARTISTS = "Various Artists"
+internal const val VARIOUS_ARTISTS = "Various Artists"
 
-class DeviceCatalog(
-    val tracks: List<SourceTrackEntity>,
-    val albums: List<AlbumEntity>,
-    val artists: List<ArtistEntity>,
-)
-
-// A leading track number in a file name: "04 Title", "04. Title", "04 - Title".
-private val fileNumber = Regex("""^\s*(\d{1,3})(?=\s*[-._)]|\s)""")
-
-private fun String?.orNull() = this?.takeIf(String::isNotBlank)
-
-// Turns the phone's files into albums and artists.
+// How the phone's files become albums and artists (PhoneScan builds them).
 //
 // Albums are grouped by name, not by the phone's album id, which follows
 // the folder when a file has no album-artist tag and so splits one album
 // kept in two folders. A same-named group is only split apart when every
 // file in it says which release it belongs to (a MusicBrainz id) or who the
 // album is by (an album artist); a partly tagged group stays together.
-fun buildDeviceCatalog(rows: List<DeviceRow>): DeviceCatalog {
-    val groups = rows
-        .groupBy { searchKey(albumName(it)) }
-        .flatMap { (nameKey, cluster) -> splitCluster(cluster).map { (splitKey, group) -> Triple(nameKey, splitKey, group) } }
 
-    val tracks = mutableListOf<SourceTrackEntity>()
-    val albums = mutableListOf<AlbumEntity>()
-    val genreNames = genreSpellings(rows)
+// A leading track number in a file name: "04 Title", "04. Title", "04 - Title".
+private val fileNumber = Regex("""^\s*(\d{1,3})(?=\s*[-._)]|\s)""")
 
-    for ((nameKey, splitKey, group) in groups) {
-        val albumId = "$DEVICE:album:${stableId("$nameKey|$splitKey")}"
-        val title = mostCommon(group.map(::albumName))
-        val artist = albumArtistOf(group)
-        val artistId = artistIdOf(artist)
-        val ordered = inAlbumOrder(group)
-        val artwork = ArtworkRef.Device("album:$albumId", ordered.first().first.uri).encode()
+internal fun String?.orNull() = this?.takeIf(String::isNotBlank)
 
-        ordered.forEachIndexed { index, (row, number) ->
-            val trackTitle = row.title.orNull() ?: row.fileName.substringBeforeLast('.').ifBlank { "Untitled" }
-            val tags = row.tags
-            tracks += SourceTrackEntity(
-                id = "$DEVICE:${row.id}",
-                sourceId = DEVICE,
-                nativeId = row.id.toString(),
-                title = trackTitle,
-                searchKey = searchKey(trackTitle),
-                sortKey = sortKey(tags.sortTitle.orNull() ?: trackTitle),
-                artist = row.artist.orNull() ?: artist,
-                artistId = artistId,
-                album = title,
-                albumId = albumId,
-                trackNo = number,
-                discNo = row.disc,
-                year = row.year,
-                durationMs = row.durationMs,
-                addedAt = row.addedAtSeconds,
-                mimeType = row.mimeType,
-                sizeBytes = row.sizeBytes,
-                artwork = artwork,
-                uri = row.uri,
-                albumOrder = index,
-                relinkKey = relinkKey(artist, title, row.disc, number, trackTitle, row.durationMs),
-                genre = row.genres.firstOrNull()?.let { genreNames.getValue(genreKey(it)) } ?: "",
-                trackGain = tags.trackGain,
-                albumGain = tags.albumGain,
-                trackPeak = tags.trackPeak,
-                albumPeak = tags.albumPeak,
-                originalYear = tags.originalYear,
-                genres = joinLines(row.genres.map { genreNames.getValue(genreKey(it)) }.distinct()),
-                artists = joinLines(tags.artists),
-                composer = tags.composer,
-                bpm = tags.bpm,
-                comment = tags.comment,
-                explicit = tags.explicit,
-                discTitle = tags.discTitle,
-                mbRecordingId = tags.mbRecordingId,
-                mbAlbumId = row.mbAlbumId,
-                mbReleaseGroupId = tags.mbReleaseGroupId,
-                mbArtistIds = joinLines(tags.mbArtistIds),
-            )
-        }
+// What a scan needs of one file to group it: the album it is filed under by
+// name, what splits a same-named group (its release, or who the album is
+// by, where the file says), the keys that order it within its album, and
+// its genres, each with the key that groups its spellings.
+internal class RowFacts(
+    val albumName: String,
+    val nameKey: String,
+    val mbKey: String?,
+    val byKey: String?,
+    val fileNo: Int?,
+    val discKey: Int,
+    val numKey: Int,
+    val nameOrder: String,
+    val genres: List<Pair<String, String>>,
+)
 
-        albums += AlbumEntity(
-            id = albumId,
-            sourceId = DEVICE,
-            nativeId = stableId("$nameKey|$splitKey"),
-            title = title,
-            searchKey = searchKey("$title $artist"),
-            sortKey = sortKey(group.firstNotNullOfOrNull { it.tags.sortAlbum.orNull() } ?: title),
-            artist = artist,
-            artistId = artistId,
-            // The year it shows: the original release year where known.
-            year = group.mapNotNull { it.tags.originalYear ?: it.year }.maxOrNull(),
-            songCount = group.size,
-            durationMs = group.sumOf { it.durationMs },
-            addedAt = group.maxOf { it.addedAtSeconds },
-            artwork = artwork,
-        )
-    }
-
-    // How each album artist is filed, where a file says ("Beatles, The").
-    val artistSorts = groups.mapNotNull { (_, _, group) ->
-        group.firstNotNullOfOrNull { it.tags.sortAlbumArtist.orNull() }?.let { artistIdOf(albumArtistOf(group)) to it }
-    }.toMap()
-
-    val artists = albums.groupBy { it.artistId }.map { (id, owned) ->
-        val name = mostCommon(owned.map { it.artist })
-        ArtistEntity(
-            id = id,
-            sourceId = DEVICE,
-            name = name,
-            searchKey = searchKey(name),
-            sortKey = sortKey(artistSorts[id] ?: name),
-            albumCount = owned.size,
-            songCount = owned.sumOf { it.songCount },
-            artwork = owned.maxByOrNull { it.addedAt }?.artwork,
-        )
-    }
-
-    return DeviceCatalog(tracks, albums, artists)
+internal fun rowFacts(row: DeviceRow): RowFacts {
+    val name = albumName(row)
+    return RowFacts(
+        albumName = name,
+        nameKey = searchKey(name),
+        mbKey = row.mbAlbumId.orNull()?.let { "mb:" + it.lowercase() },
+        byKey = row.albumArtist.orNull()?.let { "by:" + searchKey(it) },
+        fileNo = fileNumberOf(row.fileName),
+        discKey = row.disc ?: 1,
+        numKey = row.track ?: Int.MAX_VALUE,
+        nameOrder = sortKeyHex(row.fileName.lowercase()),
+        genres = row.genres.map { genreKey(it) to it },
+    )
 }
 
+// One album as the scan writes it: the album and its songs in album order.
+internal class AlbumRows(val album: AlbumEntity, val tracks: List<SourceTrackEntity>)
+
+// Builds one album from all of its files, in the order the phone listed
+// them. `spelling` gives each genre's spelling by its key.
+internal fun albumRows(nameKey: String, splitKey: String, group: List<DeviceRow>, spelling: (String) -> String): AlbumRows {
+    val albumId = albumIdOf(nameKey, splitKey)
+    val title = mostCommon(group.map(::albumName))
+    val artist = albumArtistOf(group)
+    val artistId = artistIdOf(artist)
+    val ordered = inAlbumOrder(group)
+    val artwork = albumArtwork(albumId, ordered.first().first.uri)
+    val tracks = ordered.mapIndexed { index, (row, number) -> trackRow(row, number, index, albumId, title, artist, artistId, artwork, spelling) }
+    val album = AlbumEntity(
+        id = albumId,
+        sourceId = DEVICE,
+        nativeId = albumNativeId(nameKey, splitKey),
+        title = title,
+        searchKey = searchKey("$title $artist"),
+        sortKey = sortKey(group.firstNotNullOfOrNull { it.tags.sortAlbum.orNull() } ?: title),
+        artist = artist,
+        artistId = artistId,
+        // The year it shows: the original release year where known.
+        year = group.mapNotNull { it.tags.originalYear ?: it.year }.maxOrNull(),
+        songCount = group.size,
+        durationMs = group.sumOf { it.durationMs },
+        addedAt = group.maxOf { it.addedAtSeconds },
+        artwork = artwork,
+    )
+    return AlbumRows(album, tracks)
+}
+
+// One song of an album: `number` is its track number as the album shows it
+// and `index` its place in the album.
+internal fun trackRow(
+    row: DeviceRow,
+    number: Int?,
+    index: Int,
+    albumId: String,
+    title: String,
+    artist: String,
+    artistId: String,
+    artwork: String,
+    spelling: (String) -> String,
+): SourceTrackEntity {
+    val trackTitle = row.title.orNull() ?: row.fileName.substringBeforeLast('.').ifBlank { "Untitled" }
+    val tags = row.tags
+    return SourceTrackEntity(
+        id = "$DEVICE:${row.id}",
+        sourceId = DEVICE,
+        nativeId = row.id.toString(),
+        title = trackTitle,
+        searchKey = searchKey(trackTitle),
+        sortKey = sortKey(tags.sortTitle.orNull() ?: trackTitle),
+        artist = row.artist.orNull() ?: artist,
+        artistId = artistId,
+        album = title,
+        albumId = albumId,
+        trackNo = number,
+        discNo = row.disc,
+        year = row.year,
+        durationMs = row.durationMs,
+        addedAt = row.addedAtSeconds,
+        mimeType = row.mimeType,
+        sizeBytes = row.sizeBytes,
+        artwork = artwork,
+        uri = row.uri,
+        albumOrder = index,
+        relinkKey = relinkKey(artist, title, row.disc, number, trackTitle, row.durationMs),
+        genre = row.genres.firstOrNull()?.let { spelling(genreKey(it)) } ?: "",
+        trackGain = tags.trackGain,
+        albumGain = tags.albumGain,
+        trackPeak = tags.trackPeak,
+        albumPeak = tags.albumPeak,
+        originalYear = tags.originalYear,
+        genres = joinLines(row.genres.map { spelling(genreKey(it)) }.distinct()),
+        artists = joinLines(tags.artists),
+        composer = tags.composer,
+        bpm = tags.bpm,
+        comment = tags.comment,
+        explicit = tags.explicit,
+        discTitle = tags.discTitle,
+        mbRecordingId = tags.mbRecordingId,
+        mbAlbumId = row.mbAlbumId,
+        mbReleaseGroupId = tags.mbReleaseGroupId,
+        mbArtistIds = joinLines(tags.mbArtistIds),
+    )
+}
+
+internal fun albumIdOf(nameKey: String, splitKey: String) = "$DEVICE:album:${albumNativeId(nameKey, splitKey)}"
+
+internal fun albumNativeId(nameKey: String, splitKey: String) = stableId("$nameKey|$splitKey")
+
+// An album's cover: the art of its first file.
+internal fun albumArtwork(albumId: String, firstUri: String) = ArtworkRef.Device("album:$albumId", firstUri).encode()
+
 // The album a file belongs to by name; with no album tag, its folder's name.
-private fun albumName(row: DeviceRow): String =
+internal fun albumName(row: DeviceRow): String =
     row.album.orNull()
         ?: row.folder?.trimEnd('/')?.substringAfterLast('/').orNull()
         ?: UNKNOWN_ALBUM
-
-// Splits one same-named group only when every file in it can say which
-// album it is. Otherwise the whole group is one album.
-private fun splitCluster(cluster: List<DeviceRow>): Map<String, List<DeviceRow>> = when {
-    cluster.all { it.mbAlbumId.orNull() != null } -> cluster.groupBy { "mb:" + it.mbAlbumId!!.lowercase() }
-    cluster.all { it.albumArtist.orNull() != null } -> cluster.groupBy { "by:" + searchKey(it.albumArtist!!) }
-    else -> mapOf("" to cluster)
-}
 
 // Who the album is by: its album-artist tag, "Various Artists" for a
 // compilation, otherwise whoever appears on most of its tracks.
@@ -160,21 +172,25 @@ private fun albumArtistOf(group: List<DeviceRow>): String {
     }
 }
 
-// One spelling per genre across the library, the most common one, so
-// "Hip Hop", "hip-hop" and "Hip-Hop/Rap" are the same genre.
-private fun genreSpellings(rows: List<DeviceRow>): Map<String, String> =
-    rows.flatMap { it.genres }.groupBy(::genreKey).mapValues { (_, names) -> mostCommon(names) }
+internal fun artistIdOf(name: String) = "$DEVICE:artist:${searchKey(name)}"
 
-private fun artistIdOf(name: String) = "$DEVICE:artist:${searchKey(name)}"
+// A file name's leading track number, if it has one.
+internal fun fileNumberOf(fileName: String): Int? = fileNumber.find(fileName)?.groupValues?.get(1)?.toInt()
+
+// Whether an album's file-name numbers can stand in for missing track
+// numbers: only when it has more than one file, every file has one and no
+// two are the same; otherwise a name like "50 Cent - In Da Club" would read
+// as track 50.
+internal fun namesUsable(numbers: List<Int?>): Boolean =
+    numbers.size > 1 && numbers.none { it == null } && numbers.toSet().size == numbers.size
 
 // Orders an album's files: disc, then track number, then file name. Where
 // the tags have no track numbers, numbers at the start of the file names
-// are used, but only when every file has one and no two are the same;
-// otherwise a name like "50 Cent - In Da Club" would read as track 50.
+// are used (see namesUsable).
 private fun inAlbumOrder(group: List<DeviceRow>): List<Pair<DeviceRow, Int?>> {
-    val fromNames = group.map { row -> fileNumber.find(row.fileName)?.groupValues?.get(1)?.toInt() }
-    val namesUsable = group.size > 1 && fromNames.none { it == null } && fromNames.toSet().size == group.size
-    return group.mapIndexed { i, row -> row to (row.track ?: fromNames[i].takeIf { namesUsable }) }
+    val fromNames = group.map { row -> fileNumberOf(row.fileName) }
+    val usable = namesUsable(fromNames)
+    return group.mapIndexed { i, row -> row to (row.track ?: fromNames[i].takeIf { usable }) }
         .sortedWith(
             compareBy<Pair<DeviceRow, Int?>> { it.first.disc ?: 1 }
                 .thenBy { it.second ?: Int.MAX_VALUE }
@@ -182,6 +198,8 @@ private fun inAlbumOrder(group: List<DeviceRow>): List<Pair<DeviceRow, Int?>> {
         )
 }
 
+// The value seen most; of those seen equally often, the longest; of those,
+// the first seen.
 private fun mostCommon(values: List<String>): String =
     values.groupingBy { it }.eachCount().maxWith(compareBy({ it.value }, { it.key.length })).key
 

@@ -32,19 +32,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.PlayedTrack
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.UserDao
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.listening.HistoryDay
 import app.winters.octo.listening.HistoryRange
-import app.winters.octo.listening.ListeningStore
+import app.winters.octo.listening.PlayHistory
+import app.winters.octo.listening.TotalsAnswer
 import app.winters.octo.listening.historyDays
-import app.winters.octo.listening.mostPlayed
 import app.winters.octo.listening.rangeStart
-import app.winters.octo.listening.recentHistory
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.ui.common.HeaderDropdown
+import app.winters.octo.ui.common.LoadState
+import app.winters.octo.ui.common.LoadStateContent
 import app.winters.octo.ui.common.PageHeader
 import app.winters.octo.ui.common.showDropdown
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -54,8 +54,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.time.Instant
 import java.time.ZoneId
@@ -71,25 +71,23 @@ private const val MOST_PLAYED = 100
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    user: UserDao,
-    listening: ListeningStore,
+    private val history: PlayHistory,
     private val playback: PlaybackConnection,
 ) : ViewModel() {
     var range by mutableStateOf(HistoryRange.FourWeeks)
 
     // The latest plays under a heading per day. Null until the first read.
-    val days: StateFlow<List<HistoryDay>?> = combine(user.recentPlays(RECENT_PLAYS), user.serverPlayedTracks()) { local, server ->
-        historyDays(recentHistory(local, server, RECENT_PLAYS), System.currentTimeMillis(), ZoneId.systemDefault())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    // The most played songs over the chosen stretch of time.
-    val mostPlayed: StateFlow<List<PlayedTrack>?> = snapshotFlow { range }
-        .flatMapLatest { range ->
-            val since = rangeStart(range, System.currentTimeMillis(), ZoneId.systemDefault())
-            val local = if (since == null) user.playedTracks() else user.playedTracksSince(since)
-            combine(local, user.serverPlayedTracks(), listening.sent) { mine, server, sent -> mostPlayed(mine, server, sent, since, MOST_PLAYED) }
-        }
+    val days: StateFlow<List<HistoryDay>?> = history.recentPlays(RECENT_PLAYS)
+        .map { historyDays(it, System.currentTimeMillis(), ZoneId.systemDefault()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // The most played songs over the chosen stretch of time, or why the
+    // play counts cannot be read now. Null until the first read.
+    val mostPlayed: StateFlow<TotalsAnswer<List<PlayedTrack>>?> = snapshotFlow { range }
+        .flatMapLatest { range -> history.mostPlayed(rangeStart(range, System.currentTimeMillis(), ZoneId.systemDefault()), MOST_PLAYED) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun tryAgain() = history.tryAgain()
 
     // Plays a list from one of its songs. A song played twice plays once,
     // where it first shows.
@@ -172,7 +170,12 @@ private fun RecentlyPlayed(vm: HistoryViewModel) {
 private fun MostPlayed(vm: HistoryViewModel) {
     val top by vm.mostPlayed.collectAsStateWithLifecycle()
     val range = vm.range
-    val shown = top
+    val answer = top
+    if (answer is TotalsAnswer.Problem) {
+        LoadStateContent(LoadState.Failed(answer.words), onRetry = vm::tryAgain) {}
+        return
+    }
+    val shown = (answer as? TotalsAnswer.Value)?.value
     when {
         shown == null -> Loading()
         shown.isEmpty() -> Note(if (range == HistoryRange.AllTime) "Nothing played yet" else "Nothing played in the ${range.label.lowercase()}")

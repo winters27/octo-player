@@ -1,32 +1,27 @@
 package app.winters.octo.playback
 
-import android.content.Context
-import android.util.Log
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.LikedTrackEntity
+import app.winters.octo.catalog.MosaicPicker
 import app.winters.octo.catalog.PlayEventEntity
-import app.winters.octo.catalog.QueueItemEntity
-import app.winters.octo.catalog.QueueStateEntity
+import app.winters.octo.catalog.RENAME_SONG
+import app.winters.octo.catalog.SongIds
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.listening.ListeningSync
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
+import app.winters.octo.listening.PlayTotals
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -41,53 +36,119 @@ suspend fun CatalogDao.tracksByIds(ids: List<String>): List<TrackEntity> {
     return ids.mapNotNull { found[it] }
 }
 
+// How many songs one likes lookup asks the database about, under its limit.
+private const val LIKED_CHUNK = 900
+
+// How many liked songs one page of the covers walk reads.
+private const val LIKED_COVER_PAGE = 100
+
+// Song hearts. A heart reads and writes a song as it is now (SongIds): a
+// tap reads the song's id now, whether it is liked and its key, and writes,
+// all between groups of a save, and the server's copy follows that id. While
+// a save is part way a like may be on a song's old id or its new one, and
+// either shows the heart.
 @Singleton
 class LikeStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
     private val listening: ListeningSync,
+    private val db: CatalogDatabase,
+    private val ids: SongIds,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val liked: StateFlow<Set<String>> =
-        userDao.likedIds().map { it.toSet() }.stateIn(scope, SharingStarted.Eagerly, emptySet())
+    // Whether one song is liked, as it changes.
+    fun likedFlow(trackId: String): Flow<Boolean> = userDao.likedFlow(trackId).distinctUntilChanged()
 
-    fun isLiked(trackId: String) = trackId in liked.value
+    // Which of these songs are liked, as that changes, asked about 900 at a
+    // time.
+    // Read again on each change of the likes or the renames in force: a
+    // song shows as liked through either of its ids (UserDao.shownLikedAmong).
+    fun likedAmong(trackIds: Collection<String>): Flow<Set<String>> {
+        val chunks = trackIds.distinct().chunked(LIKED_CHUNK)
+        if (chunks.isEmpty()) return flowOf(emptySet())
+        return db.invalidationTracker.createFlow("liked_track", "save_rename")
+            .map { chunks.flatMapTo(HashSet()) { userDao.shownLikedAmong(it) } }
+            .distinctUntilChanged()
+    }
+
+    suspend fun isLiked(trackId: String): Boolean = userDao.isLiked(trackId)
+
+    // A count that moves on every change of the likes, and once at first.
+    val changes: Flow<Long> = flow {
+        var n = 0L
+        db.invalidationTracker.createFlow("liked_track").collect { emit(++n) }
+    }
+
+    // Up to four covers of the liked songs, newest like first, read a page
+    // at a time until it has them.
+    suspend fun likedCovers(): List<String> {
+        val picker = MosaicPicker()
+        var beforeAt = Long.MAX_VALUE
+        var beforeId = ""
+        while (!picker.full) {
+            val page = userDao.likedCoverPage(beforeAt, beforeId, LIKED_COVER_PAGE)
+            page.forEach { picker.offer(it.albumId, it.artwork) }
+            if (page.size < LIKED_COVER_PAGE) break
+            beforeAt = page.last().likedAt
+            beforeId = page.last().trackId
+        }
+        return picker.covers
+    }
 
     fun toggle(trackId: String) {
         scope.launch {
-            if (userDao.isLiked(trackId)) {
-                userDao.unlike(trackId)
-                listening.likeChanged(trackId, liked = false)
-            } else {
-                val track = catalog.track(trackId) ?: return@launch
-                userDao.like(LikedTrackEntity(trackId, track.relinkKey, System.currentTimeMillis()))
-                listening.likeChanged(trackId, liked = true)
-            }
+            val (id, liked) = ids.write {
+                val id = ids.song(trackId)
+                if (userDao.isLiked(id)) {
+                    userDao.unlikeEither(id)
+                    id to false
+                } else {
+                    val track = catalog.track(id) ?: return@write null
+                    userDao.like(LikedTrackEntity(id, track.relinkKey, System.currentTimeMillis()))
+                    id to true
+                }
+            } ?: return@launch
+            listening.likeChanged(id, liked)
         }
     }
 
     // Takes a like away. `removed` hears the like as it was, to put it back.
     fun unlike(trackId: String, removed: (LikedTrackEntity) -> Unit) {
         scope.launch {
-            val row = userDao.likedRow(trackId) ?: return@launch
-            userDao.unlike(trackId)
-            listening.likeChanged(trackId, liked = false)
+            val (id, row) = ids.write {
+                val id = ids.song(trackId)
+                val row = userDao.likedRowEither(id) ?: return@write null
+                userDao.unlikeEither(id)
+                id to row
+            } ?: return@launch
+            listening.likeChanged(id, liked = false)
             removed(row)
         }
     }
 
-    // Puts a like back as it was, with its own time, so it keeps its place.
+    // Songs a restore liked, written already: the server is told, as a tap
+    // tells it.
+    fun restored(trackIds: List<String>) {
+        trackIds.forEach { listening.likeChanged(it, liked = true) }
+    }
+
+    // Puts a like back as it was, with its own time, so it keeps its place,
+    // on the song its id and key land on now.
     fun restore(row: LikedTrackEntity) {
         scope.launch {
-            userDao.like(row)
-            listening.likeChanged(row.trackId, liked = true)
+            val id = ids.write {
+                val id = ids.row(RENAME_SONG, row.trackId, row.relinkKey)
+                userDao.like(row.copy(trackId = id))
+                id
+            }
+            listening.likeChanged(id, liked = true)
         }
     }
 }
 
-// The queue as saved: songs in play order, where playback was, and the
-// shuffle order so shuffle picks up exactly where it left off.
+// The queue as a server keeps it: songs in play order, where playback is,
+// and how it plays. A window of the queue, never the whole of a long one.
 data class QueueSnapshot(
     val trackIds: List<String>,
     // Play-order positions visited in shuffle order; empty when unknown.
@@ -96,210 +157,75 @@ data class QueueSnapshot(
     val positionMs: Long,
     val repeatMode: Int,
     val shuffle: Boolean,
-    // Where each song came from (QueueSource.encoded), one per song, so a
-    // station keeps going after a restart; empty when unknown.
+    // Where each song came from (QueueSource.encoded), one per song; empty
+    // when unknown.
     val sources: List<String> = emptyList(),
 )
 
-fun QueueSnapshot.toRows(now: Long): Pair<List<QueueItemEntity>, QueueStateEntity> {
-    val shuffledAt = IntArray(trackIds.size) { it }
-    if (shuffleOrder.size == trackIds.size) shuffleOrder.forEachIndexed { rank, position -> shuffledAt[position] = rank }
-    val items = trackIds.mapIndexed { position, id -> QueueItemEntity(position, id, shuffledAt[position]) }
-    return items to QueueStateEntity(0, index, positionMs, repeatMode, shuffle, now)
-}
-
-fun queueFromRows(items: List<QueueItemEntity>, state: QueueStateEntity?): QueueSnapshot? {
-    if (items.isEmpty() || state == null) return null
-    val ordered = items.sortedBy { it.position }
-    return QueueSnapshot(
-        trackIds = ordered.map { it.trackId },
-        shuffleOrder = ordered.sortedBy { it.shuffledPosition }.map { it.position },
-        index = state.currentIndex.coerceIn(0, ordered.lastIndex),
-        positionMs = state.positionMs.coerceAtLeast(0),
-        repeatMode = state.repeatMode,
-        shuffle = state.shuffle,
-    )
-}
-
-// Where a saved queue picks up once the songs gone from the library are
-// dropped: `found` says which saved songs are still here, in saved order.
-// The saved song at the place it was, or when that song is gone, the first
-// song from its start.
-fun restorePoint(found: List<Boolean>, savedIndex: Int, positionMs: Long): Pair<Int, Long> {
-    if (found.getOrNull(savedIndex) != true) return 0 to 0L
-    return found.take(savedIndex).count { it } to positionMs.coerceAtLeast(0)
-}
-
-// The saved shuffle order with the songs that are gone left out, so the
-// rest still play in the order they would have.
-fun restoredShuffle(order: List<Int>, found: List<Boolean>): IntArray? {
-    if (order.size != found.size || order.sorted() != found.indices.toList()) return null
-    val newIndex = IntArray(found.size)
-    var kept = 0
-    found.forEachIndexed { i, here -> newIndex[i] = if (here) kept++ else -1 }
-    return order.filter { found[it] }.map { newIndex[it] }.toIntArray()
-}
-
-// The queue in use is the saved queue (its rows in the catalog); each other
-// account's waits in `parked` until its server is in use again. Every read
-// and write runs one at a time in the order asked, so a save asked for
-// before a hand-over lands before it, never over the queue handed over.
+// Plays. A play is written on the song its id names now (SongIds), and
+// its count and ListenBrainz follow that id. The server's play is noted at
+// once for the server in use then (ListeningSync), which finds the song's
+// copies as they are now itself.
 @Singleton
-class QueueStore internal constructor(
-    private val rows: QueueRows,
-    private val parked: ParkedQueues,
-) {
-    @Inject constructor(userDao: UserDao, @ApplicationContext context: Context) :
-        this(CatalogQueueRows(userDao, File(context.filesDir, "queue-sources")), ParkedQueues(context.parkedQueueData))
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val work = Channel<suspend () -> Unit>(Channel.UNLIMITED)
-
-    init {
-        scope.launch {
-            for (step in work) {
-                try {
-                    step()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w("Octo", "queue store: ${e.javaClass.simpleName}")
-                }
-            }
-        }
-    }
-
-    // Saving runs on its own scope so it finishes even while the service stops.
-    fun save(snapshot: QueueSnapshot) {
-        work.trySend { rows.write(snapshot) }
-    }
-
-    suspend fun load(): QueueSnapshot? = inTurn { rows.read() }
-
-    // Another account's queue becomes the one in use. The queue of `from`
-    // (as it was left, else as saved) waits for it, and the one `to` left
-    // comes back. With nothing waiting for `to`, the queue is emptied,
-    // unless `keepWhenNone`, when it stays as it is and nothing waits.
-    // Answers whether the queue in use changed.
-    suspend fun handOver(from: String, left: QueueSnapshot?, to: String, keepWhenNone: Boolean): Boolean = inTurn {
-        val coming = parked.take(to)
-        if (coming == null && keepWhenNone) return@inTurn false
-        parked.put(from, left ?: rows.read())
-        rows.write(coming ?: QueueSnapshot(emptyList(), emptyList(), 0, 0, 0, false))
-        true
-    }
-
-    // Forgets the queue kept for a server taken off the list.
-    suspend fun forget(account: String) = inTurn { parked.put(account, null) }
-
-    private suspend fun <T> inTurn(block: suspend () -> T): T {
-        val answer = CompletableDeferred<T>()
-        work.send {
-            try {
-                answer.complete(block())
-            } catch (e: Throwable) {
-                answer.completeExceptionally(e)
-            }
-        }
-        return answer.await()
-    }
-}
-
-// Where the queue in use is saved.
-interface QueueRows {
-    suspend fun read(): QueueSnapshot?
-
-    suspend fun write(snapshot: QueueSnapshot)
-}
-
-// The saved queue's rows in the catalog, and where each song came from in a
-// small file beside them, one word a line.
-private class CatalogQueueRows(private val userDao: UserDao, private val sourcesFile: File) : QueueRows {
-    override suspend fun read(): QueueSnapshot? {
-        val saved = queueFromRows(userDao.queueItems(), userDao.queueState()) ?: return null
-        val sources = runCatching { sourcesFile.readLines() }.getOrDefault(emptyList())
-        return if (sources.size == saved.trackIds.size) saved.copy(sources = sources) else saved
-    }
-
-    override suspend fun write(snapshot: QueueSnapshot) {
-        val (items, state) = snapshot.toRows(System.currentTimeMillis())
-        userDao.saveQueue(items, state)
-        runCatching {
-            if (snapshot.sources.size == snapshot.trackIds.size && snapshot.sources.isNotEmpty()) {
-                sourcesFile.writeText(snapshot.sources.joinToString("\n") { it.replace('\n', ' ') })
-            } else {
-                sourcesFile.delete()
-            }
-        }
-    }
-}
-
-private val Context.parkedQueueData by preferencesDataStore("parked_queues")
-
-// The queues of accounts not in use, one per account.
-class ParkedQueues(private val data: DataStore<Preferences>) {
-    // Takes the queue waiting for an account, which then waits no more.
-    suspend fun take(account: String): QueueSnapshot? {
-        var found: QueueSnapshot? = null
-        data.edit { p ->
-            found = p[keyOf(account)]?.let(::decodeQueue)
-            p.remove(keyOf(account))
-        }
-        return found
-    }
-
-    suspend fun put(account: String, queue: QueueSnapshot?) {
-        data.edit { p -> if (queue == null || queue.trackIds.isEmpty()) p.remove(keyOf(account)) else p[keyOf(account)] = encodeQueue(queue) }
-    }
-
-    private fun keyOf(account: String) = stringPreferencesKey("queue@$account")
-}
-
-@Serializable
-private class StoredQueue(
-    val trackIds: List<String>,
-    val shuffleOrder: List<Int> = emptyList(),
-    val index: Int = 0,
-    val positionMs: Long = 0,
-    val repeatMode: Int = 0,
-    val shuffle: Boolean = false,
-    val sources: List<String> = emptyList(),
-)
-
-private val queueJson = Json { ignoreUnknownKeys = true }
-
-fun encodeQueue(queue: QueueSnapshot): String = queueJson.encodeToString(
-    StoredQueue.serializer(),
-    StoredQueue(queue.trackIds, queue.shuffleOrder, queue.index, queue.positionMs, queue.repeatMode, queue.shuffle, queue.sources),
-)
-
-fun decodeQueue(text: String): QueueSnapshot? = runCatching {
-    val stored = queueJson.decodeFromString(StoredQueue.serializer(), text)
-    QueueSnapshot(stored.trackIds, stored.shuffleOrder, stored.index, stored.positionMs, stored.repeatMode, stored.shuffle, stored.sources)
-}.getOrNull()
-
-@Singleton
-class PlayStore @Inject constructor(
+class PlayStore internal constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
     private val listening: ListeningSync,
-    private val listenBrainz: ListenBrainzSync,
+    private val follows: PlayFollows,
+    private val ids: SongIds,
 ) {
+    @Inject constructor(
+        userDao: UserDao,
+        catalog: CatalogDao,
+        listening: ListeningSync,
+        listenBrainz: ListenBrainzSync,
+        totals: dagger.Lazy<PlayTotals>,
+        ids: SongIds,
+    ) : this(
+        userDao,
+        catalog,
+        listening,
+        object : PlayFollows {
+            override fun nowPlaying(trackId: String) = listenBrainz.nowPlaying(trackId)
+
+            override fun played(trackId: String, startedAt: Long) = listenBrainz.played(trackId, startedAt)
+
+            override fun counted(trackIds: List<String>) = totals.get().refresh(trackIds)
+        },
+        ids,
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // A song began to play.
     fun started(trackId: String) {
         listening.nowPlaying(trackId)
-        listenBrainz.nowPlaying(trackId)
+        follows.nowPlaying(trackId)
     }
 
     fun record(trackId: String, startedAt: Long, playedMs: Long, durationMs: Long) {
         if (!countsAsPlay(playedMs, durationMs)) return
-        scope.launch {
-            val key = catalog.track(trackId)?.relinkKey ?: ""
-            userDao.addPlay(PlayEventEntity(trackId = trackId, relinkKey = key, startedAt = startedAt, playedMs = playedMs, durationMs = durationMs))
-        }
         listening.played(trackId, startedAt)
-        listenBrainz.played(trackId, startedAt)
+        scope.launch {
+            val id = ids.write {
+                val id = ids.song(trackId)
+                val key = catalog.track(id)?.relinkKey ?: ""
+                userDao.addPlay(PlayEventEntity(trackId = id, relinkKey = key, startedAt = startedAt, playedMs = playedMs, durationMs = durationMs))
+                id
+            }
+            // The song's play count follows.
+            follows.counted(listOf(id))
+            follows.played(id, startedAt)
+        }
     }
+}
+
+// What follows a play once it is written: ListenBrainz and the song's
+// play count.
+internal interface PlayFollows {
+    fun nowPlaying(trackId: String)
+
+    fun played(trackId: String, startedAt: Long)
+
+    fun counted(trackIds: List<String>)
 }

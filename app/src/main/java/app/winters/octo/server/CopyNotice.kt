@@ -32,10 +32,11 @@ const val NOTICE_MAX = 1_000
 
 // The notice for the copy running: its title, what it is doing with its
 // count, and a bar of the whole copy, moving on its own while how far
-// cannot be told, the library saves, or the steps after a copy run.
+// cannot be told, the library saves before its groups are planned, or the
+// steps after a copy run.
 fun copyNotice(run: CopyRunState): NoticeContent {
     val fraction = run.fraction
-    val moving = fraction == null || run.step == CopyStep.Save || run.step == CopyStep.Settle
+    val moving = fraction == null || (run.step == CopyStep.Save && run.of == null) || run.step == CopyStep.Settle
     return NoticeContent(
         title = copyTitle(run.arriving),
         text = copyDescription(run),

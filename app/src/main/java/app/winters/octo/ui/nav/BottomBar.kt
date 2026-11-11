@@ -385,7 +385,8 @@ private fun PlayerCapsule(
                     color = OctoColors.TextPrimary,
                 )
                 Text(
-                    now.artist.orEmpty(),
+                    // While a play starts, the words say so in the artist's place.
+                    now.starting ?: now.artist.orEmpty(),
                     style = OctoType.caption.copy(fontSize = 11.sp),
                     color = OctoColors.TextMuted,
                     maxLines = 1,

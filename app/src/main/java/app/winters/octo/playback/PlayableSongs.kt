@@ -47,14 +47,19 @@ class PlayableSongs @Inject constructor(
     private val online: OnlineDao,
     private val offline: OfflineDownloads,
     private val offlineSettings: OfflineSettings,
+    // Finds a start plays before their rows are written.
+    private val held: FindMap,
 ) {
     // In the order asked for, dropping any the app no longer knows.
     suspend fun items(ids: List<String>): List<MediaItem> = itemsEach(ids).filterNotNull()
 
     // One for each id asked for, in order: nothing for any the app no
-    // longer knows, so a caller can tell which ones went.
+    // longer knows, so a caller can tell which ones went. A find whose row
+    // is not written yet plays from the find map.
     suspend fun itemsEach(ids: List<String>): List<MediaItem?> {
-        val finds = ids.filter(::isFind).distinct().chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
+        val asked = ids.filter(::isFind).distinct()
+        val waiting = asked.mapNotNull { held[it] }.associateBy { it.id }
+        val finds = waiting + asked.filter { it !in waiting }.chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
         val adopted = finds.values.mapNotNull { it.adoptedId.ifEmpty { null } }
         val library = libraryItems(ids.filterNot { isFind(it) || isRadio(it) || isOpenedFile(it) } + adopted).associateBy { it.mediaId }
         val prefs = if (finds.isEmpty()) StreamPrefs() else streams.prefs()

@@ -310,43 +310,130 @@ data class FixOutcome(
     // What puts every done step back, the last first.
     val undo: List<FixStep> get() = done.asReversed().mapNotNull { it.undo }
 
+    // The same run, counted.
+    fun tally(): FixTally = FixTally(
+        removed = done.count { it is FixStep.Remove },
+        retagged = done.count { it is FixStep.Retag },
+        joined = done.count { it is FixStep.JoinAlbum },
+        covered = done.count { it is FixStep.AddCover },
+        restored = done.count { it is FixStep.Restore },
+        undone = done.count { it is FixStep.Undo },
+        unchanged = unchanged.size,
+        failed = failed.size,
+        firstFailed = failed.firstOrNull(),
+        first = done.firstOrNull() ?: failed.firstOrNull()?.first,
+        firstSaid = done.firstOrNull()?.let { said[it] },
+        rehearsed = rehearsed,
+        stopped = stopped,
+    )
+
+    // One line for the window: what was done, and what was not.
+    fun summary(): String = tally().summary()
+}
+
+// How a run went, counted instead of listed, so a run of any length keeps a
+// few numbers: what each kind of step did, the first step that failed and
+// the first done or failed with the server's words for it. It says the same
+// line as the run's FixOutcome.
+data class FixTally(
+    val removed: Int = 0,
+    val retagged: Int = 0,
+    val joined: Int = 0,
+    val covered: Int = 0,
+    val restored: Int = 0,
+    val undone: Int = 0,
+    val unchanged: Int = 0,
+    val failed: Int = 0,
+    val firstFailed: Pair<FixStep, String>? = null,
+    val first: FixStep? = null,
+    val firstSaid: String? = null,
+    val rehearsed: Boolean = false,
+    val stopped: Boolean = false,
+) {
+    // How many steps were done.
+    val done: Int get() = removed + retagged + joined + covered + restored + undone
+
+    // The tally with one more step, as it went.
+    fun plus(step: FixStep, answer: StepAnswer): FixTally = when (answer) {
+        is StepAnswer.Done -> {
+            val counted = when (step) {
+                is FixStep.Remove -> copy(removed = removed + 1)
+                is FixStep.Retag -> copy(retagged = retagged + 1)
+                is FixStep.JoinAlbum -> copy(joined = joined + 1)
+                is FixStep.AddCover -> copy(covered = covered + 1)
+                is FixStep.Restore -> copy(restored = restored + 1)
+                is FixStep.Undo -> copy(undone = undone + 1)
+            }
+            if (first == null) counted.copy(first = step, firstSaid = answer.said) else counted
+        }
+        StepAnswer.Unchanged -> copy(unchanged = unchanged + 1)
+        StepAnswer.Rehearsed -> copy(rehearsed = true)
+        is StepAnswer.Failed -> copy(failed = failed + 1, firstFailed = firstFailed ?: (step to answer.words), first = first ?: step)
+    }
+
     // One line for the window: what was done, and what was not.
     fun summary(): String {
         // Putting back one replaced file: the server says best what it did,
         // or why there is nothing to put back.
-        val only = (done + failed.map { it.first }).singleOrNull()
+        val only = first.takeIf { done + failed == 1 }
         if (!rehearsed && only is FixStep.Restore && only.replaced) {
-            said[only]?.let { return it }
-            failed.singleOrNull()?.let { return it.second }
+            firstSaid?.let { return it }
+            if (failed == 1) firstFailed?.let { return it.second }
         }
         if (rehearsed) return "The server only rehearsed this, because its library actions are in dry run. Nothing changed."
         val parts = ArrayList<String>()
-        val removes = done.count { it is FixStep.Remove }
-        val retags = done.filterIsInstance<FixStep.Retag>()
-        val joins = done.count { it is FixStep.JoinAlbum }
-        val covers = done.count { it is FixStep.AddCover }
-        val restores = done.count { it is FixStep.Restore }
-        val undos = done.count { it is FixStep.Undo }
-        if (removes > 0) parts += "removed ${countText(removes, "song", "songs")}"
-        if (retags.isNotEmpty()) parts += "changed the tags of ${countText(retags.size, "song", "songs")}"
-        if (joins > 0) parts += "moved ${countText(joins, "song", "songs")} onto their album"
-        if (covers > 0) parts += "added ${countText(covers, "cover", "covers")}"
-        if (restores > 0) parts += "put back ${countText(restores, "song", "songs")}"
-        if (undos > 0) parts += "undid the changes to ${countText(undos, "song", "songs")}"
+        if (removed > 0) parts += "removed ${countText(removed, "song", "songs")}"
+        if (retagged > 0) parts += "changed the tags of ${countText(retagged, "song", "songs")}"
+        if (joined > 0) parts += "moved ${countText(joined, "song", "songs")} onto their album"
+        if (covered > 0) parts += "added ${countText(covered, "cover", "covers")}"
+        if (restored > 0) parts += "put back ${countText(restored, "song", "songs")}"
+        if (undone > 0) parts += "undid the changes to ${countText(undone, "song", "songs")}"
         val head = if (parts.isEmpty()) {
-            if (unchanged.isNotEmpty()) "Nothing needed changing." else "Nothing was done."
+            if (unchanged > 0) "Nothing needed changing." else "Nothing was done."
         } else {
             parts.joinToString(", ").replaceFirstChar { it.titlecase(Locale.ROOT) } + "."
         }
         val stop = if (stopped) " Stopped before the end." else ""
-        val miss = when (failed.size) {
-            0 -> ""
-            1 -> " ${failed[0].first.title}: ${failed[0].second}"
-            else -> " ${countText(failed.size, "song", "songs")} could not be done, like ${failed[0].first.title}: ${failed[0].second}"
-        }
+        val miss = firstFailed?.let { (step, words) ->
+            if (failed == 1) " ${step.title}: $words" else " ${countText(failed, "song", "songs")} could not be done, like ${step.title}: $words"
+        }.orEmpty()
         return "$head$stop$miss"
     }
 }
+
+// How one step went.
+sealed interface StepAnswer {
+    // Done, with the server's own words for it when it gave any.
+    data class Done(val said: String?) : StepAnswer
+
+    // Nothing needed changing.
+    data object Unchanged : StepAnswer
+
+    // The server only rehearsed it.
+    data object Rehearsed : StepAnswer
+
+    // Not done, in the server's words or the failure's.
+    data class Failed(val words: String) : StepAnswer
+}
+
+// Sends one step through `send`, which asks the server and answers as it
+// did, and says how it went; an exception is the step's failure, in its
+// words.
+suspend fun sendStep(step: FixStep, send: suspend (FixStep) -> LibraryActionResult, failure: (Throwable) -> String): StepAnswer =
+    try {
+        val answer = send(step)
+        when (answer.outcome) {
+            LibraryActionState.Applied -> StepAnswer.Done(answer.detail?.takeIf(String::isNotBlank))
+            LibraryActionState.Rehearsed -> StepAnswer.Rehearsed
+            // Skipped with nothing to change is not a failure: the song
+            // already says it, or the cover is there.
+            LibraryActionState.Skipped -> if (answer.detail.isNothingToDo()) StepAnswer.Unchanged else StepAnswer.Failed(answer.words())
+            else -> StepAnswer.Failed(answer.words())
+        }
+    } catch (e: Throwable) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        StepAnswer.Failed(failure(e))
+    }
 
 // Runs steps one after another through `send`, which asks the server and
 // answers as it did; an exception is that step's failure, in its words.
@@ -370,22 +457,14 @@ suspend fun runFix(
             stopped = true
             break
         }
-        try {
-            val answer = send(step)
-            when (answer.outcome) {
-                LibraryActionState.Applied -> {
-                    done += step
-                    answer.detail?.takeIf(String::isNotBlank)?.let { said[step] = it }
-                }
-                LibraryActionState.Rehearsed -> rehearsed = true
-                // Skipped with nothing to change is not a failure: the song
-                // already says it, or the cover is there.
-                LibraryActionState.Skipped -> if (answer.detail.isNothingToDo()) unchanged += step else failed += step to answer.words()
-                else -> failed += step to answer.words()
+        when (val answer = sendStep(step, send, failure)) {
+            is StepAnswer.Done -> {
+                done += step
+                answer.said?.let { said[step] = it }
             }
-        } catch (e: Throwable) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            failed += step to failure(e)
+            StepAnswer.Rehearsed -> rehearsed = true
+            StepAnswer.Unchanged -> unchanged += step
+            is StepAnswer.Failed -> failed += step to answer.words
         }
         progress(index + 1, steps.size)
     }

@@ -5,6 +5,8 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.subsonic.Song
+import app.winters.octo.ui.paging.Keyed
+import app.winters.octo.ui.paging.RowKey
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,6 +33,39 @@ fun albumHighlight(tracks: List<TrackEntity>, ranked: List<RankedSong>): String?
 }
 
 private fun titleKey(title: String): String = SongIdentity.key(SongIdentity.stripFeatures(title))
+
+// albumHighlight over rows read a page at a time, for an album too big to
+// hold: one walk keeps, per top song, its first row with the same id and
+// its first with the same title and artist, then the ranks pick from those
+// as albumHighlight does. The walk ends early once the best rank has its id.
+suspend fun highlightWalk(ranked: List<RankedSong>, page: suspend (after: RowKey?) -> List<Keyed<TrackEntity>>): String? {
+    if (ranked.isEmpty()) return null
+    val byId = arrayOfNulls<String>(ranked.size)
+    val byTitle = arrayOfNulls<String>(ranked.size)
+    val keys = ranked.map { titleKey(it.title) }
+    var after: RowKey? = null
+    while (true) {
+        val rows = page(after)
+        for (keyed in rows) {
+            val track = keyed.row
+            val key = titleKey(track.title)
+            for ((i, top) in ranked.withIndex()) {
+                if (byId[i] == null && track.id == top.id) byId[i] = track.id
+                if (byTitle[i] == null && keys[i].isNotEmpty() && key == keys[i] && SongIdentity.sameArtistName(track.artist, top.artist)) {
+                    byTitle[i] = track.id
+                }
+            }
+        }
+        if (byId[0] != null || rows.isEmpty()) break
+        after = rows.last().key
+    }
+    for (i in ranked.indices) {
+        byId[i]?.let { return it }
+        if (keys[i].isEmpty()) continue
+        byTitle[i]?.let { return it }
+    }
+    return null
+}
 
 // The artist's top songs from the signed-in server, for marking an album's
 // main song. Kept for as long as the app runs, per server, user and artist;

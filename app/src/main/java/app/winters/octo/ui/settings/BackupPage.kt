@@ -9,12 +9,14 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.backup.Backup
-import app.winters.octo.backup.BackupRead
+import app.winters.octo.backup.BackupFile
+import app.winters.octo.backup.BackupOpened
+import app.winters.octo.backup.BackupPlan
+import app.winters.octo.backup.BackupSave
 import app.winters.octo.backup.Backups
-import app.winters.octo.backup.RestorePlan
 import app.winters.octo.backup.describeBackup
 import app.winters.octo.backup.describePlan
+import app.winters.octo.data.userMessage
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.ui.settings.rows.ActionRow
 import app.winters.octo.ui.settings.rows.NoteRow
@@ -23,6 +25,10 @@ import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -33,12 +39,13 @@ sealed interface BackupState {
 
     data object Working : BackupState
 
-    data class Saved(val ok: Boolean) : BackupState
+    // Saved, or the words for why not.
+    data class Saved(val problem: String?) : BackupState
 
     // A backup read and matched against the library, waiting to be restored.
-    data class Ready(val backup: Backup, val plan: RestorePlan) : BackupState
+    data class Ready(val file: BackupFile, val plan: BackupPlan) : BackupState
 
-    data class Restored(val plan: RestorePlan) : BackupState
+    data class Restored(val plan: BackupPlan) : BackupState
 
     data class Problem(val message: String) : BackupState
 }
@@ -50,16 +57,28 @@ class BackupViewModel @Inject constructor(private val backups: Backups) : ViewMo
 
     fun save(uri: Uri) {
         _state.value = BackupState.Working
-        viewModelScope.launch { _state.value = BackupState.Saved(backups.save(uri)) }
+        viewModelScope.launch {
+            _state.value = BackupState.Saved((backups.save(uri) as? BackupSave.Failed)?.words)
+        }
     }
 
     fun open(uri: Uri) {
+        letGo()
         _state.value = BackupState.Working
         viewModelScope.launch {
             _state.value = when (val read = backups.read(uri)) {
-                is BackupRead.Read -> BackupState.Ready(read.backup, backups.plan(read.backup))
-                BackupRead.TooNew -> BackupState.Problem("This backup was made by a newer Octo. Update the app to restore it.")
-                BackupRead.NotABackup -> BackupState.Problem("That file isn't an Octo backup.")
+                is BackupOpened.Opened -> try {
+                    BackupState.Ready(read.file, backups.plan(read.file))
+                } catch (e: CancellationException) {
+                    backups.close(read.file)
+                    throw e
+                } catch (e: Exception) {
+                    backups.close(read.file)
+                    BackupState.Problem(e.userMessage())
+                }
+                BackupOpened.TooNew -> BackupState.Problem("This backup was made by a newer Octo. Update the app to restore it.")
+                BackupOpened.NotABackup -> BackupState.Problem("That file isn't an Octo backup.")
+                is BackupOpened.Problem -> BackupState.Problem(read.words)
             }
         }
     }
@@ -68,15 +87,26 @@ class BackupViewModel @Inject constructor(private val backups: Backups) : ViewMo
         val ready = _state.value as? BackupState.Ready ?: return
         _state.value = BackupState.Working
         viewModelScope.launch {
-            backups.restore(ready.backup, ready.plan)
-            _state.value = BackupState.Restored(ready.plan)
+            val problem = backups.restore(ready.file, ready.plan)
+            _state.value = if (problem == null) BackupState.Restored(ready.plan) else BackupState.Problem(problem)
         }
     }
 
     fun cancel() {
+        letGo()
         _state.value = BackupState.Idle
     }
+
+    // A file read and not restored is let go.
+    private fun letGo() {
+        (_state.value as? BackupState.Ready)?.let { ready -> RELEASE.launch { backups.close(ready.file) } }
+    }
+
+    override fun onCleared() = letGo()
 }
+
+// Where a backup read and not restored is let go once the page is gone.
+private val RELEASE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 // Saving the app's settings to a file, and putting them back from one. A
 // restore first shows what the file holds and how much of it this library
@@ -100,7 +130,7 @@ fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hil
                     icon = OctoIcons.Backup,
                     footer = "Restoring replaces your settings and adds the rest to what you have.",
                 ) {
-                    (describeBackup(now.backup) + describePlan(now.plan)).forEach { line -> NoteRow(line) }
+                    (describeBackup(now.file.header, now.file.sizes) + describePlan(now.plan)).forEach { line -> NoteRow(line) }
                 }
                 SettingsGroup {
                     ActionRow(null, title = "Restore", onClick = vm::restore, chevron = false)
@@ -109,7 +139,7 @@ fun BackupPage(onBack: () -> Unit, highlight: String?, vm: BackupViewModel = hil
             }
             else -> {
                 val note = when (now) {
-                    is BackupState.Saved -> if (now.ok) "Backup saved." else "Couldn't write the backup there."
+                    is BackupState.Saved -> now.problem ?: "Backup saved."
                     is BackupState.Restored -> (listOf("Restored.") + describePlan(now.plan)).joinToString("\n")
                     is BackupState.Problem -> now.message
                     else -> null

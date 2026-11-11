@@ -102,12 +102,13 @@ class UpgradeFollower(
     fun isPending(): Boolean = asking.isNotEmpty() || following.isNotEmpty()
 
     // Takes songs to send: those not being looked for already, at most a
-    // batch. The rest are counted for the line.
+    // batch. The rest are counted for the line, with `beyond` more the
+    // caller left out unread.
     @Synchronized
-    fun ask(songs: List<UpgradeAsk>): List<UpgradeAsk> {
+    fun ask(songs: List<UpgradeAsk>, beyond: Int = 0): List<UpgradeAsk> {
         val fresh = songs.distinctBy { it.id }.filter { it.id !in asking && it.id !in following }
         val taken = fresh.take(UPGRADE_BATCH)
-        over += fresh.size - taken.size
+        over += fresh.size - taken.size + beyond
         taken.forEach { asking[it.id] = it.title }
         return taken
     }

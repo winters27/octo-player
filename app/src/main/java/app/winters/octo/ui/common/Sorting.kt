@@ -392,7 +392,7 @@ fun <T> LazyListScope.sortedRows(items: List<T>, key: (T) -> Any, row: @Composab
 // scroll, as a small dark pill rather than a full-width band, so the page's
 // glow still shows around it.
 @Composable
-private fun LetterHeading(letter: Char) {
+fun LetterHeading(letter: Char) {
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(
             letter.toString(),

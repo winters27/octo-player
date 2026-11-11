@@ -3,7 +3,10 @@ package app.winters.octo.listening
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FIND_PREFIX
+import app.winters.octo.catalog.HoldKind
 import app.winters.octo.catalog.LikedTrackEntity
+import app.winters.octo.catalog.ReadHold
+import app.winters.octo.catalog.SongIds
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.SyncStarredEntity
 import app.winters.octo.catalog.UserDao
@@ -29,9 +32,12 @@ import javax.inject.Singleton
 // How many songs go in one star or unstar call, so the address stays short.
 private const val STAR_BATCH = 50
 
-// Runs work between rebuilds of the library, never during one.
+// Runs work between rebuilds of the library, never during one: `between`
+// for a page of a walk, `read` for one short read.
 interface Rebuilds {
     suspend fun <T> between(block: suspend () -> T): T
+
+    suspend fun <T> read(block: suspend () -> T): T = between(block)
 }
 
 // Keeps what the listener does in step with the signed-in server: a heart
@@ -51,6 +57,8 @@ class ListeningSync internal constructor(
     private val listening: ListeningDao,
     private val store: ListeningStore,
     private val rebuilds: Rebuilds,
+    // Told of every change to the plays sent, which play counts follow.
+    private val totals: TotalsRequests = TotalsRequests.None,
 ) {
     @Inject constructor(
         sessions: SessionRepository,
@@ -60,6 +68,7 @@ class ListeningSync internal constructor(
         listening: ListeningDao,
         store: ListeningStore,
         merge: Lazy<CatalogMerge>,
+        totals: Lazy<PlayTotals>,
     ) : this(
         { (sessions.state.value as? SessionState.SignedIn)?.session },
         sources,
@@ -68,11 +77,26 @@ class ListeningSync internal constructor(
         listening,
         store,
         object : Rebuilds {
-            override suspend fun <T> between(block: suspend () -> T): T = merge.get().betweenRebuilds(block)
+            override suspend fun <T> between(block: suspend () -> T): T = merge.get().betweenRebuilds(HoldKind.Page, block)
+
+            override suspend fun <T> read(block: suspend () -> T): T = merge.get().betweenRebuilds(HoldKind.Read, block)
+        },
+        object : TotalsRequests {
+            override fun refresh(trackIds: Collection<String>) = totals.get().refresh(trackIds)
+
+            override fun refreshCopies(sourceId: String, serverIds: Collection<String>) = totals.get().refreshCopies(sourceId, serverIds)
+
+            override fun rebuild() = totals.get().rebuild()
         },
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val ids = SongIds(
+        user,
+        object : ReadHold {
+            override suspend fun <T> read(block: suspend () -> T): T = rebuilds.read(block)
+        },
+    )
     private val stars = Mutex()
     private val plays = Mutex()
     private val ratings = Mutex()
@@ -101,6 +125,9 @@ class ListeningSync internal constructor(
         syncRatings(server)
         store.foldSent(server.account, server.sourceId)
         sendPending(server)
+        // The server's counts as copied, and the sent plays folded into them:
+        // every song's play count again.
+        totals.rebuild()
     }
 
     // A like changed on the phone. The song's server copies follow; a song
@@ -124,10 +151,11 @@ class ListeningSync internal constructor(
         if (isFind(trackId)) return
         val server = inUse() ?: return
         scope.launch {
-            val ids = serverIds(server, trackId).ifEmpty { return@launch }
+            val (song, ids) = copiesOf(server, trackId)
+            if (ids.isEmpty()) return@launch
             ratings.withLock {
                 // The rating as it is now, so quick changes end on the last one.
-                val rating = cleanRating(user.rating(trackId))
+                val rating = cleanRating(user.rating(song))
                 val sent = ids.all { failureOf { server.client.setRating(it, rating) } == null }
                 if (sent) {
                     if (rating > 0) store.setSyncedRatings(server.account, ids, rating) else store.clearSyncedRatings(server.account, ids)
@@ -280,6 +308,7 @@ class ListeningSync internal constructor(
             val failure = failureOf { server.client.scrobble(play.serverId, play.startedAt, submission = true) }
             if (failure != null && worthRetrying(failure)) break
             store.finishPending(server.account, play, sent = failure == null)
+            if (failure == null) totals.refreshCopies(server.sourceId, listOf(play.serverId))
         }
     }
 
@@ -292,11 +321,21 @@ class ListeningSync internal constructor(
 
     // A song's copies on the server, the same one first every time.
     // A song found online is a server song itself.
-    private suspend fun serverIds(server: Server, trackId: String): List<String> =
+    private suspend fun serverIds(server: Server, trackId: String): List<String> = copiesOf(server, trackId).second
+
+    // The song a library id names now (SongIds) and its copies on the
+    // server, its old ids' by follow included (a save part way may not have
+    // moved them yet), read together in one short hold between groups of a
+    // save; the server is asked after the hold ends, under this sync's own
+    // locks.
+    private suspend fun copiesOf(server: Server, trackId: String): Pair<String, List<String>> =
         if (isFind(trackId)) {
-            listOf(trackId.removePrefix(FIND_PREFIX))
+            trackId to listOf(trackId.removePrefix(FIND_PREFIX))
         } else {
-            sources.copies(trackId).filter { it.sourceId == server.sourceId }.map { it.nativeId }.sorted()
+            ids.write {
+                val song = ids.song(trackId)
+                song to ids.copyIds(song).flatMap { sources.copies(it) }.filter { it.sourceId == server.sourceId }.map { it.nativeId }.distinct().sorted()
+            }
         }
 
     // Runs a server call, handing back what went wrong, if anything.

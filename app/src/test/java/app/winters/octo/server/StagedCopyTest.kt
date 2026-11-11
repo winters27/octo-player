@@ -1,6 +1,7 @@
 package app.winters.octo.server
 
 import android.database.DatabaseUtils
+import app.winters.octo.catalog.COPY_PAGES_CLEAR
 import app.winters.octo.catalog.FreeSpace
 import app.winters.octo.catalog.NotEnoughSpace
 import app.winters.octo.catalog.STAGE_NONE
@@ -61,6 +62,13 @@ class StagedCopyTest {
 
     private fun stageEmpty() =
         count("SELECT COUNT(*) FROM stage_track") + count("SELECT COUNT(*) FROM stage_album") + count("SELECT COUNT(*) FROM stage_artist") == 0L
+
+    // A copy that ended leaves its stage and its pages in the background,
+    // after it: waits for both.
+    private suspend fun clearedAfter() {
+        merge.awaitStageClear(SOURCE)
+        merge.awaitClear(COPY_PAGES_CLEAR)
+    }
 
     // Each song page is kept before the next is asked for: when the request
     // for the page at offset n arrives, exactly n songs are already written.
@@ -135,6 +143,7 @@ class StagedCopyTest {
         ready.await()
         assertFalse(stageEmpty())
         run.cancelAndJoin()
+        clearedAfter()
         assertTrue(stageEmpty())
         assertEquals(0L, count("SELECT COUNT(*) FROM source_track"))
         assertEquals(0L, count("SELECT COUNT(*) FROM sync_song"))
@@ -152,6 +161,7 @@ class StagedCopyTest {
         } catch (e: NotEnoughSpace) {
             assertEquals(2 * 1_200 * STAGE_BYTES_PER_SONG, e.neededBytes)
         }
+        clearedAfter()
         assertTrue(stageEmpty())
         assertEquals(0L, count("SELECT COUNT(*) FROM source_track"))
         assertEquals(0L, count("SELECT COUNT(*) FROM sync_song"))
@@ -171,6 +181,7 @@ class StagedCopyTest {
             assertEquals(9, pages)
             assertNotEquals("Something went wrong.", e.userMessage())
         }
+        clearedAfter()
         assertTrue(stageEmpty())
         assertEquals(0L, count("SELECT COUNT(*) FROM sync_song"))
         assertEquals(STAGE_NONE, dao.meta(SOURCE)!!.stage)
@@ -241,16 +252,21 @@ class StagedCopyTest {
     fun diskConstantsHoldWithinTenPercent() = runBlocking {
         val songs = 4_000
         val library = LibraryGen.server(7, GenShape(songs = songs, albums = 400, artists = 100))
-        fun usedBytes() =
-            (count("PRAGMA page_count") - count("PRAGMA freelist_count")) * count("PRAGMA page_size")
+        // The file's pages in use, every write checkpointed in.
+        fun usedBytes(): Long {
+            count("PRAGMA wal_checkpoint(TRUNCATE)")
+            return (count("PRAGMA page_count") - count("PRAGMA freelist_count")) * count("PRAGMA page_size")
+        }
         val base = usedBytes()
         val generation = copy.start(ACCOUNT, SOURCE)
         copy.read(fake(library).client(), SOURCE)
         val sync = (usedBytes() - base) / songs
         copy.build(SOURCE, generation, songs.toLong())
         val stage = (usedBytes() - base) / songs
-        println("measured sync=$sync stage=$stage")
+        println("MEASURED copy sync=$sync stage=$stage constants=$SYNC_BYTES_PER_SONG,$STAGE_BYTES_PER_SONG")
         assertTrue("sync $sync against $SYNC_BYTES_PER_SONG", abs(sync - SYNC_BYTES_PER_SONG) <= SYNC_BYTES_PER_SONG / 10)
-        assertTrue("stage $stage against $STAGE_BYTES_PER_SONG", abs(stage - STAGE_BYTES_PER_SONG) <= STAGE_BYTES_PER_SONG / 10)
+        // The stage's constant holds what a song takes, with room to spare.
+        assertTrue("measured stage $stage, constant $STAGE_BYTES_PER_SONG", stage <= STAGE_BYTES_PER_SONG)
+        assertTrue("measured stage $stage, constant $STAGE_BYTES_PER_SONG", STAGE_BYTES_PER_SONG <= stage * 11 / 10 + 10)
     }
 }

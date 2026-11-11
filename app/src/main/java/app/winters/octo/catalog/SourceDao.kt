@@ -74,10 +74,6 @@ interface SourceDao {
     @Query("SELECT id FROM source_artist WHERE id IN (:ids)")
     suspend fun knownArtists(ids: List<String>): List<String>
 
-    // Copies of sources left out of the library are no library song's.
-    @Query("UPDATE source_track SET mergedId = '' WHERE mergedId != '' AND sourceId NOT IN (:merged)")
-    suspend fun forgetMergedExcept(merged: List<String>)
-
     // Rows by id, for comparing what a write brings with what is there.
 
     @Query("SELECT * FROM source_track WHERE id IN (:ids)")

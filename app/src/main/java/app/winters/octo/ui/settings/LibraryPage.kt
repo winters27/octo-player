@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.device.Access
 import app.winters.octo.device.DEVICE
@@ -61,6 +62,7 @@ class LibrarySettingsViewModel @Inject constructor(
 fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewModel = hiltViewModel()) {
     val access by vm.library.access.collectAsStateWithLifecycle()
     val scanning by vm.library.scanning.collectAsStateWithLifecycle()
+    val problem by vm.library.problem.collectAsStateWithLifecycle()
     val count by vm.songCount.collectAsStateWithLifecycle()
     val folders by vm.library.folders.collectAsStateWithLifecycle()
     val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
@@ -83,6 +85,8 @@ fun LibraryPage(onBack: () -> Unit, highlight: String?, vm: LibrarySettingsViewM
                 enabled = granted,
                 chevron = false,
             )
+            // A scan that could not be saved says why, as a copy does.
+            if (!scanning) problem?.let { NoteRow(it, color = OctoColors.Error) }
         }
         SettingsGroup(title = "Songs found online", icon = OctoIcons.AddToLibrary) {
             SwitchRow(SettingsIndex.LibraryOnly, libraryOnly, vm::setLibraryOnly, helper = LIBRARY_ONLY_HELP)

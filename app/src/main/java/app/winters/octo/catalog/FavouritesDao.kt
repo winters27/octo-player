@@ -7,9 +7,6 @@ import androidx.room.Query
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
-// How many ids go in one lookup, well under what one query can take.
-private const val LOOKUP_CHUNK = 500
-
 // How many source albums or artists one read of the copy counts takes.
 private const val COPY_PAGE = 200
 
@@ -17,6 +14,13 @@ private const val COPY_PAGE = 200
 // songs, and the first and last library album (or artist) they went into
 // by id: the same one unless its songs went to several.
 data class CopySpan(val serverRowId: String, val firstId: String, val lastId: String, val songs: Int)
+
+// The latest favorite albums: one sort of the favorite albums that keeps
+// only `limit` of them.
+internal const val LATEST_LIKED_ALBUMS_SQL = """
+    SELECT a.*, l.likedAt AS likedAt FROM liked_album l JOIN album a ON a.id = l.albumId
+    ORDER BY l.likedAt DESC, l.albumId LIMIT :limit
+"""
 
 // The statements below are constants so the query plan test reads the
 // same text Room runs. The source is matched with a unary + so the index on
@@ -59,6 +63,49 @@ internal const val ARTIST_SONGS_IN_SQL = """
     WHERE st.artistId = :serverRowId AND t.artistId = :libraryId
 """
 
+// The ids of `kind` that show as a favorite: one liked itself (unless a
+// rename by key of it does not reach its like), the id a rename that
+// reaches a like made of it, and every old id renamed to an id that shows.
+// While a save is part way a favorite may still be on its old id or
+// already on its new one, so either shows it. One id may come more than
+// once. The same statement for albums and for artists.
+internal const val FAVOURITE_ALBUM_IDS_SQL = """
+    SELECT l.albumId FROM liked_album l WHERE NOT EXISTS (SELECT 1 FROM save_rename r WHERE r.kind = 'album' AND r.`old` = l.albumId AND r.byKey = 1 AND r.`key` != l.relinkKey)
+    UNION ALL
+    SELECT r.`new` FROM liked_album l CROSS JOIN save_rename r ON r.kind = 'album' AND r.`old` = l.albumId WHERE r.byKey = 0 OR r.`key` = l.relinkKey
+    UNION ALL
+    SELECT o.`old` FROM liked_album l CROSS JOIN save_rename o ON o.kind = 'album' AND o.`new` = l.albumId
+    UNION ALL
+    SELECT o.`old` FROM liked_album l CROSS JOIN save_rename r ON r.kind = 'album' AND r.`old` = l.albumId CROSS JOIN save_rename o ON o.kind = 'album' AND o.`new` = r.`new`
+    WHERE (r.byKey = 0 OR r.`key` = l.relinkKey) AND o.`old` != l.albumId
+"""
+
+internal const val FAVOURITE_ARTIST_IDS_SQL = """
+    SELECT l.artistId FROM liked_artist l WHERE NOT EXISTS (SELECT 1 FROM save_rename r WHERE r.kind = 'artist' AND r.`old` = l.artistId AND r.byKey = 1 AND r.`key` != l.relinkKey)
+    UNION ALL
+    SELECT r.`new` FROM liked_artist l CROSS JOIN save_rename r ON r.kind = 'artist' AND r.`old` = l.artistId WHERE r.byKey = 0 OR r.`key` = l.relinkKey
+    UNION ALL
+    SELECT o.`old` FROM liked_artist l CROSS JOIN save_rename o ON o.kind = 'artist' AND o.`new` = l.artistId
+    UNION ALL
+    SELECT o.`old` FROM liked_artist l CROSS JOIN save_rename r ON r.kind = 'artist' AND r.`old` = l.artistId CROSS JOIN save_rename o ON o.kind = 'artist' AND o.`new` = r.`new`
+    WHERE (r.byKey = 0 OR r.`key` = l.relinkKey) AND o.`old` != l.artistId
+"""
+
+// Pins whose album, artist or playlist the library has, in row order, each
+// on the id it names now: a pin still on an old id that a rename reaches
+// shows as the id it became.
+private const val PIN_ID_NOW =
+    "COALESCE((SELECT r.`new` FROM save_rename r WHERE r.kind = p.kind AND r.`old` = p.itemId AND (r.byKey = 0 OR r.`key` = p.relinkKey)), p.itemId)"
+
+internal const val SHOWN_PINS_SQL = """
+    SELECT p.kind AS kind, $PIN_ID_NOW AS itemId, p.relinkKey AS relinkKey, p.position AS position
+    FROM pinned_item p
+    WHERE (p.kind = 'album' AND $PIN_ID_NOW IN (SELECT id FROM album))
+       OR (p.kind = 'artist' AND $PIN_ID_NOW IN (SELECT id FROM artist))
+       OR (p.kind = 'playlist' AND p.itemId IN (SELECT id FROM playlist WHERE itemSet >= 0))
+    ORDER BY p.position
+"""
+
 internal const val KEPT_ARTISTS_SQL = """
     SELECT sr.id AS serverRowId, sr.id AS libraryId, 0 AS songs FROM source_artist sr JOIN artist r ON r.id = sr.id
     WHERE sr.sourceId = :sourceId
@@ -78,9 +125,30 @@ interface FavouritesDao {
     @Query("DELETE FROM liked_album WHERE albumId = :albumId")
     suspend fun unlikeAlbum(albumId: String)
 
+    // The albums that show as favorites (FAVOURITE_ALBUM_IDS_SQL), for the
+    // screens' hearts.
+    @Query(FAVOURITE_ALBUM_IDS_SQL)
+    fun favouriteAlbumIds(): Flow<List<String>>
+
+    @Query("DELETE FROM liked_album WHERE albumId = :old AND (:byKey = 0 OR relinkKey = :key)")
+    suspend fun unlikeOldAlbum(old: String, byKey: Boolean, key: String)
+
+    // Takes an album's favorite away, and that of every old id renamed to
+    // it that its rename reaches.
+    @Transaction
+    suspend fun unlikeAlbumEither(albumId: String) {
+        unlikeAlbum(albumId)
+        for (r in renamedTo(RENAME_ALBUM, albumId)) unlikeOldAlbum(r.old, r.byKey, r.key)
+    }
+
     // Favourite albums the library still has.
     @Query("SELECT a.*, l.likedAt AS likedAt FROM liked_album l JOIN album a ON a.id = l.albumId")
     fun likedAlbums(): Flow<List<LikedAlbum>>
+
+    // The latest favorite albums the library still has, the newest
+    // favorite first; of two made at once, the lower album id.
+    @Query(LATEST_LIKED_ALBUMS_SQL)
+    fun latestLikedAlbums(limit: Int): Flow<List<LikedAlbum>>
 
     @Query("SELECT * FROM liked_album")
     suspend fun likedAlbumRows(): List<LikedAlbumEntity>
@@ -96,6 +164,27 @@ interface FavouritesDao {
     @Query("DELETE FROM liked_artist WHERE artistId = :artistId")
     suspend fun unlikeArtist(artistId: String)
 
+    // The artists that show as favorites, as for albums.
+    @Query(FAVOURITE_ARTIST_IDS_SQL)
+    fun favouriteArtistIds(): Flow<List<String>>
+
+    @Query("DELETE FROM liked_artist WHERE artistId = :old AND (:byKey = 0 OR relinkKey = :key)")
+    suspend fun unlikeOldArtist(old: String, byKey: Boolean, key: String)
+
+    @Transaction
+    suspend fun unlikeArtistEither(artistId: String) {
+        unlikeArtist(artistId)
+        for (r in renamedTo(RENAME_ARTIST, artistId)) unlikeOldArtist(r.old, r.byKey, r.key)
+    }
+
+    // The renames in force that made `id` of `kind` (SongIds).
+    @Query(RENAMED_TO_SQL)
+    suspend fun renamedTo(kind: String, id: String): List<SaveRenameEntity>
+
+    // The id an album or artist names now, as it changes.
+    @Query(CURRENT_ID_SQL)
+    fun currentIdFlow(kind: String, id: String): Flow<String>
+
     // Favourite artists the library still has.
     @Query("SELECT r.*, l.likedAt AS likedAt FROM liked_artist l JOIN artist r ON r.id = l.artistId")
     fun likedArtists(): Flow<List<LikedArtist>>
@@ -110,12 +199,6 @@ interface FavouritesDao {
 
     @Query("SELECT id, searchKey FROM artist WHERE id = :id")
     suspend fun artistKey(id: String): KeyedId?
-
-    @Query("SELECT id, searchKey FROM album")
-    suspend fun albumKeys(): List<KeyedId>
-
-    @Query("SELECT id, searchKey FROM artist")
-    suspend fun artistKeys(): List<KeyedId>
 
     // One page of a source's albums after `after`, in id order, with their
     // library songs (see serverAlbumCounts). `until` ends the source's ids.
@@ -143,45 +226,16 @@ interface FavouritesDao {
     @Query(KEPT_ARTISTS_SQL)
     suspend fun keptServerArtists(sourceId: String): List<CopyCount>
 
-    // Which library album the songs of these source albums went into, and
-    // how many, from any source: for following an album that merged into
-    // another.
-    @Query(
-        """
-        SELECT st.albumId AS serverRowId, t.albumId AS libraryId, COUNT(*) AS songs
-        FROM source_track st JOIN track t ON t.id = st.mergedId
-        WHERE st.albumId IN (:ids)
-        GROUP BY st.albumId, t.albumId
-        """,
-    )
-    suspend fun albumCopyCounts(ids: List<String>): List<CopyCount>
-
-    // The same for source artists.
-    @Query(
-        """
-        SELECT st.artistId AS serverRowId, t.artistId AS libraryId, COUNT(*) AS songs
-        FROM source_track st JOIN track t ON t.id = st.mergedId
-        WHERE st.artistId IN (:ids)
-        GROUP BY st.artistId, t.artistId
-        """,
-    )
-    suspend fun artistCopyCounts(ids: List<String>): List<CopyCount>
-
     // Pins
 
     @Query("SELECT * FROM pinned_item ORDER BY position")
     suspend fun pins(): List<PinnedItemEntity>
 
-    // Pins whose album, artist or playlist the library still has, in row order.
-    @Query(
-        """
-        SELECT * FROM pinned_item p
-        WHERE (p.kind = 'album' AND p.itemId IN (SELECT id FROM album))
-           OR (p.kind = 'artist' AND p.itemId IN (SELECT id FROM artist))
-           OR (p.kind = 'playlist' AND p.itemId IN (SELECT id FROM playlist))
-        ORDER BY p.position
-        """,
-    )
+    // Pins whose album, artist or playlist the library still has, in row
+    // order, each on the id it names now (SHOWN_PINS_SQL); a playlist being
+    // deleted is gone already. Two pins may name one id while a save is
+    // part way.
+    @Query(SHOWN_PINS_SQL)
     fun shownPins(): Flow<List<PinnedItemEntity>>
 
     @Query(
@@ -189,7 +243,7 @@ interface FavouritesDao {
         SELECT COUNT(*) FROM pinned_item p
         WHERE (p.kind = 'album' AND p.itemId IN (SELECT id FROM album))
            OR (p.kind = 'artist' AND p.itemId IN (SELECT id FROM artist))
-           OR (p.kind = 'playlist' AND p.itemId IN (SELECT id FROM playlist))
+           OR (p.kind = 'playlist' AND p.itemId IN (SELECT id FROM playlist WHERE itemSet >= 0))
         """,
     )
     suspend fun shownPinCount(): Int
@@ -221,48 +275,41 @@ interface FavouritesDao {
     @Transaction
     suspend fun moveToFront(kind: String, itemId: String) = savePins(movedToFront(pins(), kind, itemId))
 
-    // Moving rows to a new id
+    // While a save is part way, the pin of an album or artist may still be
+    // on an old id renamed to it: these reach every pin that stands for
+    // `row` (or `itemId`), the old ones whose rename reaches them included.
 
-    @Query("UPDATE OR IGNORE liked_album SET albumId = :to WHERE albumId = :from")
-    suspend fun moveLikedAlbum(from: String, to: String)
-
-    @Query("UPDATE OR IGNORE liked_artist SET artistId = :to WHERE artistId = :from")
-    suspend fun moveLikedArtist(from: String, to: String)
-
-    @Query("UPDATE OR IGNORE pinned_item SET itemId = :to WHERE kind = :kind AND itemId = :from")
-    suspend fun movePin(kind: String, from: String, to: String)
-
-    // After the library is rebuilt: favourites and pins whose album or
-    // artist id vanished follow the one their songs merged into, or failing
-    // that the one now filed under the same key.
+    // Pins at the end of the row unless a pin already stands for it. False
+    // when Home is full.
     @Transaction
-    suspend fun relinkAll() {
-        val pins = pins()
-        val likedAlbums = likedAlbumRows()
-        val likedArtists = likedArtistRows()
-        if (pins.isEmpty() && likedAlbums.isEmpty() && likedArtists.isEmpty()) return
-        val albums = albumKeys()
-        val albumIds = albums.mapTo(HashSet()) { it.id }
-        val albumsByKey = albums.groupBy({ it.searchKey }, { it.id })
-        val artists = artistKeys()
-        val artistIds = artists.mapTo(HashSet()) { it.id }
-        val artistsByKey = artists.groupBy({ it.searchKey }, { it.id })
+    suspend fun pinEither(row: PinnedItemEntity): Boolean {
+        val all = pins()
+        if (all.any { it.kind == row.kind && it.itemId in standingFor(all, row.kind, row.itemId) }) return true
+        return pin(row)
+    }
 
-        fun held(kind: PinKind) = pins.filter { it.kind == kind.id }.map { Held(it.itemId, it.relinkKey) }
-        val heldAlbums = likedAlbums.map { Held(it.albumId, it.relinkKey) }
-        val heldArtists = likedArtists.map { Held(it.artistId, it.relinkKey) }
-        val pinnedAlbums = held(PinKind.Album)
-        val pinnedArtists = held(PinKind.Artist)
+    @Transaction
+    suspend fun unpinEither(kind: String, itemId: String) {
+        val all = pins()
+        savePins(standingFor(all, kind, itemId).fold(all) { rows, id -> withoutPin(rows, kind, id) })
+    }
 
-        // Only the vanished ones are looked up, a few at a time.
-        fun vanished(rows: List<Held>, present: Set<String>) = rows.map { it.id }.filter { it !in present }.distinct()
-        val albumsMerged = mergedInto(vanished(heldAlbums + pinnedAlbums, albumIds).chunked(LOOKUP_CHUNK).flatMap { albumCopyCounts(it) })
-        val artistsMerged = mergedInto(vanished(heldArtists + pinnedArtists, artistIds).chunked(LOOKUP_CHUNK).flatMap { artistCopyCounts(it) })
+    // Moves the first pin that stands for it to the front.
+    @Transaction
+    suspend fun moveToFrontEither(kind: String, itemId: String) {
+        val all = pins()
+        val ids = standingFor(all, kind, itemId)
+        val first = all.inPinOrder().firstOrNull { it.kind == kind && it.itemId in ids } ?: return
+        savePins(movedToFront(all, kind, first.itemId))
+    }
 
-        relinks(heldAlbums, albumIds, albumsByKey, albumsMerged).forEach { moveLikedAlbum(it.from, it.to) }
-        relinks(heldArtists, artistIds, artistsByKey, artistsMerged).forEach { moveLikedArtist(it.from, it.to) }
-        relinks(pinnedAlbums, albumIds, albumsByKey, albumsMerged).forEach { movePin(PinKind.Album.id, it.from, it.to) }
-        relinks(pinnedArtists, artistIds, artistsByKey, artistsMerged).forEach { movePin(PinKind.Artist.id, it.from, it.to) }
+    // The pinned ids of `kind` that stand for `itemId`: itself, and each old
+    // id renamed to it whose rename reaches that pin.
+    @Transaction
+    suspend fun standingFor(all: List<PinnedItemEntity>, kind: String, itemId: String): Set<String> {
+        if (kind == PinKind.Playlist.id) return setOf(itemId)
+        val renamed = renamedTo(kind, itemId)
+        return setOf(itemId) + renamed.filter { r -> all.any { it.kind == kind && it.itemId == r.old && r.reaches(it.relinkKey) } }.map { it.old }
     }
 }
 

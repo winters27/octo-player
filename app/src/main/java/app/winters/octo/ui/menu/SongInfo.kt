@@ -47,8 +47,10 @@ import app.winters.octo.device.DEVICE
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.folders.serverName
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.listening.TotalsFailed
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.audioQuality
 import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuNote
@@ -105,6 +107,8 @@ data class SongFacts(
     val addedAtSeconds: Long = 0,
     val plays: Int = 0,
     val lastPlayedAt: Long = 0,
+    // Why the plays cannot be counted right now, in words; null when they are.
+    val playsProblem: String? = null,
     val rating: Int = 0,
     val trackGain: Float? = null,
     val albumGain: Float? = null,
@@ -171,7 +175,7 @@ fun infoLines(facts: SongFacts, zone: ZoneId = ZoneId.systemDefault(), locale: L
     }
     facts.suggestedBy?.takeIf { it.isNotBlank() }?.let { add(InfoLine("Suggested by", it)) }
     if (facts.addedAtSeconds > 0) add(InfoLine("Added", dateText(facts.addedAtSeconds * 1000, zone, locale)))
-    add(InfoLine("Plays", "%,d".format(locale, facts.plays)))
+    add(InfoLine("Plays", facts.playsProblem ?: "%,d".format(locale, facts.plays)))
     if (facts.lastPlayedAt > 0) add(InfoLine("Last played", dateText(facts.lastPlayedAt, zone, locale)))
     if (facts.rating > 0) add(InfoLine("Rating", if (facts.rating == 1) "1 star" else "${facts.rating} stars"))
 
@@ -229,13 +233,15 @@ class SongInfoViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val offline: OfflineDownloads,
     private val discovery: Discovery,
+    // Finds a start plays before their rows are written.
+    private val finds: FindMap,
 ) : ViewModel() {
     // Read once as the sheet opens.
     fun info(trackId: String): Flow<SongInfo?> = flow { emit(load(trackId)) }.flowOn(Dispatchers.IO)
 
     private suspend fun load(trackId: String): SongInfo? {
         if (isFind(trackId)) {
-            val track = online.songFlow(trackId).first()?.asTrack() ?: return null
+            val track = (online.songFlow(trackId).first() ?: finds[trackId])?.asTrack() ?: return null
             return SongInfo(track, track.facts(SongSource.Found).copy(suggestedBy = discovery.suggestedBy(trackId)))
         }
         val track = catalog.track(trackId) ?: return null
@@ -248,12 +254,17 @@ class SongInfoViewModel @Inject constructor(
         val onPhone = playing != null && playing === phone
         val fromFile = if (onPhone && playing?.bitrate == null) playing?.uri?.let(::fileQuality) else null
         val gains = playing?.takeIf { it.trackGain != null || it.albumGain != null } ?: copies.firstOrNull { it.trackGain != null }
-        val played = history.tracks.first().firstOrNull { it.track.id == trackId }
+        // Play counts that cannot be brought up to date say why instead.
+        val (played, playsProblem) = try {
+            history.played(trackId) to null
+        } catch (e: TotalsFailed) {
+            null to e.words
+        }
         val details = songDetails(copies)
         val source = if (onPhone) {
             SongSource.Phone(playing?.uri?.let(::phonePath))
         } else {
-            val download = offline.byTrack.value[trackId]?.takeIf { it.state == DownloadStatus.Done && it.path.isNotEmpty() }
+            val download = offline.keptRow(trackId).first()?.takeIf { it.state == DownloadStatus.Done && it.path.isNotEmpty() }
             SongSource.Server(signedInServer(), download?.path)
         }
         val facts = track.facts(source).copy(
@@ -266,6 +277,7 @@ class SongInfoViewModel @Inject constructor(
             bitDepth = playing?.bitDepth ?: fromFile?.bitDepth,
             plays = played?.plays ?: 0,
             lastPlayedAt = played?.lastPlayedAt ?: 0,
+            playsProblem = playsProblem,
             trackGain = gains?.trackGain,
             albumGain = gains?.albumGain,
             trackPeak = gains?.trackPeak,

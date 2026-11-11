@@ -47,6 +47,7 @@ import app.winters.octo.output.OutputSwitch
 import app.winters.octo.output.Outputs
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
+import app.winters.octo.server.PHONE_LIBRARY
 import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ServerSync
 import app.winters.octo.sound.AlbumRun
@@ -63,6 +64,7 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -75,6 +77,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.future
@@ -101,12 +105,6 @@ private val PLAY_NEXT_ITEM = SessionCommand(PLAY_NEXT_ITEM_ACTION, Bundle.EMPTY)
 
 // Where a car's browse action reads the words it shows for its result.
 private const val ACTION_MESSAGE = "androidx.media.utils.extras.KEY_CUSTOM_BROWSER_ACTION_RESULT_MESSAGE"
-
-// "Play next" from the app, with the song ids to play.
-internal val PLAY_NEXT = SessionCommand("app.winters.octo.PLAY_NEXT", Bundle.EMPTY)
-private const val ARG_IDS = "ids"
-
-internal fun playNextArgs(trackIds: List<String>) = Bundle().apply { putStringArrayList(ARG_IDS, ArrayList(trackIds)) }
 
 // "Play X on Octo" from the app, with the words said and what the
 // assistant picked out of them.
@@ -142,6 +140,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var streams: Streams
     @Inject lateinit var likes: LikeStore
     @Inject lateinit var queue: QueueStore
+    @Inject lateinit var legacy: LegacyQueues
     @Inject lateinit var plays: PlayStore
     @Inject lateinit var sleep: SleepTimer
     @Inject lateinit var playerSettings: PlayerSettings
@@ -171,6 +170,11 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var upgradeGuard: UpgradeGuard
     @Inject lateinit var carResume: CarResume
     @Inject lateinit var serverSync: ServerSync
+    @Inject lateinit var builds: QueueBuilds
+    @Inject lateinit var starts: QueueStarts
+    @Inject lateinit var startingPlays: StartingPlays
+    @Inject lateinit var merge: app.winters.octo.catalog.CatalogMerge
+    @Inject lateinit var finds: FindMap
 
     private val scope = MainScope()
     // What each car said it can show as tabs, kept from its root call.
@@ -198,6 +202,8 @@ class OctoPlaybackService : MediaLibraryService() {
     // drives the TV or speaker.
     private lateinit var local: OctoPlayer
     private lateinit var player: OutputSwitch
+    // The queue, kept whole in Room while the player holds a window of it.
+    private lateinit var window: QueueWindow
     private lateinit var casting: Casting
     private lateinit var tracker: PlayTracker
     private lateinit var headsets: HeadsetResume
@@ -215,9 +221,13 @@ class OctoPlaybackService : MediaLibraryService() {
     private var closed = false
     // The home screen widgets: what they show, and what their buttons do.
     private val widgets by lazy { WidgetUpdates(this, scope) }
-    private val widgetRemote by lazy { WidgetRemote(this, player, quickPicks, playable::items) }
+    private val widgetRemote by lazy { WidgetRemote(this, player, quickPicks) { spec, shuffle -> window.play(PlayRequest(spec, null, shuffle)) } }
 
-    @kotlin.OptIn(FlowPreview::class)
+    // The account whose queue is in use: the signed-in server's, else the
+    // phone library's.
+    private fun accountInUse(): String = sessions.state.value.accountId ?: PHONE_LIBRARY
+
+    @kotlin.OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
         // Both decks shape their sound from the same settings, and share one
@@ -238,7 +248,25 @@ class OctoPlaybackService : MediaLibraryService() {
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
         val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
         local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles, realLengths)
-        player = OutputSwitch(local)
+        player = OutputSwitch(local) { if (::window.isInitialized) window else null }
+        window = QueueWindow(
+            player = player,
+            inner = { player.active },
+            store = queue,
+            fill = builds,
+            starts = starts,
+            items = playable::itemsEach,
+            account = ::accountInUse,
+            guard = guard,
+            scope = scope,
+            say = { feedback.show(it) },
+            startingPlays = startingPlays,
+            finds = finds,
+        )
+        editor.attachWindow(window)
+        // Each group of a save may have renamed songs the queue holds: those
+        // rows follow at once, and the whole queue heals once the save ends.
+        scope.launch { merge.published.collect { window.swapped(it) } }
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
         player.addListener(Watcher())
@@ -249,8 +277,8 @@ class OctoPlaybackService : MediaLibraryService() {
         // The covers of the song on and the next ones, wherever it plays.
         coversAhead.attach(player)
         editor.attach(player)
-        stationRefill.attach(player, scope) { autoplay.check() }
-        autoplay.attach(player, scope)
+        stationRefill.attach(player, scope, window) { autoplay.check() }
+        autoplay.attach(player, scope, window)
         // Casting to a TV or speaker swaps the session's player to one that
         // drives the device, and back.
         casting = Casting(this, player, local, deviceMedia, feedback, scope)
@@ -282,7 +310,9 @@ class OctoPlaybackService : MediaLibraryService() {
         // The heart follows the song, the likes list, and for a song found
         // online, whether its download was asked for.
         scope.launch {
-            combine(currentId, likes.liked, downloads.states, ::notificationHeart)
+            currentId
+                .flatMapLatest { id -> (if (id == null) flowOf(false) else likes.likedFlow(id)).map { id to it } }
+                .combine(downloads.states) { (id, isLiked), states -> notificationHeart(id, isLiked, states) }
                 .combine(stationOnAir) { heart, onAir -> heart to onAir }
                 .distinctUntilChanged()
                 .collect { (heart, onAir) ->
@@ -319,6 +349,9 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
+        // A list that joined is in the server's copy of the queue too, even
+        // when the window around the song playing did not change.
+        scope.launch { window.rejoined.collect { queueChangedForServer() } }
         // A car hears of changes to the lists it has open, each list of what
         // it reads; a change to the library alone waits for a copy to end.
         scope.launch { car.inputs.collect { notifier.changed(it) } }
@@ -362,6 +395,8 @@ class OctoPlaybackService : MediaLibraryService() {
         prefetch.detach()
         coversAhead.detach()
         editor.detach()
+        window.release()
+        startingPlays.clear()
         autoplay.detach()
         stationRefill.detach()
         outputs.detach(casting)
@@ -441,36 +476,28 @@ class OctoPlaybackService : MediaLibraryService() {
     // "Start radio" on a song in a car: played only when songs like it are
     // found and nothing newer was chosen meanwhile. The words of a refusal
     // go back to the car to show.
+    // The seed plays at once and the songs like it join after it.
     private suspend fun startRadio(id: String?): SessionResult {
         restored.await()
-        val mark = guard.mark()
-        val answer = id?.let { withContext(Dispatchers.Default) { car.radioFor(it) } } ?: CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY)
-        val play = when (answer) {
-            is CarPlayAnswer.Refused -> return actionWords(answer.words)
-            is CarPlayAnswer.Play -> answer.play
-        }
-        val items = withContext(Dispatchers.IO) { playable.items(play.ids) }.map { it.withSource(play.source) }
-        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
-        if (!guard.stillWanted(mark)) return SessionResult(SessionResult.RESULT_SUCCESS)
-        player.setMediaItems(items, 0, 0)
-        player.prepare()
-        player.play()
+        val song = id?.let(::parseCarId) as? CarNode.Song ?: return actionWords(CAR_NOTHING_TO_PLAY)
+        val title = withContext(Dispatchers.IO) { queue.db.dao().track(song.trackId)?.title } ?: return actionWords(CAR_NOTHING_TO_PLAY)
+        val answer = window.play(PlayRequest(ListSpec.Radio(song.trackId, "$title radio")))
+        answer.refusal?.let { return actionWords(it) }
         return SessionResult(SessionResult.RESULT_SUCCESS)
     }
 
     // "Play next" on a song in a car: it goes right after the one playing.
     private suspend fun playNextFromCar(id: String?): SessionResult {
         val song = id?.let(::parseCarId) as? CarNode.Song ?: return actionWords(CAR_NOTHING_TO_PLAY)
-        val items = withContext(Dispatchers.IO) { playable.items(listOf(song.trackId)) }.map { it.withSource(QueueSource.You) }
-        if (items.isEmpty()) return actionWords(CAR_NOTHING_TO_PLAY)
-        player.addNext(items)
+        window.addList(ListSpec.Ids(listOf(song.trackId)), next = true, source = null) ?: return actionWords(CAR_NOTHING_TO_PLAY)
         return SessionResult(SessionResult.RESULT_SUCCESS)
     }
 
     private fun actionWords(words: String) = SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putString(ACTION_MESSAGE, words) })
 
     private fun sessionCommands() = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(PLAY_NEXT).add(STOP).add(PLAY_FROM_SEARCH).add(START_RADIO).add(PLAY_NEXT_ITEM)
+        .add(LIKE).add(DOWNLOAD).add(CLOSE).add(STOP).add(PLAY_FROM_SEARCH).add(START_RADIO).add(PLAY_NEXT_ITEM)
+        .add(PLAY_LIST).add(ADD_NEXT).add(ADD_LAST).add(PLAY_ENTRY).add(MOVE_ENTRY).add(REMOVE_ENTRIES)
         .build()
 
     private fun updateStationOnAir() {
@@ -520,42 +547,48 @@ class OctoPlaybackService : MediaLibraryService() {
     private fun downloadCurrent() {
         val id = currentId.value?.takeIf(::isFind) ?: return
         scope.launch {
-            val track = online.byIds(listOf(id)).firstOrNull()?.asTrack() ?: return@launch
+            val track = (online.byIds(listOf(id)).firstOrNull() ?: finds[id])?.asTrack() ?: return@launch
             if (!downloads.request(track)) Log.w("Octo", "notification download: not asked")
         }
     }
 
-    // Brings back the queue from last time, paused where it was left: at
-    // the saved song and place, or at the start when that song is gone.
+    // Brings back the queue from last time, paused where it was left: the
+    // window around the saved song and place, or the queue's first song
+    // when that one is gone.
     private suspend fun restoreQueue() {
-        val saved = queue.load() ?: return
-        // Each song back with where it came from, so a station keeps going.
-        val each = playable.itemsEach(saved.trackIds).mapIndexed { i, item -> item?.let { withSavedSource(it, saved.sources.getOrNull(i)) } }
-        val items = each.filterNotNull()
-        if (items.isEmpty() || player.mediaItemCount > 0) return
-        val found = each.map { it != null }
-        val (index, positionMs) = restorePoint(found, saved.index, saved.positionMs)
-        player.setMediaItems(items, index, positionMs)
-        player.repeatMode = saved.repeatMode
-        // The saved shuffle order, less any songs that are gone.
-        restoredShuffle(saved.shuffleOrder, found)?.let(player::setPlayOrder)
-        player.shuffleModeEnabled = saved.shuffle
+        val name = accountInUse()
+        // The queue as the app kept it before an upgrade comes in first.
+        legacy.importSources()
+        legacy.bringParked(name)
+        val saved = window.readSaved(name) ?: return
+        if (!window.restore(saved, name)) return
         // A station waits unopened: Play joins it live.
-        if (items.getOrNull(index)?.mediaId?.let(::isRadio) != true) player.prepare()
-        serverQueue.restored(snapshot())
+        if (player.currentMediaItem?.mediaId?.let(::isRadio) != true) player.prepare()
+        serverQueue.restored(window.serverView())
     }
 
+    // Where playback is; the songs are saved as each edit happens.
     private fun saveQueue() {
         if (!::player.isInitialized || holding) return
-        queue.save(snapshot())
+        window.saveState()
+    }
+
+    // Tells QueueSync of the queue as the server sees it.
+    private fun queueChangedForServer(paused: Boolean = false) {
+        scope.launch {
+            val view = window.serverView()
+            if (paused) serverQueue.paused(view) else serverQueue.changed(view)
+        }
     }
 
     // What a change of server asks of the player. Each runs on the main thread.
     private inner class Side : PlayerSide {
         override suspend fun leave(): LeftQueue = withContext(Dispatchers.Main) {
+            window.saveState()
             holding = true
             val wasPlaying = player.isPlaying
-            val left = snapshot()
+            val left = window.serverView()
+            window.leave()
             empty()
             LeftQueue(left.takeIf { it.trackIds.isNotEmpty() }, wasPlaying)
         }
@@ -592,18 +625,6 @@ class OctoPlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun snapshot(): QueueSnapshot {
-        return QueueSnapshot(
-            trackIds = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId },
-            shuffleOrder = shuffleOrderOf(player).toList(),
-            index = player.currentMediaItemIndex,
-            positionMs = player.currentPosition,
-            repeatMode = player.repeatMode,
-            shuffle = player.shuffleModeEnabled,
-            sources = List(player.mediaItemCount) { player.getMediaItemAt(it).queueSource.encoded() },
-        )
-    }
-
     private inner class Watcher : Player.Listener {
         // Songs that failed one after another, back to 0 once one plays.
         private var failedInARow = 0
@@ -637,7 +658,7 @@ class OctoPlaybackService : MediaLibraryService() {
             updateStationOnAir()
             saveQueue()
             widgets.show(player)
-            serverQueue.changed(snapshot())
+            queueChangedForServer()
             stationRefill.check()
             autoplay.check()
             learnLength()
@@ -673,7 +694,9 @@ class OctoPlaybackService : MediaLibraryService() {
             val why = playFailureOf(error, isFind(player.currentMediaItem?.mediaId.orEmpty())).words
             // A station that cannot play stops there: the next station is
             // the listener's to choose.
-            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem() || isRadio(player.currentMediaItem?.mediaId.orEmpty())) {
+            val queued = maxOf(window.logicalCount.value, player.mediaItemCount)
+            val atEnd = !player.hasNextMediaItem() && window.atLogicalEnd
+            if (failedInARow >= queued || atEnd || isRadio(player.currentMediaItem?.mediaId.orEmpty())) {
                 feedback.show(stoppedLine(title, why))
                 return
             }
@@ -703,7 +726,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             queueChanged.tryEmit(Unit)
-            serverQueue.changed(snapshot())
+            queueChangedForServer()
             stationRefill.check()
             autoplay.check()
             // The length is known once the song has opened.
@@ -712,7 +735,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         // A pause keeps the server's copy of the queue exact.
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (!playWhenReady) serverQueue.paused(snapshot())
+            if (!playWhenReady) queueChangedForServer(paused = true)
             updateStationOnAir()
         }
 
@@ -760,20 +783,25 @@ class OctoPlaybackService : MediaLibraryService() {
     // played.
     private suspend fun playSpoken(controller: MediaSession.ControllerInfo, ask: VoiceAsk): Boolean {
         restored.await()
-        val mark = guard.mark()
         val play = withContext(Dispatchers.Default) { carVoice.play(ask) }
-        val songs = play?.let { found -> withContext(Dispatchers.IO) { playable.items(found.ids) }.map { it.withSource(found.source) } }
-        if (play == null || songs.isNullOrEmpty()) {
+        if (play == null) {
             tell(controller, nothingFoundLine(ask.words))
             return false
         }
-        if (!guard.stillWanted(mark)) return false
-        player.shuffleModeEnabled = play.shuffle
-        player.setMediaItems(songs, if (play.shuffle) songs.indices.random() else 0, 0)
-        player.prepare()
-        player.play()
-        return true
+        val answer = window.play(PlayRequest(play.spec, null, play.shuffle, word = play.source.encoded()))
+        if (!answer.started) answer.refusal?.let { tell(controller, nothingFoundLine(ask.words)) }
+        return answer.started
     }
+
+    // A car's choice or a spoken request, as the queue plays a list (see
+    // carStart): Media3 sets the items it answers, and the queue is taken
+    // up when it does. Refused with its words, the queue as it was.
+    private suspend fun carStarted(controller: MediaSession.ControllerInfo, play: CarPlay, mark: PlayMark, keepsShuffle: Boolean = true): MediaItemsWithStartPosition =
+        when (val started = carStart(window, guard, play, mark, keepsShuffle)) {
+            is CarStarted.Items -> MediaItemsWithStartPosition(started.items, started.start, started.positionMs)
+            is CarStarted.Refused -> refuse(controller, started.words)
+            CarStarted.Superseded -> throw CarPlayRefused("superseded")
+        }
 
     // A car opened a list of its own accord: parts of the server's shelves
     // that failed are asked for again, and Home looks for a queue to pick
@@ -843,8 +871,25 @@ class OctoPlaybackService : MediaLibraryService() {
                 CLOSE -> close()
                 // A station stops, and lets its stream go.
                 STOP -> player.pause()
-                PLAY_NEXT -> args.getStringArrayList(ARG_IDS)?.let { ids ->
-                    scope.launch { player.addNext(playable.items(ids).map { it.withSource(QueueSource.You) }) }
+                // A list played or added by what it is; answered once it plays
+                // or was refused, or once the add is in.
+                PLAY_LIST -> return scope.future {
+                    restored.await()
+                    val request = playRequestOf(args) ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    SessionResult(SessionResult.RESULT_SUCCESS, answerExtras(window.play(request)))
+                }
+                ADD_NEXT, ADD_LAST -> return scope.future {
+                    restored.await()
+                    val spec = args.getString(ARG_SPEC)?.let { runCatching { ListSpec.fromJson(it) }.getOrNull() }
+                        ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    val added = window.addList(spec, next = customCommand == ADD_NEXT, args.getString(ARG_SOURCE), args.getBoolean(ARG_SHOWN_OVER))
+                    SessionResult(SessionResult.RESULT_SUCCESS, addedExtras(added))
+                }
+                PLAY_ENTRY -> window.playEntry(args.getLong(ARG_ENTRY))
+                MOVE_ENTRY -> window.moveEntry(args.getLong(ARG_ENTRY), args.getLong(ARG_BEFORE, 0).takeIf { it != 0L })
+                REMOVE_ENTRIES -> {
+                    val list = args.getLong(ARG_LIST, 0)
+                    if (list != 0L) window.removeList(list) else args.getLongArray(ARG_ENTRIES)?.let { window.removeEntries(it.toList()) }
                 }
                 START_RADIO -> return scope.future { startRadio(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
                 PLAY_NEXT_ITEM -> return scope.future { playNextFromCar(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
@@ -866,14 +911,19 @@ class OctoPlaybackService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = scope.future {
             restored.await()
-            // A list chosen in a car adds all its songs, a song chosen in one
-            // only itself. Songs added are the listener's own, for the
-            // queue's headings.
+            // A list chosen in a car is added by what it is, at the end of
+            // the listener's songs, a page at a time when it is long; a song
+            // chosen in one adds only itself. Songs added are the listener's
+            // own, for the queue's headings.
             val ids = mediaItems.flatMap { item ->
                 val node = parseCarId(item.mediaId) ?: return@flatMap listOf(item.mediaId)
                 if (node is CarNode.Song) return@flatMap listOf(node.trackId)
                 when (val answer = withContext(Dispatchers.Default) { car.plays.playFor(item.mediaId) }) {
-                    is CarPlayAnswer.Play -> answer.play.ids
+                    is CarPlayAnswer.Play -> {
+                        val added = window.addList(answer.play.spec, next = false, source = null, shownOverWindow = answer.play.shownOverWindow)
+                        if (added == null) tell(controller, answer.play.emptyWords)
+                        emptyList()
+                    }
                     is CarPlayAnswer.Refused -> {
                         tell(controller, answer.words)
                         emptyList()
@@ -881,7 +931,8 @@ class OctoPlaybackService : MediaLibraryService() {
                     null -> listOf(item.mediaId)
                 }
             }
-            withContext(Dispatchers.IO) { playable.items(ids) }.map { it.withSource(QueueSource.You) }.toMutableList()
+            // An id a car kept from before a save plays as the song it became.
+            withContext(Dispatchers.IO) { playable.items(renamedSongs(queue.db, ids)) }.map { it.withSource(QueueSource.You) }.toMutableList()
         }
 
         // The futures of plays run on the main thread and end there, with
@@ -901,26 +952,20 @@ class OctoPlaybackService : MediaLibraryService() {
             single?.requestMetadata?.searchQuery?.let { query ->
                 val ask = voiceAskOf(query, single.requestMetadata.extras)
                 val play = withContext(Dispatchers.Default) { carVoice.play(ask) } ?: refuse(controller, nothingFoundLine(ask.words))
-                val songs = withContext(Dispatchers.IO) { playable.items(play.ids) }.map { it.withSource(play.source) }
-                if (songs.isEmpty()) refuse(controller, nothingFoundLine(ask.words))
-                if (!guard.stillWanted(mark)) throw CarPlayRefused("superseded")
-                player.shuffleModeEnabled = play.shuffle
-                return@future MediaItemsWithStartPosition(songs, if (play.shuffle) songs.indices.random() else 0, 0)
+                val spoken = CarPlay(play.spec, null, play.source, network = true, shuffle = play.shuffle, emptyWords = nothingFoundLine(ask.words))
+                // Its shuffle comes with its songs, not on the queue they
+                // replace.
+                return@future carStarted(controller, spoken, mark, keepsShuffle = false)
             }
             // A place or a song chosen in a car.
             when (val answer = single?.let { withContext(Dispatchers.Default) { car.plays.playFor(it.mediaId) } }) {
                 is CarPlayAnswer.Refused -> refuse(controller, answer.words)
-                is CarPlayAnswer.Play -> {
-                    val play = answer.play
-                    val each = withContext(Dispatchers.IO) { playable.itemsEach(play.ids) }
-                    val items = each.mapNotNull { it?.withSource(play.source) }
-                    if (items.isEmpty()) refuse(controller, CAR_NOTHING_TO_PLAY)
-                    if (play.network && !guard.stillWanted(mark)) throw CarPlayRefused("superseded")
-                    return@future MediaItemsWithStartPosition(items, chosenStart(each, play.start), play.positionMs)
-                }
+                is CarPlayAnswer.Play -> return@future carStarted(controller, answer.play, mark)
                 null -> Unit
             }
-            val each = playable.itemsEach(mediaItems.map { it.mediaId })
+            // Ids a car or a widget kept from before a save play as the songs
+            // they became.
+            val each = playable.itemsEach(renamedSongs(queue.db, mediaItems.map { it.mediaId }))
             // The list's name, when the app gave one, goes on every song.
             val source = mediaItems.firstOrNull()?.requestedSource
             val resolved = each.filterNotNull().map { if (source != null) it.withSource(source) else it }
@@ -936,17 +981,30 @@ class OctoPlaybackService : MediaLibraryService() {
         ): ListenableFuture<MediaItemsWithStartPosition> = scope.future {
             // The library cannot open until its upgrade has room on disk.
             if (upgradeGuard.state.value != UpgradeState.Clear) throw UnsupportedOperationException("Nothing to resume")
-            val saved = queue.load() ?: throw UnsupportedOperationException("Nothing to resume")
-            val each = playable.itemsEach(saved.trackIds)
-            val items = each.filterNotNull()
-            if (items.isEmpty()) throw UnsupportedOperationException("Nothing to resume")
-            // The saved song where it was left, or the first from its start.
-            val (index, positionMs) = restorePoint(each.map { it != null }, saved.index, saved.positionMs)
+            restored.await()
+            // The queue is back already: it plays as it is.
+            if (player.mediaItemCount > 0) {
+                val items = List(player.mediaItemCount, player::getMediaItemAt)
+                val index = player.currentMediaItemIndex.coerceAtLeast(0)
+                return@future if (isForPlayback) {
+                    MediaItemsWithStartPosition(items, index, player.currentPosition)
+                } else {
+                    MediaItemsWithStartPosition(listOf(items[index]), 0, player.currentPosition)
+                }
+            }
+            legacy.importSources()
+            legacy.bringParked(accountInUse())
+            val saved = window.readSaved(accountInUse()) ?: throw UnsupportedOperationException("Nothing to resume")
+            // The saved window, the saved song where it was left, or the
+            // queue's first song from its start.
+            val byQk = saved.rows.sortedWith(compareBy({ it.qk }, { it.entry }))
+            val items = byQk.mapNotNull { saved.items[it.entry] }
+            val index = byQk.indexOfFirst { it.entry == saved.start }.coerceAtLeast(0)
             if (isForPlayback) {
-                MediaItemsWithStartPosition(items, index, positionMs)
+                MediaItemsWithStartPosition(items, index, saved.positionMs)
             } else {
                 // The media controls only need the song to show.
-                MediaItemsWithStartPosition(listOf(items[index]), 0, positionMs)
+                MediaItemsWithStartPosition(listOf(items[index]), 0, saved.positionMs)
             }
         }
 

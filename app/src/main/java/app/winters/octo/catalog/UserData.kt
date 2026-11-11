@@ -13,7 +13,7 @@ import androidx.room.PrimaryKey
 // them. Each row keeps a relinkKey instead, so a song whose id changed (a
 // file moved) can be found again.
 
-@Entity(tableName = "liked_track")
+@Entity(tableName = "liked_track", indices = [Index("likedAt", "trackId", name = "index_liked_track_likedAt")])
 data class LikedTrackEntity(
     @PrimaryKey val trackId: String,
     val relinkKey: String,
@@ -22,7 +22,7 @@ data class LikedTrackEntity(
 
 // A song's rating made on the phone, 1 to 5 stars. A song with no rating
 // has no row.
-@Entity(tableName = "track_rating")
+@Entity(tableName = "track_rating", indices = [Index("ratedAt", "trackId", name = "index_track_rating_ratedAt")])
 data class TrackRatingEntity(
     @PrimaryKey val trackId: String,
     val relinkKey: String,
@@ -30,7 +30,9 @@ data class TrackRatingEntity(
     val ratedAt: Long,
 )
 
-@Entity(tableName = "play_event", indices = [Index("trackId"), Index("startedAt")])
+// A song's plays are indexed by when they started, so its latest is one
+// read and they move to another id oldest first.
+@Entity(tableName = "play_event", indices = [Index("trackId", "startedAt"), Index("startedAt")])
 data class PlayEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val trackId: String,
@@ -64,14 +66,22 @@ data class PlaylistEntity(
     // A family playlist: anyone in the family may add and take out songs,
     // and its order is the server's.
     @ColumnInfo(defaultValue = "0") val family: Boolean = false,
-    // The server's songs as both sides last agreed, one id a line, so a
-    // family playlist's own changes can be told from everyone else's.
-    val syncedSongs: String? = null,
+    // Where an older Octo kept a family playlist's base, one id a line. The
+    // upgrade moved every one into playlist_synced_song; nothing writes it.
+    @ColumnInfo(name = "syncedSongs") val retiredSyncedSongs: String? = null,
     // What the listener may do with this family playlist, as the last sync found.
     @ColumnInfo(defaultValue = "0") val familyMayAdd: Boolean = false,
     @ColumnInfo(defaultValue = "0") val familyMayRemove: Boolean = false,
     @ColumnInfo(defaultValue = "0") val familyMayRename: Boolean = false,
     @ColumnInfo(defaultValue = "0") val familyMayDelete: Boolean = false,
+    // Which item set holds the playlist's songs (playlist_item rows with
+    // this number), and which base set its base (playlist_synced_song). A
+    // whole new list of songs is written as a new set, then these move to
+    // it in one step. -1 while the playlist is being deleted.
+    @ColumnInfo(defaultValue = "0") val itemSet: Long = 0,
+    @ColumnInfo(defaultValue = "0") val baseSet: Long = 0,
+    // Whether a base is kept in playlist_synced_song, even an empty one.
+    @ColumnInfo(defaultValue = "0") val syncedSongsKept: Boolean = false,
 )
 
 @Entity(
@@ -84,35 +94,51 @@ data class PlaylistEntity(
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index("playlistId", "position")],
+    indices = [
+        Index("playlistId", "itemSet", "ord", "itemKey", name = "index_playlist_item_set"),
+        Index("playlistId", "itemSet", "itemKey", unique = true, name = "index_playlist_item_set_key"),
+        Index("playlistId", "itemSet", "trackId", name = "index_playlist_item_set_track"),
+        Index("trackId", name = "index_playlist_item_trackId"),
+    ],
 )
 data class PlaylistItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val playlistId: String,
+    // The playlist's item set the row is in; the playlist's own itemSet
+    // names its songs.
+    @ColumnInfo(defaultValue = "0") val itemSet: Long = 0,
     val trackId: String,
     val relinkKey: String,
-    val position: Int,
+    // Where the row comes in play order, ORD_STEP apart, ties by itemKey.
+    val ord: Long,
+    // The row's own key within its playlist, from playlist_meta; 0 until
+    // the row is written and given one.
+    val itemKey: Long = 0,
     // The server's id for this song when it came from the server's copy of
     // the playlist, so it goes back as the same song.
     val serverSongId: String? = null,
 )
 
-// The queue as it was, one row per song in play order.
-@Entity(tableName = "queue_item")
-data class QueueItemEntity(
-    @PrimaryKey val position: Int,
-    val trackId: String,
-    // Where this song falls when shuffle is on.
-    val shuffledPosition: Int,
+// A family playlist's base: the server's songs as both sides last agreed,
+// each song once with how many times the playlist holds it, so the
+// playlist's own changes can be told from everyone else's. Written in sets
+// like the playlist's songs; the playlist's baseSet names the current one.
+@Entity(
+    tableName = "playlist_synced_song",
+    primaryKeys = ["playlistId", "baseSet", "songId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = PlaylistEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["playlistId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
 )
+data class PlaylistSyncedSongEntity(val playlistId: String, val songId: String, val copies: Int, val baseSet: Long)
 
-// Where playback was in the saved queue. Always a single row.
-@Entity(tableName = "queue_state")
-data class QueueStateEntity(
-    @PrimaryKey val id: Int = 0,
-    val currentIndex: Int,
-    val positionMs: Long,
-    val repeatMode: Int,
-    val shuffle: Boolean,
-    val savedAt: Long,
-)
+// The key the next new playlist row takes. One row, id 0. It only grows,
+// so no key is handed out twice, even across a restart.
+@Entity(tableName = "playlist_meta")
+data class PlaylistMetaEntity(@PrimaryKey val id: Int, val nextItemKey: Long)
+

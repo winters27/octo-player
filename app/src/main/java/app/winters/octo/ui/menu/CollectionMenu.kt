@@ -8,34 +8,43 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.PIN_LIMIT
 import app.winters.octo.catalog.PlaylistSummary
-import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
-import app.winters.octo.catalog.byPlayCount
+import app.winters.octo.catalog.rawQuery
+import app.winters.octo.data.AlbumUpgrade
 import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
 import app.winters.octo.favourites.FavouriteStore
 import app.winters.octo.favourites.PinKey
 import app.winters.octo.favourites.PinStore
 import app.winters.octo.listening.FavouriteKind
-import app.winters.octo.listening.PlayHistory
-import app.winters.octo.offline.DownloadEntity
+import app.winters.octo.listening.PlayedIn
 import app.winters.octo.offline.OfflineDownloads
+import app.winters.octo.playback.ArtistOrder
 import app.winters.octo.playback.LibraryRadio
+import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playback.RadioAround
+import app.winters.octo.playback.RadioSeeds
+import app.winters.octo.playback.Shown
 import app.winters.octo.playback.queueAddWords
 import app.winters.octo.ui.common.Feedback
+import app.winters.octo.ui.paging.SqlValue
+import app.winters.octo.ui.paging.tableChanges
 import app.winters.octo.ui.playlist.copiedMessage
 import app.winters.octo.ui.playlist.playlistCopyName
-import app.winters.octo.ui.upgrade.UpgradeAsk
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -163,6 +172,11 @@ fun pinSpot(shown: List<PinKey>, key: PinKey): PinSpot = when (shown.indexOf(key
     else -> PinSpot.Pinned
 }
 
+// Where the pin of `key` is in the row, as that changes, looked for by the
+// id it names now: a menu opened on an album's or an artist's old id while
+// a save is part way finds its pin under the new id.
+fun pinSpotOf(pins: PinStore, key: PinKey): Flow<PinSpot> = combine(pins.shown, pins.current(key)) { shown, now -> pinSpot(shown, now) }
+
 @HiltViewModel
 class CollectionMenuViewModel @Inject constructor(
     private val catalog: CatalogDao,
@@ -171,17 +185,21 @@ class CollectionMenuViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val libraryRadio: LibraryRadio,
     private val offline: OfflineDownloads,
-    private val history: PlayHistory,
+    private val seeds: RadioSeeds,
     private val feedback: Feedback,
     private val favourites: FavouriteStore,
     private val pins: PinStore,
     private val upgrades: Upgrades,
+    private val db: CatalogDatabase,
 ) : ViewModel() {
     val favouriteAlbums: StateFlow<Set<String>> = favourites.albums
     val favouriteArtists: StateFlow<Set<String>> = favourites.artists
 
     // The pins Home shows, in row order.
     val pinned: StateFlow<List<PinKey>> = pins.shown
+
+    // Where one pin is in that row (pinSpotOf).
+    fun spotOf(key: PinKey): Flow<PinSpot> = pinSpotOf(pins, key)
 
     fun setFavourite(kind: FavouriteKind, id: String, favourite: Boolean) = favourites.set(kind, id, favourite)
 
@@ -203,98 +221,96 @@ class CollectionMenuViewModel @Inject constructor(
     // Whether an artist can start a radio: always, since the library alone can make one.
     val radio: StateFlow<Boolean> = MutableStateFlow(true)
 
-    // Library songs downloaded to the phone, or on their way.
-    val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
+    // Whether an album has a song only on a server with no download yet,
+    // by a probe that stops at the first: read again on every write of a
+    // download but a progress tick, and when its songs change.
+    fun canDownload(albumId: String): Flow<Boolean> =
+        combine(offline.version, db.tableChanges(arrayOf("track")).onStart { emit(Unit) }) { _, _ -> }.conflate().map {
+            db.listsDao().count(
+                rawQuery(
+                    "SELECT EXISTS(SELECT 1 FROM track t WHERE t.albumId = ? AND t.onPhone = 0 " +
+                        "AND NOT EXISTS (SELECT 1 FROM download d WHERE d.trackId = t.id))",
+                    listOf(SqlValue.Text(albumId)),
+                ),
+            ) == 1
+        }
+
+    // When an album's songs change, as after a FLAC lands.
+    val trackChanges: Flow<Unit> = db.tableChanges(arrayOf("track")).onStart { emit(Unit) }
 
     // Whether the signed-in Octo server can look for FLACs, and where.
     val canUpgrade: StateFlow<Boolean> = upgrades.canUpgrade
     val upgradeSource: StateFlow<String?> = upgrades.source
 
-    // The album's songs a FLAC could replace, by their copies on the server.
-    suspend fun upgradableInAlbum(albumId: String): List<UpgradeAsk> = upgrades.upgradableInAlbum(albumId)
+    // The album's songs a FLAC could replace, by their copies on the server:
+    // how many, and the first batch.
+    suspend fun upgradableInAlbum(albumId: String): AlbumUpgrade = upgrades.upgradableInAlbum(albumId)
 
-    fun findFlac(asks: List<UpgradeAsk>) = upgrades.request(asks)
+    fun findFlac(asks: AlbumUpgrade) = upgrades.request(asks.first, beyond = asks.count - asks.first.size)
 
     fun album(id: String): Flow<AlbumEntity?> = catalog.album(id)
-    fun albumTracks(id: String): Flow<List<TrackEntity>> = catalog.albumTracks(id)
     fun artist(id: String): Flow<ArtistEntity?> = catalog.artist(id)
     fun playlist(id: String): Flow<PlaylistSummary?> = store.playlists.map { list -> list.firstOrNull { it.id == id } }
 
-    // The songs, in the order they play: an album's in its order, an
-    // artist's album by album, newest first, as their page lists them, and a
+    // The songs, in the order they play, named by what they are: an
+    // album's in its order, an artist's album by album, newest first, and a
     // playlist's in its order.
-    suspend fun songIds(target: CollectionTarget): List<String> = when (target) {
-        is CollectionTarget.Album -> catalog.albumTrackIds(target.id)
-        is CollectionTarget.Artist -> catalog.artistAlbums(target.id).first().flatMap { catalog.albumTrackIds(it.id) }
-        is CollectionTarget.Playlist -> userDao.playlistTracks(target.id).first().map { it.track.id }
+    fun specOf(target: CollectionTarget): ListSpec = when (target) {
+        is CollectionTarget.Album -> ListSpec.Album(target.id, withFinds = false)
+        is CollectionTarget.Artist -> ListSpec.Artist(target.id, ArtistOrder.Albums)
+        is CollectionTarget.Playlist -> ListSpec.Playlist(target.id)
     }
 
     // A new playlist named "<name> (copy)" with the same songs in the same
-    // order, as the desktop's Duplicate makes.
+    // order, as the desktop's Duplicate makes: the playlist as it stood when
+    // the copy began, a page at a time.
     fun duplicatePlaylist(id: String) {
         viewModelScope.launch {
             val playlist = userDao.playlistRow(id) ?: return@launch
             val name = playlistCopyName(playlist.name)
-            store.create(name, userDao.playlistTracks(id).first().map { it.track.id })
+            store.duplicate(id, name) ?: return@launch
             feedback.show(copiedMessage(name))
         }
     }
 
-    fun play(target: CollectionTarget, shuffle: Boolean) {
-        viewModelScope.launch { playback.playTracks(songIds(target), 0, shuffle) }
-    }
+    fun play(target: CollectionTarget, shuffle: Boolean) = playback.playList(specOf(target), null, shuffle)
 
-    fun playNext(target: CollectionTarget) {
-        viewModelScope.launch {
-            val ids = songIds(target).takeIf { it.isNotEmpty() } ?: return@launch
-            playback.playNextUndoable(ids) { count, undo -> feedback.undoable(queueAddWords(count, next = true), undo) }
-        }
-    }
+    fun playNext(target: CollectionTarget) =
+        playback.addList(specOf(target), next = true, inserted = { count, undo -> feedback.undoable(queueAddWords(count, next = true), undo) })
 
-    fun addToQueue(target: CollectionTarget) {
-        viewModelScope.launch {
-            val ids = songIds(target).takeIf { it.isNotEmpty() } ?: return@launch
-            playback.playLastUndoable(ids) { count, undo -> feedback.undoable(queueAddWords(count, next = false), undo) }
-        }
-    }
+    fun addToQueue(target: CollectionTarget) =
+        playback.addList(specOf(target), next = false, inserted = { count, undo -> feedback.undoable(queueAddWords(count, next = false), undo) })
 
-    // Hands the songs on once read, when there are any. Runs here rather
-    // than on the menu, which is gone by then.
-    fun withSongs(target: CollectionTarget, use: (List<String>) -> Unit) {
-        viewModelScope.launch { songIds(target).takeIf { it.isNotEmpty() }?.let(use) }
-    }
+    // Downloads an album's songs only on a server, a page at a time.
+    fun downloadAlbum(albumId: String) = offline.downloadAlbum(albumId)
 
-    fun download(trackIds: List<String>) = offline.download(trackIds)
-
-    // A radio from an album: its most played song here, else its first, then
-    // songs like the album, leaving the rest of the album out.
+    // A radio from an album: its most played song here as the stored play
+    // counts have it, else its first, playing at once; then songs like the
+    // album, leaving the rest of the album out.
     fun startAlbumRadio(albumId: String) {
         viewModelScope.launch {
-            val tracks = catalog.albumTracks(albumId).first()
-            val played = history.tracks.first().filter { it.track.albumId == albumId }
-            val seed = byPlayCount(played, 1).firstOrNull() ?: tracks.firstOrNull()
+            val seed = seeds.of(PlayedIn.Album(albumId))
             if (seed == null) {
                 feedback.show("No songs to start a radio from")
                 return@launch
             }
-            val seeds = (listOf(seed) + tracks).distinctBy { it.id }
-            playRadio(seeds, libraryRadio, playback, feedback, exclude = tracks.map { it.id }.toSet())
+            val album = catalog.album(albumId).first()
+            playRadio(seed, playback, RadioAround.Album(albumId), Shown(album?.title ?: seed.album, album?.artist, album?.artwork))
         }
     }
 
     // A radio from the artist's most played song, or their first song when
-    // none has been played yet, then songs like theirs, theirs among them.
+    // none has been played yet, playing at once; then songs like theirs,
+    // theirs among them.
     fun startRadio(artistId: String) {
         viewModelScope.launch {
-            val played = history.tracks.first().filter { it.track.artistId == artistId }
-            val ids = songIds(CollectionTarget.Artist(artistId))
-            val seed = byPlayCount(played, 1).firstOrNull() ?: ids.firstOrNull()?.let { catalog.track(it) }
+            val seed = seeds.of(PlayedIn.Artist(artistId))
             if (seed == null) {
                 feedback.show("No songs to start a radio from")
                 return@launch
             }
-            val more = catalog.tracksByIdsUnordered(ids.take(200))
-            playRadio((listOf(seed) + more).distinctBy { it.id }, libraryRadio, playback, feedback)
+            val artist = catalog.artist(artistId).first()
+            playRadio(seed, playback, RadioAround.Artist(artistId), Shown(artist?.name ?: seed.artist, null, artist?.artwork))
         }
     }
 }

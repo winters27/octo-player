@@ -19,16 +19,25 @@ data class MusicFolder(val name: String, val songs: Int, val included: Boolean)
 fun topFolder(relativePath: String?): String =
     relativePath?.trim('/')?.substringBefore('/').orEmpty()
 
-// Leaves out files in folders someone switched off.
-fun List<DeviceFile>.withoutFolders(excluded: Set<String>): List<DeviceFile> =
-    if (excluded.isEmpty()) this else filterNot { topFolder(it.folder) in excluded }
+// Whether a file is in a folder someone switched off, so it is left out.
+fun switchedOff(folder: String?, excluded: Set<String>): Boolean = excluded.isNotEmpty() && topFolder(folder) in excluded
 
-// Lists every folder music was found in, including switched-off ones, so
-// they can be switched back on.
-fun List<DeviceFile>.folders(excluded: Set<String>): List<MusicFolder> =
-    groupingBy { topFolder(it.folder) }.eachCount()
-        .map { (name, count) -> MusicFolder(name, count, name !in excluded) }
-        .sortedByDescending { it.songs }
+// Counts the files of a scan by top folder as they are listed, so every
+// folder music was found in can be shown, switched-off ones included, so
+// they can be switched back on. Holds one count per folder.
+class FolderCounter {
+    private val counts = LinkedHashMap<String, Int>()
+
+    fun add(folder: String?) {
+        val top = topFolder(folder)
+        counts[top] = (counts[top] ?: 0) + 1
+    }
+
+    // The folders, most songs first; folders with as many songs keep the
+    // order they were first seen in.
+    fun folders(excluded: Set<String>): List<MusicFolder> =
+        counts.map { (name, count) -> MusicFolder(name, count, name !in excluded) }.sortedByDescending { it.songs }
+}
 
 // A file's path from the top of its storage, like "Music/Kavinsky/01.mp3".
 fun relativeFile(folder: String?, fileName: String): String =
@@ -37,15 +46,17 @@ fun relativeFile(folder: String?, fileName: String): String =
 // The phone's main storage, as the media library names it.
 private const val MAIN_STORAGE = "external_primary"
 
-// Where each file sits, as folder names, by media id. The storage it is on
-// leads the path only when music is on more than one, so a phone with no
-// SD card starts at "Music" rather than "Internal storage".
-fun List<DeviceFile>.folderPaths(): Map<Long, List<String>> {
-    val volumes = mapTo(HashSet()) { it.volume ?: MAIN_STORAGE }
-    val cards = volumes - MAIN_STORAGE
-    return associate { file ->
-        val names = pathNames(file.folder)
-        file.id to if (volumes.size > 1) listOf(storageName(file.volume, cards.size)) + names else names
+// Where a file sits, as folder names, given every storage the phone's music
+// is on (`volumes`, null for the main one). The storage leads the path only
+// when music is on more than one, so a phone with no SD card starts at
+// "Music" rather than "Internal storage".
+class PhonePaths(volumes: Collection<String?>) {
+    private val all = volumes.mapTo(HashSet()) { it ?: MAIN_STORAGE }
+    private val cards = (all - MAIN_STORAGE).size
+
+    fun of(folder: String?, volume: String?): List<String> {
+        val names = pathNames(folder)
+        return if (all.size > 1) listOf(storageName(volume, cards)) + names else names
     }
 }
 
@@ -61,9 +72,10 @@ private val Context.libraryPrefs by preferencesDataStore("library")
 private val EXCLUDED = stringSetPreferencesKey("excluded_folders")
 
 // Which folders are left out of the library. New folders are always in.
+// Tests give their own folders in place of the kept ones.
 @Singleton
-class FolderRules @Inject constructor(@ApplicationContext private val context: Context) {
-    val excluded: Flow<Set<String>> = context.libraryPrefs.data.map { it[EXCLUDED] ?: emptySet() }
+open class FolderRules @Inject constructor(@ApplicationContext private val context: Context) {
+    open val excluded: Flow<Set<String>> = context.libraryPrefs.data.map { it[EXCLUDED] ?: emptySet() }
 
     suspend fun setIncluded(folder: String, included: Boolean) {
         context.libraryPrefs.edit { prefs ->

@@ -44,6 +44,9 @@ data class StoredServer(
     val label: String = "",
     // Signed out: still in the list, its password forgotten.
     val signedOut: Boolean = false,
+    // The library sources its address had before edits changed it, so a
+    // song kept under an old address still streams from it.
+    val formerSourceIds: List<String> = emptyList(),
 ) {
     val name: String get() = serverName(label, serverUrl)
 

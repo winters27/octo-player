@@ -72,6 +72,13 @@ interface CopyDao {
     @Query("SELECT MAX(seq) FROM sync_album")
     suspend fun maxSyncAlbumSeq(): Long?
 
+    // A page of the listed albums' ids, in the list's order.
+    @Query(CopySql.SYNC_ALBUM_ORDER)
+    suspend fun syncAlbumOrder(after: Long, limit: Int): List<RowSeq>
+
+    @Query("UPDATE sync_album SET place = :place WHERE id = :id")
+    suspend fun setSyncAlbumPlace(id: String, place: Long)
+
     @Query(CopySql.SYNC_ARTIST_PAGE)
     suspend fun syncArtistPage(after: Long, limit: Int): List<SyncArtistEntity>
 
@@ -102,14 +109,33 @@ interface CopyDao {
     @Query("DELETE FROM sync_artist")
     suspend fun deleteSyncArtists()
 
-    // Empties the copy's pages and this source's ordering rows.
-    @Transaction
-    suspend fun clearSync(sourceId: String) {
-        deleteSyncSongs()
-        deleteSyncAlbums()
-        deleteSyncArtists()
-        deleteSyncOrderOf("$sourceId#")
-    }
+    // The copy's pages a page at a time, for the clear after a copy.
+
+    @Query("DELETE FROM sync_song WHERE seq IN (SELECT seq FROM sync_song LIMIT :limit)")
+    suspend fun deleteSyncSongPage(limit: Int): Int
+
+    @Query("DELETE FROM sync_album WHERE rowid IN (SELECT rowid FROM sync_album LIMIT :limit)")
+    suspend fun deleteSyncAlbumPage(limit: Int): Int
+
+    @Query("DELETE FROM sync_artist WHERE rowid IN (SELECT rowid FROM sync_artist LIMIT :limit)")
+    suspend fun deleteSyncArtistPage(limit: Int): Int
+
+    @Query(CopySql.DELETE_SYNC_ORDER_PAGE)
+    suspend fun deleteSyncOrderPage(prefix: String, limit: Int): Int
+
+    @Query("SELECT EXISTS (SELECT 1 FROM sync_song) OR EXISTS (SELECT 1 FROM sync_album) OR EXISTS (SELECT 1 FROM sync_artist)")
+    suspend fun hasSyncPages(): Boolean
+
+    // What a copy's start clears, a page at a time, before it stages
+    // anything: every giant album's order rows (only one copy runs at a
+    // time, so any left are an earlier copy's, of any source) and the
+    // server's stars an earlier copy's steps read. Each answers how many
+    // went.
+    @Query("DELETE FROM sync_order WHERE rowid IN (SELECT rowid FROM sync_order LIMIT :limit)")
+    suspend fun deleteAnySyncOrderPage(limit: Int): Int
+
+    @Query("DELETE FROM sync_starred WHERE rowid IN (SELECT rowid FROM sync_starred LIMIT :limit)")
+    suspend fun deleteSyncStarredPage(limit: Int): Int
 
     // The stage
 
@@ -171,7 +197,7 @@ interface CopyDao {
     @Query(
         """
         UPDATE source_meta SET stage = 'building', generation = :generation, stageOwner = :owner,
-            stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0
+            stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0, movedTracks = 0, movedAlbums = 0, movedArtists = 0
         WHERE sourceId = :sourceId
         """,
     )
@@ -189,7 +215,8 @@ interface CopyDao {
 
     @Query(
         """
-        UPDATE source_meta SET stage = 'none', stageOwner = NULL, stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0
+        UPDATE source_meta SET stage = 'none', stageOwner = NULL, stagedTracks = 0, stagedAlbums = 0, stagedArtists = 0,
+            movedTracks = 0, movedAlbums = 0, movedArtists = 0
         WHERE sourceId = :sourceId
         """,
     )
@@ -290,6 +317,16 @@ interface CopyDao {
         if (!keepScan) setLastScan(account, scan)
     }
 
+    // A copy whose save stopped part way and was resumed is in: its record
+    // says so, and its steps after a copy are owed, as at a whole copy's
+    // swap (markSwapped). The record of an account's first copy is there
+    // already (ensureAccountSync, written with the stage).
+    @Transaction
+    suspend fun resumedIn(account: String, sourceId: String, rowsVersion: Int) {
+        ensureAccountSync(account, sourceId, rowsVersion)
+        markSwapped(account, rowsVersion)
+    }
+
     @Query("DELETE FROM account_sync WHERE account = :account")
     suspend fun forgetAccount(account: String)
 
@@ -329,12 +366,15 @@ object CopySql {
     const val DELETE_ALBUM_SONGS = "DELETE FROM sync_song WHERE albumKey IN (:keys)"
     const val SYNC_ALBUM = "SELECT * FROM sync_album WHERE id = :id"
     const val SYNC_ALBUM_PAGE = "SELECT * FROM sync_album WHERE seq > :after ORDER BY seq LIMIT :limit"
+    const val SYNC_ALBUM_ORDER = "SELECT id, seq FROM sync_album WHERE seq > :after ORDER BY seq LIMIT :limit"
     const val SYNC_ARTIST_PAGE = "SELECT * FROM sync_artist WHERE seq > :after ORDER BY seq LIMIT :limit"
     const val FIRST_ORDERED = "SELECT * FROM sync_order WHERE owner = :owner ORDER BY discKey, trackKey, sortKeyHex, seq LIMIT :limit"
     const val ORDERED_AFTER =
         "SELECT * FROM sync_order WHERE owner = ? AND (discKey, trackKey, sortKeyHex, seq) > (?, ?, ?, ?) " +
             "ORDER BY discKey, trackKey, sortKeyHex, seq LIMIT ?"
     const val DELETE_SYNC_ORDER_OF = "DELETE FROM sync_order WHERE substr(owner, 1, length(:prefix)) = :prefix"
+    const val DELETE_SYNC_ORDER_PAGE =
+        "DELETE FROM sync_order WHERE rowid IN (SELECT rowid FROM sync_order WHERE substr(owner, 1, length(:prefix)) = :prefix LIMIT :limit)"
     const val CLEAR_STAGE_TRACKS = "DELETE FROM stage_track WHERE sourceId = :sourceId"
     const val CLEAR_STAGE_ALBUMS = "DELETE FROM stage_album WHERE sourceId = :sourceId"
     const val CLEAR_STAGE_ARTISTS = "DELETE FROM stage_artist WHERE sourceId = :sourceId"

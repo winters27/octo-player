@@ -9,8 +9,10 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class CatalogMergerTest {
+    // A song of `source`, `native` its own id for it: the row's id is
+    // "source:native", as every source row's is.
     private fun track(
-        id: String,
+        native: String,
         source: String,
         title: String,
         album: String,
@@ -21,7 +23,7 @@ class CatalogMergerTest {
         year: Int? = null,
         genre: String = "",
     ) = SourceTrackEntity(
-        id = id, sourceId = source, nativeId = id, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
+        id = "$source:$native", sourceId = source, nativeId = native, title = title, searchKey = title.lowercase(), sortKey = title.lowercase(),
         artist = "Drake", artistId = artist, album = "Views", albumId = album, trackNo = no, discNo = null, year = year,
         durationMs = ms, addedAt = 0, mimeType = null, sizeBytes = null, artwork = null, uri = null,
         albumOrder = order, relinkKey = "", genre = genre,
@@ -62,7 +64,7 @@ class CatalogMergerTest {
         }
         assertEquals(listOf("device:album"), merged.albums.map { it.id })
         assertEquals(2, merged.albums.single().songCount)
-        assertEquals(mapOf("p1" to "p1", "p2" to "p2"), merged.mergedIds)
+        assertEquals(mapOf("device:p1" to "device:p1", "device:p2" to "device:p2"), merged.mergedIds)
     }
 
     @Test
@@ -77,8 +79,8 @@ class CatalogMergerTest {
         )
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
         // The phone's songs keep their ids and take the server's rating; none is none.
-        assertEquals(4, merged.getValue("p1").rating)
-        assertEquals(0, merged.getValue("p2").rating)
+        assertEquals(4, merged.getValue("device:p1").rating)
+        assertEquals(0, merged.getValue("device:p2").rating)
     }
 
     @Test
@@ -93,11 +95,11 @@ class CatalogMergerTest {
         )
         // The phone's files say nothing, so the server's marks reach them.
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide)).tracks.associateBy { it.id }
-        assertEquals(true, merged.getValue("p1").explicit)
-        assertEquals(false, merged.getValue("p2").explicit)
+        assertEquals(true, merged.getValue("device:p1").explicit)
+        assertEquals(false, merged.getValue("device:p2").explicit)
         // A phone file's own mark goes first.
-        val tagged = phoneOnly.copy(tracks = phoneOnly.tracks.map { if (it.id == "p1") it.copy(explicit = false) else it })
-        assertEquals(false, mergeThroughDatabase(listOf(tagged, serverSide)).tracks.single { it.id == "p1" }.explicit)
+        val tagged = phoneOnly.copy(tracks = phoneOnly.tracks.map { if (it.id == "device:p1") it.copy(explicit = false) else it })
+        assertEquals(false, mergeThroughDatabase(listOf(tagged, serverSide)).tracks.single { it.id == "device:p1" }.explicit)
         // A song only one source has keeps its mark, or none.
         assertEquals(null, mergeThroughDatabase(listOf(phoneOnly)).tracks.first().explicit)
     }
@@ -136,7 +138,7 @@ class CatalogMergerTest {
 
         // Songs on both keep the phone id; the server-only one streams.
         val byTitle = merged.tracks.associateBy { it.title }
-        assertEquals("p2", byTitle.getValue("One Dance").id)
+        assertEquals("device:p2", byTitle.getValue("One Dance").id)
         assertTrue(byTitle.getValue("One Dance").onPhone)
         assertFalse(byTitle.getValue("Views").onPhone)
         assertEquals("device:album", byTitle.getValue("Views").albumId)
@@ -150,9 +152,9 @@ class CatalogMergerTest {
         assertEquals(listOf("Views", "One Dance", "Hotline Bling"), merged.tracks.sortedBy { it.albumOrder }.map { it.title })
 
         // Each server copy points at its library song.
-        assertEquals("p2", merged.mergedIds["s1"])
-        assertEquals("p1", merged.mergedIds["s2"])
-        assertEquals("s3", merged.mergedIds["s3"])
+        assertEquals("device:p2", merged.mergedIds["server:s1"])
+        assertEquals("device:p1", merged.mergedIds["server:s2"])
+        assertEquals("server:s3", merged.mergedIds["server:s3"])
 
         // One artist, with counts over everything.
         val drake = merged.artists.single()
@@ -196,7 +198,7 @@ class CatalogMergerTest {
         val scorpion = merged.albums.single { it.title == "Scorpion" }
         assertEquals("server:scorpion", scorpion.id)
         assertEquals("device:artist", scorpion.artistId)
-        assertFalse(merged.tracks.single { it.id == "s9" }.onPhone)
+        assertFalse(merged.tracks.single { it.id == "server:s9" }.onPhone)
     }
 
     @Test
@@ -221,8 +223,8 @@ class CatalogMergerTest {
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         assertEquals(listOf("device:album"), merged.albums.map { it.id })
         assertEquals(2, merged.tracks.size)
-        assertEquals("p1", merged.mergedIds["s1"])
-        assertEquals("p2", merged.mergedIds["s2"])
+        assertEquals("device:p1", merged.mergedIds["server:s1"])
+        assertEquals("device:p2", merged.mergedIds["server:s2"])
         // The label artist has nothing of its own left.
         assertEquals(listOf("device:artist"), merged.artists.map { it.id })
     }
@@ -241,7 +243,7 @@ class CatalogMergerTest {
         val deluxe = merged.albums.single { it.id == "server:deluxe" }
         assertEquals(1, deluxe.songCount)
         assertEquals(listOf("Bonus Track"), merged.tracks.filter { it.albumId == "server:deluxe" }.map { it.title })
-        assertEquals("p1", merged.mergedIds["s1"])
+        assertEquals("device:p1", merged.mergedIds["server:s1"])
     }
 
     @Test
@@ -253,7 +255,7 @@ class CatalogMergerTest {
             artists = listOf(artist("server:someone", "server", name = "Someone Else")),
         )
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
-        assertEquals("s1", merged.mergedIds["s1"])
+        assertEquals("server:s1", merged.mergedIds["server:s1"])
         assertEquals(3, merged.tracks.size)
     }
 
@@ -270,8 +272,8 @@ class CatalogMergerTest {
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         // A remaster is the same recording; a live take of the same length
         // is not, and keeps its own id.
-        assertEquals("p1", merged.mergedIds["s1"])
-        assertEquals("s2", merged.mergedIds["s2"])
+        assertEquals("device:p1", merged.mergedIds["server:s1"])
+        assertEquals("server:s2", merged.mergedIds["server:s2"])
         assertEquals(3, merged.tracks.size)
     }
 
@@ -288,8 +290,8 @@ class CatalogMergerTest {
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
         // An anniversary edition packages the same recording again; a
         // drumless one of the same length is another recording.
-        assertEquals("p1", merged.mergedIds["s1"])
-        assertEquals("s2", merged.mergedIds["s2"])
+        assertEquals("device:p1", merged.mergedIds["server:s1"])
+        assertEquals("server:s2", merged.mergedIds["server:s2"])
         assertEquals(3, merged.tracks.size)
     }
 
@@ -306,8 +308,8 @@ class CatalogMergerTest {
             artists = listOf(artist("server:artist", "server")),
         )
         val merged = mergeThroughDatabase(listOf(phone, serverSide))
-        assertEquals("p1", merged.mergedIds["s1"])
-        assertEquals("p2", merged.mergedIds["s2"])
+        assertEquals("device:p1", merged.mergedIds["server:s1"])
+        assertEquals("device:p2", merged.mergedIds["server:s2"])
     }
 
     @Test
@@ -321,7 +323,7 @@ class CatalogMergerTest {
             artists = listOf(artist("server:artist", "server")),
         )
         val merged = mergeThroughDatabase(listOf(phoneOnly, serverSide))
-        assertEquals("p2", merged.mergedIds["s1"])
+        assertEquals("device:p2", merged.mergedIds["server:s1"])
     }
 
     @Test

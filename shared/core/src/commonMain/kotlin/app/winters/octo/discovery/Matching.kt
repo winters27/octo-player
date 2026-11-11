@@ -1,11 +1,14 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.catalog.SongIdentity.ParsedSong
 import app.winters.octo.catalog.SongMatchOptions
 import app.winters.octo.catalog.SongRef
 import app.winters.octo.catalog.SongVerdict
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.subsonic.Song
+import kotlin.math.ceil
+import kotlin.math.floor
 
 // Octo lists a song it found online as exactly three minutes long when it
 // does not know the real length yet.
@@ -15,6 +18,10 @@ private const val GUESSED_SECONDS = 180
 // the lyrics match, since a library copy and a server's copy of one
 // recording can be cut a little differently.
 private const val SAME_LENGTH_S = 10
+
+// The same, in milliseconds: unless both songs share an ISRC, sameSong
+// never calls two known lengths further apart than this one song.
+const val SAME_SONG_LENGTH_MS = SAME_LENGTH_S * 1000L
 
 private val WithinTenSeconds = SongMatchOptions(lengthToleranceSeconds = SAME_LENGTH_S)
 
@@ -60,6 +67,34 @@ fun sameSong(
         SongRef(otherTitle, otherArtist, secondsOf(otherLengthMs), otherIsrcs),
         WithinTenSeconds,
     ).isSame
+
+// A song read once for sameSong, so a song compared with many others is
+// read only the once.
+fun parsedSong(title: String, artist: String, lengthMs: Long, isrcs: List<String> = emptyList()): ParsedSong =
+    SongIdentity.parseSong(SongRef(title, artist, secondsOf(lengthMs), isrcs))
+
+// sameSong over two songs read once: the answer it gives over their fields.
+fun sameSong(song: ParsedSong, other: ParsedSong): Boolean = SongIdentity.same(song, other, WithinTenSeconds).isSame
+
+// The lengths in milliseconds another song may have and still be sameSong
+// with a song: any length (`near` null), or every unknown length (0 or
+// less) and those in `near`.
+class SongLengths internal constructor(val near: LongRange?) {
+    operator fun contains(lengthMs: Long): Boolean = near == null || lengthMs <= 0 || lengthMs in near
+}
+
+// The lengths sameSong can still accept beside `song`, whatever the other
+// song is: any length when `song` carries a valid ISRC (a code it shares
+// with the other makes them one recording at any lengths) or its own
+// length is not known; otherwise unknown lengths and those within
+// SAME_SONG_LENGTH_MS of its own. sameSong never accepts a song whose
+// length is outside them, so a caller may leave those out unasked.
+fun sameSongLengths(song: ParsedSong): SongLengths {
+    val seconds = song.ref.seconds
+    if (song.codes.isNotEmpty() || seconds == null || seconds <= 0) return SongLengths(null)
+    val ms = seconds * 1000.0
+    return SongLengths(floor(ms).toLong() - SAME_SONG_LENGTH_MS..ceil(ms).toLong() + SAME_SONG_LENGTH_MS)
+}
 
 // The same recording by the same artist, lengths not compared.
 fun sameRecording(

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,9 +46,41 @@ import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.catalog.isFind
+import app.winters.octo.catalog.rawQuery
 import app.winters.octo.discovery.ONLY_MY_SONGS
+import app.winters.octo.discovery.highlightWalk
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
+import app.winters.octo.playback.QUEUE_WINDOW
+import app.winters.octo.ui.common.adoptedFinds
+import app.winters.octo.ui.common.picked
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowKey
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.SqlValue
+import app.winters.octo.ui.paging.WHOLE_ALBUM_MAX
+import app.winters.octo.ui.paging.marks
+import app.winters.octo.ui.paging.rememberLinedRows
+import app.winters.octo.ui.paging.tableChanges
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.onStart
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -113,26 +146,166 @@ import kotlinx.coroutines.launch
 @HiltViewModel(assistedFactory = AlbumViewModel.Factory::class)
 class AlbumViewModel @AssistedInject constructor(
     @Assisted private val id: String,
-    dao: CatalogDao,
+    private val dao: CatalogDao,
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     private val downloads: Downloads,
     private val topSongs: TopSongsSource,
     private val serverDownloads: ServerDownloads,
-    player: PlayerSettings,
+    private val player: PlayerSettings,
     animatedArts: AnimatedArts,
+    private val loaders: ListLoaders,
+    private val reads: LibraryReads,
+    private val db: CatalogDatabase,
+    owners: WorkOwners,
+    private val merge: CatalogMerge,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    // The album's songs in the library.
-    val library: StateFlow<List<TrackEntity>> =
-        dao.albumTracks(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // How many songs the library has of it, by a count on its index; null
+    // until read.
+    val count: StateFlow<Int?> = db.tableChanges(arrayOf("track")).onStart { emit(Unit) }.map {
+        db.listsDao().count(rawQuery("SELECT COUNT(*) FROM track WHERE albumId = ?", listOf(SqlValue.Text(id))))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // An album bigger than WHOLE_ALBUM_MAX is never held: its page reads it
+    // in pages, and everything about it is counted or walked.
+    val huge: StateFlow<Boolean> = count.map { (it ?: 0) > WHOLE_ALBUM_MAX }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // The album's songs in the library, for an album held whole.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val library: StateFlow<List<TrackEntity>> = count.filterNotNull().distinctUntilChanged { a, b -> (a <= WHOLE_ALBUM_MAX) == (b <= WHOLE_ALBUM_MAX) }
+        .flatMapLatest { smallLibrary(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private fun smallLibrary(songCount: Int): Flow<List<TrackEntity>> = if (songCount <= WHOLE_ALBUM_MAX) dao.albumTracks(id) else flowOf(emptyList())
+
+    // A big album's listing copy, under the page's two owners: written again
+    // under the other when a find it shows is taken into the library. A
+    // listing with no find writes nothing: the page reads the library.
+    private val copyOwners = listOf(owners.vm(), owners.vm())
+    private val copies = AlbumCopies(
+        copyOwners,
+        { owner -> loaders.buildAlbum(owner, id, keepLibrary = false) },
+        { owner -> loaders.albumCopy(owner) },
+        { owner, finds -> copyShowsFinds(db, owner, finds) },
+        { owner -> copyIsStale(db, owner, id) },
+    )
+
+    // A big album's listing holds songs found online.
+    private val hugeFinds = MutableStateFlow(false)
+    val hasFinds: StateFlow<Boolean> = hugeFinds
+
+    // A big album's songs in pages: the listing's copy with its finds in
+    // place, or the library's songs alone when there are none or the
+    // switches leave them out.
+    private var pagesHandle: ListHandle<Boolean, TrackEntity>? = null
+    val pages: StateFlow<ListHandle<Boolean, TrackEntity>?> by lazy {
+        combine(huge, hugeFinds, player.prefs.map { it.libraryOnly }, onlyMine) { big, finds, everywhere, here ->
+            if (!big) null else finds && !(everywhere || here)
+        }.map { withFinds ->
+            if (withFinds == null) return@map null
+            pagesHandle?.also { it.ask(withFinds) } ?: ListHandle(
+                viewModelScope,
+                withFinds,
+                { finds -> if (finds) copies.loader else loaders.albumLibrary(id) },
+                reads,
+                { _, loader -> db.tableChanges(loader.tables) },
+            ).also { pagesHandle = it }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    }
+
+    // A big album's pages with the held album's disc headings among them.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val bigLines: Flow<PagingData<AlbumLine>> by lazy {
+        pages.filterNotNull().flatMapLatest { handle -> handle.pages.withDiscs { first -> otherDisc(handle.asked.value, first) } }
+            .cachedIn(viewModelScope)
+    }
+
+    // Whether the big album's rows hold a song on another disc than `disc`,
+    // the first row's: the library's songs, or the copy's shown rows.
+    private suspend fun otherDisc(withFinds: Boolean, disc: Int): Boolean {
+        val lists = db.listsDao()
+        val other = SqlValue.Int64(disc.toLong())
+        return if (withFinds) {
+            lists.count(
+                rawQuery(
+                    "SELECT EXISTS(SELECT 1 $COPY_SHOWN AND IFNULL(CASE WHEN t.id IS NOT NULL THEN t.discNo ELSE e.discNo END, 1) != ?)",
+                    listOf(SqlValue.Text(copies.owner), other),
+                ),
+            ) == 1
+        } else {
+            libraryOtherDisc(db, id, disc)
+        }
+    }
+
+    // A big album's header, by counts over its rows: re-read when the rows
+    // it shows read again, and when a find is asked for or adopted.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val bigHeader: StateFlow<BigAlbumHeader?> by lazy {
+        val generation = pages.flatMapLatest { handle -> handle?.shown?.map { handle.asked.value to it?.generation } ?: flowOf(null) }
+        val adopted = downloads.phases.map(::adoptedFinds).distinctUntilChanged()
+        combine(generation, hugeFinds, downloads.states, adopted) { shown, finds, states, done -> HeaderInputs(shown?.first, finds, states, done) }
+            .conflate()
+            .map { inputs -> inputs.withFinds?.let { bigHeaderOf(it, inputs.finds, inputs.states, inputs.adopted) } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    }
+
+    private class HeaderInputs(val withFinds: Boolean?, val finds: Boolean, val states: Map<String, DownloadState>, val adopted: Set<String>)
+
+    private suspend fun bigHeaderOf(withFinds: Boolean, hasFinds: Boolean, states: Map<String, DownloadState>, adopted: Set<String>): BigAlbumHeader {
+        val lists = db.listsDao()
+        val album = listOf(SqlValue.Text(id))
+        val songs = lists.count(rawQuery("SELECT COUNT(*) FROM track WHERE albumId = ?", album))
+        val ms = lists.numbers(rawQuery("SELECT IFNULL(SUM(durationMs), 0) FROM track WHERE albumId = ?", album)).firstOrNull() ?: 0
+        val rated = lists.count(rawQuery("SELECT COUNT(*) FROM track WHERE albumId = ? AND rating BETWEEN 1 AND 5", album))
+        val sum = lists.numbers(rawQuery("SELECT IFNULL(SUM(rating), 0) FROM track WHERE albumId = ? AND rating BETWEEN 1 AND 5", album)).firstOrNull() ?: 0
+        // The genre most of its songs have, spelled as its first song with it.
+        val genre = lists.ids(
+            rawQuery(
+                "SELECT genre FROM (SELECT genre, MIN(albumOrder) AS first, COUNT(*) AS n FROM track " +
+                    "WHERE albumId = ? AND TRIM(genre) != '' GROUP BY genre ORDER BY n DESC, first LIMIT 1)",
+                album,
+            ),
+        ).firstOrNull()
+        val average = if (rated > 0) sum.toDouble() / rated else null
+        if (!hasFinds) return BigAlbumHeader(songs, ms, songs, 0, 0, 0, genre, average)
+        val owned = listOf(SqlValue.Text(copies.owner))
+        val whole = lists.count(rawQuery("SELECT COUNT(*) $COPY_SHOWN", owned))
+        val wholeMs = lists.numbers(rawQuery("SELECT IFNULL(SUM(CASE WHEN t.id IS NOT NULL THEN t.durationMs ELSE o.durationMs END), 0) $COPY_SHOWN", owned)).firstOrNull() ?: 0
+        val finds = lists.count(rawQuery("SELECT COUNT(*) $COPY_SHOWN AND e.isFind = 1", owned))
+        val asked = states.filterValues { it != DownloadState.None }.keys
+        val coming = states.filterValues { it == DownloadState.Requested }.keys
+        return BigAlbumHeader(
+            shown = if (withFinds) whole else songs,
+            lengthMs = if (withFinds) wholeMs else ms,
+            whole = whole,
+            outside = finds - findsAmong(adopted),
+            askable = finds - findsAmong(asked),
+            coming = findsAmong(coming),
+            genre = genre,
+            average = average,
+        )
+    }
+
+    // How many of the page's finds are among `ids`, a chunk at a time.
+    private suspend fun findsAmong(ids: Set<String>): Int = ids.filter(::isFind).chunked(900).sumOf { chunk ->
+        db.listsDao().count(
+            rawQuery(
+                "SELECT COUNT(DISTINCT e.shownId) $COPY_SHOWN AND e.isFind = 1 AND e.shownId IN ${marks(chunk.size)}",
+                listOf(SqlValue.Text(copies.owner)) + chunk.map { SqlValue.Text(it) },
+            ),
+        )
+    }
 
     // The album's square loop from its server, in place of its cover.
     @OptIn(ExperimentalCoroutinesApi::class)
     val loop: StateFlow<AnimatedClip?> = animatedArts.pageLoop(
-        library.map { songs -> songs.map(TrackEntity::id) }
+        combine(huge, library) { big, songs ->
+            if (big) loaders.albumLibrary(id).after(null, 8).map { it.row.id } else songs.map(TrackEntity::id)
+        }
             .filter { it.isNotEmpty() }
             .distinctUntilChanged()
             .mapLatest { animatedArts.serverAlbumOf(it) },
@@ -173,16 +346,42 @@ class AlbumViewModel @AssistedInject constructor(
     // The album's main song, starred as Apple Music does: the one first in
     // the artist's top songs on the server. None until known, or when no song
     // here is among them.
+    // A big album's is found by one walk of the rows it shows, a page at a
+    // time, keeping each top song's first id match and first title match.
     @OptIn(ExperimentalCoroutinesApi::class)
     val highlight: StateFlow<String?> = album.map { it?.artist }.distinctUntilChanged()
         .flatMapLatest { artist -> if (artist == null) flowOf(emptyList()) else flowOf(topSongs.forArtist(artist)) }
-        .combine(tracks) { ranked, tracks -> albumHighlight(tracks, ranked) }
+        .combine(combine(tracks, pages.flatMapLatest { it?.shown ?: flowOf(null) }) { tracks, meta -> tracks to meta?.generation }) { ranked, (tracks, _) ->
+            val big = pages.value
+            if (big != null) {
+                val loader = big.loader
+                highlightWalk(ranked) { after -> loader.after(after, WALK_PAGE) }
+            } else {
+                albumHighlight(tracks, ranked)
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     init {
         // Asked once the library's songs are known, then again when a song
-        // from here arrives in the library, once its check has landed.
+        // from here arrives in the library, once its check has landed. A big
+        // album's listing is read into the page's copy instead, and read
+        // again into the other copy when a find it shows is taken in, so the
+        // song shows as the one it became, in place, and when a swap renamed,
+        // removed or added one of its songs.
         viewModelScope.launch {
+            if (count.filterNotNull().first() > WHOLE_ALBUM_MAX) {
+                hugeFinds.value = runCatching { copies.build(downloads.adoptions.value.orEmpty().keys) }.getOrDefault(false)
+                launch {
+                    merge.swapStamp.filter { it % 2 == 0L }.distinctUntilChanged().drop(1).collectLatest {
+                        if (hugeFinds.value) rebuilt { copies.swapped() }
+                    }
+                }
+                downloads.adoptions.filterNotNull().map { it.keys }.distinctUntilChanged().collectLatest { adopted ->
+                    if (hugeFinds.value) rebuilt { copies.adopted(adopted) }
+                }
+                return@launch
+            }
             askServer(library.first { it.isNotEmpty() })
             downloads.arrived.drop(1).collectLatest {
                 delay(CHECK_SETTLE_MS)
@@ -191,18 +390,60 @@ class AlbumViewModel @AssistedInject constructor(
         }
     }
 
+    // A rebuild of the big album's copy: once the page's loader has turned to
+    // the new copy, the page reads again around the row in view. Offline,
+    // refused or short of room, the page keeps its copy.
+    private suspend fun rebuilt(write: suspend () -> Boolean?) {
+        val held = try {
+            write()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } ?: return
+        hugeFinds.value = held
+        pagesHandle?.refresh()
+    }
+
+    override fun onCleared() {
+        pagesHandle?.close()
+        RELEASE.launch { copyOwners.forEach { loaders.release(it) } }
+    }
+
+    // The server's listing of an album held whole, read whole: only for one
+    // of at most WHOLE_ALBUM_MAX library songs, and only when the listing
+    // itself names at most WHOLE_ALBUM_MAX songs; a longer listing is never
+    // held, and the page shows the library's songs. A bigger album is never
+    // held, and its listing is read a page at a time into the page's copy.
     private suspend fun askServer(songs: List<TrackEntity>) {
+        if (songs.isEmpty() || songs.size > WHOLE_ALBUM_MAX) return
         try {
-            discovery.libraryAlbum(songs.map { it.id })?.let { server.value = it }
+            discovery.libraryAlbum(id, most = WHOLE_ALBUM_MAX)?.let { server.value = it }
         } catch (e: SubsonicException) {
             // Offline or refused: the library's songs are the album for now.
         }
     }
 
-    // Has the server add every song here it lacks and not yet asked for.
+    // Has the server add every song here it lacks and not yet asked for:
+    // for a big album, its listing's rows walked a page at a time, shown or
+    // not.
     fun addMissing() {
-        val waiting = whole.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
-        viewModelScope.launch { waiting.forEach { downloads.request(it) } }
+        if (pages.value == null) {
+            val waiting = whole.value.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }
+            viewModelScope.launch { waiting.forEach { downloads.request(it) } }
+            return
+        }
+        if (!hugeFinds.value) return
+        viewModelScope.launch {
+            val copy = loaders.albumCopy(copies.owner)
+            var after: RowKey? = null
+            while (true) {
+                val rows = copy.after(after, WALK_PAGE)
+                rows.map { it.row }.filter { isFind(it.id) && downloads.state(it.id) == DownloadState.None }.forEach { downloads.request(it) }
+                if (rows.size < WALK_PAGE) break
+                after = rows.last().key
+            }
+        }
     }
 
     // Whether the server keeps a downloads list the sheet can show.
@@ -224,20 +465,76 @@ class AlbumViewModel @AssistedInject constructor(
         .map { albums -> albums.filter { it.id != id } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Plays the album from one of its songs.
-    fun play(index: Int) = playback.playTracks(tracks.value.map { it.id }, index, source = album.value?.title)
+    // The album as a play names it: its rows when it shows at most
+    // QUEUE_WINDOW (found songs in their places), else the album itself,
+    // with its finds when the page shows them.
+    private fun spec(shown: List<TrackEntity>, withFinds: Boolean): ListSpec =
+        if (shown.size <= QUEUE_WINDOW) ListSpec.Ids(shown.map { it.id }, album.value?.title) else ListSpec.Album(id, withFinds)
 
-    // Shuffles the album whole, songs found online too, when it has any.
-    fun shuffle() {
-        val all = tracks.value
-        if (all.any { isFind(it.id) }) playback.playTracks(all.map { it.id }, shuffle = true, source = album.value?.title) else playback.playAlbum(id, shuffle = true)
+    private fun shownFinds() = tracks.value.any { isFind(it.id) }
+
+    // Plays the album from a song tapped on an album held whole.
+    fun play(track: TrackEntity) {
+        val shown = tracks.value
+        playback.playList(spec(shown, shownFinds()), ListStart.Row(track.id, null), source = album.value?.title, shownOverWindow = shown.size > QUEUE_WINDOW)
     }
+
+    // Plays from a song tapped on a big album's pages.
+    fun play(item: ListItem<TrackEntity>) {
+        val big = pages.value ?: return
+        playback.playList(ListSpec.Album(id, big.asked.value), ListStart.Row(item.row.id, item.key), source = album.value?.title, shownOverWindow = true)
+    }
+
+    // Plays the album from its first song, or shuffled from a song picked
+    // at random: on an album held whole the page knows that song, so it
+    // plays at once.
+    fun playAll(shuffle: Boolean) {
+        val big = pages.value
+        if (big != null) {
+            playback.playList(ListSpec.Album(id, big.asked.value), null, shuffle, album.value?.title, pageOwner = copies.owner, shownOverWindow = true)
+            return
+        }
+        val shown = tracks.value
+        val first = (if (shuffle) shown.randomOrNull() else shown.firstOrNull()) ?: return
+        playback.playList(spec(shown, shownFinds()), ListStart.First(first.id, null), shuffle, album.value?.title, shownOverWindow = shown.size > QUEUE_WINDOW)
+    }
+
+    fun shuffle() = playAll(shuffle = true)
 
     @AssistedFactory
     interface Factory {
         fun create(id: String): AlbumViewModel
     }
 }
+
+// A big album's header, by counts: the rows its page shows and their
+// length; the listing's rows with its finds, shown or not, the finds outside
+// the library, those not asked for yet and those on their way; and its
+// genre and its songs' average rating, from its library songs.
+data class BigAlbumHeader(
+    val shown: Int,
+    val lengthMs: Long,
+    val whole: Int,
+    val outside: Int,
+    val askable: Int,
+    val coming: Int,
+    val genre: String?,
+    val average: Double?,
+)
+
+// The rows of a page's album copy it shows: each listed song once, the
+// first time it comes, and the library songs the listing left out, while
+// the song is still there.
+private const val COPY_SHOWN =
+    "FROM lists_album_entry e LEFT JOIN track t ON t.id = e.shownId LEFT JOIN online_song o ON o.id = e.shownId " +
+        "WHERE e.owner = ? AND (t.id IS NOT NULL OR o.id IS NOT NULL) AND (e.albumOrder IS NOT NULL OR " +
+        "e.position = (SELECT MIN(f.position) FROM lists_album_entry f WHERE f.owner = e.owner AND f.shownId = e.shownId))"
+
+// Where a page's copy is let go of once the page is gone.
+private val RELEASE = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+// The rows read at a time by a big album's walks.
+private const val WALK_PAGE = 500
 
 private val CoverShape = RoundedCornerShape(10.dp)
 private val CoverSide = 240.dp
@@ -250,10 +547,22 @@ fun AlbumScreen(
     vm: AlbumViewModel = hiltViewModel<AlbumViewModel, AlbumViewModel.Factory> { it.create(id) },
 ) {
     val album by vm.album.collectAsStateWithLifecycle()
+    val big by vm.pages.collectAsStateWithLifecycle()
+    PageArtwork(AlbumRoute(id), album?.artwork)
+
+    Refreshable {
+        val handle = big
+        if (handle != null) BigAlbumSongs(id, handle, vm, onOpen) else HeldAlbumSongs(id, vm, onOpen)
+        BackButton(onBack)
+    }
+}
+
+// An album held whole: its merged list in memory, as it has always been.
+@Composable
+private fun HeldAlbumSongs(id: String, vm: AlbumViewModel, onOpen: (NavKey) -> Unit) {
+    val album by vm.album.collectAsStateWithLifecycle()
     val tracks by vm.tracks.collectAsStateWithLifecycle()
     val whole by vm.whole.collectAsStateWithLifecycle()
-    val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
-    val ownOnly by vm.ownOnly.collectAsStateWithLifecycle()
     val library by vm.library.collectAsStateWithLifecycle()
     val states by vm.downloadStates.collectAsStateWithLifecycle()
     // Whether the album lists songs found online, so every row says which
@@ -262,100 +571,204 @@ fun AlbumScreen(
     val missing = whole.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     val highlight by vm.highlight.collectAsStateWithLifecycle()
-    val loop by vm.loop.collectAsStateWithLifecycle()
-    PageArtwork(AlbumRoute(id), album?.artwork)
 
     val pickable = remember(tracks) { tracks.map { Pickable(it.id, it) } }
     // Its songs' menus leave out the way back to this page.
     val menuContext = remember(id) { SongMenuContext(albumId = id) }
 
-    Refreshable {
-        SelectableSongs(pickable) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
-                album?.let { a ->
-                    item(key = "header") {
-                        val genre = albumGenre(library)
-                        val adopted = LocalAdoptedFinds.current
-                        val outside = if (missing) whole.count { isOutsideLibrary(it.id, adopted) } else 0
-                        val note = if (missing) albumLibraryNote(whole.size, outside) else null
-                        val share = albumShareItem(id, a.title)
-                        val download = albumDownloadItem(library, outside)
-                        val canFollow by vm.canFollow.collectAsStateWithLifecycle()
-                        val askable = whole.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None }
-                        val coming = whole.count { isFind(it.id) && states[it.id] == DownloadState.Requested }
-                        val follows = askable == 0 && coming > 0 && canFollow
-                        // The setting already leaves them out; the switch is for this album alone.
-                        val offerOnlyMine = !libraryOnly
-                        val more = albumMore(share != null, download != null, missing, offerOnlyMine, genre != null).mapNotNull { entry ->
-                            when (entry) {
-                                AlbumMore.Share -> share
-                                AlbumMore.Download -> download
-                                AlbumMore.AddMissing -> {
-                                    val (label, enabled) = addMissingAction(askable, follows)
-                                    MoreItem(label, OctoIcons.AddToLibrary, enabled = enabled) { if (follows) vm.showDownloads() else vm.addMissing() }
-                                }
-                                AlbumMore.OnlyMine -> MoreItem(ONLY_MY_SONGS, OctoIcons.Library, checked = ownOnly) { vm.setOnlyMine(!ownOnly) }
-                                AlbumMore.Genre -> genre?.let { MoreItem("Go to genre", OctoIcons.Genres, detail = it, opensPage = true) { onOpen(GenreRoute(it)) } }
-                            }
-                        }
-                        AlbumHeader(
-                            artwork = a.artwork,
-                            loop = loop,
-                            title = a.title,
-                            artist = a.artist,
-                            details = factsLine(albumFacts(
-                                a.year,
-                                songs(if (mixed) tracks.size else a.songCount),
-                                (if (mixed) (tracks.sumOf { it.durationMs } / 1000).toInt() else (a.durationMs / 1000).toInt()).asLength(),
-                                genre,
-                                averageRating(library),
-                                note,
-                            )),
-                            onArtist = { onOpen(ArtistRoute(a.artistId)) },
-                            onPlay = { vm.play(0) },
-                            onShuffle = vm::shuffle,
-                            // Favorites: the heart leads the control line.
-                            heart = { FavouriteHeart(FavouriteKind.Album, id) },
-                            more = more,
-                        )
-                    }
+    SelectableSongs(pickable) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
+            album?.let { a ->
+                item(key = "header") {
+                    val adopted = LocalAdoptedFinds.current
+                    val outside = if (missing) whole.count { isOutsideLibrary(it.id, adopted) } else 0
+                    AlbumTop(
+                        id, a, vm, onOpen,
+                        AlbumTopFacts(
+                            songs = if (mixed) tracks.size else a.songCount,
+                            lengthSeconds = if (mixed) (tracks.sumOf { it.durationMs } / 1000).toInt() else (a.durationMs / 1000).toInt(),
+                            genre = albumGenre(library),
+                            average = averageRating(library),
+                            whole = whole.size,
+                            outside = outside,
+                            askable = whole.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None },
+                            coming = whole.count { isFind(it.id) && states[it.id] == DownloadState.Requested },
+                            missing = missing,
+                        ),
+                        download = albumDownloadItem(library, outside),
+                        onPlay = { vm.playAll(shuffle = false) },
+                    )
                 }
-                val discs = tracks.groupBy { it.discNo ?: 1 }
-                discs.forEach { (disc, onDisc) ->
-                    if (discs.size > 1) {
-                        item(key = "disc:$disc") {
-                            Text(
-                                "Disc $disc",
-                                style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
-                                color = OctoColors.TextMuted,
-                                modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
-                            )
-                        }
-                    }
-                    items(onDisc, key = { it.id }) { track ->
-                        // Only say who is singing when it is not the album's artist.
-                        // In an album mixing in songs found online, each row
-                        // says after its number whether the song is in the
-                        // library, as the desktop's album does.
-                        SongRow(
-                            track,
-                            SongLead.Number(track.trackNo),
-                            subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
-                            menuContext = menuContext,
-                            ownership = mixed,
-                            highlight = track.id == highlight,
-                        ) { vm.play(tracks.indexOf(track)) }
-                    }
+            }
+            val discs = tracks.groupBy { it.discNo ?: 1 }
+            discs.forEach { (disc, onDisc) ->
+                if (discs.size > 1) {
+                    item(key = "disc:$disc") { DiscHeading(disc) }
                 }
-                album?.let { a ->
-                    if (moreByArtist.isNotEmpty()) {
-                        item(key = "more-by-artist") { MoreByArtist(a.artist, moreByArtist, onOpen) }
-                    }
+                items(onDisc, key = { it.id }) { track ->
+                    // Only say who is singing when it is not the album's artist.
+                    // In an album mixing in songs found online, each row
+                    // says after its number whether the song is in the
+                    // library, as the desktop's album does.
+                    SongRow(
+                        track,
+                        SongLead.Number(track.trackNo),
+                        subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
+                        menuContext = menuContext,
+                        ownership = mixed,
+                        highlight = track.id == highlight,
+                    ) { vm.play(track) }
+                }
+            }
+            album?.let { a ->
+                if (moreByArtist.isNotEmpty()) {
+                    item(key = "more-by-artist") { MoreByArtist(a.artist, moreByArtist, onOpen) }
                 }
             }
         }
-        BackButton(onBack)
     }
+}
+
+// An album too big to hold: its rows in pages, its header by counts. Its
+// rows run in album order, with a disc's heading where the disc changes, as
+// the held album's.
+@Composable
+private fun BigAlbumSongs(id: String, handle: ListHandle<Boolean, TrackEntity>, vm: AlbumViewModel, onOpen: (NavKey) -> Unit) {
+    val album by vm.album.collectAsStateWithLifecycle()
+    val header by vm.bigHeader.collectAsStateWithLifecycle()
+    val hasFinds by vm.hasFinds.collectAsStateWithLifecycle()
+    val asked by handle.asked.collectAsStateWithLifecycle()
+    val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
+    val highlight by vm.highlight.collectAsStateWithLifecycle()
+    val menuContext = remember(id) { SongMenuContext(albumId = id) }
+    val state = rememberLazyListState()
+    val items = rememberLinedRows(handle, vm.bigLines, AlbumLine::row, state, above = if (album != null) 1 else 0)
+    // The rows say which songs are in the library while finds show.
+    val mixed = asked && hasFinds
+
+    PagedPicks(
+        handle,
+        { items.itemSnapshotList.items.mapNotNull(AlbumLine::row) },
+        pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null },
+        base = ListSpec.Album(id, asked),
+    ) {
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
+            album?.let { a ->
+                item(key = "header") {
+                    val counts = header
+                    val outside = counts?.outside ?: 0
+                    AlbumTop(
+                        id, a, vm, onOpen,
+                        AlbumTopFacts(
+                            songs = counts?.shown ?: a.songCount,
+                            lengthSeconds = ((counts?.lengthMs ?: a.durationMs) / 1000).toInt(),
+                            genre = counts?.genre,
+                            average = counts?.average,
+                            whole = counts?.whole ?: a.songCount,
+                            outside = outside,
+                            askable = counts?.askable ?: 0,
+                            coming = counts?.coming ?: 0,
+                            missing = hasFinds,
+                        ),
+                        download = bigAlbumDownloadItem(id, outside),
+                        onPlay = { vm.playAll(shuffle = false) },
+                    )
+                }
+            }
+            items(items.itemCount, key = { at -> items.peek(at)?.key() ?: "row:$at" }) { at ->
+                when (val line = items[at]) {
+                    null -> RowPlaceholder()
+                    is AlbumLine.Disc -> DiscHeading(line.disc)
+                    is AlbumLine.Song -> {
+                        val item = line.item
+                        SongRow(
+                            item.row,
+                            SongLead.Number(item.row.trackNo),
+                            subtitle = { it.artist.takeIf { artist -> artist != album?.artist } },
+                            menuContext = menuContext,
+                            ownership = mixed,
+                            highlight = item.row.id == highlight,
+                        ) { vm.play(item) }
+                    }
+                }
+            }
+            album?.let { a ->
+                if (moreByArtist.isNotEmpty()) {
+                    item(key = "more-by-artist") { MoreByArtist(a.artist, moreByArtist, onOpen) }
+                }
+            }
+        }
+    }
+}
+
+// What an album's header says and offers, however its songs are read.
+private class AlbumTopFacts(
+    val songs: Int,
+    val lengthSeconds: Int,
+    val genre: String?,
+    val average: Double?,
+    val whole: Int,
+    val outside: Int,
+    val askable: Int,
+    val coming: Int,
+    val missing: Boolean,
+)
+
+@Composable
+private fun AlbumTop(
+    id: String,
+    a: AlbumEntity,
+    vm: AlbumViewModel,
+    onOpen: (NavKey) -> Unit,
+    facts: AlbumTopFacts,
+    download: MoreItem?,
+    onPlay: () -> Unit,
+) {
+    val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
+    val ownOnly by vm.ownOnly.collectAsStateWithLifecycle()
+    val loop by vm.loop.collectAsStateWithLifecycle()
+    val canFollow by vm.canFollow.collectAsStateWithLifecycle()
+    val genre = facts.genre
+    val note = if (facts.missing) albumLibraryNote(facts.whole, facts.outside) else null
+    val share = albumShareItem(id, a.title)
+    val follows = facts.askable == 0 && facts.coming > 0 && canFollow
+    // The setting already leaves them out; the switch is for this album alone.
+    val offerOnlyMine = !libraryOnly
+    val more = albumMore(share != null, download != null, facts.missing, offerOnlyMine, genre != null).mapNotNull { entry ->
+        when (entry) {
+            AlbumMore.Share -> share
+            AlbumMore.Download -> download
+            AlbumMore.AddMissing -> {
+                val (label, enabled) = addMissingAction(facts.askable, follows)
+                MoreItem(label, OctoIcons.AddToLibrary, enabled = enabled) { if (follows) vm.showDownloads() else vm.addMissing() }
+            }
+            AlbumMore.OnlyMine -> MoreItem(ONLY_MY_SONGS, OctoIcons.Library, checked = ownOnly) { vm.setOnlyMine(!ownOnly) }
+            AlbumMore.Genre -> genre?.let { MoreItem("Go to genre", OctoIcons.Genres, detail = it, opensPage = true) { onOpen(GenreRoute(it)) } }
+        }
+    }
+    AlbumHeader(
+        artwork = a.artwork,
+        loop = loop,
+        title = a.title,
+        artist = a.artist,
+        details = factsLine(albumFacts(a.year, songs(facts.songs), facts.lengthSeconds.asLength(), genre, facts.average, note)),
+        onArtist = { onOpen(ArtistRoute(a.artistId)) },
+        onPlay = onPlay,
+        onShuffle = vm::shuffle,
+        // Favorites: the heart leads the control line.
+        heart = { FavouriteHeart(FavouriteKind.Album, id) },
+        more = more,
+    )
+}
+
+@Composable
+private fun DiscHeading(disc: Int) {
+    Text(
+        "Disc $disc",
+        style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp),
+    )
 }
 
 // The top of an album page: the cover, the title under it, one quiet line

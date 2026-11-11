@@ -1,5 +1,6 @@
 package app.winters.octo.server
 
+import app.winters.octo.catalog.ApplyPending
 import app.winters.octo.catalog.StageAborted
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -89,6 +90,32 @@ class CopyPassTest {
         val outcome = tracker.outcome.value as CopyOutcome.Failed
         assertEquals("Not enough room.", outcome.reason)
         assertEquals(CopyStep.Add, outcome.step)
+    }
+
+    // A first copy whose save stopped after its first group says why it
+    // stopped, at its Save step; its resume is the next run's.
+    @Test
+    fun aFirstCopyWhoseSaveStoppedSaysWhyItStopped() = runBlocking {
+        val token = tracker.begin("acc", "Home", arriving = false, whole = true)
+        try {
+            pass(token) { _, report ->
+                report.at(CopyStep.Save, SAVE_PARTS / 4, SAVE_PARTS)
+                throw ApplyPending("The phone is out of space.")
+            }
+            fail("the stop is the job's")
+        } catch (e: ApplyPending) {
+            // Passed on.
+        }
+        val outcome = tracker.outcome.value as CopyOutcome.Failed
+        assertEquals("The phone is out of space.", outcome.reason)
+        assertEquals(CopyStep.Save, outcome.step)
+        // A resumed run takes the place of the stopped one, from where its
+        // bar stopped, and its first write puts the old card away.
+        val stopped = tracker.run.value!!.fraction!!
+        val (resumed, _) = tracker.beginResume("acc", "Home", arriving = true, saved = 0.25f)
+        assertEquals(stopped, tracker.run.value!!.fraction!!, 1e-6f)
+        assertNull(tracker.outcome.value)
+        assertTrue(resumed != token)
     }
 
     @Test

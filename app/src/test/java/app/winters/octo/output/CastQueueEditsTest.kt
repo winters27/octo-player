@@ -81,7 +81,7 @@ class CastQueueEditsTest {
     // controller connected to the session.
     private fun cast(items: List<MediaItem>, index: Int = 0, shuffle: Boolean = false) {
         val local = OctoPlayer(context, ExoPlayer.Builder(context).build(), ExoPlayer.Builder(context).build())
-        switch = OutputSwitch(local)
+        switch = OutputSwitch(local) { null }
         remote = RemotePlayer(QuietDevice(), AnyMedia(), scope) {}
         val order = if (shuffle) listOf(2, 0, 1) + items.indices.drop(3) else items.indices.toList()
         remote.start(QueueState(items, index, 0, playing = true, shuffle = shuffle, order = order))

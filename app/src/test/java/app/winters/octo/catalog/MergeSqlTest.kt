@@ -3,6 +3,7 @@ package app.winters.octo.catalog
 import app.winters.octo.testing.CurrentSqlite
 import app.winters.octo.testing.OldSqlite
 import app.winters.octo.testing.openTestCatalog
+import app.winters.octo.testing.testMerge
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -74,29 +75,32 @@ class MergeSqlTest {
         assertIndexed("SELECT sourceId FROM source_track WHERE sourceId > ?1 ORDER BY sourceId LIMIT 1", listOf(""), chunked = true)
     }
 
+    // Each of the apply's statements names its row by key: no scan, sort or
+    // table built in memory.
     @Test
     fun swapStatementsSortNothing() {
         val sql = SwapSql(
             columns("source_track"), columns("source_album"), columns("source_artist"),
             columns("track"), columns("album"), columns("artist"),
         )
-        sql.applyStage.forEach { assertIndexed(it, listOf("s", 1L), chunked = false) }
-        sql.applyLibrary.forEach { assertIndexed(it, emptyList(), chunked = false) }
-        assertIndexed(sql.mergedIds, listOf("s"), chunked = false)
+        assertTrue(sql.all.size > 10)
+        for (statement in sql.all) {
+            val count = Regex("""\?(\d+)""").findAll(statement).maxOf { it.groupValues[1].toInt() }
+            assertIndexed(statement, List(count) { "x" }, chunked = true)
+        }
     }
 
+    // A save's pick of the lowest song under a relink key, over the merge's
+    // output and over the library, as SaveFind.keyTarget runs it.
     @Test
     fun relinkPicksUseTheIdOrderedIndex() {
-        // As UserDao.relinkLikes runs it.
-        val relink = """
-            UPDATE OR IGNORE liked_track
-            SET trackId = (SELECT t.id FROM track t WHERE t.relinkKey = liked_track.relinkKey ORDER BY t.id LIMIT 1)
-            WHERE trackId NOT IN (SELECT id FROM track)
-              AND EXISTS (SELECT 1 FROM track t WHERE t.relinkKey = liked_track.relinkKey AND t.relinkKey != '')
-        """.trimIndent()
-        val plan = OldSqlite.plan(conn, relink, emptyList())
-        assertTrue(plan.joinToString(" / "), plan.any { "index_track_relinkKey_id" in it })
-        assertFalse(plan.joinToString(" / "), plan.any { "TEMP B-TREE" in it })
+        for ((songs, index) in listOf("merge_candidate" to "index_merge_candidate_relinkKey_id", "track" to "index_track_relinkKey_id")) {
+            val pick = "SELECT id FROM `$songs` WHERE relinkKey = ?1 ORDER BY id LIMIT 1"
+            for (plan in listOf(OldSqlite.plan(conn, pick, listOf("k")), CurrentSqlite.plan(pick, listOf("k")))) {
+                assertTrue(plan.joinToString(" / "), plan.any { index in it })
+                assertFalse(plan.joinToString(" / "), plan.any { "TEMP B-TREE" in it })
+            }
+        }
     }
 
     @Test
@@ -119,7 +123,7 @@ class MergeSqlTest {
                 val values = listOf<Any?>(
                     "c$i", "device", "$i", "Untitled", "untitled", "untitled", "A", "artist", "Album", "album",
                     null, null, null, if (untaken && i != 9_999) 999_000L else 200_000L, 0L, null, null, null, null, 0,
-                    "", "", 1, 0, null,
+                    "", "", 1, 0, null, "", "", UNTITLED.lookupKey, UNTITLED.looseKey,
                     i.toLong(), "untitled", "a|untitled", null, 1, 1, if (untaken) 0 else 1, 0, 0,
                 )
                 values.forEachIndexed { at, value -> insert.setObject(at + 1, value) }
@@ -155,17 +159,26 @@ class MergeSqlTest {
         }
     }
 
+    // A save relinks a like whose song is gone to the lowest song under its
+    // key: of two library songs filed under it, the phone's.
     @Test
     fun aRelinkPrefersThePhonesCopyOnATie() = runBlocking {
         val db = openTestCatalog()
         try {
-            db.exec("INSERT INTO track (id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId, durationMs, addedAt, relinkKey) VALUES ('server:x:1', 'server:x', '1', 'T', 't', 't', 'A', 'a', 'B', 'b', 1, 0, 'same')")
-            db.exec("INSERT INTO track (id, sourceId, nativeId, title, searchKey, sortKey, artist, artistId, album, albumId, durationMs, addedAt, relinkKey) VALUES ('device:1', 'device', '1', 'T', 't', 't', 'A', 'a', 'B', 'b', 1, 0, 'same')")
+            val server = "server:x"
+            db.put(SourceCatalog(app.winters.octo.device.DEVICE, true, listOf(song("device", "1", "Tee", "al").copy(relinkKey = "same")), listOf(albumRow("device", "al")), listOf(artistRow("device"))))
+            db.put(SourceCatalog(server, false, listOf(song(server, "1", "Other", "al").copy(relinkKey = "same")), listOf(albumRow(server, "al")), listOf(artistRow(server))))
             db.exec("INSERT INTO liked_track (trackId, relinkKey, likedAt) VALUES ('gone', 'same', 1)")
-            db.userDao().relinkAll()
-            assertTrue(db.userDao().isLiked("device:1"))
+            db.testMerge(server).rebuild()
+            assertEquals(setOf("device:1", "server:x:1"), db.query("SELECT id FROM track", null).use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } })
+            assertEquals(listOf("device:1"), db.query("SELECT trackId FROM liked_track", null).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } })
         } finally {
             db.close()
         }
+    }
+
+    private companion object {
+        // The lookup keys of the candidates written here, all "Untitled" by "A".
+        val UNTITLED = titleLookup("Untitled", "A")
     }
 }

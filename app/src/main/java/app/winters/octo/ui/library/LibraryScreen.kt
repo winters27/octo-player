@@ -68,9 +68,20 @@ import androidx.navigation3.runtime.NavKey
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.livelists.liveListQueryFrom
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.sort.SongScope
 import app.winters.octo.sort.SortList
+import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.Sorted
+import app.winters.octo.ui.common.LetterHeading
+import app.winters.octo.ui.common.picked
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.AlbumCard
 import app.winters.octo.ui.common.ArtistRow
@@ -276,10 +287,13 @@ fun ArtistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewM
 // tap plays the list as shown from that song.
 @Composable
 fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryViewModel = hiltViewModel()) {
-    val songs by vm.songs.collectAsStateWithLifecycle()
-    val shown by vm.shownSongs.collectAsStateWithLifecycle()
+    val handle by vm.songs.collectAsStateWithLifecycle()
+    val order by vm.songOrder.collectAsStateWithLifecycle()
+    val meta by vm.songMeta.collectAsStateWithLifecycle()
+    val total by vm.songTotal.collectAsStateWithLifecycle()
     val query by vm.songFilter.collectAsStateWithLifecycle()
     val choices by vm.songChoices.collectAsStateWithLifecycle()
+    val shuffleWaiting by vm.shuffleWaiting.collectAsStateWithLifecycle()
     // Search opens from the title's line and stays open while it narrows the
     // list. Closing it (its button, or Back) clears the words and the chips.
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -295,8 +309,9 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
         vm.filterSongs(query.cleared())
     }
     BackHandler(enabled = searching) { closeSearch() }
-    val all = songs?.items?.size ?: 0
-    val count = if (query.filters) filteredCount(shown?.items?.size ?: 0, all) else listCount(songs, "song")
+    // A filter's count shows once its pass has counted it.
+    val shownCount = meta?.count
+    val count = if (query.filters) shownCount?.let { filteredCount(it, total) } else shownCount?.takeIf { it > 0 }?.let { songCountLine(it) }
     val toggleSearch = {
         if (searching) {
             closeSearch()
@@ -308,9 +323,10 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
     val searchWords = if (searching) "Close the search" else "Search these songs"
     // The sort first, then Search, both once there is something to sort;
     // the sort is the first to move into More on a narrow phone, then Search.
+    val known = order
     val lead = listOfNotNull(
-        songs?.takeIf { it.items.isNotEmpty() }?.let { sortItem(SortList.Songs, it.order, { order -> vm.setOrder(SortList.Songs, order) }) },
-        if (songs?.items?.isNotEmpty() == true) {
+        known?.takeIf { total > 0 }?.let { sortItem(SortList.Songs, it, { next -> vm.setOrder(SortList.Songs, next) }) },
+        if (total > 0) {
             LineItem("search", overflow = 1, more = MoreItem(searchWords, if (searching) OctoIcons.Close else OctoIcons.Search, onClick = toggleSearch)) { _ ->
                 GlassIconButton(if (searching) OctoIcons.Close else OctoIcons.Search, searchWords, onClick = toggleSearch, lit = searching)
             }
@@ -318,33 +334,63 @@ fun SongsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit = {}, vm: LibraryVi
             null
         },
     )
-    LibraryPage("Songs", onBack, count = count, lead = lead, tail = playItems(shown, vm::playSongs), panel = {
-        if (songs != null) {
+    val playable = (meta?.count ?: meta?.shown ?: 0) > 0
+    LibraryPage("Songs", onBack, count = count, lead = lead, tail = if (playable) playShuffleItems({ vm.playSongs(false) }, { vm.playSongs(true) }, shuffling = shuffleWaiting) else emptyList(), panel = {
+        if (known != null) {
             SearchPanel(searching) {
                 SongFilterRow(
                     query,
                     choices,
                     vm::filterSongs,
-                    onSaveAsLive = { onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, songs?.order))) },
+                    onSaveAsLive = { onOpen(LiveListEditRoute(start = liveListQueryFrom(emptyList(), query, known))) },
                     focusOnOpen = focusOnOpen,
                     onFocused = { focusOnOpen = false },
                 )
             }
         }
     }) {
-        Loaded(songs) { _ ->
-            val list = shown
-            when {
-                list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
+        val list = handle
+        when {
+            list == null || known == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
+            }
+            total == 0 -> CopyNote { EmptyLibraryNote() }
+            meta?.count == 0 && query.filters -> NoMatchesNote { vm.filterSongs(query.cleared()) }
+            else -> PagedSongs(list, known, vm)
+        }
+    }
+}
+
+// "2,835 songs".
+private fun songCountLine(count: Int) = "%,d %s".format(count, if (count == 1) "song" else "songs")
+
+// The Songs list in pages, under letter headings with the letter rail when
+// its order is by name. Rows not read yet keep their place; a jump on the
+// rail reads around where it lands.
+@Composable
+private fun PagedSongs(handle: ListHandle<SongsQuestion, TrackEntity>, order: SortOrder, vm: LibraryViewModel) {
+    val state = rememberLazyListState()
+    TopOnNewOrder(order, state)
+    val meta by handle.shown.collectAsStateWithLifecycle()
+    val runs = meta?.runs
+    val items = rememberListRows(handle, state, runs = runs, visible = vm::visible)
+    val rail = railShows(runs != null, meta?.count ?: 0)
+    val asked by handle.asked.collectAsStateWithLifecycle()
+    PagedPicks(
+        handle,
+        items,
+        pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null },
+        base = ListSpec.Songs(SongScope.All, asked.order, asked.filter.takeIf { it.filters }),
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = rowsPadding(rail)) {
+                listRows(items, runs, heading = { LetterHeading(it) }) { item ->
+                    if (item == null) RowPlaceholder() else SongRow(item.row) { vm.playSong(item) }
                 }
-                list.items.isEmpty() -> NoMatchesNote { vm.filterSongs(query.cleared()) }
-                else -> {
-                    val pickable = remember(list.items) { list.items.map { Pickable(it.id, it) } }
-                    SelectableSongs(pickable) {
-                        SortedList(list, key = { it.id }) { track -> SongRow(track) { vm.playSong(track) } }
-                    }
-                }
+            }
+            if (rail && runs != null) {
+                val stops = remember(runs) { railStops(runs, headed = true) }
+                LetterRail(stops, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
             }
         }
     }

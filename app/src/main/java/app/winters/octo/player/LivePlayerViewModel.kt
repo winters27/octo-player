@@ -30,11 +30,14 @@ import app.winters.octo.ui.search.SearchAsks
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -43,6 +46,7 @@ import javax.inject.Inject
 // What the live player does beyond playing: the heart for the song on air,
 // and the station's menu (keep it, add it to the server, find or copy the
 // song).
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class LivePlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -64,7 +68,14 @@ class LivePlayerViewModel @Inject constructor(
         search = searches::ask,
     )
 
-    private val library: StateFlow<LibraryNow> = combine(likes.liked, downloads.phases, downloads.adoptions) { liked, phases, adoptions ->
+    // The likes of the song on air only: the library song it matched, and
+    // the one an outside song asked for became.
+    private val liked: Flow<Set<String>> = combine(song.state, downloads.adoptions) { state, adoptions ->
+        val match = state.lookup?.match
+        listOfNotNull(match?.id, match?.let { adoptions.orEmpty()[it.id] })
+    }.distinctUntilChanged().flatMapLatest { ids -> likes.likedAmong(ids) }
+
+    private val library: StateFlow<LibraryNow> = combine(liked, downloads.phases, downloads.adoptions) { liked, phases, adoptions ->
         LibraryNow(liked, phases, adoptions.orEmpty())
     }.stateIn(viewModelScope, SharingStarted.Eagerly, LibraryNow())
 

@@ -66,14 +66,33 @@ import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.songs
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+// What the Downloads page lists: the server in use's downloads, in an order.
+data class DownloadsQuestion(val order: SortOrder, val sourceId: String?)
 
 @HiltViewModel
 class OfflineDownloadsViewModel @Inject constructor(
@@ -82,12 +101,46 @@ class OfflineDownloadsViewModel @Inject constructor(
     private val feedback: Feedback,
     private val sorting: SortSettings,
     userDao: UserDao,
+    private val loaders: ListLoaders,
+    reads: LibraryReads,
+    sessions: SessionRepository,
 ) : ViewModel() {
-    // In the chosen order, the ones on their way always first. Null until
-    // first read.
-    val rows: StateFlow<Sorted<DownloadRow>?> =
-        combine(offline.rows, sorting.order(SortList.Downloads)) { rows, order -> Sorted(sortDownloads(rows, order), order, null) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val source = sessions.state.map { (it as? SessionState.SignedIn)?.session?.sourceId }.distinctUntilChanged()
+
+    // The page's rows in pages, the ones on their way always first, read
+    // again on every write of a download but a progress tick. Null until
+    // the order is known.
+    private var handle: ListHandle<DownloadsQuestion, DownloadRow>? = null
+    val pages: StateFlow<ListHandle<DownloadsQuestion, DownloadRow>?> =
+        combine(sorting.order(SortList.Downloads), source, ::DownloadsQuestion)
+            .map { question ->
+                handle?.also { it.ask(question) } ?: ListHandle(
+                    viewModelScope,
+                    question,
+                    { q -> loaders.downloads(q.order, q.sourceId) },
+                    reads,
+                    { _, _ -> offline.version.drop(1) },
+                ).also { handle = it }
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // Whether the server in use has any download, on its way or done.
+    val any: StateFlow<Boolean?> = combine(offline.version, source) { _, s -> s }.conflate()
+        .map { loaders.downloadTotals().any(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // How many are on the phone and the room they take, by counts on the
+    // done rows, following the set of downloaded songs.
+    val done: StateFlow<Pair<Int, Long>?> = combine(offline.doneVersion, source) { _, s -> s }.conflate()
+        .map { loaders.downloadTotals().doneTotals(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // How far a download on its way has come, as it ticks.
+    fun progressOf(row: DownloadRow): Flow<Float> = offline.progressOf(row.sourceId, row.serverId)
+
+    override fun onCleared() {
+        handle?.close()
+    }
 
     // Playlist names, for saying which playlist keeps a song.
     val playlistNames: StateFlow<Map<String, String>> = userDao.playlists()
@@ -104,9 +157,9 @@ class OfflineDownloadsViewModel @Inject constructor(
     }
 
     // Plays the finished downloads, in the order shown, from this one.
-    fun play(row: DownloadRow) {
-        val done = rows.value?.items.orEmpty().filter { it.state == DownloadStatus.Done }.map { it.trackId }
-        playback.playTracks(done, done.indexOf(row.trackId).coerceAtLeast(0))
+    fun play(item: ListItem<DownloadRow>) {
+        val order = pages.value?.asked?.value?.order ?: return
+        playback.playList(ListSpec.Downloads(order), ListStart.Row(item.row.trackId, item.key))
     }
 }
 
@@ -141,28 +194,31 @@ private val RowShape = RoundedCornerShape(12.dp)
 // they take sit on the title line; Remove all is in More and asks first.
 @Composable
 fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltViewModel()) {
-    val rows by vm.rows.collectAsStateWithLifecycle()
+    val handle by vm.pages.collectAsStateWithLifecycle()
     val names by vm.playlistNames.collectAsStateWithLifecycle()
+    val anyKnown by vm.any.collectAsStateWithLifecycle()
+    val done by vm.done.collectAsStateWithLifecycle()
     var confirming by remember { mutableStateOf(false) }
 
     val state = rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 8.dp)) {
-            val sorted = rows
-            val any = sorted != null && sorted.items.isNotEmpty()
+            val paged = handle
+            val asked = paged?.asked?.collectAsStateWithLifecycle()?.value
+            val any = anyKnown == true && asked != null
             PageHeader(
                 "Downloads",
                 onBack,
-                count = sorted?.items?.let(::downloadsCount),
-                lead = if (!any) emptyList() else listOf(sortItem(SortList.Downloads, sorted.order, vm::setOrder)),
+                count = if (anyKnown == true) done?.let { (songs, bytes) -> downloadsCount(songs, bytes) } else null,
+                lead = if (!any) emptyList() else listOf(sortItem(SortList.Downloads, asked!!.order, vm::setOrder)),
                 more = if (!any) emptyList() else listOf(MoreItem(REMOVE_ALL, OctoIcons.Delete, destructive = true, opensPage = true) { confirming = true }),
             )
-            if (sorted != null) {
-                val list = sorted.items
-                TopOnNewOrder(sorted.order, state)
+            if (paged != null && asked != null && anyKnown != null) {
+                TopOnNewOrder(asked.order, state)
+                val items = rememberListRows(paged, state, above = if (anyKnown == false) 1 else 0)
                 LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
-                    if (list.isEmpty()) {
+                    if (anyKnown == false) {
                         item(key = "empty") {
                             Text(
                                 "Songs you download play without a connection. Long press a song and choose Download, " +
@@ -173,21 +229,27 @@ fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltView
                             )
                         }
                     }
-                    items(list, key = { "${it.sourceId}|${it.serverId}" }) { row ->
-                        val byHand = Reasons.MANUAL in Reasons.parse(row.reason)
-                        // A download a rule still keeps comes back from a swipe as it was.
-                        key(row.reason) {
-                            DownloadLine(
-                                row,
-                                downloadDetail(row, names),
-                                removable = byHand,
-                                onRemove = { vm.remove(row.trackId) },
-                                modifier = Modifier.animateItem(),
-                            ) {
-                                when (row.state) {
-                                    DownloadStatus.Failed -> vm.retry(row.trackId)
-                                    DownloadStatus.Done -> vm.play(row)
-                                    else -> Unit
+                    listRows(items, null, heading = {}) { item ->
+                        if (item == null) {
+                            RowPlaceholder()
+                        } else {
+                            val row = item.row
+                            val byHand = Reasons.MANUAL in Reasons.parse(row.reason)
+                            // A download a rule still keeps comes back from a swipe as it was.
+                            key(row.reason) {
+                                DownloadLine(
+                                    row,
+                                    progressOf = vm::progressOf,
+                                    detail = { progress -> downloadDetail(row.copy(progress = progress), names) },
+                                    removable = byHand,
+                                    onRemove = { vm.remove(row.trackId) },
+                                    modifier = Modifier.animateItem(),
+                                ) {
+                                    when (row.state) {
+                                        DownloadStatus.Failed -> vm.retry(row.trackId)
+                                        DownloadStatus.Done -> vm.play(item)
+                                        else -> Unit
+                                    }
                                 }
                             }
                         }
@@ -224,18 +286,27 @@ const val REMOVE_ALL_DETAIL = "Every download leaves this phone. Liked songs and
 fun downloadsCount(rows: List<DownloadRow>): String? {
     if (rows.isEmpty()) return null
     val done = rows.filter { it.state == DownloadStatus.Done }
-    return "${songs(done.size)} · ${sizeLabel(done.sumOf { it.sizeBytes })}"
+    return downloadsCount(done.size, done.sumOf { it.sizeBytes })
 }
+
+// The same from the done rows' counts, while there is any download.
+fun downloadsCount(done: Int, bytes: Long): String = "${songs(done)} · ${sizeLabel(bytes)}"
 
 @Composable
 private fun DownloadLine(
     row: DownloadRow,
-    detail: String,
+    progressOf: (DownloadRow) -> Flow<Float>,
+    detail: (progress: Float) -> String,
     removable: Boolean,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    // A download on its way follows its own progress; the list reads
+    // again only when its state changes.
+    val ticking = row.state == DownloadStatus.Downloading
+    val progress by remember(row.sourceId, row.serverId, ticking) { if (ticking) progressOf(row) else flowOf(row.progress) }
+        .collectAsStateWithLifecycle(row.progress)
     val haptics = LocalHapticFeedback.current
     val swipe = rememberSwipeToDismissBoxState()
     SwipeToDismissBox(
@@ -272,7 +343,7 @@ private fun DownloadLine(
                 Column(Modifier.weight(1f)) {
                     SongTitle(row.title, explicit = row.explicit == true, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
                     Text(
-                        listOf(row.artist, detail).filter { it.isNotEmpty() }.joinToString(" · "),
+                        listOf(row.artist, detail(progress)).filter { it.isNotEmpty() }.joinToString(" · "),
                         style = OctoType.caption,
                         color = if (row.state == DownloadStatus.Failed) OctoColors.TextSecondary else OctoColors.TextMuted,
                         maxLines = 1,
@@ -283,7 +354,7 @@ private fun DownloadLine(
             // A hairline of progress under a download on its way.
             if (row.state == DownloadStatus.Downloading) {
                 Box(Modifier.padding(start = 76.dp, end = 20.dp).fillMaxWidth().height(2.dp).background(OctoColors.TextPrimary.copy(alpha = 0.08f))) {
-                    Box(Modifier.fillMaxWidth(row.progress.coerceIn(0f, 1f)).fillMaxHeight().background(OctoColors.Accent))
+                    Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).fillMaxHeight().background(OctoColors.Accent))
                 }
             }
         }

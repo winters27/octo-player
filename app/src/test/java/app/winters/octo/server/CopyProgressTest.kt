@@ -137,7 +137,13 @@ class CopyProgressTest {
         assertEquals(claimed.map { it.placed }, claimed.map { it.placed }.sorted())
         assertEquals(of, claimed.last().placed)
         assertTrue(claimed.last().saving)
-        assertEquals(1, claimed.count { it.saving })
+        // Saving says once that every song is placed, then how much of the
+        // save is in after each group, never moving back.
+        val saving = claimed.filter { it.saving }
+        assertEquals(1, saving.count { it.saved == null })
+        assertNull(saving.first().saved)
+        val parts = saving.mapNotNull { it.saved }
+        assertTrue("parts $parts", parts.isNotEmpty() && parts.zipWithNext().all { (a, b) -> b >= a } && parts.last() == 1f)
         assertNull(progress.last())
         // The copy reached Add, with the staged songs as its total.
         val adds = seenAt(CopyStep.Add)

@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import app.winters.octo.catalog.UpgradeGuard
 import app.winters.octo.catalog.UpgradeState
+import app.winters.octo.listening.PlayTotals
 import app.winters.octo.ui.common.UpgradeSpaceScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -61,6 +62,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var imports: ImportInbox
     // Whether the library can open, and the space an upgrade still needs.
     @Inject lateinit var upgradeGuard: UpgradeGuard
+    // Play counts that could not be brought up to date try again on return.
+    @Inject lateinit var totals: PlayTotals
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -178,6 +181,7 @@ class MainActivity : ComponentActivity() {
         playback.connect()
         // A queue left on another device may be waiting on the server.
         queueSync.check()
+        totals.foreground()
     }
 
     // Letting go lets the service stop itself when nothing is playing.
