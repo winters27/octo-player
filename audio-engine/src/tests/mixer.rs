@@ -543,14 +543,14 @@ fn the_shape_of_a_plan_gates_every_curve_but_plain_equal_power() {
     let intro =
         TransitionPlan { kind: TransitionKind::Intro, hold_share: 0.7, rise_share: 0.1, ..fixed.clone() };
     let blend = TransitionPlan { kind: TransitionKind::Blend, k: 0.2, ..fixed.clone() };
-    let shape = |plan: &TransitionPlan| FadeShape::for_plan(plan, 180.0, Some(-14.0));
+    let shape = |plan: &TransitionPlan| FadeShape::for_plan(plan, Some(-14.0));
     assert_eq!(shape(&fixed).silence_gate_db, None);
     assert_eq!(shape(&blend).silence_gate_db, Some(-59.0));
     let intro = shape(&intro);
     assert_eq!(intro.silence_gate_db, Some(-59.0));
     assert_eq!((intro.kind, intro.hold_share, intro.rise_share), (TransitionKind::Intro, 0.7, 0.1));
     // Without a known level the gate sits at the floor.
-    assert_eq!(FadeShape::for_plan(&blend, 180.0, None).silence_gate_db, Some(-60.0));
+    assert_eq!(FadeShape::for_plan(&blend, None).silence_gate_db, Some(-60.0));
 }
 
 #[test]

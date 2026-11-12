@@ -1230,7 +1230,6 @@ impl Player {
             }
         };
         let blend_ms = (fade_ms as f64 * speed).round() as i64;
-        let b_len = next_song.duration_ms as f64 / 1_000.0;
         let now_ms = (position * 1_000.0) as i64;
         let (mut plan, live) = self.make_plan(current, next, &current_song, &next_song, blend_ms, now_ms);
         if plan.kind == TransitionKind::Gapless {
@@ -1263,7 +1262,7 @@ impl Player {
             .or_else(|| self.profile_at(current).and_then(|p| p.body_db));
         // The outgoing song's silence gate comes from its level, as heard so
         // far or else from its profile.
-        let shape = FadeShape::for_plan(&plan, b_len, body_db);
+        let shape = FadeShape::for_plan(&plan, body_db);
         let rate = self.mixer.as_ref().map(|m| m.rate()).unwrap_or(48_000) as f64;
         let frames = (plan.overlap_secs() * rate) as u64;
         if let Some(mixer) = self.mixer.as_mut() {

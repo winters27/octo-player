@@ -934,6 +934,46 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
     assert_eq!((next[1] * 32768.0).round() as usize, RATE as usize % 15_000);
 }
 
+// A blend at 9 s over 2 s whose next song comes in at 1.03 times its speed.
+fn matched_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 2_000, "matched plan");
+    (plan.kind, plan.k, plan.start_ms) = (crate::automix::TransitionKind::Blend, 0.4, 9_000);
+    plan.beat_match_rate = Some(1.03);
+    plan
+}
+
+#[test]
+fn a_matched_blend_plays_its_rate_however_soon_the_next_song_ends() {
+    // Song A on the left for 12 s; song B on the right for 4 s, which ends
+    // before its rate has eased back to normal.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    let a_samples: Vec<i16> = (0..RATE as usize * 12).flat_map(|_| [8_192, 0]).collect();
+    write_wav(&a, RATE, 2, &a_samples);
+    let b_samples: Vec<i16> = (0..RATE as usize * 4).flat_map(|_| [0, 8_192]).collect();
+    write_wav(&b, RATE, 2, &b_samples);
+    let (engine, events, capture, pump) = driven_engine();
+    engine.set_test_planner(Some(matched_plan));
+    engine.set_crossfade(2_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    let planned =
+        play_until(&pump, &events, "plan", 1_200, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert_eq!((start_ms, overlap_ms), (9_000, 2_000), "{reason}");
+    pump.play_out();
+    events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+    // B's 4 s go by faster than 4 s: 1.03 times through the blend, then
+    // easing back, so B is heard for about 3.89 s.
+    let out = capture.lock().unwrap().clone();
+    let b_heard = out.chunks_exact(2).filter(|f| f[1] != 0.0).count();
+    assert!((182_000..189_000).contains(&b_heard), "B heard for {b_heard} frames");
+}
+
 fn late_entry_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
     let len = input.current.duration_ms as i64;
     let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 2_500, "test plan");

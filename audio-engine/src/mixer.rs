@@ -9,10 +9,9 @@
 use std::collections::VecDeque;
 
 use crate::automix::{
-    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_EASE_SECS, RATE_RANGE,
-    SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, TransitionKind, TransitionPlan, beat_match_rate_at,
-    incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_outgoing_low_pass_hz,
-    transition_gains,
+    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_RANGE, SILENCE_BELOW_BODY_DB,
+    SILENCE_FLOOR_DB, TransitionKind, TransitionPlan, beat_match_rate_at, incoming_high_pass_hz,
+    outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_outgoing_low_pass_hz, transition_gains,
 };
 use crate::deck::Deck;
 use crate::error::Failure;
@@ -129,14 +128,13 @@ pub struct FadeShape {
 }
 
 impl FadeShape {
-    /// How the mixer runs `plan` into a song `b_len_secs` long, whose
-    /// outgoing song's body level is `body_db` when it is known. The silence
-    /// gate sits that far under the body, and is set for every planned
-    /// curve but plain equal power, and for an intro, whose shape has no
-    /// curve weight.
-    pub fn for_plan(plan: &TransitionPlan, b_len_secs: f64, body_db: Option<f64>) -> FadeShape {
-        // The incoming song must outlast the rate's ease back to normal.
-        let room = b_len_secs - plan.entry_secs() > plan.overlap_secs() + RATE_EASE_SECS + 1.0;
+    /// How the mixer runs `plan`, whose outgoing song's body level is
+    /// `body_db` when it is known. The silence gate sits that far under the
+    /// body, and is set for every planned curve but plain equal power, and
+    /// for an intro, whose shape has no curve weight. A planned rate is kept
+    /// as it is: the planner sets one only when the incoming song outlasts
+    /// the ease back to its own rate.
+    pub fn for_plan(plan: &TransitionPlan, body_db: Option<f64>) -> FadeShape {
         let gate =
             body_db.map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
         let gated = plan.k != 0.0 || plan.kind == TransitionKind::Intro;
@@ -148,7 +146,7 @@ impl FadeShape {
             curve: plan.curve,
             filter_strength: plan.filter_strength,
             steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
-            rate: plan.beat_match_rate.filter(|_| room),
+            rate: plan.beat_match_rate,
             silence_gate_db: gated.then_some(gate as f32),
             headroom_db: plan.headroom_db as f32,
         }
