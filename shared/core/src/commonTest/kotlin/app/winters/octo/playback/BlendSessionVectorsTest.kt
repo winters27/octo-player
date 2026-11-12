@@ -1,5 +1,6 @@
 package app.winters.octo.playback
 
+import java.io.File
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.serialization.json.Json
@@ -29,9 +30,10 @@ import org.junit.Test
 //   and "events" lists, in order. A missing list means none. The ops:
 //   - advance {to, head, aSongMs}: BlendSession.advance.
 //   - arm {gen, startMs, overlapMs, latestEndMs, outgoingEndMs,
-//     lateMoveAllowed?, barMs?, intro?, holdShare?, speed?,
+//     lateMoveBars?, barMs?, intro?, holdShare?, speed?,
 //     commitBeforeAck?}: opens gen on the commit word, as the registering
-//     thread does, then arms. lateMoveAllowed, intro and commitBeforeAck
+//     thread does, then arms. lateMoveBars is a number or "unbounded"
+//     (LATE_MOVE_UNBOUNDED) and defaults to 0; intro and commitBeforeAck
 //     default to false, holdShare to 0, speed to 1, barMs to none.
 //   - post {deck: "A" | "B", input, frame, value?}: BlendSession.post.
 //   - ack and cancel {gen, ok}: main's compare-and-set on the word, which
@@ -68,6 +70,18 @@ class BlendSessionVectorsTest {
         }
         assertTrue(names.size >= 40)
         assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    // The copy OctoKit's tests embed (BlendSessionVectorsData.swift) holds the
+    // same JSON as this file.
+    @Test
+    fun theSwiftCopyHoldsTheSameVectors() {
+        val swift = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "ios/Tests/OctoKitTests/Playback/BlendSessionVectorsData.swift") }
+            .firstOrNull(File::isFile)
+            ?: error("BlendSessionVectorsData.swift not found above ${File("").absolutePath}")
+        val embedded = swift.readText().substringAfter("##\"\"\"").substringBefore("\"\"\"##")
+        assertEquals(file, Json.parseToJsonElement(embedded))
     }
 
     // The runner itself: a step whose action is one frame off, and one that
@@ -167,7 +181,7 @@ class BlendSessionVectorsTest {
                             overlapMs = step.double("overlapMs"),
                             latestEndMs = step.double("latestEndMs"),
                             outgoingEndMs = step.double("outgoingEndMs"),
-                            lateMoveAllowed = step.boolOr("lateMoveAllowed", false),
+                            lateMoveBars = step.moveBars("lateMoveBars"),
                             barMs = step.doubleOr("barMs", Double.NaN),
                             intro = step.boolOr("intro", false),
                             holdShare = step.doubleOr("holdShare", 0.0),
@@ -259,4 +273,10 @@ class BlendSessionVectorsTest {
     private fun JsonObject.doubleOr(key: String, default: Double): Double = present(key)?.jsonPrimitive?.double ?: default
 
     private fun JsonObject.boolOr(key: String, default: Boolean): Boolean = present(key)?.jsonPrimitive?.boolean ?: default
+
+    // A bar budget: a number, "unbounded", or 0 when missing.
+    private fun JsonObject.moveBars(key: String): Int = when (val value = present(key)?.jsonPrimitive) {
+        null -> 0
+        else -> if (value.content == "unbounded") LATE_MOVE_UNBOUNDED else value.long.toInt()
+    }
 }

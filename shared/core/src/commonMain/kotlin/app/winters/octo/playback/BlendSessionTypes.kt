@@ -201,10 +201,12 @@ data class BlendArm(
     val overlapMs: Double,
     val latestEndMs: Double,
     val outgoingEndMs: Double,
-    // Whether the start may move later in A (a late start, a restart inside
-    // the commit deadline): only when the plan's drift bound does not depend
-    // on where the blend sits. Otherwise such a start does not happen.
-    val lateMoveAllowed: Boolean,
+    // The most whole bars of A the blend may move later in all (a late
+    // start, a hold, a restart inside the commit deadline) and still meet its
+    // drift bound: LATE_MOVE_UNBOUNDED for no limit, 0 for no move. A move
+    // past it does not happen. Without a bar grid only the plan's latest end
+    // bounds a move to the first frame far enough ahead.
+    val lateMoveBars: Int,
     val barMs: Double = Double.NaN,
     val intro: Boolean = false,
     val holdShare: Double = 0.0,

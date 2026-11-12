@@ -54,7 +54,12 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private var outgoingEndMs = 0.0
     private var speed = 1.0
     private var commitBeforeAck = false
-    private var lateMoveAllowed = false
+    private var lateMoveBars = 0
+
+    // Whole bars the blend has moved later so far, and the bars to a hold's
+    // room deadline.
+    private var movedBars = 0
+    private var deadlineBars = 0
 
     // A's song time per output frame.
     private var msPerFrame = 1.0
@@ -188,7 +193,9 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         outgoingEndMs = arm.outgoingEndMs
         speed = arm.speed
         commitBeforeAck = arm.commitBeforeAck
-        lateMoveAllowed = arm.lateMoveAllowed
+        lateMoveBars = arm.lateMoveBars
+        movedBars = 0
+        deadlineBars = 0
         msPerFrame = arm.speed * 1_000.0 / timing.sampleRate
         state = BlendState.ARMED
         incomingReady = false
@@ -437,12 +444,15 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
 
     // A start that can no longer be decided the proposal lead ahead of the
     // head moves to A's first bar line (or, with no bar grid, the first
-    // frame) that far ahead, while the plan allows moves and its latest end
-    // allows; otherwise B does not start.
+    // frame) that far ahead, while the plan's bar budget and its latest end
+    // allow; otherwise B does not start.
     private fun lateStart(predicted: Long, at: Long) {
         val nowMs = startMs + (head + timing.proposalLeadFrames - predicted) * msPerFrame
-        val target = if (locked) startMs + max(1.0, ceil((nowMs - startMs) / barMs)) * barMs else nowMs
-        if (lateMoveAllowed && target + overlapMs + extensionMs <= latestEndMs) {
+        val bars = if (locked) max(1.0, ceil((nowMs - startMs) / barMs)) else 0.0
+        val target = if (locked) startMs + bars * barMs else nowMs
+        val fits = if (locked) bars <= allowedBars().toDouble() else target + overlapMs + extensionMs <= latestEndMs
+        if (fits) {
+            if (locked) movedBars += bars.toInt()
             startMs = target
             action(BlendActionKind.MOVE_START, at, ms = target)
             moved(at)
@@ -539,14 +549,17 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // bars from the stop.
     private fun roomDeadline(stop: Long): Long {
         val leftMs = timing.ringLeadMs + timing.sinkBufferMs + BLEND_ROOM_SPARE_MS
+        deadlineBars = 0
         val latest = if (locked) {
             val bar = barMs / msPerFrame
+            val most = min(allowedBars(), MOST_HOLD_BARS)
             var best = -1L
             var bars = 1
-            while (bars <= MOST_HOLD_BARS) {
+            while (bars <= most) {
                 val at = stop + frames(bars * bar)
-                if (startMs + overlapMs + extensionMs + bars * barMs > latestEndMs || !leaves(at, leftMs)) break
+                if (!leaves(at, leftMs)) break
                 best = at
+                deadlineBars = bars
                 bars++
             }
             best
@@ -578,6 +591,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             }
             at = placed
             added = bars * barMs
+            movedBars += bars.toInt()
         } else {
             at = earliest
             added = (at - holdFrom) * msPerFrame
@@ -598,6 +612,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private fun deadlinePassed(frame: Long) {
         val at = max(deadline, soonest)
         extensionMs += (at - holdFrom) * msPerFrame
+        if (locked) movedBars += deadlineBars
         action(BlendActionKind.UNFREEZE_A, at, ms = extensionMs)
         moved(frame)
         state = BlendState.STALLED
@@ -660,7 +675,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // yet committed, it simply moves (the commit point decides). Committed
     // and now inside the commit deadline, it moves to A's next bar line, to
     // the placement horizon with no bar grid, or, with no bar line before
-    // A's end or a plan that allows no moves, B starts at the horizon by the
+    // A's end or within the plan's bar budget, B starts at the horizon by the
     // clean cut (a committed start cannot be cancelled).
     private fun restarted(frame: Long, s: Long) {
         if (head >= startFrame) return
@@ -673,7 +688,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             replace(s, commitNow = false)
             return
         }
-        if (lateMoveAllowed && !locked) {
+        if (!locked) {
             val at = max(soonest + timing.placementHorizonFrames, s)
             startMs += (at - s) * msPerFrame
             action(BlendActionKind.MOVE_START, frame, ms = startMs)
@@ -681,7 +696,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             moved(frame)
             return
         }
-        if (lateMoveAllowed) {
+        run {
             val bar = barMs / msPerFrame
             var bars = max(1.0, ceil((earliest - s) / bar))
             var at = s + frames(bars * bar)
@@ -690,7 +705,8 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
                 at = s + frames(bars * bar)
             }
             val movedMs = startMs + bars * barMs
-            if (movedMs < outgoingEndMs) {
+            if (bars <= allowedBars().toDouble() && movedMs < outgoingEndMs) {
+                movedBars += bars.toInt()
                 startMs = movedMs
                 action(BlendActionKind.MOVE_START, frame, ms = movedMs)
                 replace(at, commitNow = true)
@@ -820,6 +836,15 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private fun answer(pass: Long) {
         action(BlendActionKind.A_FOLLOW, soonest, pass)
         askGen = -1
+    }
+
+    // On the bar grid: how many more whole bars the blend may move later,
+    // the bars left before the plan's latest end, within what remains of
+    // its budget. Computed in floating point before any multiplication, so
+    // an unbounded budget never overflows.
+    private fun allowedBars(): Int {
+        val roomBars = floor(max(0.0, latestEndMs - (startMs + overlapMs + extensionMs)) / barMs).toInt()
+        return if (lateMoveBars == LATE_MOVE_UNBOUNDED) roomBars else min(lateMoveBars - movedBars, roomBars)
     }
 
     private fun handedOver(): Boolean {

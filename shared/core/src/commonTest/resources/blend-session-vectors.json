@@ -95,7 +95,7 @@
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 180145}]},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded", "actions": [{"kind": "moveStart", "frame": 470400, "ms": 180145}]},
         {"op": "post", "deck": "B", "input": "ready", "frame": 470400},
         {"op": "post", "deck": "A", "input": "startAt", "frame": 470400, "value": 486960},
         {"op": "advance", "to": 470880, "head": 460800, "aSongMs": 179810, "actions": [{"kind": "startB", "frame": 486960}, {"kind": "limiterOn", "frame": 486960}]},
@@ -109,12 +109,25 @@
       ]
     },
     {
+      "name": "a-crossfade-late-move-counts-no-bars",
+      "about": "The same late Crossfade with a bar budget of 0: without a bar grid no bars are counted, only the latest end bounds the move, so it moves to 180145 as with an unbounded budget.",
+      "profile": "android",
+      "steps": [
+        {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 180145}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 470400},
+        {"op": "post", "deck": "A", "input": "startAt", "frame": 470400, "value": 486960},
+        {"op": "advance", "to": 470880, "head": 460800, "aSongMs": 179810, "actions": [{"kind": "startB", "frame": 486960}, {"kind": "limiterOn", "frame": 486960}]},
+        {"op": "advance", "to": 475200, "head": 465600, "aSongMs": 179900, "events": [{"kind": "moved", "gen": 1, "frame": 470400, "ms": 180145, "ms2": 0}, {"kind": "proposed", "gen": 1, "frame": 486960}]}
+      ]
+    },
+    {
       "name": "late-arm-on-the-bar-grid-moves-a-bar",
       "about": "The same late arm for a rate-matched plan with a 2000 ms bar (moves allowed): the start moves to A's first bar line at least the lead ahead, 182000.",
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 182000}]},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded", "actions": [{"kind": "moveStart", "frame": 470400, "ms": 182000}]},
         {"op": "post", "deck": "B", "input": "ready", "frame": 480000},
         {"op": "advance", "to": 523200, "head": 499200, "aSongMs": 180900, "events": [{"kind": "moved", "gen": 1, "frame": 470400, "ms": 182000, "ms2": 0}]},
         {"op": "post", "deck": "A", "input": "startAt", "frame": 547200, "value": 576000},
@@ -134,7 +147,7 @@
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 183000, "outgoingEndMs": 183250, "lateMoveAllowed": true, "actions": [{"kind": "aDisarm", "frame": 470400}]},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 183000, "outgoingEndMs": 183250, "lateMoveBars": "unbounded", "actions": [{"kind": "aDisarm", "frame": 470400}]},
         {"op": "advance", "to": 475200, "head": 470400, "aSongMs": 179900, "events": [{"kind": "incomingNotReady", "gen": 1, "frame": 470400, "cause": "late"}]},
         {"op": "word", "gen": 1, "state": "initial"}
       ]
@@ -145,8 +158,70 @@
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": false, "actions": [{"kind": "aDisarm", "frame": 470400}]},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0, "actions": [{"kind": "aDisarm", "frame": 470400}]},
         {"op": "advance", "to": 475200, "head": 470400, "aSongMs": 179900, "events": [{"kind": "incomingNotReady", "gen": 1, "frame": 470400, "cause": "late"}]}
+      ]
+    },
+    {
+      "name": "a-late-move-of-three-bars-is-refused-with-two-allowed",
+      "about": "Armed with A already 4 s past startMs: the first bar line the lead allows (186000) is 3 bars on, over the plan's budget of 2, so incoming not ready. The same start under a budget of 3 moves there.",
+      "profile": "android",
+      "steps": [
+        {"op": "advance", "to": 672000, "head": 648000, "aSongMs": 184000},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 190000, "outgoingEndMs": 190250, "lateMoveBars": 2, "actions": [{"kind": "aDisarm", "frame": 672000}]},
+        {"op": "advance", "to": 676800, "head": 672000, "aSongMs": 184100, "events": [{"kind": "incomingNotReady", "gen": 1, "frame": 672000, "cause": "late"}]},
+        {"op": "arm", "gen": 2, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 190000, "outgoingEndMs": 190250, "lateMoveBars": 3, "actions": [{"kind": "moveStart", "frame": 676800, "ms": 186000}]},
+        {"op": "advance", "to": 681600, "head": 676800, "aSongMs": 184200, "events": [{"kind": "moved", "gen": 2, "frame": 676800, "ms": 186000, "ms2": 0}]}
+      ]
+    },
+    {
+      "name": "a-late-move-of-two-bars-is-made-with-two-allowed",
+      "about": "Armed with A 2 s past startMs: the first bar line the lead allows (184000) is 2 bars on, within the plan's budget of 2, so the start moves there.",
+      "profile": "android",
+      "steps": [
+        {"op": "advance", "to": 576000, "head": 552000, "aSongMs": 182000},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 190000, "outgoingEndMs": 190250, "lateMoveBars": 2, "actions": [{"kind": "moveStart", "frame": 576000, "ms": 184000}]},
+        {"op": "advance", "to": 580800, "head": 576000, "aSongMs": 182100, "events": [{"kind": "moved", "gen": 1, "frame": 576000, "ms": 184000, "ms2": 0}]}
+      ]
+    },
+    {
+      "name": "a-hold-is-capped-at-the-plans-one-bar",
+      "about": "The hold of the intro vector with a budget of 1 bar: the room deadline is one bar from B's stop (720000) instead of three, B is not ready by then, so A's blend time unfreezes there (2000 ms) and B's return is the clean cut.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
+        {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
+        {"op": "advance", "to": 715200, "head": 691200, "aSongMs": 184900},
+        {"op": "advance", "to": 720000, "head": 696000, "aSongMs": 185000, "actions": [{"kind": "unfreezeA", "frame": 720000, "ms": 2000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 744000},
+        {"op": "advance", "to": 744480, "head": 720480, "aSongMs": 185510, "actions": [{"kind": "cut", "frame": 744480, "value": 960}, {"kind": "limiterOff", "frame": 745440}], "events": [{"kind": "moved", "gen": 1, "frame": 720000, "ms": 180000, "ms2": 2000}]},
+        {"op": "advance", "to": 749280, "head": 744480, "aSongMs": 185610, "events": [{"kind": "blendEnd", "gen": 1, "frame": 744480, "ms": 3000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-late-move-spends-the-budget-a-hold-would-use",
+      "about": "An intro plan with a budget of 1 bar armed late moves its start one bar (182000). B then stalls inside A's hold: the budget is spent, so there is no room and no extension (no freeze); B is held and comes in by the clean cut.",
+      "profile": "android",
+      "steps": [
+        {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 182000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 480000},
+        {"op": "advance", "to": 523200, "head": 499200, "aSongMs": 180900, "events": [{"kind": "moved", "gen": 1, "frame": 470400, "ms": 182000, "ms2": 0}]},
+        {"op": "post", "deck": "A", "input": "startAt", "frame": 547200, "value": 576000},
+        {"op": "advance", "to": 552000, "head": 542400, "aSongMs": 181500, "actions": [{"kind": "startB", "frame": 576000}, {"kind": "limiterOn", "frame": 576000}]},
+        {"op": "advance", "to": 561600, "head": 552000, "aSongMs": 181700, "events": [{"kind": "proposed", "gen": 1, "frame": 576000}]},
+        {"op": "ack", "gen": 1, "ok": true},
+        {"op": "advance", "to": 571200, "head": 561600, "aSongMs": 181900, "actions": [{"kind": "commitB", "frame": 576000}]},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 720000},
+        {"op": "advance", "to": 720480, "head": 696480, "aSongMs": 185010, "actions": [{"kind": "holdB", "frame": 720000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 792000},
+        {"op": "advance", "to": 792480, "head": 768480, "aSongMs": 186510, "actions": [{"kind": "cut", "frame": 792480, "value": 960}, {"kind": "limiterOff", "frame": 793440}]},
+        {"op": "advance", "to": 797280, "head": 792480, "aSongMs": 186610, "events": [{"kind": "blendEnd", "gen": 1, "frame": 792480, "ms": 3000}]},
+        {"op": "stopped", "gen": 1}
       ]
     },
     {
@@ -155,7 +230,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": false},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0},
         {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
         {"op": "advance", "to": 403200, "head": 379200, "aSongMs": 178400},
         {"op": "post", "deck": "A", "input": "dry", "frame": 451152},
@@ -173,7 +248,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded"},
         {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
         {"op": "advance", "to": 403200, "head": 379200, "aSongMs": 178400},
         {"op": "post", "deck": "A", "input": "dry", "frame": 451152},
@@ -418,7 +493,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -436,7 +511,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 624480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -454,7 +529,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 202000, "outgoingEndMs": 202250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 202000, "outgoingEndMs": 202250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -476,7 +551,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 12000, "intro": true, "holdShare": 0.7, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 12000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.7, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -494,7 +569,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 195000, "outgoingEndMs": 195250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 195000, "outgoingEndMs": 195250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}]},
@@ -510,7 +585,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 198000, "outgoingEndMs": 198250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 198000, "outgoingEndMs": 198250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -561,7 +636,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "A", "input": "dry", "frame": 600000},
         {"op": "advance", "to": 600480, "head": 576480, "aSongMs": 182500, "actions": [{"kind": "aEnd", "frame": 600000}, {"kind": "bDisarm", "frame": 600480, "value": 12000}, {"kind": "limiterOff", "frame": 612480}]},
@@ -623,7 +698,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -881,7 +956,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded"},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 482400},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179900, "actions": [{"kind": "startB", "frame": 482400}, {"kind": "limiterOn", "frame": 482400}, {"kind": "commitB", "frame": 482400}]},
@@ -896,7 +971,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded"},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "moveStart", "frame": 477600, "ms": 182000}, {"kind": "startB", "frame": 575520}, {"kind": "limiterOn", "frame": 575520}, {"kind": "commitB", "frame": 575520}], "events": [{"kind": "moved", "gen": 1, "frame": 477600, "ms": 182000, "ms2": 0}]},
@@ -911,7 +986,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": true},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded"},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "moveStart", "frame": 477600, "ms": 180030}, {"kind": "startB", "frame": 480960}, {"kind": "limiterOn", "frame": 480960}, {"kind": "commitB", "frame": 480960}], "events": [{"kind": "moved", "gen": 1, "frame": 477600, "ms": 180030, "ms2": 0}]},
@@ -926,7 +1001,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 181500, "outgoingEndMs": 181800, "lateMoveAllowed": true},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 181500, "outgoingEndMs": 181800, "lateMoveBars": "unbounded"},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "startB", "frame": 480960}, {"kind": "limiterOn", "frame": 480960}, {"kind": "commitB", "frame": 480960}, {"kind": "cut", "frame": 480960, "value": 960}, {"kind": "limiterOff", "frame": 481920}]},
@@ -936,11 +1011,11 @@
     },
     {
       "name": "iphone-restart-of-a-plan-that-allows-no-move-cuts",
-      "about": "The same restart inside the deadline for a plan that allows no move: the committed start cannot be cancelled, so B starts at the horizon by the clean cut.",
+      "about": "The same restart inside the deadline for a plan with no bars to move (lateMoveBars 0): the committed start cannot be cancelled, so B starts at the horizon by the clean cut.",
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveAllowed": false},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "startB", "frame": 480960}, {"kind": "limiterOn", "frame": 480960}, {"kind": "commitB", "frame": 480960}, {"kind": "cut", "frame": 480960, "value": 960}, {"kind": "limiterOff", "frame": 481920}]},
