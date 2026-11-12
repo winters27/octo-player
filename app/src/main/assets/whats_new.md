@@ -1,4 +1,4 @@
-**Themes**, **big libraries that fit on your phone**, **hearts get the version you heard**, and **Android Auto gets the whole app**.
+**Automix**, **themes**, **big libraries that fit on your phone**, **hearts get the version you heard**, and **Android Auto gets the whole app**.
 
 ## Sound
 
@@ -22,6 +22,7 @@
 
 ## Playback
 
+- **Automix is now its own choice next to Crossfade and is on by default:** songs blend where they meet best, and a quiet intro plays under the end of the song before it. If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on. Gapless is under Between songs. A Crossfade setup you chose stays as it was. Automix now picks its own blend lengths. Match tempo is now on for Automix; turn it off under Between songs if you prefer.
 - **Android Auto gets the whole app:** Home, Radio, Playlists and Library tabs, as on your phone, with Made for you, your server's stations, charts and stations near you.
 - Search in the car shows your library first, then what Octo found outside it, and songs from outside your library play from the car.
 - Lists and albums open to their songs, every album of a big library sits under its letter, and playlist covers look as they do on your phone.

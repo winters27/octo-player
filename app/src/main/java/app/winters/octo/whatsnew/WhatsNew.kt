@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The one line the card on Home shows. Kept short.
-const val WhatsNewSummary = "Themes, big libraries, and hearts that get the version you heard"
+const val WhatsNewSummary = "Automix, themes, big libraries, and hearts get the version you heard"
 
 // What this update brings, part by part, as markdown in the app's assets.
 // Rewrite it with each update.
