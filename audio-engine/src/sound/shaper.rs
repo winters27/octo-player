@@ -162,9 +162,10 @@ impl SoundShaper {
         self.follow_limiter();
     }
 
-    /// Says whether two songs sound together. Their sum can pass full scale
-    /// even when each passes through untouched, so while they blend the
-    /// limiter runs whenever the settings have it on.
+    /// Says whether two songs sound together, or one is still coming up to
+    /// its own level after a blend. Their sum can pass full scale even when
+    /// each passes through untouched, so while they blend the limiter runs
+    /// whatever the settings say; a song alone follows the settings.
     pub fn set_blending(&mut self, blending: bool) {
         if blending != self.blending {
             self.blending = blending;
@@ -173,7 +174,7 @@ impl SoundShaper {
     }
 
     fn follow_limiter(&mut self) {
-        self.limiter.enabled = self.limiter_on && (!self.untouched || self.blending);
+        self.limiter.enabled = (self.limiter_on && !self.untouched) || self.blending;
     }
 
     /// Shapes `frames` frames of `samples` in place. The limiter's delay

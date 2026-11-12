@@ -343,6 +343,97 @@ fn the_limiter_catches_a_blend_that_would_clip() {
     assert!(middle > 0.8 && middle <= ceiling + 1e-4, "{middle}");
 }
 
+// Full-scale white noise on both sides, the same for the same seed.
+fn noise(frames: usize, seed: u64) -> Vec<i16> {
+    let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+    (0..frames * 2)
+        .map(|_| {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            ((state >> 33) as i64 % 65_535 - 32_767) as i16
+        })
+        .collect()
+}
+
+fn loudest(out: &[f32], from: usize, to: usize) -> f32 {
+    out[from * 2..to * 2].iter().fold(0.0f32, |m, s| m.max(s.abs()))
+}
+
+// Song A (`a_frames` long) blending at 1 s into B (2 s) over `fade` frames
+// with `shape`, under `settings`.
+fn blend_of(a: &[i16], b: &[i16], fade: u64, shape: FadeShape, settings: &SoundSettings) -> Vec<f32> {
+    let dir = temp_dir();
+    let (pa, pb) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&pa, RATE, 2, a);
+    write_wav(&pb, RATE, 2, b);
+    let mut mixer = Mixer::new(RATE, 0, settings, Pace::default());
+    let mut lane = Lane::new(deck(1, &pa), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &pb);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, fade, next, Loudness::default(), shape);
+    render_all(&mut mixer).0
+}
+
+fn limiter_off() -> SoundSettings {
+    let mut settings = SoundSettings::default();
+    settings.dsp.limiter = false;
+    settings
+}
+
+#[test]
+fn every_blend_is_limited_whatever_the_limiter_setting() {
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let shape = FadeShape { k: 0.4, ..Default::default() };
+    let out = blend_of(&noise(96_000, 1), &noise(96_000, 2), 24_000, shape, &limiter_off());
+    let fade_start = 48_000 + LATENCY;
+    // A alone, with its blend lined up but not yet begun, is left as it is.
+    assert!(loudest(&out, LATENCY, fade_start - 100) > 0.99);
+    // Both songs together never pass the ceiling.
+    let through = loudest(&out, fade_start, fade_start + 24_000);
+    assert!(through <= ceiling + 1e-4, "{through}");
+    // B alone afterwards follows the setting again.
+    assert!(loudest(&out, fade_start + 24_000 + 2_000, out.len() / 2) > 0.99);
+}
+
+#[test]
+fn an_outgoing_song_that_ends_inside_its_blend_lets_the_next_one_up_gently() {
+    let fade = 48_000u64;
+    let shape = FadeShape { k: 0.4, headroom_db: 1.0, ..Default::default() };
+    // A ends 0.3 of the way through the blend.
+    let a_frames = 48_000 + 14_400;
+    let a: Vec<i16> = (0..a_frames).flat_map(|_| [8_192, 0]).collect();
+    let b: Vec<i16> = (0..96_000).flat_map(|_| [0, 8_192]).collect();
+    let out = blend_of(&a, &b, fade, shape.clone(), &SoundSettings::default());
+    let fade_start = 48_000 + LATENCY;
+    let gone = (fade_start..out.len() / 2).find(|&i| out[i * 2] == 0.0).expect("A ended");
+    assert!(gone.abs_diff(fade_start + 14_400) <= 256, "A ended at {gone}");
+    // B was at its in-gain there, well under its own level, and climbs from
+    // it to its own level over 250 ms in even steps.
+    let from = out[(gone - 1) * 2 + 1];
+    assert!(from < 0.15, "{from}");
+    let climb = 0.25 - from;
+    let lift = RATE as usize / 4;
+    let step = (gone - 10..gone + lift + 512)
+        .map(|i| (out[i * 2 + 1] - out[(i - 1) * 2 + 1]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(step < climb / lift as f32 * 2.0, "a step of {step} on a climb of {climb}");
+    let halfway = out[(gone + lift / 2 + 256) * 2 + 1];
+    assert!(halfway > from + climb * 0.3 && halfway < from + climb * 0.8, "{halfway}");
+    assert!((out[(gone + lift + 512) * 2 + 1] - 0.25).abs() < 1e-6);
+
+    // With full-scale noise and the limiter off, the climb is limited too,
+    // and B alone after it follows the setting.
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let a = noise(a_frames, 3);
+    let out = blend_of(&a, &noise(96_000, 4), fade, shape, &limiter_off());
+    // The climb lasts at least 250 ms from A's end.
+    let climbing = fade_start + 14_400 + lift;
+    let through = loudest(&out, fade_start, climbing);
+    assert!(through <= ceiling + 1e-4, "{through}");
+    assert!(loudest(&out, climbing + 24_000, out.len() / 2) > 0.99);
+}
+
 #[test]
 fn a_song_with_no_blend_plays_exactly_as_before() {
     // A blend later in a song changes nothing before it.
