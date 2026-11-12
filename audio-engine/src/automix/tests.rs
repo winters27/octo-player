@@ -456,13 +456,53 @@ fn every_plan_says_where_it_may_end_at_the_latest() {
         }
         assert_eq!(plan.late, late, "{what}: {plan:?}");
         assert_eq!(plan.latest_end_ms, latest_end, "{what}: {plan:?}");
-        assert_eq!((plan.hold_share, plan.rise_share, plan.late_move_bars), (0.0, 0.0, 0), "{what}");
+        assert_eq!((plan.hold_share, plan.rise_share), (0.0, 0.0), "{what}");
+        // None of these has a bar grid to keep, so each may move any number
+        // of bars.
+        assert!(!plan.bar_locked(), "{what}: {plan:?}");
+        assert_eq!(plan.late_move_bars, LATE_MOVE_UNBOUNDED, "{what}");
         assert!(plan.start_ms + plan.overlap_ms <= plan.latest_end_ms, "{what}: {plan:?}");
     }
     // The engine's own late start keeps the end it may reach.
     let fixed = TransitionPlan::fixed_crossfade(200_000, 8_000, "test");
-    assert_eq!(fixed.latest_end_ms, 200_000);
-    assert_eq!(fixed.late_from(195_000).unwrap().latest_end_ms, 200_000);
+    assert_eq!((fixed.latest_end_ms, fixed.late_move_bars), (200_000, LATE_MOVE_UNBOUNDED));
+    let mut locked = fixed.clone();
+    (locked.beat_ms, locked.beat_anchor_ms, locked.late_move_bars) = (Some(500.0), Some(0.0), 0);
+    let late = locked.late_from(195_000).unwrap();
+    assert_eq!((late.latest_end_ms, late.late_move_bars), (200_000, LATE_MOVE_UNBOUNDED));
+}
+
+#[test]
+fn a_locked_blend_moves_late_only_when_its_beats_stay_together() {
+    let song = |bpm: f64, length_ms: i64| SyntheticSong {
+        rate: 22_050,
+        channels: 1,
+        length_ms,
+        layers: click(length_ms as f64, bpm),
+    };
+    let a = song(120.0, 200_000);
+    let tail = a.tail();
+    let fade_song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
+    let plan = |head: &SectionAnalysis, beat_match: bool| {
+        let settings = PlanSettings { beat_match, ..PlanSettings::new(8_000) };
+        let (a, b) = (fade_song(200_000), fade_song(180_000));
+        plan_transition(&a, Some(&b), Some(&tail), Some(head), &settings, &TransitionContext::default())
+    };
+    let near = song(118.0, 180_000).head();
+    // 120 against 118 BPM, unmatched: the two drift apart, so it stays put.
+    let unmatched = plan(&near, false);
+    assert!(unmatched.bar_locked() && unmatched.beat_match_rate.is_none(), "{unmatched:?}");
+    assert_eq!(unmatched.late_move_bars, 0);
+    // Matched, or between equal tempos, the beats stay together anywhere.
+    let matched = plan(&near, true);
+    assert!(matched.bar_locked() && matched.beat_match_rate.is_some(), "{matched:?}");
+    assert_eq!(matched.late_move_bars, LATE_MOVE_UNBOUNDED);
+    let mut same = song(120.0, 180_000).head();
+    let (a_tempo, b_tempo) = (tail.features.tempo.unwrap(), same.features.tempo.unwrap());
+    same.features.tempo = Some(Tempo { bpm: a_tempo.bpm, beat_ms: a_tempo.beat_ms, ..b_tempo });
+    let equal = plan(&same, false);
+    assert!(equal.bar_locked(), "{equal:?}");
+    assert_eq!(equal.late_move_bars, LATE_MOVE_UNBOUNDED);
 }
 
 fn whole_song_profile(song: &SyntheticSong) -> TransitionProfile {

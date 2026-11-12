@@ -499,6 +499,15 @@ pub fn plan_transition(
     if let Some(r) = rate {
         reason += &format!(", rate {}", decimals(r, 3));
     }
+    // A blend whose beats stay together wherever it sits may move any
+    // number of bars: one not locked to the bar, one at a matched rate, or
+    // one between equal tempos. A locked blend between two tempos drifts
+    // apart more where both songs are louder, so it may not move.
+    let late_move_bars = match (lock_a, rate, ratio) {
+        (None, _, _) | (_, Some(_), _) => LATE_MOVE_UNBOUNDED,
+        (_, _, Some(ratio)) if ratio == 1.0 => LATE_MOVE_UNBOUNDED,
+        _ => 0,
+    };
     TransitionPlan {
         start_ms: start,
         entry_ms,
@@ -516,7 +525,7 @@ pub fn plan_transition(
         hold_share: 0.0,
         rise_share: 0.0,
         latest_end_ms: latest_end as i64,
-        late_move_bars: 0,
+        late_move_bars,
     }
 }
 
@@ -623,7 +632,7 @@ fn late_plan(
         hold_share: 0.0,
         rise_share: 0.0,
         latest_end_ms: (latest_end + 0.5).floor() as i64,
-        late_move_bars: 0,
+        late_move_bars: LATE_MOVE_UNBOUNDED,
     }
 }
 
@@ -645,7 +654,7 @@ fn gapless_plan(len_a: i64, reason: &str) -> TransitionPlan {
         hold_share: 0.0,
         rise_share: 0.0,
         latest_end_ms: len_a.max(0),
-        late_move_bars: 0,
+        late_move_bars: LATE_MOVE_UNBOUNDED,
     }
 }
 
@@ -667,7 +676,7 @@ fn crossfade_plan(len_a: i64, length: i64, why: &str) -> TransitionPlan {
         hold_share: 0.0,
         rise_share: 0.0,
         latest_end_ms: len_a,
-        late_move_bars: 0,
+        late_move_bars: LATE_MOVE_UNBOUNDED,
     }
 }
 

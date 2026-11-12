@@ -132,14 +132,15 @@ impl Checker {
     }
 }
 
-// Analyzes one section the way the file describes.
+// Analyzes one section the way the file describes: a head measured against
+// the whole song's body when the section gives one.
 fn analyze(song: &SyntheticSong, section: &Value) -> SectionAnalysis {
     let envelope = song.envelope(num(section, "fromMs"), num(section, "toMs"), 4_093);
     let tag = num_or_none(section, "tagBpm");
     if text(section, "part") == "tail" {
         analyze_tail(envelope, tag, None)
     } else {
-        analyze_head(envelope, tag, None)
+        analyze_head(envelope, tag, num_or_none(section, "bodyLevelDb"))
     }
 }
 
@@ -180,11 +181,14 @@ fn check(vectors: &Value) -> Vec<String> {
         let name = text(section, "song");
         let part = text(section, "part");
         let tag = num_or_none(section, "tagBpm");
-        let what = match tag {
-            None => format!("{name} {part}"),
-            Some(tag) => format!("{name} {part} tagged {tag}"),
+        let body = num_or_none(section, "bodyLevelDb");
+        let what = match (tag, body) {
+            (None, None) => format!("{name} {part}"),
+            (Some(tag), _) => format!("{name} {part} tagged {tag}"),
+            (None, Some(body)) => format!("{name} {part} against a body of {body}"),
         };
-        if tag.is_none() {
+        // The planner takes each song's plain section.
+        if tag.is_none() && body.is_none() {
             untagged.insert(format!("{name}/{part}"), analysis);
         }
         let envelope = &analysis.envelope;
@@ -386,6 +390,13 @@ fn check(vectors: &Value) -> Vec<String> {
             Some(automix_in_gain(time, k)),
             t("curve"),
         );
+    }
+    for g in vectors.get("introGains").and_then(Value::as_array).into_iter().flatten() {
+        let (time, hold, rise) = (num(g, "t"), num(g, "holdShare"), num(g, "riseShare"));
+        let (out, gain_in) = intro_gains(time, hold, rise);
+        let what = format!("intro at {time}, hold {hold}, rise {rise}");
+        c.near(&format!("{what}: out"), Some(num(g, "out")), Some(out), t("curve"));
+        c.near(&format!("{what}: in"), Some(num(g, "in")), Some(gain_in), t("curve"));
     }
     for f in list(vectors, "filters") {
         let (time, s) = (num(f, "t"), num(f, "strength"));

@@ -119,7 +119,7 @@ impl TransitionPlan {
             hold_share: 0.0,
             rise_share: 0.0,
             latest_end_ms: len_a_ms,
-            late_move_bars: 0,
+            late_move_bars: LATE_MOVE_UNBOUNDED,
         }
     }
 
@@ -132,8 +132,8 @@ impl TransitionPlan {
     /// This plan when its start has already passed, or comes too soon to
     /// line the incoming song up: the blend ends where it would have, starts
     /// at `now_ms` at the earliest, keeps its entry, curve and filters, and
-    /// drops its bar lock and tempo matching. `None` when too little is left
-    /// to blend.
+    /// drops its bar lock and tempo matching, so it may move by any number
+    /// of bars. `None` when too little is left to blend.
     pub fn late_from(&self, now_ms: i64) -> Option<Self> {
         let end = self.start_ms + self.overlap_ms;
         let start_ms = self.start_ms.max(now_ms);
@@ -148,6 +148,7 @@ impl TransitionPlan {
             beat_ms: None,
             beat_anchor_ms: None,
             late: true,
+            late_move_bars: LATE_MOVE_UNBOUNDED,
             reason: format!(
                 "late {} at {} over {} ({})",
                 self.kind.name(),
