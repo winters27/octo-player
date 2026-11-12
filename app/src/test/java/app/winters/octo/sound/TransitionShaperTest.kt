@@ -5,6 +5,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.FILTER_STRENGTH
+import app.winters.octo.playback.LATE_MOVE_UNBOUNDED
 import app.winters.octo.playback.MIX_ONLY_HEADROOM_DB
 import app.winters.octo.playback.TransitionKind
 import app.winters.octo.playback.TransitionPlan
@@ -53,7 +54,7 @@ class TransitionShaperTest {
         beatMs: Double? = null,
         beatAnchorMs: Double? = null,
         rate: Double? = null,
-    ) = TransitionPlan(start, entry, overlap, TransitionKind.BLEND, k, strength, rate, beatMs, beatAnchorMs, false, headroomDb, "test")
+    ) = TransitionPlan(start, entry, overlap, TransitionKind.BLEND, k, strength, rate, beatMs, beatAnchorMs, false, headroomDb, "test", lateMoveBars = LATE_MOVE_UNBOUNDED)
 
     // `frames` mono frames at a fixed level, 16-bit.
     private fun level(frames: Int, value: Short = 16_384): ByteBuffer {

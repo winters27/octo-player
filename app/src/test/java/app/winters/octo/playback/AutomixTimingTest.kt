@@ -10,7 +10,7 @@ import kotlin.math.abs
 
 class AutomixTimingTest {
     private fun plan(start: Long = 180_000, entry: Long = 4_000, overlap: Long = 8_000, rate: Double? = null, beatMs: Double? = 500.0) =
-        TransitionPlan(start, entry, overlap, TransitionKind.BLEND, BLEND_CURVE, FILTER_STRENGTH, rate, beatMs, beatMs?.let { 0.0 }, false, 1.0, "test")
+        TransitionPlan(start, entry, overlap, TransitionKind.BLEND, BLEND_CURVE, FILTER_STRENGTH, rate, beatMs, beatMs?.let { 0.0 }, false, 1.0, "test", lateMoveBars = LATE_MOVE_UNBOUNDED)
 
     @Test
     fun theRunUpStartsSoTheEntryLandsOnTheStart() {
