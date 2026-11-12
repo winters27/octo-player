@@ -59,7 +59,7 @@ class LoopPlayers @Inject constructor(
 ) {
     // Loops come from Apple or the server; one from the server that is a
     // sign-in page's HTML is refused, never played or kept.
-    private val loopHttp = security.byteClient(http)
+    internal val loopHttp = security.byteClient(http)
 
     private val fetcher = LoopFetcher(loopHttp)
 
