@@ -35,14 +35,17 @@ class PlaylistStartTest {
     // 300 twice over: no song in both.
     private fun songOf(set: Int, i: Int) = "t${2 * (set * 300 + i % 300)}"
 
-    // A set's rows; with `keys`, set 1's rows keep set 0's row keys, as a
-    // flip that keeps rows does, else each row's key is new.
+    // A set's rows; with `keys`, set 1's rows keep set 0's row keys (each
+    // now holding another song), else each row's key is new. Row keys are
+    // taken from the playlists' next key, as every write of a set takes
+    // them, so a pin made after sees every row.
     private fun setRows(rig: ServerStartRig, set: Int, rows: Int, keys: Boolean = false) {
         for (i in 0 until rows) {
             val id = songOf(set, i)
             val key = if (keys) i else set * 10_000 + i
             insertRow(rig.db, "playlist_item", mapOf("playlistId" to "pl", "itemSet" to set, "trackId" to id, "relinkKey" to "rk-$id", "ord" to i, "itemKey" to key))
         }
+        rig.db.openHelper.writableDatabase.execSQL("UPDATE playlist_meta SET nextItemKey = MAX(nextItemKey, (SELECT MAX(itemKey) + 1 FROM playlist_item)) WHERE id = 0")
     }
 
     private fun playlist(rig: ServerStartRig, rows: Int) {
@@ -124,10 +127,13 @@ class PlaylistStartTest {
 
     // The set flipped and released after the start read it and before its
     // build: the head is the start's read, the rest the build's own set.
-    // What the queue holds is what the start read and what its build makes
-    // of the set shown when it starts, which a walk's pin, let go before the
-    // hand-off, never reached: the same with that pin as without it (the
-    // pinned start gives these queues too).
+    // A whole start's queue is its read. A big one's build finds the start
+    // again in the set it pins, its row by key, else its song, and queues
+    // the rest of that set around it: with the rows' keys kept, the row that
+    // kept the start's key is the start's own (its new song is left out, as
+    // a server list's start entry leaves out the copy's song); with new
+    // keys and the start's song gone from the set, the whole set comes
+    // after the start.
     @Test
     fun theQueuesHeadIsTheStartsReadWithTheSetFlippedBeforeTheBuild() {
         for ((rows, keys) in listOf(40 to false, 600 to true, 600 to false)) {
@@ -144,13 +150,15 @@ class PlaylistStartTest {
                 assertEquals("the flip ran", 1, flipped)
                 rig.joined()
                 val queue = rig.songs()
-                val where = "$rows rows, keys kept $keys: ${queue.take(4)} ... ${queue.size}"
+                val where = "$rows rows, keys kept $keys: ${queue.take(4)} ... ${queue.size}, words ${rig.words}"
                 println("PlaylistStartTest queue after the flip: $where")
-                // A whole start's queue is its read; a big one's build, its
-                // set flipped since the start, keeps the start's song alone,
-                // as it did with the walk's pin (let go before the hand-off).
-                val expected = if (rows == 40) (0 until rows).map { songOf(0, it) } else listOf(songOf(0, 0))
+                val expected = when {
+                    rows == 40 -> (0 until rows).map { songOf(0, it) }
+                    keys -> listOf(songOf(0, 0)) + (1 until rows).map { songOf(1, it) }
+                    else -> listOf(songOf(0, 0)) + (0 until rows).map { songOf(1, it) }
+                }
                 assertEquals(where, expected, queue)
+                assertEquals(where, songOf(0, 0), rig.current())
             }
         }
     }
