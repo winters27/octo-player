@@ -464,6 +464,95 @@ fn a_blend_finishes_early_once_the_outgoing_song_falls_silent() {
     assert!((full[at * 2 + 1] - 0.25 * gin).abs() < 1e-6);
 }
 
+// A 14 s intro from A's first second: A holds its level for 10 s, B rises
+// over 2 s.
+const INTRO_FRAMES: u64 = RATE as u64 * 14;
+const INTRO_HOLD: f64 = 10.0 / 14.0;
+
+// A on the left at a steady level, silent over each of `breaks` (seconds
+// into the blend), into B on the right through that intro, with the
+// silence gate on. Returns the sound.
+fn intro_with_breaks(breaks: &[(f64, f64)]) -> Vec<f32> {
+    use crate::automix::TransitionKind;
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    let quiet = |n: usize| {
+        let s = n as f64 / RATE as f64 - 1.0;
+        breaks.iter().any(|&(from, to)| s >= from && s < to)
+    };
+    let samples: Vec<i16> =
+        (0..RATE as usize * 16).flat_map(|n| [if quiet(n) { 0 } else { 8_192 }, 0]).collect();
+    write_wav(&a, RATE, 2, &samples);
+    dc_file(&b, RATE as usize * 16, 0, 8_192);
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(deck(1, &a), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &b);
+    wait_ready(&next);
+    let shape = FadeShape {
+        kind: TransitionKind::Intro,
+        hold_share: INTRO_HOLD,
+        rise_share: 2.0 / 14.0,
+        silence_gate_db: Some(-60.0),
+        ..Default::default()
+    };
+    mixer.plan_fade(1, 1.0, INTRO_FRAMES, next, Loudness::default(), shape);
+    render_all(&mut mixer).0
+}
+
+// The sample of A (left) or B (right) `secs` into the intro, and A's
+// planned gain there.
+fn intro_at(out: &[f32], secs: f64, side: usize) -> f32 {
+    out[(48_000 + LATENCY + (secs * RATE as f64) as usize) * 2 + side]
+}
+
+fn intro_out_at(secs: f64) -> f32 {
+    let p = (secs * RATE as f64) as usize as f64 / INTRO_FRAMES as f64;
+    0.25 * crate::automix::intro_out_gain(p, INTRO_HOLD) as f32
+}
+
+#[test]
+fn a_break_in_the_outgoing_song_during_an_intros_hold_is_heard_as_the_song() {
+    // A stop of half a second 40% into the hold: A holds its level on both
+    // sides of it and fades as planned, never rushed to its end.
+    let out = intro_with_breaks(&[(4.0, 4.5)]);
+    for secs in [0.5, 3.9, 4.6, 6.0, 9.9] {
+        assert_eq!(intro_at(&out, secs, 0), 0.25, "A at {secs} s");
+    }
+    for secs in [11.0, 12.0, 13.0] {
+        assert!((intro_at(&out, secs, 0) - intro_out_at(secs)).abs() < 1e-6, "A at {secs} s");
+    }
+    // A break that starts in the hold is counted only from the hold's end,
+    // where too little of it is left to finish the blend.
+    let out = intro_with_breaks(&[(9.8, 10.2)]);
+    for secs in [10.3, 12.0] {
+        assert!((intro_at(&out, secs, 0) - intro_out_at(secs)).abs() < 1e-6, "A at {secs} s");
+    }
+    // Once A fades, the gate acts as in any blend: the rest of the blend
+    // runs over 0.25 s, and B plays on alone.
+    let out = intro_with_breaks(&[(11.0, 11.5)]);
+    assert!((intro_at(&out, 10.9, 0) - intro_out_at(10.9)).abs() < 1e-6);
+    assert_eq!((intro_at(&out, 11.7, 0), intro_at(&out, 11.7, 1)), (0.0, 0.25));
+}
+
+#[test]
+fn the_shape_of_a_plan_gates_every_curve_but_plain_equal_power() {
+    use crate::automix::{TransitionKind, TransitionPlan};
+    let fixed = TransitionPlan::fixed_crossfade(200_000, 8_000, "test");
+    let intro =
+        TransitionPlan { kind: TransitionKind::Intro, hold_share: 0.7, rise_share: 0.1, ..fixed.clone() };
+    let blend = TransitionPlan { kind: TransitionKind::Blend, k: 0.2, ..fixed.clone() };
+    let shape = |plan: &TransitionPlan| FadeShape::for_plan(plan, 180.0, Some(-14.0));
+    assert_eq!(shape(&fixed).silence_gate_db, None);
+    assert_eq!(shape(&blend).silence_gate_db, Some(-59.0));
+    let intro = shape(&intro);
+    assert_eq!(intro.silence_gate_db, Some(-59.0));
+    assert_eq!((intro.kind, intro.hold_share, intro.rise_share), (TransitionKind::Intro, 0.7, 0.1));
+    // Without a known level the gate sits at the floor.
+    assert_eq!(FadeShape::for_plan(&blend, 180.0, None).silence_gate_db, Some(-60.0));
+}
+
 #[test]
 fn headroom_lowers_the_middle_of_a_blend() {
     let fade = 24_000u64;

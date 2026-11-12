@@ -9,9 +9,10 @@
 use std::collections::VecDeque;
 
 use crate::automix::{
-    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_RANGE, TransitionKind,
-    beat_match_rate_at, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
-    stepped_outgoing_low_pass_hz, transition_gains,
+    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_EASE_SECS, RATE_RANGE,
+    SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, TransitionKind, TransitionPlan, beat_match_rate_at,
+    incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz, stepped_outgoing_low_pass_hz,
+    transition_gains,
 };
 use crate::deck::Deck;
 use crate::error::Failure;
@@ -118,11 +119,40 @@ pub struct FadeShape {
     /// The incoming song's rate through the blend, eased back to 1 after.
     pub rate: Option<f64>,
     /// When the outgoing song stays below this level (dBFS) for 0.3 s
-    /// during the blend, the blend finishes early.
+    /// during the blend, the blend finishes early. Through an intro's hold
+    /// the outgoing song plays at its own level, so a break in its music
+    /// there is the song's own: the gate listens only from `hold_share` on.
     pub silence_gate_db: Option<f32>,
     /// Lowers both songs by this many dB through the blend, coming and going
     /// over its first and last tenth, so the sum keeps clear of clipping.
     pub headroom_db: f32,
+}
+
+impl FadeShape {
+    /// How the mixer runs `plan` into a song `b_len_secs` long, whose
+    /// outgoing song's body level is `body_db` when it is known. The silence
+    /// gate sits that far under the body, and is set for every planned
+    /// curve but plain equal power, and for an intro, whose shape has no
+    /// curve weight.
+    pub fn for_plan(plan: &TransitionPlan, b_len_secs: f64, body_db: Option<f64>) -> FadeShape {
+        // The incoming song must outlast the rate's ease back to normal.
+        let room = b_len_secs - plan.entry_secs() > plan.overlap_secs() + RATE_EASE_SECS + 1.0;
+        let gate =
+            body_db.map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
+        let gated = plan.k != 0.0 || plan.kind == TransitionKind::Intro;
+        FadeShape {
+            kind: plan.kind,
+            hold_share: plan.hold_share,
+            rise_share: plan.rise_share,
+            k: plan.k,
+            curve: plan.curve,
+            filter_strength: plan.filter_strength,
+            steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
+            rate: plan.beat_match_rate.filter(|_| room),
+            silence_gate_db: gated.then_some(gate as f32),
+            headroom_db: plan.headroom_db as f32,
+        }
+    }
 }
 
 // The song and moment at a mix frame, before speed changes. The song moves
@@ -844,9 +874,22 @@ impl Mixer {
         if let Some(fade) = &mut self.fade {
             let old = fade.outgoing.pull(&mut self.b[..frames * 2], &mut self.spans_b);
             self.b[old * 2..frames * 2].fill(0.0);
-            if let Some(gate) = fade.gate {
-                let power = self.b[..frames * 2].iter().map(|s| s * s).sum::<f32>() / (frames * 2) as f32;
-                fade.quiet = if power < gate { fade.quiet + frames as u64 } else { 0 };
+            // Through an intro's hold the outgoing song is at its own level,
+            // so the gate counts quiet only from the hold's end on.
+            let listen_from = match fade.kind {
+                TransitionKind::Intro => {
+                    let hold_end = (fade.hold_share.clamp(0.0, 1.0) * fade.frames as f64).ceil() as u64;
+                    hold_end.saturating_sub(fade.done).min(frames as u64) as usize
+                }
+                _ => 0,
+            };
+            if let Some(gate) = fade.gate
+                && listen_from < frames
+            {
+                let heard = &self.b[listen_from * 2..frames * 2];
+                let power = heard.iter().map(|s| s * s).sum::<f32>() / heard.len() as f32;
+                let counted = (frames - listen_from) as u64;
+                fade.quiet = if power < gate { fade.quiet + counted } else { 0 };
                 if fade.clock.rush.is_none() && fade.quiet as f64 >= QUIET_SECS * self.rate as f64 {
                     // The outgoing song has gone quiet: finish the blend now.
                     let len =

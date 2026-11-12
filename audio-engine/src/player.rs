@@ -16,15 +16,14 @@ use crate::api::{
 };
 use crate::automix::{
     AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, LiveAnalysis, PlanInput, PlanSettings,
-    RATE_EASE_SECS, SILENCE_BELOW_BODY_DB, SILENCE_FLOOR_DB, TAIL_SECS, TransitionContext, TransitionKind,
-    TransitionPlan, TransitionProfile,
+    TAIL_SECS, TransitionContext, TransitionKind, TransitionPlan, TransitionProfile,
 };
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
 use crate::decode::TrackInfo;
 use crate::lane::Lane;
 use crate::live::LenCount;
-use crate::mixer::{FadeShape, LowPassSteps, Marker, MixState, Mixer, Transition};
+use crate::mixer::{FadeShape, Marker, MixState, Mixer, Transition};
 use crate::output::{
     DeviceEvent, Driver, OpenedOutput, OutputDevice, OutputFormat, OutputShared, Renderer, ring,
 };
@@ -1262,7 +1261,9 @@ impl Player {
             .as_ref()
             .and_then(|l| l.body_level_db)
             .or_else(|| self.profile_at(current).and_then(|p| p.body_db));
-        let shape = self.shape_of(&plan, b_len, body_db);
+        // The outgoing song's silence gate comes from its level, as heard so
+        // far or else from its profile.
+        let shape = FadeShape::for_plan(&plan, b_len, body_db);
         let rate = self.mixer.as_ref().map(|m| m.rate()).unwrap_or(48_000) as f64;
         let frames = (plan.overlap_secs() * rate) as u64;
         if let Some(mixer) = self.mixer.as_mut() {
@@ -1362,28 +1363,6 @@ impl Player {
         } else {
             let why = format!("the plan did not fit ({})", plan.reason);
             (TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, &why), live)
-        }
-    }
-
-    // How the mixer runs `plan`. The outgoing song's silence gate comes from
-    // its level, as heard so far or else from its profile.
-    fn shape_of(&self, plan: &TransitionPlan, b_len: f64, body_db: Option<f64>) -> FadeShape {
-        // The incoming song must outlast the rate's ease back to normal.
-        let room = b_len - plan.entry_secs() > plan.overlap_secs() + RATE_EASE_SECS + 1.0;
-        let gate =
-            body_db.map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
-        let equal_power = plan.k == 0.0;
-        FadeShape {
-            kind: plan.kind,
-            hold_share: plan.hold_share,
-            rise_share: plan.rise_share,
-            k: plan.k,
-            curve: plan.curve,
-            filter_strength: plan.filter_strength,
-            steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
-            rate: plan.beat_match_rate.filter(|_| room),
-            silence_gate_db: (!equal_power).then_some(gate as f32),
-            headroom_db: plan.headroom_db as f32,
         }
     }
 
