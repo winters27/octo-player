@@ -1169,7 +1169,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_seek() and 0xFFFF) != 46784) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_engine_set_automix() and 0xFFFF) != 25418) {
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_automix() and 0xFFFF) != 60543) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_crossfade() and 0xFFFF) != 65324) {
@@ -1865,8 +1865,9 @@ public interface EngineInterface {
     
     /**
      * How crossfades are chosen and shaped: smart transitions, filter
-     * sweeps, tempo matching and the longest blend. Applies from the next
-     * transition on. Smart transitions are off until this is called.
+     * sweeps, tempo matching, the longest blend and the longest intro.
+     * Applies from the next transition on. Smart transitions are off until
+     * this is called.
      */
     fun `setAutomix`(`settings`: AutomixSettings)
     
@@ -2340,8 +2341,9 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
     
     /**
      * How crossfades are chosen and shaped: smart transitions, filter
-     * sweeps, tempo matching and the longest blend. Applies from the next
-     * transition on. Smart transitions are off until this is called.
+     * sweeps, tempo matching, the longest blend and the longest intro.
+     * Applies from the next transition on. Smart transitions are off until
+     * this is called.
      */
     @Throws(EngineException::class)override fun `setAutomix`(`settings`: AutomixSettings)
         = 
@@ -3600,6 +3602,12 @@ data class AutomixSettings (
      * The shape of the fixed crossfade, with smart transitions off.
      */
     val `fadeCurve`: FadeCurve
+    , 
+    /**
+     * The longest a next song's quiet intro may play under the end of the
+     * song before it, in milliseconds, at most 16 s.
+     */
+    val `longestIntroMs`: kotlin.UInt = 16000u 
     
 ){
     
@@ -3621,6 +3629,7 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterTypeFadeCurve.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
@@ -3629,7 +3638,8 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.allocationSize(value.`filterSweeps`) +
             FfiConverterBoolean.allocationSize(value.`matchTempo`) +
             FfiConverterUInt.allocationSize(value.`maxOverlapMs`) +
-            FfiConverterTypeFadeCurve.allocationSize(value.`fadeCurve`)
+            FfiConverterTypeFadeCurve.allocationSize(value.`fadeCurve`) +
+            FfiConverterUInt.allocationSize(value.`longestIntroMs`)
     )
 
     override fun write(value: AutomixSettings, buf: ByteBuffer) {
@@ -3638,6 +3648,7 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.write(value.`matchTempo`, buf)
             FfiConverterUInt.write(value.`maxOverlapMs`, buf)
             FfiConverterTypeFadeCurve.write(value.`fadeCurve`, buf)
+            FfiConverterUInt.write(value.`longestIntroMs`, buf)
     }
 }
 
@@ -4737,8 +4748,10 @@ public object FfiConverterTypeReplayGainSettings: FfiConverterRustBuffer<ReplayG
 
 
 /**
- * What the planner needs about one song: its first 30 s and last 60 s, and
- * the whole song's level and tempo.
+ * What the planner needs about one song: its first 45 s (30 s before
+ * revision 2) and last 60 s, and the whole song's level and tempo.
+ * `revision` is the analysis pass the profile comes from, 1 when the
+ * profile does not say; every revision is read the same way.
  */
 data class SongProfile (
     val `durationMs`: kotlin.Long
@@ -4750,6 +4763,8 @@ data class SongProfile (
     val `head`: SongProfileSection
     , 
     val `tail`: SongProfileSection
+    , 
+    val `revision`: kotlin.UInt = 1u 
     
 ){
     
@@ -4771,6 +4786,7 @@ public object FfiConverterTypeSongProfile: FfiConverterRustBuffer<SongProfile> {
             FfiConverterOptionalTypeSongProfileTempo.read(buf),
             FfiConverterTypeSongProfileSection.read(buf),
             FfiConverterTypeSongProfileSection.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
@@ -4779,7 +4795,8 @@ public object FfiConverterTypeSongProfile: FfiConverterRustBuffer<SongProfile> {
             FfiConverterOptionalDouble.allocationSize(value.`bodyDb`) +
             FfiConverterOptionalTypeSongProfileTempo.allocationSize(value.`tempo`) +
             FfiConverterTypeSongProfileSection.allocationSize(value.`head`) +
-            FfiConverterTypeSongProfileSection.allocationSize(value.`tail`)
+            FfiConverterTypeSongProfileSection.allocationSize(value.`tail`) +
+            FfiConverterUInt.allocationSize(value.`revision`)
     )
 
     override fun write(value: SongProfile, buf: ByteBuffer) {
@@ -4788,6 +4805,7 @@ public object FfiConverterTypeSongProfile: FfiConverterRustBuffer<SongProfile> {
             FfiConverterOptionalTypeSongProfileTempo.write(value.`tempo`, buf)
             FfiConverterTypeSongProfileSection.write(value.`head`, buf)
             FfiConverterTypeSongProfileSection.write(value.`tail`, buf)
+            FfiConverterUInt.write(value.`revision`, buf)
     }
 }
 

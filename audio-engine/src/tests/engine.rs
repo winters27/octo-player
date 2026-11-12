@@ -904,6 +904,7 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
             match_tempo: false,
             max_overlap_ms: 8_000,
             fade_curve: crate::automix::FadeCurve::EqualPower,
+            longest_intro_ms: 16_000,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
@@ -1000,6 +1001,7 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
             match_tempo: false,
             max_overlap_ms: 8_000,
             fade_curve: crate::automix::FadeCurve::EqualPower,
+            longest_intro_ms: 16_000,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 9_500, true).unwrap();
@@ -1128,6 +1130,43 @@ fn profile_of(duration_ms: i64, tail_from_ms: i64) -> crate::automix::SongProfil
     }
 }
 
+// The longest blend and the longest intro the planner was handed, for a
+// playing song 13 s long.
+static LENGTHS: Mutex<Option<(i64, i64)>> = Mutex::new(None);
+
+fn length_recording_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    if input.current.duration_ms == 13_000 {
+        *LENGTHS.lock().unwrap() = Some((input.settings.max_overlap_ms, input.settings.longest_intro_ms));
+    }
+    test_plan(input)
+}
+
+#[test]
+fn the_longest_intro_is_kept_to_16_s_and_planned_in_song_time() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 13, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 4, 0.3));
+    let (engine, events, _) = engine(2.0);
+    engine.set_test_planner(Some(length_recording_plan));
+    engine.set_speed(0.5, 1.0).unwrap();
+    engine.set_crossfade(8_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings {
+            smart_transitions: true,
+            longest_intro_ms: 20_000,
+            ..Default::default()
+        })
+        .unwrap();
+    engine.set_song_profile("a".into(), Some(profile_of(13_000, 0))).unwrap();
+    engine.set_song_profile("b".into(), Some(profile_of(4_000, 0))).unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    events.wait_for("plan", Duration::from_secs(10), |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    // 8 s and 16 s of listening at half speed are 4 s and 8 s of the songs.
+    assert_eq!(LENGTHS.lock().unwrap().take(), Some((4_000, 8_000)));
+    engine.shutdown();
+}
+
 #[test]
 fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
     let dir = temp_dir();
@@ -1144,6 +1183,7 @@ fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
             match_tempo: false,
             max_overlap_ms: 8_000,
             fade_curve: crate::automix::FadeCurve::EqualPower,
+            longest_intro_ms: 16_000,
         })
         .unwrap();
     engine.set_song_profile("a".into(), Some(profile_of(12_000, 0))).unwrap();

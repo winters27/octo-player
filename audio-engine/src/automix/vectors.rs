@@ -313,6 +313,10 @@ fn check(vectors: &Value) -> Vec<String> {
             head,
             &PlanSettings {
                 max_overlap_ms: int(settings, "maxOverlapMs"),
+                longest_intro_ms: settings
+                    .get("longestIntroMs")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(AUTOMIX_LONGEST_INTRO_MS),
                 smart: flag(settings, "smart"),
                 filter_sweeps: flag(settings, "filterSweeps"),
                 beat_match: flag(settings, "beatMatch"),

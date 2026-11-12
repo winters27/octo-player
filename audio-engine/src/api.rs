@@ -356,11 +356,13 @@ impl Engine {
     }
 
     /// How crossfades are chosen and shaped: smart transitions, filter
-    /// sweeps, tempo matching and the longest blend. Applies from the next
-    /// transition on. Smart transitions are off until this is called.
+    /// sweeps, tempo matching, the longest blend and the longest intro.
+    /// Applies from the next transition on. Smart transitions are off until
+    /// this is called.
     pub fn set_automix(&self, settings: AutomixSettings) -> Result<(), EngineError> {
         let max_overlap_ms = settings.max_overlap_ms.min(crate::crossfade::LONGEST_FADE_MS);
-        self.send(Command::SetAutomix(AutomixSettings { max_overlap_ms, ..settings }))
+        let longest_intro_ms = settings.longest_intro_ms.min(crate::automix::AUTOMIX_LONGEST_INTRO_MS as u32);
+        self.send(Command::SetAutomix(AutomixSettings { max_overlap_ms, longest_intro_ms, ..settings }))
     }
 
     /// The transition profile of the song queued as `item_id`, from its

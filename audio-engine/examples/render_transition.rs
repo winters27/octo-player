@@ -252,6 +252,7 @@ fn plan_pair(a: &str, b: &str, a_len: f64, b_len: f64, opts: &Options) -> Transi
     };
     let settings = PlanSettings {
         max_overlap_ms: opts.crossfade_ms as i64,
+        longest_intro_ms: automix::AUTOMIX_LONGEST_INTRO_MS,
         smart: true,
         filter_sweeps: opts.sweeps,
         beat_match: opts.match_tempo,

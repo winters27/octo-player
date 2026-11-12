@@ -25,8 +25,8 @@ pub use features::{
     analyze_tail, body_level_of, fold_tempo_ratio,
 };
 pub use planner::{
-    LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan,
-    is_plain_genre, plan_transition, transition_gains,
+    AUTOMIX_LONGEST_INTRO_MS, LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings, TransitionContext,
+    TransitionKind, TransitionPlan, is_plain_genre, plan_transition, transition_gains,
 };
 pub use profile::{
     PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,
@@ -71,6 +71,10 @@ pub struct AutomixSettings {
     pub max_overlap_ms: u32,
     /// The shape of the fixed crossfade, with smart transitions off.
     pub fade_curve: FadeCurve,
+    /// The longest a next song's quiet intro may play under the end of the
+    /// song before it, in milliseconds, at most 16 s.
+    #[uniffi(default = 16000)]
+    pub longest_intro_ms: u32,
 }
 
 impl Default for AutomixSettings {
@@ -81,6 +85,24 @@ impl Default for AutomixSettings {
             match_tempo: false,
             max_overlap_ms: 8_000,
             fade_curve: FadeCurve::EqualPower,
+            longest_intro_ms: AUTOMIX_LONGEST_INTRO_MS as u32,
+        }
+    }
+}
+
+impl AutomixSettings {
+    /// What the planner works with for these settings, with the crossfade
+    /// `crossfade_ms` long and the songs playing at `speed`. The planner's
+    /// lengths are in song time, so they grow and shrink with the speed.
+    pub fn plan_settings(&self, crossfade_ms: u32, speed: f64) -> PlanSettings {
+        let max_ms = if self.max_overlap_ms > 0 { self.max_overlap_ms } else { crossfade_ms };
+        PlanSettings {
+            max_overlap_ms: (max_ms as f64 * speed).round() as i64,
+            longest_intro_ms: (self.longest_intro_ms as f64 * speed).round() as i64,
+            smart: true,
+            filter_sweeps: self.filter_sweeps,
+            beat_match: self.match_tempo,
+            fade_curve: self.fade_curve,
         }
     }
 }

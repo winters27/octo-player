@@ -15,8 +15,8 @@ use crate::api::{
     RepeatMode,
 };
 use crate::automix::{
-    AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, LiveAnalysis, PlanInput, PlanSettings,
-    TAIL_SECS, TransitionContext, TransitionKind, TransitionPlan, TransitionProfile,
+    AutomixSettings, HEAD_SECS, LATEST_EXIT_SECS, LEAD_SECS, LiveAnalysis, PlanInput, TAIL_SECS,
+    TransitionContext, TransitionKind, TransitionPlan, TransitionProfile,
 };
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS, blend_decision};
 use crate::deck::{Deck, DeckStatus};
@@ -1321,20 +1321,12 @@ impl Player {
         };
         let tempo_prior =
             a_profile.and_then(|p| p.tempo_prior()).or_else(|| live.as_ref().and_then(|l| l.tempo_prior));
-        let max_ms =
-            if self.automix.max_overlap_ms > 0 { self.automix.max_overlap_ms } else { self.crossfade_ms };
         let input = PlanInput {
             current: current_song.clone(),
             next: next_song.clone(),
             tail: tail.as_ref(),
             head: head.as_ref(),
-            settings: PlanSettings {
-                max_overlap_ms: (max_ms as f64 * speed).round() as i64,
-                smart: true,
-                filter_sweeps: self.automix.filter_sweeps,
-                beat_match: self.automix.match_tempo,
-                fade_curve: self.automix.fade_curve,
-            },
+            settings: self.automix.plan_settings(self.crossfade_ms, speed),
             context: TransitionContext {
                 now_ms,
                 played_ms: live.as_ref().map_or(now_ms, |l| l.heard_ms),

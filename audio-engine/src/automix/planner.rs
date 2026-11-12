@@ -45,6 +45,10 @@ pub const OVERLAP_HEADROOM_DB: f64 = 1.0;
 /// A plan's `late_move_bars` when it may move later by any number of bars.
 pub const LATE_MOVE_UNBOUNDED: i32 = i32::MAX;
 
+/// The longest a next song's quiet intro may play under the end of the
+/// song before it, in milliseconds.
+pub const AUTOMIX_LONGEST_INTRO_MS: i64 = 16_000;
+
 /// Songs in genres holding any of these words (in any case) get the plain
 /// crossfade, never a planned one.
 pub const PLAIN_CROSSFADE_GENRES: [&str; 6] =
@@ -87,6 +91,9 @@ impl TransitionKind {
 pub struct PlanSettings {
     /// The longest blend, from the crossfade slider; 0 turns crossfade off.
     pub max_overlap_ms: i64,
+    /// The longest a next song's quiet intro may play under the end of
+    /// this one.
+    pub longest_intro_ms: i64,
     /// Off plays the fixed crossfade at the end of each song.
     pub smart: bool,
     pub filter_sweeps: bool,
@@ -101,6 +108,7 @@ impl PlanSettings {
     pub fn new(max_overlap_ms: i64) -> Self {
         PlanSettings {
             max_overlap_ms,
+            longest_intro_ms: AUTOMIX_LONGEST_INTRO_MS,
             smart: true,
             filter_sweeps: true,
             beat_match: false,

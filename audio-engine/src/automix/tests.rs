@@ -175,6 +175,28 @@ fn sweeps_follow_their_paths() {
 }
 
 #[test]
+fn the_planner_gets_its_lengths_in_song_time() {
+    let settings = AutomixSettings {
+        smart_transitions: true,
+        filter_sweeps: false,
+        match_tempo: true,
+        max_overlap_ms: 8_000,
+        fade_curve: FadeCurve::Linear,
+        longest_intro_ms: 16_000,
+    };
+    // At half speed a second heard is half a second of the song.
+    let half = settings.plan_settings(8_000, 0.5);
+    assert_eq!((half.max_overlap_ms, half.longest_intro_ms), (4_000, 8_000));
+    assert_eq!(settings.plan_settings(8_000, 1.0).longest_intro_ms, 16_000);
+    assert_eq!(settings.plan_settings(8_000, 1.5).longest_intro_ms, 24_000);
+    assert!(half.smart && !half.filter_sweeps && half.beat_match && half.fade_curve == FadeCurve::Linear);
+    // No longest blend of its own: the crossfade length.
+    let plain = AutomixSettings { max_overlap_ms: 0, ..settings };
+    assert_eq!(plain.plan_settings(6_000, 0.5).max_overlap_ms, 3_000);
+    assert_eq!(AutomixSettings::default().longest_intro_ms as i64, AUTOMIX_LONGEST_INTRO_MS);
+}
+
+#[test]
 fn a_late_plan_keeps_its_end_and_drops_the_bar_lock() {
     let mut plan = TransitionPlan::fixed_crossfade(200_000, 6_000, "test");
     plan.start_ms = 150_000;
