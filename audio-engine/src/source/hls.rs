@@ -396,7 +396,10 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
     let mut failures = 0u32;
     // Segments in a row the server said were not there.
     let mut missing = 0u32;
-    // When the playlist last added a segment.
+    // When the playlist last listed a segment past the ones already taken,
+    // whether that segment could be fetched or not: a stream whose new
+    // segments are all missing is still adding to its playlist, and ends on
+    // the missing ones, never as stopped.
     let mut grew = Instant::now();
     loop {
         let media = match playlist.take() {
@@ -444,6 +447,7 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
             None if !media.ended => edge,
             None => media.first_seq,
         };
+        let listed = media.segments.iter().any(|s| s.seq >= from);
         let mut added = false;
         let mut rejoin = restarted;
         for segment in media.segments.iter().filter(|s| s.seq >= from) {
@@ -517,7 +521,7 @@ fn run(shared: Arc<Shared>, url: String, first: Media) {
         }
         let stopped_after =
             (media.target * STOPPED_AFTER_TARGETS).max(shared.opts.live_backoff * STOPPED_AFTER_WAITS);
-        if added {
+        if listed {
             grew = Instant::now();
         } else if grew.elapsed() > stopped_after {
             let stopped = "the HLS stream stopped adding to its playlist";
