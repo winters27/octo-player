@@ -30,6 +30,7 @@ import app.winters.octo.query.matcher
 import app.winters.octo.sort.Listening
 import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.TrackFields
+import app.winters.octo.ui.paging.Keyed
 import app.winters.octo.ui.paging.SqlOrder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,7 @@ import java.util.PriorityQueue
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.random.Random
 
 // How many rows each step of a live list's walk reads or writes at a time.
 internal const val LIVE_PAGE = 500
@@ -233,8 +235,40 @@ class LivePicks internal constructor(
 
     // A play of a live list for a queue's fill under the fill's own owner
     // (`into`), read from the list's shown songs until the fill's copy is
-    // made, then from the copy.
-    fun forSpec(listId: String?, query: LibraryQuery, into: String): LiveSpecLoader = LiveSpecLoader(this, db, listId, query, into)
+    // made, then from the copy. `fallback` is the owner of the page the play
+    // was chosen from, read when the list's own page and preview show
+    // nothing.
+    fun forSpec(listId: String?, query: LibraryQuery, into: String, fallback: String? = null): LiveSpecLoader =
+        LiveSpecLoader(this, db, listId, query, into, fallback)
+
+    // What a play of a list no reader shows starts from, read as eachPick
+    // reads, with no write or lock: the first `n` songs `query` picks in the
+    // list's order, how many it picks (at most its limit), and with `seed`
+    // one song drawn at random: over every song it picks, or for a list
+    // with a limit, over those first `n`.
+    internal suspend fun firstPicks(query: LibraryQuery, n: Int, seed: Long?): LiveStartPicks {
+        val limit = query.limit?.takeIf { it >= 0 }
+        val keep = if (limit != null) minOf(n, limit) else n
+        val inOrder = Comparator<Pair<ByteArray, String>> { a, b -> unsigned(a.first, b.first).let { if (it != 0) it else a.second.compareTo(b.second) } }
+        val worstFirst = PriorityQueue(keep + 1, inOrder.reversed())
+        val random = seed?.let { Random(it) }
+        var picked = 0
+        var drawn: Pair<ByteArray, String>? = null
+        if (keep > 0) {
+            eachPick(query) { song, key ->
+                val row = key to song.id
+                picked++
+                if (random != null && limit == null && random.nextInt(picked) == 0) drawn = row
+                worstFirst += row
+                if (worstFirst.size > keep) worstFirst.poll()
+                true
+            }
+        }
+        val rows = worstFirst.sortedWith(inOrder)
+        if (random != null && limit != null && rows.isNotEmpty()) drawn = rows[random.nextInt(rows.size)]
+        val keyed = { row: Pair<ByteArray, String> -> Keyed(liveRowKey(row.first, row.second), row.second) }
+        return LiveStartPicks(rows.map(keyed), if (limit != null) minOf(picked, limit) else picked, drawn?.let(keyed))
+    }
 
     // The owner whose shown songs a play of this list reads: the saved
     // list's, or an editor's preview of the same rules; null when none is

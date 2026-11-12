@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlin.coroutines.coroutineContext
 import app.winters.octo.livelists.LivePicks
+import app.winters.octo.livelists.LiveSpecLoader
 import app.winters.octo.sort.SongSort
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.ui.library.health.HealthBuild
@@ -174,7 +175,7 @@ class QueueStarts @Inject constructor(
             is ListSpec.Online, ListSpec.ServerQueue -> fromServer(spec, start, shuffle, shownOverWindow, listId, adding)
             is ListSpec.Folder -> folder(spec, start, shuffle, shownOverWindow)
             is ListSpec.Album -> if (spec.withFinds) albumWithFinds(spec, start, shuffle, shownOverWindow, pageOwner) else viaLoader(spec, start, shuffle, shownOverWindow)
-            else -> viaLoader(spec, start, shuffle, shownOverWindow)
+            else -> viaLoader(spec, start, shuffle, shownOverWindow, pageOwner)
         }
     }
 
@@ -407,13 +408,16 @@ class QueueStarts @Inject constructor(
     }
 
     // The list's first QUEUE_WINDOW + 1 rows through its own loader, read
-    // with no copy: whole when that is all of it, else its start.
+    // with no copy: whole when that is all of it, else its start. A live
+    // list no reader shows starts from its rules (unshownLive).
     @Suppress("UNCHECKED_CAST")
-    private suspend fun viaLoader(spec: ListSpec, start: ListStart?, shuffle: Boolean, shownOverWindow: Boolean): StartRead {
+    private suspend fun viaLoader(spec: ListSpec, start: ListStart?, shuffle: Boolean, shownOverWindow: Boolean, pageOwner: String? = null): StartRead {
         val owner = owners.walk()
-        val loader = (startLoader(spec, owner) ?: return StartRead.Refused(COULD_NOT_PLAY_LIST)) as ListLoader<Any>
+        val made = startLoader(spec, owner, pageOwner) ?: return StartRead.Refused(COULD_NOT_PLAY_LIST)
+        val loader = made as ListLoader<Any>
         try {
-            val read = small(loader, start, shuffle, shownOverWindow) ?: big(loader, start, shuffle)
+            val unshown = (made as? LiveSpecLoader)?.takeUnless { it.shown() }
+            val read = unshown?.let { unshownLive(it, start, shuffle) } ?: small(loader, start, shuffle, shownOverWindow) ?: big(loader, start, shuffle)
             hooks.read(owner)
             return read
         } finally {
@@ -429,11 +433,37 @@ class QueueStarts @Inject constructor(
         return whole(rows, start, shuffle, { songOf(loader, it) }, loader.order, loader.songsOnce)
     }
 
+    // A live list none of its pages, its preview or the page it was chosen
+    // from shows: its start worked out from its rules with no write
+    // (LiveSpecLoader.firstPicks). It plays whole when it picks at most
+    // QUEUE_WINDOW songs; else it starts with the song tapped, the song at
+    // a place, a song drawn at random or its first, and the build walks its
+    // rules behind it.
+    private suspend fun unshownLive(loader: LiveSpecLoader, start: ListStart?, shuffle: Boolean): StartRead {
+        val draw = shuffle && start == null
+        val picks = loader.firstPicks(QUEUE_WINDOW + 1, if (draw) random.nextLong() else null)
+        if (picks.count <= QUEUE_WINDOW) {
+            if (picks.rows.isEmpty()) return StartRead.Refused(NOTHING_TO_PLAY)
+            return whole(picks.rows, start, shuffle, { it }, loader.order, loader.songsOnce)
+        }
+        val first = picks.rows.first()
+        return when (start) {
+            is ListStart.Row -> StartRead.Big(start.trackId, start.key, false)
+            is ListStart.First -> StartRead.Big(start.trackId, start.key, shuffle)
+            // A song past the first rows read is found again by the build.
+            is ListStart.Track -> StartRead.Big(start.trackId, picks.rows.firstOrNull { it.row == start.trackId }?.key, false)
+            is ListStart.At -> picks.rows.getOrNull(start.index)?.let { StartRead.Big(it.row, it.key, false, positionMs = start.positionMs) }
+                ?: StartRead.Big(first.row, first.key, false)
+            null -> if (draw) (picks.drawn ?: first).let { StartRead.Big(it.row, it.key, true, count = picks.count) } else StartRead.Big(first.row, first.key, false)
+        }
+    }
+
     // The loader a play reads its start from: the list as a page shows it,
-    // never a copy of its own. A playlist's is read with no pin
+    // never a copy of its own; a live list's falls back on `pageOwner`, the
+    // page it was chosen from. A playlist's is read with no pin
     // (PlaylistStartLoader), so its start writes nothing; its build pins.
-    private suspend fun startLoader(spec: ListSpec, owner: String): ListLoader<*>? = when (spec) {
-        is ListSpec.Live -> live.get().forSpec(spec.listId, spec.query, owner)
+    private suspend fun startLoader(spec: ListSpec, owner: String, pageOwner: String?): ListLoader<*>? = when (spec) {
+        is ListSpec.Live -> live.get().forSpec(spec.listId, spec.query, owner, fallback = pageOwner)
         is ListSpec.Health -> health.get().loader(spec.check, owner)
         is ListSpec.AlbumList -> AlbumListLoader(db, spec.albumIds)
         is ListSpec.Playlist -> playlistStart(spec.playlistId)

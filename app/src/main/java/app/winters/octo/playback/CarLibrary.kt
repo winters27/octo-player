@@ -464,8 +464,11 @@ class CarLibrary @Inject constructor(
             CarList(ListSpec.Playlist(node.id), QueueSource.Played(list.name))
         }
         CarNode.Liked -> CarList(ListSpec.Songs(SongScope.Liked, order(SortList.Liked)), QueueSource.Played(CAR_LIKED))
+        // A live list plays as the car shows it, from the car's own copy
+        // when it keeps one and no page of the phone shows the list.
         is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { list ->
-            CarList(ListSpec.Live(list.id, list.query, list.name), QueueSource.Played(list.name))
+            val owner = lists.keptFor<CarOwned<CarLive>>(node)?.owner
+            CarList(ListSpec.Live(list.id, list.query, list.name), QueueSource.Played(list.name), pageOwner = owner)
         }
         CarNode.MostPlayed -> carIds(playShelves().mostPlayed.map { it.id }, NoSource)
         CarNode.Songs -> CarList(ListSpec.Songs(SongScope.All, order(SortList.Songs)), QueueSource.Played("Songs"))

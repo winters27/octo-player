@@ -101,16 +101,27 @@ class LiveLoader internal constructor(private val db: CatalogDatabase, val owner
 
     private fun keyBytes(key: RowKey): ByteArray = (key.values.single() as SqlValue.Blob).v.toByteArray()
 
-    private fun rowKey(orderKey: ByteArray, trackId: String) = RowKey(0, listOf(SqlValue.Blob(orderKey.toByteString())), trackId)
+    private fun rowKey(orderKey: ByteArray, trackId: String) = liveRowKey(orderKey, trackId)
 
     private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
 }
 
+// A live list row's key: its order key, then its song.
+internal fun liveRowKey(orderKey: ByteArray, trackId: String) = RowKey(0, listOf(SqlValue.Blob(orderKey.toByteString())), trackId)
+
+// What a play of a live list no reader shows starts from, read from its
+// rules with no write (LivePicks.firstPicks): its first rows in the list's
+// order, keyed as the list's own rows are, how many songs it picks, and,
+// when asked, one of them drawn at random.
+class LiveStartPicks(val rows: List<Keyed<String>>, val count: Int, val drawn: Keyed<String>?)
+
 // A play of a live list for a queue's fill. Until the fill's copy is made
-// it reads the songs the list shows (its saved page's, or an editor's
-// preview of the same rules): the small check, the first song, the song at
-// a place, each one statement, never waiting for the copy. `copy` makes
-// the fill's own copy under its owner; from then on every read is of that
+// it reads the songs the list shows (its saved page's, an editor's preview
+// of the same rules, or else `fallback`, the owner of the page the play was
+// chosen from, such as the car's copy): the small check, the first song,
+// the song at a place, each one statement, never waiting for the copy.
+// With none of them shown, a play starts from firstPicks. `copy` makes the
+// fill's own copy under its owner; from then on every read is of that
 // copy, which nothing changes until the fill clears it.
 class LiveSpecLoader internal constructor(
     private val picks: LivePicks,
@@ -118,6 +129,7 @@ class LiveSpecLoader internal constructor(
     private val listId: String?,
     private val query: LibraryQuery,
     val into: String,
+    private val fallback: String? = null,
 ) : ListLoader<String> {
     @Volatile private var reading: LiveLoader? = null
 
@@ -130,21 +142,38 @@ class LiveSpecLoader internal constructor(
     // Whether the fill's copy is made.
     val copied: Boolean get() = reading?.owner == into
 
+    // Whether reads answer from songs a list holds now: the copy, or the
+    // list as a reader shows it.
+    suspend fun shown(): Boolean = source() != null
+
     // What reads answer now: the copy once made, else the list as shown,
     // else nothing (no list shows these songs yet).
     private suspend fun source(): LiveLoader? {
         reading?.let { return it }
-        return picks.sourceOf(listId, query)?.let { picks.loader(it) }
+        return shownOwner()?.let { picks.loader(it) }
     }
+
+    // The owner whose shown songs the list is read from: its own page's or
+    // preview's, else the fallback's once it shows them.
+    private suspend fun shownOwner(): String? = picks.sourceOf(listId, query) ?: fallback?.takeIf { picks.shown(it) != null }
 
     // Makes the fill's copy, from the songs the list shows when it runs
     // (or, with none shown, by a walk of its rules), and answers its swap
     // count and how many songs it holds.
     suspend fun copy(): LiveCopy {
-        val made = picks.copy(picks.sourceOf(listId, query), query, into)
+        val made = picks.copy(shownOwner(), query, into)
         reading = picks.loader(into)
         return made
     }
+
+    // The list's first `n` songs and how many it picks, worked out from its
+    // rules with no write, for a play while no reader shows it; with `seed`,
+    // one song drawn at random too.
+    suspend fun firstPicks(n: Int, seed: Long?): LiveStartPicks = picks.firstPicks(query, n, seed)
+
+    // Null while no list shows these songs, so a play never takes an empty
+    // read for an empty list.
+    override suspend fun small(): List<Keyed<String>>? = source()?.small()
 
     override suspend fun count(): Int = source()?.count() ?: 0
     override suspend fun survey(anchor: RowKey?): Survey = source()?.survey(anchor) ?: Survey(0, null, null)
