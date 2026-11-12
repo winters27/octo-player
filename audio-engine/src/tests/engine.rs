@@ -1130,6 +1130,37 @@ fn profile_of(duration_ms: i64, tail_from_ms: i64) -> crate::automix::SongProfil
     }
 }
 
+// A 14 s blend ending with the outgoing song, the length of a long intro.
+fn intro_length_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    crate::automix::TransitionPlan::fixed_crossfade(len, 14_000, "a 14 s intro")
+}
+
+#[test]
+fn a_long_intro_is_decided_before_it_starts() {
+    // With the scouts never done, the decision waits for its deadline,
+    // which must come early enough for a 14 s intro to start as planned
+    // rather than late.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 24, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_test_planner(Some(intro_length_plan));
+    engine.hold_scouts(true);
+    engine.set_crossfade(8_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    let planned =
+        play_until(&pump, &events, "plan", 1_500, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert_eq!((start_ms, overlap_ms), (10_000, 14_000), "{reason}");
+    assert!(!reason.contains("late"), "{reason}");
+    engine.shutdown();
+}
+
 // The longest blend and the longest intro the planner was handed, for a
 // playing song 13 s long.
 static LENGTHS: Mutex<Option<(i64, i64)>> = Mutex::new(None);

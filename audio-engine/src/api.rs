@@ -563,6 +563,14 @@ impl Engine {
         *self.shared.planner.lock().unwrap_or_else(|e| e.into_inner()) = planner;
     }
 
+    /// Holds every scout of this engine unfinished, so each transition is
+    /// decided at its deadline.
+    #[cfg(test)]
+    pub fn hold_scouts(&self, held: bool) {
+        self.shared.scouts_held.store(held, std::sync::atomic::Ordering::Relaxed);
+        self.shared.wake();
+    }
+
     /// How many track infos the player holds.
     #[cfg(test)]
     pub fn infos_len(&self) -> usize {

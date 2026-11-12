@@ -152,6 +152,10 @@ pub struct Shared {
     /// How many track infos the player holds, for tests.
     #[cfg(test)]
     pub infos_len: std::sync::atomic::AtomicUsize,
+    /// While set, no scout counts as done, so a decision waits for its
+    /// deadline.
+    #[cfg(test)]
+    pub scouts_held: std::sync::atomic::AtomicBool,
     /// Where the player counts the track infos it holds.
     pub track_info_count: &'static std::sync::atomic::AtomicI64,
 }
@@ -185,6 +189,8 @@ impl Shared {
             planner: Mutex::new(None),
             #[cfg(test)]
             infos_len: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            scouts_held: std::sync::atomic::AtomicBool::new(false),
             track_info_count,
         }
     }
@@ -1081,6 +1087,10 @@ impl Player {
     // Whether the scout is done (or given up on) for the songs `a` then `b`;
     // a song with a profile needs none.
     fn scouts_settled(&self, a: u64, b: u64) -> bool {
+        #[cfg(test)]
+        if self.shared.scouts_held.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
         let s = &self.scouting;
         let profiled = |key: u64| self.index_of(key).and_then(|i| self.profile_at(i)).is_some();
         let tail = profiled(a)
@@ -1170,9 +1180,14 @@ impl Player {
         let remaining = self.remaining_secs(current, lane);
         let speed = self.pace.speed as f64;
         let mut blend_secs = self.crossfade_ms as f64 / 1_000.0 * speed;
+        let mut scout_secs = blend_secs;
         if self.automix.smart_transitions {
             // Room to line the incoming song up from its entry point.
             blend_secs += LEAD_SECS * speed;
+            // A quiet intro may start further from the end than a blend, so
+            // the scouts are given up on in time for one.
+            let longest_ms = self.crossfade_ms.max(self.automix.longest_intro_ms);
+            scout_secs = (longest_ms as f64 / 1_000.0 + LEAD_SECS) * speed;
         }
         let can_blend = self.crossfade_ms > 0
             && self.repeat != RepeatMode::One
@@ -1181,12 +1196,14 @@ impl Player {
             && next != current;
         // The next song's length is its decoder's once it has opened. Until
         // the deadline the decision waits for that; after it, a listed
-        // length will do.
+        // length will do. The scouts are waited for until their own
+        // deadline.
         let opened = self.infos.contains_key(&up_key) || up_failed;
         let next_known = opened || self.length_ms(next).is_some();
         let scouted = !self.automix.smart_transitions || self.scouts_settled(self.queue[current].key, up_key);
         let deadline = remaining.is_none_or(|r| r <= blend_secs + DECIDE_MARGIN_SECS);
-        if can_blend && !deadline && !(opened && scouted) {
+        let scouts_due = remaining.is_none_or(|r| r <= scout_secs + DECIDE_MARGIN_SECS);
+        if can_blend && !deadline && !(opened && (scouted || scouts_due)) {
             return;
         }
         // Past the deadline the next song's length is still worth waiting
