@@ -1281,19 +1281,27 @@ fn a_live_stream_paused_a_long_while_starts_again_where_it_is_now() {
         pump.play();
     }
     assert_eq!(server.asked().len(), 1);
-    // A long one (300 ms in tests) connects again, at the live edge.
+    // A long one (300 ms in tests) connects again, at the live edge. The
+    // pause counts from when the engine takes it, so the wait starts once
+    // it says it is paused.
+    let paused = |e: &EngineEvent| matches!(e, EngineEvent::StateChanged { state: PlaybackState::Paused });
     engine.pause().unwrap();
     pump.play();
+    wait_until("paused again", || events.all().iter().filter(|e| paused(e)).count() == 2);
     std::thread::sleep(Duration::from_millis(400));
+    let before = events.all().len();
     engine.play().unwrap();
+    // Until the engine takes the play, the output is paused and a pump
+    // gives silence at once; after it, each pump waits for sound.
+    let playing =
+        |e: &EngineEvent| matches!(e, EngineEvent::StateChanged { state } if *state != PlaybackState::Paused);
+    wait_until("playing again", || events.all()[before..].iter().any(playing));
     let again = |e: &EngineEvent| matches!(e, EngineEvent::TrackStarted { .. });
-    for _ in 0..1_000 {
+    let until = Instant::now() + Duration::from_secs(10);
+    while events.all().iter().filter(|e| again(e)).count() < 2 {
+        assert!(Instant::now() < until, "never started again: {:?}", events.story());
         pump.play();
-        if events.all().iter().filter(|e| again(e)).count() == 2 {
-            break;
-        }
     }
-    assert_eq!(events.all().iter().filter(|e| again(e)).count(), 2, "{:?}", events.story());
     assert_eq!(server.asked().len(), 2);
     assert!(engine.position().position_ms < 2_000.0, "{}", engine.position().position_ms);
     engine.shutdown();
