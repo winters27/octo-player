@@ -168,12 +168,16 @@ fun ListHeader(
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
+        // Play and Shuffle hold their place, dimmed, while the size is still
+        // being counted, so the line never shifts when it comes; a list
+        // counted empty has none.
         val playable = (songCount ?: 0) > 0
-        if (playable || onMore != null) {
+        val counting = songCount == null
+        if (playable || counting || onMore != null) {
             HeaderControlLine(
                 control = null,
                 actions = {
-                    if (playable) PlayShuffleButtons(onPlay, onShuffle)
+                    if (playable || counting) PlayShuffleButtons(onPlay, onShuffle, enabled = playable)
                     if (onMore != null) HeaderButton(OctoIcons.More, "More", onMore, Modifier.pressSpot(LocalPressSpot.current))
                 },
                 modifier = Modifier.padding(start = 12.dp, end = 16.dp, top = 10.dp),

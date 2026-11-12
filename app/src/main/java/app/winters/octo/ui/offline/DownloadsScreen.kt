@@ -217,6 +217,7 @@ fun DownloadsScreen(onBack: () -> Unit, vm: OfflineDownloadsViewModel = hiltView
                 "Downloads",
                 onBack,
                 count = if (anyKnown == true) done?.let { (songs, bytes) -> downloadsCount(songs, bytes) } else null,
+                shortCount = done?.let { (kept, _) -> songs(kept) },
                 lead = if (!any) emptyList() else listOf(sortItem(SortList.Downloads, asked!!.order, vm::setOrder)),
                 more = if (!any) emptyList() else listOf(MoreItem(REMOVE_ALL, OctoIcons.Delete, destructive = true, opensPage = true) { confirming = true }),
             )

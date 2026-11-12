@@ -20,12 +20,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -333,7 +327,6 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 // player, once it covers the pages, has its own top.
                 if (!playerCovers) {
                     StatusGlaze(haze, Modifier.align(Alignment.TopCenter))
-                    StatusScrim(Modifier.align(Alignment.TopCenter))
                 }
                 // Back from the top of another tab goes Home rather than out.
                 BackHandler(enabled = selected != 0 && stack.size == 1) { selected = 0 }
@@ -478,38 +471,4 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }
         entry<HealthTrashRoute> { RecentlyRemovedScreen(back) }
     }
-}
-
-// How far below the status bar the page color fades out.
-internal val StatusFade = 16.dp
-
-// The page color over what scrolls up under the status bar: solid to the
-// bar's bottom, so nothing runs through the clock and icons, then fading
-// out over StatusFade, quickly at first, so a page's top controls just
-// below stay clear.
-@Composable
-private fun StatusScrim(modifier: Modifier) {
-    val density = LocalDensity.current
-    val inset = WindowInsets.statusBars.getTop(density)
-    val page = OctoColors.Background
-    val fade = with(density) { StatusFade.toPx() }
-    val tall = with(density) { (inset + fade).toDp() }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .height(tall)
-            .drawBehind {
-                val stops = statusScrimStops(inset.toFloat(), fade)
-                drawRect(Brush.verticalGradient(*stops.map { (at, alpha) -> at to page.copy(alpha = page.alpha * alpha) }.toTypedArray()))
-            },
-    )
-}
-
-// The scrim's color stops, as (fraction of its height, opacity): opaque
-// down to the status bar's bottom `inset`, then easing out over `fade`.
-internal fun statusScrimStops(inset: Float, fade: Float): List<Pair<Float, Float>> {
-    val tall = inset + fade
-    if (tall <= 0f) return listOf(0f to 0f, 1f to 0f)
-    fun at(px: Float) = px / tall
-    return listOf(0f to 1f, at(inset) to 1f, at(inset + fade * 0.25f) to 0.55f, at(inset + fade * 0.5f) to 0.2f, 1f to 0f)
 }

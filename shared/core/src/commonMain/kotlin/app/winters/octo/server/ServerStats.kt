@@ -56,7 +56,7 @@ fun scanWords(status: ScanStatus?, nowMs: Long, zone: ZoneId = ZoneId.systemDefa
 }
 
 // A time before now in words: "just now", "5 minutes ago", "yesterday",
-// "on 12 September", with the year when it was another year.
+// "on September 12", with the year when it was another year.
 fun agoWords(thenMs: Long, nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): String {
     val minutes = (nowMs - thenMs).coerceAtLeast(0) / 60_000
     val hours = minutes / 60
@@ -70,7 +70,7 @@ fun agoWords(thenMs: Long, nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): 
         else -> {
             val then = Instant.ofEpochMilli(thenMs).atZone(zone)
             val sameYear = then.year == Instant.ofEpochMilli(nowMs).atZone(zone).year
-            "on " + then.format(DateTimeFormatter.ofPattern(if (sameYear) "d MMMM" else "d MMMM yyyy", Locale.ENGLISH))
+            "on " + then.format(DateTimeFormatter.ofPattern(if (sameYear) "MMMM d" else "MMMM d, yyyy", Locale.ENGLISH))
         }
     }
 }

@@ -62,8 +62,8 @@ class ServerStatsTest {
         assertEquals("an hour ago", agoWords(now - 61 * minute, now, utc))
         assertEquals("yesterday", agoWords(now - 30 * 60 * minute, now, utc))
         assertEquals("4 days ago", agoWords(now - 4 * 24 * 60 * minute, now, utc))
-        assertEquals("on 12 September", agoWords(ZonedDateTime.of(2026, 9, 12, 8, 0, 0, 0, utc).toInstant().toEpochMilli(), now, utc))
-        assertEquals("on 3 March 2025", agoWords(ZonedDateTime.of(2025, 3, 3, 8, 0, 0, 0, utc).toInstant().toEpochMilli(), now, utc))
+        assertEquals("on September 12", agoWords(ZonedDateTime.of(2026, 9, 12, 8, 0, 0, 0, utc).toInstant().toEpochMilli(), now, utc))
+        assertEquals("on March 3, 2025", agoWords(ZonedDateTime.of(2025, 3, 3, 8, 0, 0, 0, utc).toInstant().toEpochMilli(), now, utc))
         assertEquals("a clock running behind is not the future", "just now", agoWords(now + 5 * minute, now, utc))
     }
 }

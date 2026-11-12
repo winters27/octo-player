@@ -82,15 +82,18 @@ internal fun countFits(titleEnd: Int, count: Int, gap: Int, width: Int): Boolean
 // Play and Shuffle (`tail`, or fixed `actions`) and More with `more` at the
 // end. On a narrow phone the lesser controls move into More. A page with
 // none of those has the first line only. A `count` ("120 songs") sits muted
-// at the end of the title's line when it fits there whole, and is left off
-// when it does not. A page without a way back (a tab) keeps `trailing` at
-// the end of the title's line, for a quiet page action like Edit Home.
+// at the end of the title's line when it fits there whole; when it does not,
+// its `shortCount` ("120 songs" for "120 songs · 1.2 GB") stands in where
+// that fits, so a count whose width changes as it goes never blinks out.
+// A page without a way back (a tab) keeps `trailing` at the end of the
+// title's line, for a quiet page action like Edit Home.
 @Composable
 fun PageHeader(
     title: String,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
     count: String? = null,
+    shortCount: String? = null,
     control: (@Composable () -> Unit)? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
@@ -107,6 +110,7 @@ fun PageHeader(
             title,
             onBack,
             count,
+            shortCount.takeIf { count != null },
             trailing,
             Modifier.padding(start = if (onBack != null) 12.dp else 20.dp, end = 16.dp, top = 8.dp, bottom = if (hasLine) 4.dp else 12.dp),
         )
@@ -123,7 +127,7 @@ private val CountGap = 10.dp
 // on the middle of the title's capitals. A title wider than the room after
 // the button is set just small enough to fit whole.
 @Composable
-private fun TitleLine(title: String, onBack: (() -> Unit)?, count: String?, trailing: (@Composable () -> Unit)?, modifier: Modifier) {
+private fun TitleLine(title: String, onBack: (() -> Unit)?, count: String?, shortCount: String?, trailing: (@Composable () -> Unit)?, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -141,18 +145,19 @@ private fun TitleLine(title: String, onBack: (() -> Unit)?, count: String?, trai
                 )
             }
         }
-        TitleLineLayout(title, style, onBack, count, trailing)
+        TitleLineLayout(title, style, onBack, count, shortCount, trailing)
     }
 }
 
 @Composable
-private fun TitleLineLayout(title: String, style: TextStyle, onBack: (() -> Unit)?, count: String?, trailing: (@Composable () -> Unit)?) {
+private fun TitleLineLayout(title: String, style: TextStyle, onBack: (() -> Unit)?, count: String?, shortCount: String?, trailing: (@Composable () -> Unit)?) {
     val capHeight = rememberCapHeightPx(style)
     Layout(
         content = {
             if (onBack != null) HeaderButton(OctoIcons.Back, "Back", onBack)
             Text(title, style = style, color = OctoColors.TextPrimary, maxLines = 1, softWrap = false)
             if (count != null) Text(count, style = OctoType.bodySmall, color = OctoColors.TextMuted, maxLines = 1, softWrap = false)
+            if (shortCount != null) Text(shortCount, style = OctoType.bodySmall, color = OctoColors.TextMuted, maxLines = 1, softWrap = false)
             if (trailing != null) Box { trailing() }
         },
         modifier = Modifier.fillMaxWidth(),
@@ -161,14 +166,16 @@ private fun TitleLineLayout(title: String, style: TextStyle, onBack: (() -> Unit
         var next = 0
         val back = if (onBack != null) measurables[next++].measure(Constraints()) else null
         val name = measurables[next++].measure(Constraints())
-        val counted = if (count != null) measurables[next++].measure(Constraints()) else null
+        val whole = if (count != null) measurables[next++].measure(Constraints()) else null
+        val short = if (shortCount != null) measurables[next++].measure(Constraints()) else null
         val end = if (trailing != null) measurables[next].measure(Constraints()) else null
         val (x, _) = titlePlace(back?.width ?: 0, name.width, Gap.roundToPx())
         // What follows the title goes only where it fits whole: the page
         // action at the far end, then the count after the title.
         val endRoom = end?.let { it.width + Gap.roundToPx() } ?: 0
         val shownEnd = end?.takeIf { x + name.width + endRoom <= width }
-        val shownCount = counted?.takeIf { countFits(x + name.width, it.width, CountGap.roundToPx(), width - (if (shownEnd != null) endRoom else 0)) }
+        val countRoom = width - (if (shownEnd != null) endRoom else 0)
+        val shownCount = listOfNotNull(whole, short).firstOrNull { countFits(x + name.width, it.width, CountGap.roundToPx(), countRoom) }
         // The line is as tall on every page: the title where a 48dp target
         // centered on its capitals fits.
         val half = LineHalf.roundToPx()

@@ -1,32 +1,25 @@
 package app.winters.octo.ui.nav
 
+import app.winters.octo.design.StatusFrost
+import app.winters.octo.design.statusFrostStops
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// The status bar's frost covers the bar's whole height at full strength and
+// fades out just below it, deep enough that words under the clock blur away.
 class StatusScrimTest {
-    // Opaque all the way down the status bar, then easing out to nothing
-    // over the fade below it.
     @Test
-    fun solidToTheBarThenFadingOut() {
-        val stops = statusScrimStops(inset = 96f, fade = 64f)
-        assertEquals(0f to 1f, stops.first())
-        assertEquals(0.6f, stops[1].first, 0.0001f)
-        assertEquals(1f, stops[1].second, 0f)
-        assertEquals(1f to 0f, stops.last())
-        // Each stop further down, and never stronger than the one above.
-        stops.zipWithNext().forEach { (a, b) ->
-            assertTrue(b.first > a.first)
-            assertTrue(b.second <= a.second)
-        }
+    fun theFrostIsFullThroughTheBarThenFades() {
+        // A 24 dp bar and a 16 dp fade at 4 px a dp.
+        assertEquals(96f / 160f to 1f, statusFrostStops(inset = 96f, fade = 64f))
+        // No status bar: the frost only fades.
+        assertEquals(0f to 1f, statusFrostStops(inset = 0f, fade = 64f))
+        assertEquals(0f to 1f, statusFrostStops(inset = 0f, fade = 0f))
     }
 
-    // With no status bar (a phone in a window, say) it is all fade.
     @Test
-    fun noBarIsAllFade() {
-        val stops = statusScrimStops(inset = 0f, fade = 64f)
-        assertEquals(0f, stops[1].first, 0f)
-        assertEquals(1f to 0f, stops.last())
-        assertEquals(listOf(0f to 0f, 1f to 0f), statusScrimStops(0f, 0f))
+    fun theFrostIsDeeperThanTheChromes() {
+        assertTrue(StatusFrost > app.winters.octo.design.GlazeFrost * 3)
     }
 }

@@ -6,9 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.composed
@@ -102,32 +103,50 @@ const val GlazeSaturation = 1.1f
 // its specular and its lit rim, as glass out of the light does.
 val LocalWindowFocused = compositionLocalOf { true }
 
-private fun glazeBlur(frost: Float, saturation: Float, page: Color, card: Color, fades: Boolean = false) = HazeBlurStyle {
+private fun glazeBlur(frost: Float, saturation: Float, page: Color, card: Color, mask: Brush? = null) = HazeBlurStyle {
     backgroundColor(page)
     blurRadius(backdropBlur(frost))
     noiseFactor(0f)
     colorEffects(listOf(HazeColorEffect.colorFilter(saturation(saturation))))
     fallbackColorEffect(HazeColorEffect.tint(card))
-    // Full at the top, gone at the bottom.
-    if (fades) mask(Brush.verticalGradient(listOf(Color.Black, Color.Transparent)))
+    if (mask != null) mask(mask)
 }
 
-@Composable
-private fun StatusBlur(): HazeBlurStyle {
-    val page = OctoColors.Background
-    val card = OctoColors.BackgroundTertiary
-    return remember(page, card) { glazeBlur(GlazeFrost, GlazeSaturation, page, card, fades = true) }
+// The status bar's frost, as a CSS blur: deep enough that a row's words
+// under the clock blur away, where the chrome's lighter frost leaves them
+// readable.
+const val StatusFrost = 14f
+
+// How far below the status bar its frost fades out.
+val StatusFrostFade = 16.dp
+
+// Where the status frost is full and where it fades, as fractions of its
+// height: full down to the bar's bottom (`inset`), then gone `fade` below.
+fun statusFrostStops(inset: Float, fade: Float): Pair<Float, Float> {
+    val tall = inset + fade
+    return if (tall <= 0f) 0f to 1f else inset / tall to 1f
 }
 
-// The status bar's own glass at the top of every page: what scrolls up under the clock is
-// frosted, the frost fading out at the bar's bottom, so rows never run through the clock.
+// The status bar's own glass at the top of every page: what scrolls up under
+// the clock is frosted through the bar's whole height, the frost fading out
+// just below it, so rows never run through the clock and the page's own glow
+// still shows through.
 @Composable
 fun StatusGlaze(backdrop: HazeState, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val inset = WindowInsets.statusBars.getTop(density).toFloat()
+    val fade = with(density) { StatusFrostFade.toPx() }
+    val (full, gone) = statusFrostStops(inset, fade)
+    val page = OctoColors.Background
+    val card = OctoColors.BackgroundTertiary
+    val style = remember(page, card, full) {
+        glazeBlur(StatusFrost, GlazeSaturation, page, card, mask = Brush.verticalGradient(0f to Color.Black, full to Color.Black, gone to Color.Transparent))
+    }
     Box(
         modifier
             .fillMaxWidth()
-            .windowInsetsTopHeight(WindowInsets.statusBars)
-            .hazeBlur(input = HazeInput.Backdrop(backdrop), style = StatusBlur()),
+            .height(with(density) { (inset + fade).toDp() })
+            .hazeBlur(input = HazeInput.Backdrop(backdrop), style = style),
     )
 }
 
