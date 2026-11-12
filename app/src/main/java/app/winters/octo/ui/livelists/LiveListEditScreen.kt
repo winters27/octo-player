@@ -7,6 +7,7 @@ import app.winters.octo.design.GlassPopup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -14,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,12 +30,15 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.GlassInput
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.listening.PlayTotals
+import app.winters.octo.livelists.LiveChoices
 import app.winters.octo.livelists.LiveList
 import app.winters.octo.livelists.LiveListDraft
 import app.winters.octo.livelists.LiveListLimits
@@ -43,20 +47,21 @@ import app.winters.octo.livelists.LiveListSorts
 import app.winters.octo.livelists.LiveListStarter
 import app.winters.octo.livelists.LiveListStarters
 import app.winters.octo.livelists.LiveListStore
+import app.winters.octo.livelists.LiveShown
 import app.winters.octo.livelists.asksMatch
 import app.winters.octo.livelists.limitWords
 import app.winters.octo.livelists.liveListName
 import app.winters.octo.livelists.matchWords
 import app.winters.octo.livelists.sortWords
 import app.winters.octo.livelists.toggling
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.Shown
 import app.winters.octo.query.FilterPresets
 import app.winters.octo.query.LibraryQuery
 import app.winters.octo.query.QueryMatch
 import app.winters.octo.query.QuerySort
-import app.winters.octo.query.artistsIn
-import app.winters.octo.query.decadesIn
-import app.winters.octo.query.genresIn
 import app.winters.octo.query.label
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.ui.common.PageHeader
@@ -69,6 +74,13 @@ import app.winters.octo.ui.common.SongRow
 import app.winters.octo.ui.common.SortRequest
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.library.FilterChip
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
+import app.winters.octo.ui.paging.tableChanges
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -82,16 +94,16 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-// What Add a rule can ask which of, from the library.
-data class LiveChoices(val genres: List<String> = emptyList(), val artists: List<String> = emptyList(), val decades: List<Int> = emptyList())
-
 @HiltViewModel(assistedFactory = LiveListEditViewModel.Factory::class)
 class LiveListEditViewModel @AssistedInject constructor(
     @Assisted private val id: String?,
     @Assisted private val start: LibraryQuery?,
     private val store: LiveListStore,
-    songs: LiveListSongs,
+    private val songs: LiveListSongs,
     private val playback: PlaybackConnection,
+    private val totals: PlayTotals,
+    reads: LibraryReads,
+    db: CatalogDatabase,
 ) : ViewModel() {
     private val _draft = MutableStateFlow(editorStart(null, start))
     val draft: StateFlow<LiveListDraft> = _draft
@@ -106,14 +118,25 @@ class LiveListEditViewModel @AssistedInject constructor(
     private val _starters = MutableStateFlow(false)
     val starters: StateFlow<Boolean> = _starters
 
-    // The songs the rules pick as they change. Null until first worked out.
-    val preview: StateFlow<List<TrackEntity>?> =
-        songs.songs(_draft.map { it.query }.distinctUntilChanged())
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // The preview's own list, worked out in the database as the rules
+    // change and let go with the editor.
+    private val owner = songs.draft()
 
-    val choices: StateFlow<LiveChoices> =
-        songs.library.map { lib -> LiveChoices(genresIn(lib.tracks, lib.fields), artistsIn(lib.tracks, lib.fields), decadesIn(lib.tracks, lib.fields)) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveChoices())
+    // How many songs the rules pick now and how long they are together:
+    // loading before the first walk, or why it could not be worked out.
+    val shown: StateFlow<LiveShown> = songs.watch(owner, null, _draft.map { it.query }.distinctUntilChanged())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveShown.Loading)
+
+    // The songs the rules pick, in pages, in the list's order.
+    val preview: ListHandle<Unit, TrackEntity> = ListHandle(viewModelScope, Unit, { songs.pages(owner) }, reads, { _, loader -> db.tableChanges(loader.tables) })
+
+    val choices: StateFlow<LiveChoices> = songs.choices().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LiveChoices())
+
+    // Whether play counts could not be brought up to date; Try again asks
+    // once more.
+    val totalsFailed: StateFlow<Boolean> = totals.failed
+
+    fun tryAgain() = totals.tryAgain()
 
     init {
         viewModelScope.launch {
@@ -152,10 +175,20 @@ class LiveListEditViewModel @AssistedInject constructor(
         viewModelScope.launch { then(store.save(LiveList.new(starter.name, starter.query, System.currentTimeMillis())).id) }
     }
 
-    // Plays the preview from the song tapped.
-    fun play(index: Int) {
-        val songs = preview.value ?: return
-        playback.playTracks(songs.map { it.id }, index, source = _draft.value.savedName)
+    // Plays the preview from the song tapped: the draft's rules as a list.
+    fun play(item: ListItem<TrackEntity>) {
+        val draft = _draft.value
+        playback.playList(
+            ListSpec.Live(null, draft.query, draft.savedName),
+            ListStart.Row(item.row.id, item.key),
+            source = draft.savedName,
+            shown = Shown(item.row.title, item.row.artist, item.row.artwork),
+        )
+    }
+
+    override fun onCleared() {
+        preview.close()
+        songs.discard(owner)
     }
 
     @AssistedFactory
@@ -179,9 +212,10 @@ fun LiveListEditScreen(
     vm: LiveListEditViewModel = hiltViewModel<LiveListEditViewModel, LiveListEditViewModel.Factory> { it.create(id, start) },
 ) {
     val draft by vm.draft.collectAsStateWithLifecycle()
-    val preview by vm.preview.collectAsStateWithLifecycle()
+    val shown by vm.shown.collectAsStateWithLifecycle()
     val starters by vm.starters.collectAsStateWithLifecycle()
     val choices by vm.choices.collectAsStateWithLifecycle()
+    val totalsFailed by vm.totalsFailed.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
     val query = draft.query
     val new = id == null
@@ -220,8 +254,13 @@ fun LiveListEditScreen(
         })
     }
 
+    // The editor's own lines above the preview's songs.
+    val above = 7 + (if (query.asksMatch()) 1 else 0) + (if (starters) 1 + LiveListStarters.size else 0)
+    val state = rememberLazyListState()
+    val items = rememberListRows(vm.preview, state, above = above)
+
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding()) {
+        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
             // Back leaves, asking first when there are changes; the save is
             // on the control line.
             item(key = "title") {
@@ -286,17 +325,31 @@ fun LiveListEditScreen(
                     item(key = "starter:${starter.name}") { StarterLine(starter) { vm.make(starter, onSaved) } }
                 }
             }
-            val songs = preview
-            if (songs != null) {
-                item(key = "count") {
-                    Text(
-                        if (songs.isEmpty()) NO_RULE_MATCHES else matchWords(songs.size),
-                        style = OctoType.caption,
-                        color = OctoColors.TextMuted,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
+            // How many the rules pick, or why that could not be worked out
+            // over what they picked before; nothing before the first walk.
+            val now = when (val s = shown) {
+                is LiveShown.Shown -> s
+                is LiveShown.Problem -> s.before
+                LiveShown.Loading -> null
+            }
+            val problem = (shown as? LiveShown.Problem)?.words
+            item(key = "count") {
+                Column {
+                    if (problem != null) ProblemLine(problem, if (totalsFailed) vm::tryAgain else null)
+                    if (now != null) {
+                        Text(
+                            if (now.count == 0) NO_RULE_MATCHES else matchWords(now.count),
+                            style = OctoType.caption,
+                            color = OctoColors.TextMuted,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
+                    }
                 }
-                itemsIndexed(songs, key = { _, track -> track.id }) { index, track -> SongRow(track) { vm.play(index) } }
+            }
+            if (now != null) {
+                listRows(items, null, heading = {}) { item ->
+                    if (item == null) RowPlaceholder() else SongRow(item.row) { vm.play(item) }
+                }
             }
         }
         GlassPopup(

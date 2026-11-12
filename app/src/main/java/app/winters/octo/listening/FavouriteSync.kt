@@ -4,9 +4,12 @@ import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.LikedAlbumEntity
 import app.winters.octo.catalog.LikedArtistEntity
 import app.winters.octo.catalog.ServerCopy
+import app.winters.octo.catalog.serverAlbumCounts
+import app.winters.octo.catalog.serverArtistCounts
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
+import app.winters.octo.subsonic.StarredKind
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CoroutineScope
@@ -37,33 +40,34 @@ fun favouriteCall(client: SubsonicClient, kind: FavouriteKind, star: Boolean): s
 // local. Nothing here shows an error; a change that fails to send is tried
 // again shortly, and the next sync catches whatever is still left.
 @Singleton
-class FavouriteSync @Inject constructor(
-    private val sessions: SessionRepository,
+class FavouriteSync internal constructor(
+    // The sign-in state now.
+    private val state: () -> SessionState,
     private val favourites: FavouritesDao,
     private val store: FavouriteSyncStore,
+    private val listening: ListeningDao,
 ) {
+    @Inject constructor(sessions: SessionRepository, favourites: FavouritesDao, store: FavouriteSyncStore, listening: ListeningDao) :
+        this({ sessions.state.value }, favourites, store, listening)
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
 
-    // Runs after each sync of the server's library.
+    // Runs after each sync of the server's library, after ListeningSync has
+    // taken in the server's stars.
     suspend fun afterSync() {
         val session = signedIn() ?: return
-        val client = session.client
         // Without the server's stars as they are now, nothing can be decided.
-        val starred = try {
-            client.starred()
-        } catch (e: SubsonicException) {
-            return
-        }
+        val generation = listening.completeStarred() ?: return
         lock.withLock {
             val albums = copies(session, FavouriteKind.Album)
             if (albums.isNotEmpty()) {
-                val times = starred.album.associate { it.id to parseServerTime(it.starred) }
+                val times = listening.starredOf(generation, StarredKind.Album.wire).associate { it.id to parseServerTime(it.starredAt) }
                 reconcile(session, FavouriteKind.Album, albums, likedIds(FavouriteKind.Album), times)
             }
             val artists = copies(session, FavouriteKind.Artist)
             if (artists.isNotEmpty()) {
-                val times = starred.artist.associate { it.id to parseServerTime(it.starred) }
+                val times = listening.starredOf(generation, StarredKind.Artist.wire).associate { it.id to parseServerTime(it.starredAt) }
                 reconcile(session, FavouriteKind.Artist, artists, likedIds(FavouriteKind.Artist), times)
             }
         }
@@ -81,7 +85,7 @@ class FavouriteSync @Inject constructor(
     // One try at sending a change. True when nothing is left to send.
     private suspend fun sendChange(kind: FavouriteKind, libraryId: String, liked: Boolean): Boolean {
         // No server at all means nothing to send; one still signing in is tried again.
-        if (sessions.state.value is SessionState.SignedOut) return true
+        if (state() is SessionState.SignedOut) return true
         val session = signedIn() ?: return false
         return lock.withLock {
             val ids = idsToSend(copies(session, kind), libraryId, liked, likedNow = libraryId in likedIds(kind))
@@ -140,7 +144,7 @@ class FavouriteSync @Inject constructor(
         ids.sorted().chunked(FAVOURITE_BATCH).filter { failureOf { call(it) } != null }.flatten().toSet()
 
     // The signed-in session, if there is one.
-    private fun signedIn(): Session? = (sessions.state.value as? SessionState.SignedIn)?.session
+    private fun signedIn(): Session? = (state() as? SessionState.SignedIn)?.session
 
     // Runs a server call, handing back what went wrong, if anything.
     private suspend fun failureOf(call: suspend () -> Unit): SubsonicException? =

@@ -6,9 +6,12 @@ import android.net.Network
 import app.winters.octo.BuildConfig
 import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.OnlineDao
+import app.winters.octo.catalog.RENAME_SONG
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.catalog.songDetails
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.RealLengths
 import app.winters.octo.playback.isOpenedFile
 import app.winters.octo.playback.isRadio
@@ -37,12 +40,17 @@ class ListenBrainzSync @Inject constructor(
     @ApplicationContext private val context: Context,
     http: OkHttpClient,
     private val store: ListenBrainzStore,
-    private val catalog: CatalogDao,
-    private val sources: SourceDao,
-    private val online: OnlineDao,
+    catalog: CatalogDao,
+    sources: SourceDao,
+    online: OnlineDao,
+    // The renames a save part way has in force.
+    user: UserDao,
     // Real lengths learned by playing, for songs whose listing was wrong.
-    private val lengths: RealLengths,
+    lengths: RealLengths,
+    // Finds a start plays before their rows are written.
+    finds: FindMap,
 ) {
+    private val songs = ListenedSongs(catalog, sources, online, user, lengths, finds)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val api = ListenBrainzApi(listenBrainzClient(http, "Octo/${BuildConfig.VERSION_NAME} (Android)"))
     private val sending = Mutex()
@@ -80,7 +88,7 @@ class ListenBrainzSync @Inject constructor(
         scope.launch {
             val prefs = store.current()
             if (!prefs.keepsPlays) return@launch
-            val song = songOf(trackId) ?: return@launch
+            val song = songs.of(trackId) ?: return@launch
             if (!shouldSend(prefs.sendPlays, song.reachesServer)) return@launch
             val listen = song.listenAt(startedAt) ?: return@launch
             store.addListen(listen)
@@ -89,12 +97,13 @@ class ListenBrainzSync @Inject constructor(
     }
 
     // A song started. ListenBrainz shows it as playing now; a failure here
-    // does not matter, as the next song replaces it.
+    // does not matter, as the next song replaces it. The player's id may
+    // be one a save renamed since; the song is read by the id it is now.
     fun nowPlaying(trackId: String) {
         scope.launch {
             val prefs = store.current()
             if (!prefs.sends || !prefs.nowPlaying) return@launch
-            val song = songOf(trackId) ?: return@launch
+            val song = songs.of(trackId) ?: return@launch
             if (!shouldSend(prefs.sendPlays, song.reachesServer)) return@launch
             val listen = song.listenAt(System.currentTimeMillis()) ?: return@launch
             val token = store.token() ?: return@launch
@@ -199,25 +208,39 @@ class ListenBrainzSync @Inject constructor(
         }
     }
 
-    // What the app knows about a song that played. Radio streams are left
-    // out; an opened file goes only when it has a title and artist.
-    private suspend fun songOf(trackId: String): PlayedSong? = listedSongOf(trackId)?.let { it.copy(durationMs = lengths.lengthMs(trackId, it.durationMs)) }
+}
 
-    private suspend fun listedSongOf(trackId: String): PlayedSong? = when {
+// What the app knows about a song that played. Radio streams are left out;
+// an opened file goes only when it has a title and artist. A library song
+// is read by the id it is now: the player's id may be one a save renamed,
+// which names no song once the save has moved its rows.
+internal class ListenedSongs(
+    private val catalog: CatalogDao,
+    private val sources: SourceDao,
+    private val online: OnlineDao,
+    private val user: UserDao,
+    private val lengths: RealLengths,
+    private val finds: FindMap,
+) {
+    suspend fun of(trackId: String): PlayedSong? = listed(trackId)?.let { it.copy(durationMs = lengths.lengthMs(trackId, it.durationMs)) }
+
+    private suspend fun listed(trackId: String): PlayedSong? = when {
         isRadio(trackId) -> null
         isOpenedFile(trackId) -> openedFileOf(trackId)?.let { PlayedSong(it.title, it.artist, "", 0, null, reachesServer = false) }
-        isFind(trackId) -> online.song(trackId)?.let { PlayedSong(it.title, it.artist, it.album, it.durationMs, null, reachesServer = true) }
-        else -> catalog.track(trackId)?.let { track ->
-            val copies = sources.copies(trackId)
-            val details = songDetails(copies)
-            PlayedSong(
-                track.title, track.artist, track.album, track.durationMs, track.trackNo,
-                playReachesServer(trackId, copies.map { it.sourceId }),
-                recordingMbid = details.mbRecordingId,
-                releaseMbid = details.mbAlbumId,
-                releaseGroupMbid = details.mbReleaseGroupId,
-                artistMbids = details.mbArtistIds,
-            )
-        }
+        isFind(trackId) -> (online.song(trackId) ?: finds[trackId])?.let { PlayedSong(it.title, it.artist, it.album, it.durationMs, null, reachesServer = true) }
+        else -> library(user.currentId(RENAME_SONG, trackId))
+    }
+
+    private suspend fun library(id: String): PlayedSong? = catalog.track(id)?.let { track ->
+        val copies = sources.copies(id)
+        val details = songDetails(copies)
+        PlayedSong(
+            track.title, track.artist, track.album, track.durationMs, track.trackNo,
+            playReachesServer(id, copies.map { it.sourceId }),
+            recordingMbid = details.mbRecordingId,
+            releaseMbid = details.mbAlbumId,
+            releaseGroupMbid = details.mbReleaseGroupId,
+            artistMbids = details.mbArtistIds,
+        )
     }
 }

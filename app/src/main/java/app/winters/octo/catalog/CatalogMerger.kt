@@ -1,32 +1,49 @@
 package app.winters.octo.catalog
 
-import kotlin.math.abs
-
-// Everything one source has.
-data class SourceCatalog(
-    val sourceId: String,
-    // Whether the source is the phone's own files.
-    val onPhone: Boolean,
-    val tracks: List<SourceTrackEntity>,
-    val albums: List<SourceAlbumEntity>,
-    val artists: List<SourceArtistEntity>,
-)
-
-// The library as the screens read it, and which library song each source
-// copy became.
-data class MergedCatalog(
-    val tracks: List<TrackEntity>,
-    val albums: List<AlbumEntity>,
-    val artists: List<ArtistEntity>,
-    val mergedIds: Map<String, String>,
-)
+import android.database.Cursor
+import androidx.room.RoomRawQuery
+import androidx.room.withTransaction
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteStatement
+import app.winters.octo.device.DEVICE
+import java.io.Closeable
 
 // Two copies of a song count as the same one if their lengths differ by
 // no more than this.
 private const val SAME_LENGTH_MS = 3_000L
 
+// How many rows the merge reads or places at a time.
+internal const val MERGE_PAGE = 500
+
+// Raised whenever the rules below change what a merge makes, so the next
+// merge runs even when no source changed.
+const val MERGE_RULES_VERSION = 1
+
+// One source as a merge reads it: its place in the order, and whether its
+// rows are a copy waiting to be swapped in (stage_*) or its live ones.
+internal class MergeSource(val sourceId: String, val rank: Int, val staged: Boolean) {
+    val onPhone get() = sourceId == DEVICE
+    val trackTable get() = if (staged) "stage_track" else "source_track"
+    val albumTable get() = if (staged) "stage_album" else "source_album"
+    val artistTable get() = if (staged) "stage_artist" else "source_artist"
+}
+
+// Hears how far a merge is: each page of a source's songs placed, then
+// once every song is.
+internal interface MergeProgress {
+    fun page(source: MergeSource, rows: Int) {}
+
+    fun placed() {}
+
+    companion object {
+        val None: MergeProgress = object : MergeProgress {}
+    }
+}
+
 // Merges the sources into one library, so something on the phone and on a
-// server shows once.
+// server shows once. The library comes out in merge_candidate (songs),
+// album_next and artist_next, and which library song each copy became in
+// merged_id_next; the swap (CatalogMerge) puts them in place.
 //
 // - Artists match by name, albums by album artist and title, and songs by
 //   title and length within an album. Track numbers are not needed, since
@@ -54,127 +71,284 @@ private const val SAME_LENGTH_MS = 3_000L
 //     (songDetails).
 // - Anything only one source has is passed through exactly as it was,
 //   apart from its year, which is its original year when it has one.
-fun mergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
-    // Artists and albums match only across sources: two a source keeps
-    // apart (say, two albums of the same name) stay apart.
-    val artistBases = acrossSources(sources, { it.artists }, { it.id }, { matchKey(it.name) })
-    val artistIdFor = artistBases.idFor
-    val albumBases = acrossSources(sources, { it.albums }, { it.id }, { matchKey(it.artist) + "|" + matchKey(it.title) })
-    val albumIdFor = albumBases.idFor
+//
+// Songs are read a page at a time and placed against the songs placed so
+// far, which sit in merge_candidate, so memory grows with albums and
+// artists only.
+internal class CatalogMerger(
+    private val db: CatalogDatabase,
+    private val work: WorkDao,
+    private val hooks: () -> MergeHooks,
+) {
+    suspend fun merge(sources: List<MergeSource>, progress: MergeProgress = MergeProgress.None): MergeCounts {
+        work.clearMergeWork()
 
-    // Songs, matched within each merged album
-    val inAlbum = HashMap<String, MutableList<MergingSong>>()
-    // Every song so far by title and artist, for the second chance below.
-    val everywhere = HashMap<String, MutableList<MergingSong>>()
-    val mergedIds = HashMap<String, String>()
-    // Each copy's keys, read once, and once for copies tagged alike.
-    val keys = HashMap<String, SongKeys>()
-    val tagged = HashMap<Pair<String, String>, SongKeys>()
-    fun keysOf(track: SourceTrackEntity) = keys.getOrPut(track.id) {
-        tagged.getOrPut(track.artist to track.title) { SongIdentity.songKeys(track.artist, track.title) }
-    }
-    for (source in sources) {
-        // A song matches at most one copy from each source.
-        val taken = HashSet<String>()
-        for (track in source.tracks.sortedBy { it.albumOrder }) {
-            val albumId = albumIdFor[track.albumId] ?: track.albumId
-            val trackKeys = keysOf(track)
-            fun fits(song: MergingSong) = song.id !in taken && song.sources.none { it == source.sourceId } &&
-                keysOf(song.base).title == trackKeys.title &&
-                abs(song.base.durationMs - track.durationMs) <= SAME_LENGTH_MS
-            // First within the matched album. Failing that, the same song by
-            // the same artist anywhere: sources often file an album under a
-            // different album artist or edition name.
-            val match = inAlbum[albumId]?.firstOrNull(::fits)
-                ?: everywhere[trackKeys.matchKey]?.firstOrNull(::fits)
-            if (match != null) {
-                match.add(track, source)
-                taken += match.id
-                mergedIds[track.id] = match.id
-            } else {
-                val song = MergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId)
-                inAlbum.getOrPut(albumId) { mutableListOf() } += song
-                everywhere.getOrPut(trackKeys.matchKey) { mutableListOf() } += song
-                mergedIds[track.id] = song.id
+        // Artists and albums match only across sources: two a source keeps
+        // apart (say, two albums of the same name) stay apart.
+        val artistBases = acrossSources(
+            sources,
+            { source, after -> work.artistPage(seqPageQuery(source.artistTable, source.sourceId, after)) },
+            { it.seq }, { it.id }, { matchKey(it.name) },
+        )
+        val artistIdFor = artistBases.idFor
+        val albumBases = acrossSources(
+            sources,
+            { source, after -> work.albumPage(seqPageQuery(source.albumTable, source.sourceId, after)) },
+            { it.seq }, { it.id }, { matchKey(it.artist) + "|" + matchKey(it.title) },
+        )
+        val albumIdFor = albumBases.idFor
+
+        val placed = Placed()
+        var firstWritten = false
+        for (source in sources) {
+            // From the third source on, every song is open to it again: none
+            // has a copy from it yet. Matches below mark theirs taken.
+            if (source.rank > 1) reopenSongs()
+            // The first page starts below every row: any id sorts after "".
+            var after = PageKey(Int.MIN_VALUE, Long.MIN_VALUE, "")
+            while (true) {
+                val page = work.trackPage(trackPageQuery(source.trackTable, source.sourceId, after))
+                if (page.isEmpty()) break
+                // A song that comes in new files under its title's lookup
+                // keys, read before the page's transaction takes the lock.
+                val lookups = page.map { titleLookup(it.title, it.artist) }
+                db.withTransaction {
+                    PageWriter(db.openHelper.writableDatabase).use { writer ->
+                        page.forEachIndexed { i, track -> place(track, lookups[i], source, writer, placed, albumIdFor, artistIdFor) }
+                    }
+                }
+                if (!firstWritten) {
+                    firstWritten = true
+                    hooks().firstOutputWritten()
+                }
+                progress.page(source, page.size)
+                val last = page.last()
+                after = PageKey(last.albumOrder, last.seq, last.id)
             }
         }
+        progress.placed()
+
+        orderMixedAlbums(placed)
+        val albumCount = writeAlbums(albumBases, artistIdFor, placed)
+        val artistCount = writeArtists(artistBases, sources.firstOrNull()?.sourceId, placed)
+        return MergeCounts(placed.total, albumCount, artistCount)
+    }
+
+    // What the songs placed so far add up to, by album and artist.
+    private class Placed {
+        var total = 0
+        var nextSeq = 0L
+        // The source rank that made each album's first song.
+        val albumMadeBy = HashMap<String, Int>()
+        // Albums filled from more than one source.
+        val mixed = HashSet<String>()
+        val albumSongs = HashMap<String, Int>()
+        val albumMs = HashMap<String, Long>()
+        val artistSongs = HashMap<String, Int>()
+        // Library albums per artist, filled while albums are written.
+        val albumsByArtist = HashMap<String, Int>()
+    }
+
+    private fun place(
+        track: SourceTrackEntity,
+        lookup: TitleLookup,
+        source: MergeSource,
+        writer: PageWriter,
+        placed: Placed,
+        albumIdFor: Map<String, String>,
+        artistIdFor: Map<String, String>,
+    ) {
+        val keys = if (track.keysVersion == SONG_KEYS_VERSION) track else track.withKeys()
+        val albumId = albumIdFor[track.albumId] ?: track.albumId
+        // First within the matched album. Failing that, the same song by the
+        // same artist anywhere: sources often file an album under a
+        // different album artist or edition name. The first source has
+        // nothing before it to match.
+        val match = if (source.rank == 0) {
+            null
+        } else {
+            writer.fit(FIT_IN_ALBUM_SQL, albumId, keys.titleKey, track.durationMs)
+                ?: writer.fit(FIT_ANYWHERE_SQL, keys.matchKey, keys.titleKey, track.durationMs)
+        }
+        if (match != null) {
+            writer.add(match, track, source)
+            writer.link(track.id, match.id)
+            placed.mixed += match.albumId
+            return
+        }
+        val artistId = artistIdFor[track.artistId] ?: track.artistId
+        writer.create(track, keys, lookup, source, albumId, artistId, placed.nextSeq++)
+        writer.link(track.id, track.id)
+        val firstRank = placed.albumMadeBy.getOrPut(albumId) { source.rank }
+        if (firstRank != source.rank) placed.mixed += albumId
+        placed.albumSongs[albumId] = (placed.albumSongs[albumId] ?: 0) + 1
+        placed.albumMs[albumId] = (placed.albumMs[albumId] ?: 0L) + track.durationMs
+        placed.artistSongs[artistId] = (placed.artistSongs[artistId] ?: 0) + 1
+        placed.total++
     }
 
     // Album order: an album filled from more than one source is put in
     // track number order when every song has one; otherwise its songs keep
-    // the order they came in. Single-source albums keep their own order.
-    val tracks = ArrayList<TrackEntity>(mergedIds.size)
-    for ((_, songs) in inAlbum) {
-        val mixed = songs.flatMap { it.sources }.toSet().size > 1
-        val ordered = when {
-            !mixed -> songs.map { it.toTrack(it.base.albumOrder) }
-            songs.all { it.trackNo != null } ->
-                songs.sortedWith(compareBy({ it.discNo ?: 1 }, { it.trackNo }))
-                    .mapIndexed { index, song -> song.toTrack(index) }
-            else -> songs.mapIndexed { index, song -> song.toTrack(index) }
+    // the order they came in. Single-source albums keep their own order,
+    // which each song brought with it.
+    private suspend fun orderMixedAlbums(placed: Placed) {
+        val sql = db.openHelper.writableDatabase
+        for (albumId in placed.mixed) {
+            val numbered = !exists(sql, "SELECT EXISTS(SELECT 1 FROM merge_candidate WHERE albumId = ?1 AND trackNo IS NULL)", albumId)
+            var order = 0
+            var disc = Int.MIN_VALUE.toLong()
+            var number = Int.MIN_VALUE.toLong()
+            var seq = Long.MIN_VALUE
+            while (true) {
+                val ids = ArrayList<String>(MERGE_PAGE)
+                if (numbered) {
+                    sql.query(BY_TRACK_NUMBER_SQL, arrayOf<Any?>(albumId, disc, number, seq)).use { c ->
+                        while (c.moveToNext()) {
+                            ids += c.getString(0)
+                            disc = c.getLong(1)
+                            number = c.getLong(2)
+                            seq = c.getLong(3)
+                        }
+                    }
+                } else {
+                    sql.query(BY_ARRIVAL_SQL, arrayOf<Any?>(albumId, seq)).use { c ->
+                        while (c.moveToNext()) {
+                            ids += c.getString(0)
+                            seq = c.getLong(1)
+                        }
+                    }
+                }
+                if (ids.isEmpty()) break
+                db.withTransaction {
+                    db.openHelper.writableDatabase.compileStatement("UPDATE merge_candidate SET albumOrder = ?1 WHERE id = ?2").use { update ->
+                        for (id in ids) {
+                            update.bindAll(order++, id)
+                            update.executeUpdateDelete()
+                        }
+                    }
+                }
+            }
         }
-        tracks += ordered
     }
-    val tracksByAlbum = tracks.groupBy { it.albumId }
 
     // An album whose songs all turned out to be copies of songs already in
     // another album has nothing left, and is left out.
-    val albums = albumBases.bases.filter { it.id in tracksByAlbum }.map { base ->
-        val extras = albumBases.extras[base.id].orEmpty()
-        val albumTracks = tracksByAlbum.getValue(base.id)
-        // Counts are only worked out again for albums whose songs changed:
-        // made from several sources, or with songs gone to another album.
-        val recount = extras.isNotEmpty() || albumTracks.size != base.songCount
-        AlbumEntity(
-            id = base.id,
-            sourceId = base.sourceId,
-            nativeId = base.nativeId,
-            title = base.title,
-            searchKey = base.searchKey,
-            sortKey = base.sortKey,
-            artist = base.artist,
-            artistId = artistIdFor[base.artistId] ?: base.artistId,
-            year = base.year ?: extras.firstNotNullOfOrNull { it.year },
-            songCount = if (recount) albumTracks.size else base.songCount,
-            durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
-            addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
-            artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
-            releaseTypes = base.releaseTypes.ifEmpty { extras.firstOrNull { it.releaseTypes.isNotEmpty() }?.releaseTypes.orEmpty() },
-        )
+    private suspend fun writeAlbums(bases: Matched<SourceAlbumEntity>, artistIdFor: Map<String, String>, placed: Placed): Int {
+        var count = 0
+        val batch = ArrayList<AlbumNextEntity>(MERGE_PAGE)
+        for (base in bases.bases) {
+            val songs = placed.albumSongs[base.id] ?: continue
+            val extras = bases.extras[base.id].orEmpty()
+            // Counts are only worked out again for albums whose songs changed:
+            // made from several sources, or with songs gone to another album.
+            val recount = extras.isNotEmpty() || songs != base.songCount
+            val album = AlbumEntity(
+                id = base.id,
+                sourceId = base.sourceId,
+                nativeId = base.nativeId,
+                title = base.title,
+                searchKey = base.searchKey,
+                sortKey = base.sortKey,
+                artist = base.artist,
+                artistId = artistIdFor[base.artistId] ?: base.artistId,
+                year = base.year ?: extras.firstNotNullOfOrNull { it.year },
+                songCount = if (recount) songs else base.songCount,
+                durationMs = if (recount) placed.albumMs[base.id] ?: 0L else base.durationMs,
+                addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
+                artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
+                releaseTypes = base.releaseTypes.ifEmpty { extras.firstOrNull { it.releaseTypes.isNotEmpty() }?.releaseTypes.orEmpty() },
+            )
+            placed.albumsByArtist[album.artistId] = (placed.albumsByArtist[album.artistId] ?: 0) + 1
+            batch += AlbumNextEntity(album)
+            count++
+            if (batch.size == MERGE_PAGE) {
+                work.insertAlbumNext(batch)
+                batch.clear()
+            }
+        }
+        if (batch.isNotEmpty()) work.insertAlbumNext(batch)
+        return count
     }
 
     // Artists from a later source with nothing left of their own are left
-    // out too; the phone's artists always stay as they were.
-    val firstSource = sources.firstOrNull()?.sourceId
-    val artists = artistBases.bases.mapNotNull { base ->
-        val several = artistBases.extras[base.id].orEmpty().isNotEmpty()
-        val later = base.sourceId != firstSource
-        val albumCount = albums.count { it.artistId == base.id }
-        val songCount = tracks.count { it.artistId == base.id }
-        if (later && albumCount == 0 && songCount == 0) return@mapNotNull null
-        ArtistEntity(
-            id = base.id,
-            sourceId = base.sourceId,
-            name = base.name,
-            searchKey = base.searchKey,
-            sortKey = base.sortKey,
-            albumCount = if (several || later) albumCount else base.albumCount,
-            songCount = if (several || later) songCount else base.songCount,
-            artwork = base.artwork,
-        )
+    // out too; the first source's artists always stay as they were.
+    private suspend fun writeArtists(bases: Matched<SourceArtistEntity>, firstSource: String?, placed: Placed): Int {
+        var count = 0
+        val batch = ArrayList<ArtistNextEntity>(MERGE_PAGE)
+        for (base in bases.bases) {
+            val several = bases.extras[base.id].orEmpty().isNotEmpty()
+            val later = base.sourceId != firstSource
+            val albumCount = placed.albumsByArtist[base.id] ?: 0
+            val songCount = placed.artistSongs[base.id] ?: 0
+            if (later && albumCount == 0 && songCount == 0) continue
+            batch += ArtistNextEntity(
+                ArtistEntity(
+                    id = base.id,
+                    sourceId = base.sourceId,
+                    name = base.name,
+                    searchKey = base.searchKey,
+                    sortKey = base.sortKey,
+                    albumCount = if (several || later) albumCount else base.albumCount,
+                    songCount = if (several || later) songCount else base.songCount,
+                    artwork = base.artwork,
+                ),
+            )
+            count++
+            if (batch.size == MERGE_PAGE) {
+                work.insertArtistNext(batch)
+                batch.clear()
+            }
+        }
+        if (batch.isNotEmpty()) work.insertArtistNext(batch)
+        return count
     }
 
-    return MergedCatalog(tracks, albums, artists, mergedIds)
+    // Every song placed so far is open to the next source again, a page of
+    // them a transaction in the order they were placed, so no write holds
+    // the lock for every song and none runs outside a transaction.
+    private suspend fun reopenSongs() {
+        var after = Long.MIN_VALUE
+        while (true) {
+            val end = db.withTransaction {
+                val sql = db.openHelper.writableDatabase
+                val last = sql.query(REOPEN_PAGE_END_SQL, arrayOf<Any?>(after)).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+                if (last == null) {
+                    sql.execSQL(REOPEN_REST_SQL, arrayOf<Any?>(after))
+                } else {
+                    sql.execSQL(REOPEN_PAGE_SQL, arrayOf<Any?>(after, last))
+                }
+                last
+            } ?: return
+            after = end
+        }
+    }
+
+    private fun exists(sql: SupportSQLiteDatabase, query: String, vararg args: Any?): Boolean =
+        sql.query(query, args).use { it.moveToFirst() && it.getLong(0) != 0L }
 }
+
+// Where a page of placed songs ends, by the order they were placed: the
+// last of the page's MERGE_PAGE songs, none when fewer are left. Then the
+// page, or every song left, opened to the next source.
+internal const val REOPEN_PAGE_END_SQL =
+    "SELECT seq FROM merge_candidate WHERE seq > ?1 ORDER BY seq LIMIT 1 OFFSET ${MERGE_PAGE - 1}"
+internal const val REOPEN_PAGE_SQL =
+    "UPDATE merge_candidate SET lastSourceRank = 0 WHERE seq > ?1 AND seq <= ?2 AND lastSourceRank != 0"
+internal const val REOPEN_REST_SQL = "UPDATE merge_candidate SET lastSourceRank = 0 WHERE seq > ?1 AND lastSourceRank != 0"
+
+// Where a page of a source's songs ends: its last row's place in album,
+// source order and id.
+internal class PageKey(val order: Int, val seq: Long, val id: String)
 
 // Things matched across sources: the first copy of each (the base, whose
 // id the library uses), the other copies of it, and which base every copy
 // belongs to.
-private class Matched<T>(val bases: List<T>, val extras: Map<String, List<T>>, val idFor: Map<String, String>)
+internal class Matched<T>(val bases: List<T>, val extras: Map<String, List<T>>, val idFor: Map<String, String>)
 
-private fun <T> acrossSources(
-    sources: List<SourceCatalog>,
-    items: (SourceCatalog) -> List<T>,
+private suspend fun <T> acrossSources(
+    sources: List<MergeSource>,
+    page: suspend (MergeSource, Long) -> List<T>,
+    seq: (T) -> Long,
     id: (T) -> String,
     key: (T) -> String,
 ): Matched<T> {
@@ -186,90 +360,190 @@ private fun <T> acrossSources(
     val earlier = HashMap<String, ArrayDeque<T>>()
     for (source in sources) {
         val added = HashMap<String, ArrayDeque<T>>()
-        for (item in items(source)) {
-            val k = key(item)
-            val base = earlier[k]?.removeFirstOrNull()
-            if (base != null) {
-                idFor[id(item)] = id(base)
-                extras.getOrPut(id(base)) { mutableListOf() } += item
-            } else {
-                bases += item
-                idFor[id(item)] = id(item)
-                added.getOrPut(k) { ArrayDeque() } += item
+        var after = Long.MIN_VALUE
+        while (true) {
+            val rows = page(source, after)
+            if (rows.isEmpty()) break
+            for (item in rows) {
+                val k = key(item)
+                val base = earlier[k]?.removeFirstOrNull()
+                if (base != null) {
+                    idFor[id(item)] = id(base)
+                    extras.getOrPut(id(base)) { mutableListOf() } += item
+                } else {
+                    bases += item
+                    idFor[id(item)] = id(item)
+                    added.getOrPut(k) { ArrayDeque() } += item
+                }
             }
+            after = seq(rows.last())
         }
         for ((k, list) in added) earlier.getOrPut(k) { ArrayDeque() } += list
     }
     return Matched(bases, extras, idFor)
 }
 
-// One library song while its copies are gathered.
-private class MergingSong(
-    val base: SourceTrackEntity,
-    source: SourceCatalog,
-    val albumId: String,
-    val artistId: String,
-) {
-    val id = base.id
-    val sources = mutableListOf(source.sourceId)
-    var onPhone = source.onPhone
-    var trackNo = base.trackNo
-    var discNo = base.discNo
-    var year = base.year
-    var originalYear = base.originalYear
-    var genre = base.genre
-    var rating = base.rating?.takeIf { it in 1..5 }
-    var explicit = base.explicit
-    var addedAt = base.addedAt
-    var artist = base.artist
-    var credits = splitLines(base.artists).size
+// A library song a copy matched: its id, the album it is in, its title and
+// how many artists its credit names.
+private class Fit(val id: String, val albumId: String, val title: String, val credits: Int)
 
-    fun add(copy: SourceTrackEntity, source: SourceCatalog) {
-        sources += source.sourceId
-        onPhone = onPhone || source.onPhone
-        trackNo = trackNo ?: copy.trackNo
-        discNo = discNo ?: copy.discNo
-        year = year ?: copy.year
-        originalYear = originalYear ?: copy.originalYear
-        if (genre.isEmpty()) genre = copy.genre
-        rating = rating ?: copy.rating?.takeIf { it in 1..5 }
-        explicit = explicit ?: copy.explicit
-        addedAt = earliestAdded(listOf(addedAt, copy.addedAt))
-        val copyCredits = splitLines(copy.artists).size
-        if (copyCredits > credits && copy.artist.isNotBlank()) {
-            artist = copy.artist
-            credits = copyCredits
+// The statements one page of placing songs runs, compiled once a page.
+private class PageWriter(private val sql: SupportSQLiteDatabase) : Closeable {
+    private val insert = sql.compileStatement(INSERT_CANDIDATE_SQL)
+    private val addCopy = sql.compileStatement(ADD_COPY_SQL)
+    private val linkCopy = sql.compileStatement(LINK_SQL)
+
+    fun fit(query: String, key: String, titleKey: String, durationMs: Long): Fit? =
+        sql.query(query, arrayOf<Any?>(key, titleKey, durationMs - SAME_LENGTH_MS, durationMs + SAME_LENGTH_MS)).use { c: Cursor ->
+            if (c.moveToFirst()) Fit(c.getString(0), c.getString(1), c.getString(2), c.getInt(3)) else null
         }
+
+    // A copy joins a library song: today's rules for each field. A copy
+    // whose credit names more artists gives the song its artist, and with
+    // it the title's lookup keys read with that artist; the statement
+    // takes them on the same rule, reading the row it changes.
+    fun add(match: Fit, copy: SourceTrackEntity, source: MergeSource) {
+        val credits = splitLines(copy.artists).size
+        val keys = if (credits > match.credits && copy.artist.isNotBlank()) titleLookup(match.title, copy.artist) else null
+        addCopy.bindAll(
+            copy.trackNo, copy.discNo, copy.year, copy.originalYear, copy.genre, copy.rating, copy.explicit,
+            copy.addedAt, credits, copy.artist.isNotBlank(), copy.artist, source.onPhone,
+            source.rank, match.id, keys?.lookupKey, keys?.looseKey,
+        )
+        addCopy.executeUpdateDelete()
     }
 
-    fun toTrack(order: Int) = TrackEntity(
-        id = base.id,
-        sourceId = base.sourceId,
-        nativeId = base.nativeId,
-        title = base.title,
-        searchKey = base.searchKey,
-        sortKey = base.sortKey,
-        artist = artist,
-        artistId = artistId,
-        album = base.album,
-        albumId = albumId,
-        trackNo = trackNo,
-        discNo = discNo,
-        year = originalYear ?: year,
-        durationMs = base.durationMs,
-        addedAt = addedAt,
-        mimeType = base.mimeType,
-        sizeBytes = base.sizeBytes,
-        artwork = base.artwork,
-        uri = base.uri,
-        albumOrder = order,
-        relinkKey = base.relinkKey,
-        genre = genre,
-        onPhone = onPhone,
-        rating = rating ?: 0,
-        explicit = explicit,
-    )
+    // A copy no song matched becomes a library song of its own, filed under
+    // its title's lookup keys (`lookup`, read with its artist).
+    fun create(
+        base: SourceTrackEntity,
+        keys: SourceTrackEntity,
+        lookup: TitleLookup,
+        source: MergeSource,
+        albumId: String,
+        artistId: String,
+        seq: Long,
+    ) {
+        insert.bindAll(
+            base.id, base.sourceId, base.nativeId, base.title, base.searchKey, base.sortKey, base.artist, artistId,
+            base.album, albumId, base.trackNo, base.discNo, base.year, base.durationMs, base.addedAt, base.mimeType,
+            base.sizeBytes, base.artwork, base.uri, base.albumOrder, base.relinkKey, base.genre, source.onPhone,
+            base.rating?.takeIf { it in 1..5 } ?: 0, base.explicit, "", "", lookup.lookupKey, lookup.looseKey,
+            seq, keys.titleKey, keys.matchKey, base.originalYear, splitLines(base.artists).size, base.discNo ?: 1,
+            source.rank, source.rank, false,
+        )
+        insert.executeInsert()
+    }
+
+    fun link(sourceRowId: String, mergedId: String) {
+        linkCopy.bindAll(sourceRowId, mergedId)
+        linkCopy.executeInsert()
+    }
+
+    override fun close() {
+        insert.close()
+        addCopy.close()
+        linkCopy.close()
+    }
 }
+
+internal fun SupportSQLiteStatement.bindAll(vararg args: Any?) {
+    clearBindings()
+    args.forEachIndexed { index, value ->
+        val at = index + 1
+        when (value) {
+            null -> bindNull(at)
+            is String -> bindString(at, value)
+            is Boolean -> bindLong(at, if (value) 1 else 0)
+            is Int -> bindLong(at, value.toLong())
+            is Long -> bindLong(at, value)
+            is Float -> bindDouble(at, value.toDouble())
+            is Double -> bindDouble(at, value)
+            else -> error("cannot bind ${value::class.simpleName}")
+        }
+    }
+}
+
+// A page of a source's songs in the order the merge reads them: by place
+// in album, then source order, then id.
+internal fun trackPageSql(table: String) =
+    "SELECT * FROM `$table` WHERE sourceId = ?1 AND (albumOrder, seq, id) > (?2, ?3, ?4) " +
+        "ORDER BY albumOrder, seq, id LIMIT $MERGE_PAGE"
+
+internal fun seqPageSql(table: String) =
+    "SELECT * FROM `$table` WHERE sourceId = ?1 AND seq > ?2 ORDER BY seq LIMIT $MERGE_PAGE"
+
+private fun trackPageQuery(table: String, sourceId: String, after: PageKey): RoomRawQuery =
+    RoomRawQuery(trackPageSql(table)) { statement ->
+        statement.bindText(1, sourceId)
+        statement.bindLong(2, after.order.toLong())
+        statement.bindLong(3, after.seq)
+        statement.bindText(4, after.id)
+    }
+
+private fun seqPageQuery(table: String, sourceId: String, after: Long): RoomRawQuery =
+    RoomRawQuery(seqPageSql(table)) { statement ->
+        statement.bindText(1, sourceId)
+        statement.bindLong(2, after)
+    }
+
+// The library song already placed that a copy belongs to: not yet given a
+// copy by this source (lastSourceRank 0), with the same title, within the
+// length allowed, the first placed. In the copy's album first, then
+// anywhere by the same artist.
+internal const val FIT_IN_ALBUM_SQL =
+    "SELECT id, albumId, title, credits FROM merge_candidate WHERE albumId = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
+        "AND durationMs BETWEEN ?3 AND ?4 ORDER BY seq LIMIT 1"
+
+internal const val FIT_ANYWHERE_SQL =
+    "SELECT id, albumId, title, credits FROM merge_candidate WHERE matchKey = ?1 AND titleKey = ?2 AND lastSourceRank = 0 " +
+        "AND durationMs BETWEEN ?3 AND ?4 ORDER BY seq LIMIT 1"
+
+// Every value on the right reads the row as it was, so discKey follows the
+// disc number the row ends with, and the lookup keys (?15, ?16) are taken
+// exactly when the artist is. Both are null when the copy gives the song
+// no artist, so a row that took an artist without its keys fails.
+internal const val ADD_COPY_SQL = """
+    UPDATE merge_candidate SET
+        trackNo = COALESCE(trackNo, ?1),
+        discNo = COALESCE(discNo, ?2),
+        discKey = COALESCE(discNo, ?2, 1),
+        year = COALESCE(year, ?3),
+        originalYear = COALESCE(originalYear, ?4),
+        genre = CASE WHEN genre = '' THEN ?5 ELSE genre END,
+        rating = CASE WHEN rating BETWEEN 1 AND 5 THEN rating WHEN ?6 BETWEEN 1 AND 5 THEN ?6 ELSE 0 END,
+        explicit = COALESCE(explicit, ?7),
+        addedAt = CASE WHEN addedAt > 0 AND ?8 > 0 THEN MIN(addedAt, ?8) WHEN addedAt > 0 THEN addedAt
+            WHEN ?8 > 0 THEN ?8 ELSE 0 END,
+        artist = CASE WHEN ?9 > credits AND ?10 THEN ?11 ELSE artist END,
+        lookupKey = CASE WHEN ?9 > credits AND ?10 THEN ?15 ELSE lookupKey END,
+        looseKey = CASE WHEN ?9 > credits AND ?10 THEN ?16 ELSE looseKey END,
+        credits = CASE WHEN ?9 > credits AND ?10 THEN ?9 ELSE credits END,
+        onPhone = onPhone OR ?12,
+        lastSourceRank = ?13,
+        mixed = 1
+    WHERE id = ?14
+"""
+
+internal val CANDIDATE_COLUMNS = listOf(
+    "id", "sourceId", "nativeId", "title", "searchKey", "sortKey", "artist", "artistId", "album", "albumId",
+    "trackNo", "discNo", "year", "durationMs", "addedAt", "mimeType", "sizeBytes", "artwork", "uri", "albumOrder",
+    "relinkKey", "genre", "onPhone", "rating", "explicit", "artistSortKey", "albumSortKey", "lookupKey", "looseKey",
+    "seq", "titleKey", "matchKey", "originalYear", "credits", "discKey", "lastSourceRank", "createdRank", "mixed",
+)
+
+private val INSERT_CANDIDATE_SQL =
+    "INSERT INTO merge_candidate (${CANDIDATE_COLUMNS.joinToString { "`$it`" }}) " +
+        "VALUES (${CANDIDATE_COLUMNS.joinToString { "?" }})"
+
+private const val LINK_SQL = "INSERT OR REPLACE INTO merged_id_next (sourceRowId, mergedId) VALUES (?1, ?2)"
+
+internal const val BY_ARRIVAL_SQL =
+    "SELECT id, seq FROM merge_candidate WHERE albumId = ?1 AND seq > ?2 ORDER BY seq LIMIT $MERGE_PAGE"
+
+internal const val BY_TRACK_NUMBER_SQL =
+    "SELECT id, discKey, trackNo, seq FROM merge_candidate WHERE albumId = ?1 " +
+        "AND (discKey, trackNo, seq) > (?2, ?3, ?4) ORDER BY discKey, trackNo, seq LIMIT $MERGE_PAGE"
 
 // The earliest of some times added, leaving out unknown ones (0 or less).
 internal fun earliestAdded(times: List<Long>): Long = times.filter { it > 0 }.minOrNull() ?: 0

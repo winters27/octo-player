@@ -2,7 +2,6 @@ package app.winters.octo.playback
 
 import app.winters.octo.covers.CoverGlyph
 import app.winters.octo.covers.PlaylistCoverStyle
-import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -29,20 +28,5 @@ class CarPlaylistArtTest {
     fun otherReferencesAreNotPlaylistArt() {
         assertNull(playlistArtOf("s:server:a"))
         assertNull(playlistArtOf("playlist-art:Nope|x|y|||"))
-    }
-
-    @Test
-    fun songRadioPlaysTheSongThenThoseLikeIt() = runTest {
-        val seed = track("device:1", "Midnight City")
-        val play = (carRadio(seed) { listOf("device:2", "find:3") } as CarPlayAnswer.Play).play
-        assertEquals(listOf("device:1", "device:2", "find:3"), play.ids)
-        assertEquals(QueueSource.Played("Midnight City radio"), play.source)
-        assertEquals(true, play.network)
-    }
-
-    @Test
-    fun songRadioWithNothingLikeItSaysSo() = runTest {
-        assertEquals(CarPlayAnswer.Refused(NO_SIMILAR_SONGS), carRadio(track("device:1")) { emptyList() })
-        assertEquals(CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY), carRadio(null) { listOf("x") })
     }
 }

@@ -1,6 +1,7 @@
 package app.winters.octo
 
 import app.winters.octo.subsonic.parseFamilyLink
+import app.winters.octo.family.ClipReads
 import app.winters.octo.family.FamilyOpen
 import app.winters.octo.family.FamilyNotifier
 import app.winters.octo.family.FamilyHub
@@ -25,10 +26,19 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import app.winters.octo.catalog.UpgradeGuard
+import app.winters.octo.catalog.UpgradeState
+import app.winters.octo.listening.PlayTotals
+import app.winters.octo.ui.common.UpgradeSpaceScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.update.AppUpdates
 import app.winters.octo.device.DeviceLibrary
@@ -60,6 +70,10 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var imports: ImportInbox
     // The theme showing, kept where the first frame can read it.
     @Inject lateinit var themes: ThemeStore
+    // Whether the library can open, and the space an upgrade still needs.
+    @Inject lateinit var upgradeGuard: UpgradeGuard
+    // Play counts that could not be brought up to date try again on return.
+    @Inject lateinit var totals: PlayTotals
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -92,7 +106,26 @@ class MainActivity : ComponentActivity() {
         // The app opens on the library; servers are an optional add-on.
         setContent {
             ThemeRoot(themes, launchFade = firstScreen || savedInstanceState == null) {
-                ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } }
+                when (val state = upgradeGuard.state.collectAsState().value) {
+                    is UpgradeState.NeedsSpace -> {
+                        var checking by remember { mutableStateOf(false) }
+                        UpgradeSpaceScreen(state.bytes, checking) {
+                            checking = true
+                            lifecycleScope.launch {
+                                val clear = withContext(Dispatchers.IO) { upgradeGuard.retry() }
+                                checking = false
+                                if (clear) {
+                                    (application as OctoApp).startAll()
+                                    recreate()
+                                }
+                            }
+                        }
+                    }
+                    UpgradeState.Clear -> {
+                        ProvideOfflineMarks { ProvideAdoptedFinds { ProvideLearnedLengths { MainShell(library, playback, feedback, openPlayer) } } }
+                    }
+                    UpgradeState.Checking -> Unit
+                }
             }
         }
         publishShortcuts(this)
@@ -122,13 +155,19 @@ class MainActivity : ComponentActivity() {
     }
 
     // Coming to the front: a family link on the clipboard is offered once.
-    // Android lets only the app in front read the clipboard.
+    // Android lets only the app in front read the clipboard, and says so on
+    // every read, so only a new text clip is read (ClipReads).
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) return
-        val clip = runCatching { getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java) ?: return
+        val about = runCatching { clipboard.primaryClipDescription }.getOrNull() ?: return
+        if (!clipReads.due(about.timestamp, about.hasMimeType("text/*"))) return
+        val clip = runCatching { clipboard.primaryClip?.getItemAt(0)?.text?.toString() }.getOrNull()
         family.offerClipboard(clip)
     }
+
+    private val clipReads by lazy { ClipReads(getSharedPreferences("clipboard", MODE_PRIVATE)) }
 
     // A family link (an invite, or a sign-in from another device, from a QR
     // code the camera read or a link tapped) opens the sign-in form filled
@@ -174,6 +213,7 @@ class MainActivity : ComponentActivity() {
         playback.connect()
         // A queue left on another device may be waiting on the server.
         queueSync.check()
+        totals.foreground()
     }
 
     // Letting go lets the service stop itself when nothing is playing.

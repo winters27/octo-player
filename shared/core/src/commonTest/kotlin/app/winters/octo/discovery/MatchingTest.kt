@@ -48,6 +48,39 @@ class MatchingTest {
         assertTrue(sameSong("Nightcall", "Kavinsky", 0, "Nightcall", "Kavinsky", 0, listOf("FR0000000001"), listOf("FR0000000002")))
     }
 
+    private class Side(val title: String, val artist: String, val lengthMs: Long, val isrcs: List<String> = emptyList()) {
+        val parsed = parsedSong(title, artist, lengthMs, isrcs)
+    }
+
+    private fun sameByFields(a: Side, b: Side) = sameSong(a.title, a.artist, a.lengthMs, b.title, b.artist, b.lengthMs, a.isrcs, b.isrcs)
+
+    // sameSong over songs parsed once answers as over their fields: the
+    // cases above, then every first side against every second side, each
+    // parsed song reused for every comparison it is in, twice over.
+    @Test
+    fun songsParsedOnceMatchAsTheirFields() {
+        val code = listOf("JPU901901234")
+        val cases = listOf(
+            Side("Around the World", "Daft Punk", 238_000) to Side("Around the World", "Daft Punk", 429_000),
+            Side("Around the World", "Daft Punk", 0) to Side("Around the World", "Daft Punk", 429_000),
+            Side("Nightcall - Live", "Kavinsky", 0) to Side("Nightcall", "Kavinsky", 179_000),
+            Side("紅蓮華", "LiSA", 239_000, code) to Side("Gurenge", "LiSA", 239_000, listOf("JP-U90-19-01234")),
+            Side("紅蓮華", "LiSA", 0, code) to Side("Gurenge", "LiSA", 0),
+            Side("Nightcall - Live", "Kavinsky", 0, listOf("FR0000000001")) to Side("Nightcall", "Kavinsky", 0, listOf("FR0000000002")),
+            Side("Nightcall", "Kavinsky", 0, listOf("FR0000000001")) to Side("Nightcall", "Kavinsky", 0, listOf("FR0000000002")),
+        )
+        val answers = listOf(false, true, false, true, false, false, true)
+        repeat(2) {
+            cases.forEachIndexed { i, (a, b) ->
+                assertEquals("case $i", answers[i], sameByFields(a, b))
+                assertEquals("case $i", answers[i], sameSong(a.parsed, b.parsed))
+                for ((j, other) in cases.withIndex()) {
+                    assertEquals("case $i against $j", sameByFields(a, other.second), sameSong(a.parsed, other.second.parsed))
+                }
+            }
+        }
+    }
+
     @Test
     fun anIsrcIndexFindsSongsByAnyOfTheirCodes() {
         val library = listOf(

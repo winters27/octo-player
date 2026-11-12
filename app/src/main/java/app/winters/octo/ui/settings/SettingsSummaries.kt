@@ -13,6 +13,8 @@ import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.radio.RadioDiscovery
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.copyStatus
 import app.winters.octo.theme.ThemeChoice
 
 // The one line under each category on the front page, saying how it is set
@@ -87,8 +89,10 @@ fun syncedAgo(at: Long, now: Long): String = "Synced " + timeAgo(at, now).replac
 // How the server is doing, for the account card and its category: syncing,
 // or where it is reached from and how fresh the copy is. Place is null when
 // the server has only one address.
-fun serverStatus(syncing: Boolean, place: Place?, syncedAt: Long?, now: Long): String {
-    if (syncing) return "Syncing…"
+// While a copy runs (`run`), how far it is: "Syncing, 15%".
+fun serverStatus(syncing: Boolean, place: Place?, syncedAt: Long?, now: Long, run: CopyRunState? = null): String {
+    if (run != null) return copyStatus(run)
+    if (syncing) return "Syncing"
     return line(
         when (place) {
             Place.Home -> "Connected at home"

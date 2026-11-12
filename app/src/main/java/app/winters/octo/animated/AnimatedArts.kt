@@ -11,6 +11,7 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.offline.LoopAlbum
 import app.winters.octo.offline.OfflineLoopStore
 import app.winters.octo.offline.offlineLoopsDir
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.subsonic.AnimatedArt
@@ -55,6 +56,8 @@ class AnimatedArts @Inject constructor(
     private val online: OnlineDao,
     private val playback: PlaybackConnection,
     private val settings: PlayerSettings,
+    // Finds a start plays before their rows are written.
+    private val finds: FindMap,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val store by lazy { OfflineLoopStore(offlineLoopsDir(context)) }
@@ -94,7 +97,7 @@ class AnimatedArts @Inject constructor(
         albumOfSong.get(key)?.let { return it }
         val found = withContext(Dispatchers.IO) {
             if (isFind(trackId)) {
-                online.song(trackId)?.takeIf { it.sourceId == here.sourceId }?.albumId?.takeIf(String::isNotBlank)
+                (online.song(trackId) ?: finds[trackId])?.takeIf { it.sourceId == here.sourceId }?.albumId?.takeIf(String::isNotBlank)
             } else {
                 sources.copies(trackId).firstOrNull { it.sourceId == here.sourceId }?.let { sources.albumNativeId(it.albumId) }
             }

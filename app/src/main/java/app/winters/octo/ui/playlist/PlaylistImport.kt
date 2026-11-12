@@ -40,6 +40,9 @@ sealed interface ImportState {
     data class Done(val report: ImportReport) : ImportState
 
     data object Failed : ImportState
+
+    // The phone ran short of room for the file's songs.
+    data class Problem(val words: String) : ImportState
 }
 
 // How the last import went, quietly, with the lines it could not find
@@ -51,13 +54,15 @@ fun ImportNote(state: ImportState) {
         val text = when (state) {
             ImportState.Working -> "Importing…"
             ImportState.Failed -> "That file couldn't be read."
+            is ImportState.Problem -> state.words
             is ImportState.Done -> importSummary(state.report)
         }
         Text(text, style = OctoType.bodySmall, color = OctoColors.TextMuted)
-        val missed = (state as? ImportState.Done)?.report?.missed.orEmpty()
+        val report = (state as? ImportState.Done)?.report
+        val missed = report?.missed.orEmpty()
         if (missed.isNotEmpty()) {
             Text(
-                if (open) "Hide songs not found" else "Show ${missed.size} not found",
+                if (open) "Hide songs not found" else "Show ${report!!.total - report.matched} not found",
                 style = OctoType.caption,
                 color = OctoColors.TextSecondary,
                 modifier = Modifier

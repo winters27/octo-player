@@ -211,7 +211,7 @@ struct AlbumsView: View {
                     .padding(.top, pageTopGap)
                     if let sorted {
                         if sorted.items.isEmpty {
-                            EmptyLibraryNote()
+                            CopyAwareNote { EmptyLibraryNote() }
                         } else {
                             FirstRowMark().id("first")
                             LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
@@ -290,7 +290,7 @@ struct ArtistsView: View {
                     .padding(.top, pageTopGap)
                     if let sorted {
                         if sorted.items.isEmpty {
-                            EmptyLibraryNote()
+                            CopyAwareNote { EmptyLibraryNote() }
                         } else {
                             FirstRowMark().id("first")
                             LetterRuns(items: sorted.items, headings: sorted.headings, id: \.id) { _, artist in
@@ -469,7 +469,9 @@ struct FavoritesView: View {
     private var songsSegment: some View {
         if let songs {
             if songs.isEmpty {
-                MutedNote("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
+                CopyAwareNote(likes: true) {
+                    MutedNote("No liked songs yet. Tap the heart in the player to add the song that is playing, or long press any song and choose Add to Liked songs.")
+                }
             } else {
                 FirstRowMark().id("liked-top")
                 ForEach(Array(songs.enumerated()), id: \.element.id) { position, track in
@@ -493,7 +495,7 @@ struct FavoritesView: View {
     private var albumsSegment: some View {
         if let albums {
             if albums.isEmpty {
-                MutedNote("Heart an album from its page or its menu to keep it here.")
+                CopyAwareNote(likes: true) { MutedNote("Heart an album from its page or its menu to keep it here.") }
             } else {
                 FirstRowMark().id("favorites-top")
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
@@ -512,7 +514,7 @@ struct FavoritesView: View {
     private var artistsSegment: some View {
         if let artists {
             if artists.isEmpty {
-                MutedNote("Heart an artist from their page or their menu to keep them here.")
+                CopyAwareNote(likes: true) { MutedNote("Heart an artist from their page or their menu to keep them here.") }
             } else {
                 FirstRowMark().id("favorites-top")
                 ForEach(artists, id: \.artist.id) { liked in ArtistRow(artist: liked.artist) }

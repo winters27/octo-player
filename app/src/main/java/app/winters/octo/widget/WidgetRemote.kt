@@ -8,8 +8,8 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import app.winters.octo.playback.ListSpec
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -27,8 +27,10 @@ class WidgetRemote(
     private val service: Service,
     private val player: Player,
     private val picks: QuickPicks,
-    // Turns song ids into playable songs, skipping any that are gone.
-    private val songs: suspend (List<String>) -> List<MediaItem>,
+    // Plays a list in place of the queue, shuffled or not, as the app's own
+    // Play and Shuffle all do: a shuffled one starts from a song picked at
+    // random and plays every other once.
+    private val play: suspend (ListSpec, Boolean) -> Unit,
 ) {
     suspend fun run(command: WidgetCommand) {
         when (command) {
@@ -39,8 +41,7 @@ class WidgetRemote(
             is WidgetCommand.Quick -> if (command.pick == QuickPick.Resume) {
                 resume()
             } else {
-                val (ids, shuffle) = picks.songsFor(command.pick)
-                play(songs(ids), shuffle)
+                picks.specFor(command.pick)?.let { (spec, shuffle) -> play(spec, shuffle) }
             }
         }
         val willPlay = player.playWhenReady && player.mediaItemCount > 0
@@ -51,18 +52,10 @@ class WidgetRemote(
     // app's own play button does.
     private suspend fun resume() {
         if (player.mediaItemCount == 0) {
-            play(songs(picks.everything()), shuffle = true)
+            play(picks.everything(), true)
         } else {
             Util.handlePlayButtonAction(player)
         }
-    }
-
-    private fun play(items: List<MediaItem>, shuffle: Boolean) {
-        if (items.isEmpty()) return
-        player.shuffleModeEnabled = shuffle
-        player.setMediaItems(items, if (shuffle) items.indices.random() else 0, 0)
-        player.prepare()
-        player.play()
     }
 
     // Shows a quiet notification on the media channel and removes it at

@@ -10,6 +10,9 @@ import app.winters.octo.home.HOME_SECTIONS_KEY
 import app.winters.octo.home.HomeSectionEntry
 import app.winters.octo.home.encodeHomeSections
 import app.winters.octo.home.homeSectionOrder
+import app.winters.octo.server.CopyOutcome
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.CopyWait
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,6 +40,59 @@ fun homeLayout(access: Access, accessDismissed: Boolean?, librarySongs: Int?): H
         shelves = librarySongs != null && librarySongs > 0,
         empty = librarySongs == 0,
     )
+
+// The card in Home's one copy slot.
+sealed interface HomeCopyCard {
+    // A first copy of the server's music on its way, `run` null while none
+    // runs yet (drawn still at its first step). `big` with no music of the
+    // phone's own, where it fills Home; a banner above the shelves otherwise.
+    data class Coming(val run: CopyRunState?, val server: String, val big: Boolean) : HomeCopyCard
+
+    // The music arrived. `settling` while the steps after the copy still run.
+    data class Here(val token: Long, val songs: Int, val albums: Int, val server: String, val settling: Boolean, val stepsProblem: String?) : HomeCopyCard
+
+    // The first copy stopped before its music arrived.
+    data class Stopped(val outcome: CopyOutcome.Failed, val big: Boolean) : HomeCopyCard
+}
+
+// Which copy card Home shows, if any, for the account in use (`account`,
+// named `server`). A first copy of this account shows while its music is
+// still to come, then the done card once it is in, unless put away; a
+// first copy that stopped shows while the music is still to come; a
+// finished one shows the done card; with music still to come and no copy
+// running yet, the card is drawn still. A copy again never shows here.
+// Nothing shows until whether music is to come has been read.
+fun homeCopyCard(wait: CopyWait?, run: CopyRunState?, outcome: CopyOutcome?, account: String?, server: String): HomeCopyCard? {
+    if (wait == null || account == null) return null
+    val big = !wait.phoneMusic
+    val first = run?.takeIf { it.account == account && it.arriving }
+    if (first != null) {
+        if (first.swapped || !wait.awaiting) {
+            return if (first.dismissed) null else HomeCopyCard.Here(first.token, first.songs, first.albums, first.server, settling = true, stepsProblem = null)
+        }
+        return HomeCopyCard.Coming(first, first.server, big)
+    }
+    if (outcome?.account == account) {
+        when (outcome) {
+            is CopyOutcome.Failed -> if (wait.awaiting) return HomeCopyCard.Stopped(outcome, big)
+            is CopyOutcome.Arrived -> return HomeCopyCard.Here(outcome.token, outcome.songs, outcome.albums, outcome.server, settling = false, outcome.stepsProblem)
+        }
+    }
+    return if (wait.awaiting) HomeCopyCard.Coming(null, server, big) else null
+}
+
+// Leaving Home puts away the done card it showed: Home's pause, unless the
+// screen is only turning.
+class DoneCardSeen {
+    private var shown: Long? = null
+
+    fun shown(token: Long?) {
+        shown = token
+    }
+
+    // Answers the done card's token to put away, if any.
+    fun paused(turning: Boolean): Long? = if (turning) null else shown.also { shown = null }
+}
 
 private val Context.homePrefs by preferencesDataStore("home")
 private val ACCESS_DISMISSED = booleanPreferencesKey("phone_access_dismissed")

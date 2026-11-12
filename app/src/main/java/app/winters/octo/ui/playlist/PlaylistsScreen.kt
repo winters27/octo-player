@@ -2,8 +2,10 @@ package app.winters.octo.ui.playlist
 
 import app.winters.octo.ui.common.sortItem
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.flowOn
-import app.winters.octo.catalog.mosaicCovers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import app.winters.octo.covers.playlistGlyph
 import app.winters.octo.livelists.LiveListSongs
 import app.winters.octo.design.OctoIcons
@@ -25,7 +27,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.catalog.NotEnoughSpace
 import app.winters.octo.catalog.PlaylistSummary
+import app.winters.octo.data.userMessage
 import app.winters.octo.livelists.LiveList
 import app.winters.octo.livelists.LiveListStore
 import app.winters.octo.playback.PlaylistStore
@@ -66,6 +70,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class PlaylistsViewModel @Inject constructor(
     store: PlaylistStore,
@@ -80,11 +85,12 @@ class PlaylistsViewModel @Inject constructor(
     val liveLists: StateFlow<List<LiveList>> =
         liveListStore.lists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // The covers of each live list's first albums, by its id, for its picture.
+    // The covers of each live list's first albums, by its id, for its
+    // picture, each found by a walk that stops once it has them.
     val liveCovers: StateFlow<Map<String, List<String>>> =
-        combine(liveListStore.lists, liveSongs.library) { lists, library ->
-            lists.associate { list -> list.id to mosaicCovers(library.pick(list.query).map { it.albumId to it.artwork }) }
-        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+        liveListStore.lists.flatMapLatest { lists ->
+            if (lists.isEmpty()) flowOf(emptyMap()) else combine(lists.map { list -> liveSongs.coversOf(list).map { list.id to it } }) { it.toMap() }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     // The playlists in the chosen order. There are few, so they sort here.
     val playlists: StateFlow<Sorted<PlaylistSummary>?> =
@@ -137,7 +143,11 @@ class PlaylistsViewModel @Inject constructor(
     fun importFile(uri: Uri) {
         _importState.value = ImportState.Working
         viewModelScope.launch {
-            _importState.value = files.import(uri)?.let(ImportState::Done) ?: ImportState.Failed
+            _importState.value = try {
+                files.import(uri)?.let(ImportState::Done) ?: ImportState.Failed
+            } catch (e: NotEnoughSpace) {
+                ImportState.Problem(e.userMessage())
+            }
         }
     }
 }

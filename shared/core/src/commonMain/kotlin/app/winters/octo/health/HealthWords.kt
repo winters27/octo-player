@@ -155,11 +155,14 @@ private fun rateText(hz: Int): String {
 }
 
 // The line under the page's title.
-fun <T> HealthReport<T>.overview(): String {
+fun <T> HealthReport<T>.overview(): String = healthOverview(checked, findings.size)
+
+// The same from how many songs were checked and how many checks found
+// something.
+fun healthOverview(checked: Int, kinds: Int): String {
     val checkedText = "Checked ${countText(checked, "song", "songs")}."
     // The page says the rest when there is nothing to fix.
-    if (clean) return checkedText
-    val kinds = findings.size
+    if (kinds == 0) return checkedText
     return "$checkedText ${if (kinds == 1) "One thing" else "$kinds things"} could be better."
 }
 

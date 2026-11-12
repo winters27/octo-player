@@ -33,6 +33,15 @@ fun QuietButton(text: String, enabled: Boolean, style: TextStyle = OctoType.labe
             .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
             .clip(CircleShape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = QuietButtonInset, vertical = QuietButtonSpill),
     )
 }
+
+// A quiet button's own padding beside and above its words: what a row
+// shifts it by to end its words on the content's edge, and what spills
+// past its line.
+val QuietButtonInset = 10.dp
+val QuietButtonSpill = 6.dp
+
+// A quiet button set in a caption line: the caption's size, a label's weight.
+val InCaption = OctoType.label.copy(fontSize = OctoType.caption.fontSize, lineHeight = OctoType.caption.lineHeight)

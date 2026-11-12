@@ -8,6 +8,7 @@ import app.winters.octo.catalog.PIN_LIMIT
 import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.PinnedItemEntity
 import app.winters.octo.catalog.PlaylistSummary
+import app.winters.octo.catalog.SongIds
 import app.winters.octo.playback.PlaylistStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,20 +46,32 @@ sealed interface PinnedItem {
 }
 
 // Albums, artists and playlists pinned to the front of Home, in the order
-// they were pinned unless moved. Home holds at most PIN_LIMIT.
+// they were pinned unless moved. Home holds at most PIN_LIMIT. A pin
+// change is written on the album or artist its id names now (SongIds),
+// between groups of a save; while a save is part way a pin still on an old
+// id shows as the id it became.
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
-class PinStore @Inject constructor(
+class PinStore internal constructor(
     private val dao: FavouritesDao,
     private val catalog: CatalogDao,
-    private val playlists: PlaylistStore,
+    // A playlist's summary, as it changes.
+    private val summary: (String) -> Flow<PlaylistSummary?>,
+    private val ids: SongIds,
 ) {
+    @Inject constructor(dao: FavouritesDao, catalog: CatalogDao, playlists: PlaylistStore, ids: SongIds) : this(dao, catalog, playlists::summary, ids)
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    // The pins Home can show now, in row order.
+    // The pins Home can show now, in row order, each once.
     val shown: StateFlow<List<PinKey>> = dao.shownPins()
-        .map { rows -> rows.mapNotNull { row -> PinKind.of(row.kind)?.let { PinKey(it, row.itemId) } }.take(PIN_LIMIT) }
+        .map { rows -> rows.mapNotNull { row -> PinKind.of(row.kind)?.let { PinKey(it, row.itemId) } }.distinct().take(PIN_LIMIT) }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    // A pin's key on the id it names now, as that changes: what to look
+    // for in `shown` when the id may be an old one.
+    fun current(key: PinKey): Flow<PinKey> =
+        if (key.kind == PinKind.Playlist) flowOf(key) else dao.currentIdFlow(key.kind.id, key.id).map { PinKey(key.kind, it) }
 
     // The pins with what they show, for the shelf.
     val items: Flow<List<PinnedItem>> = shown.flatMapLatest { keys ->
@@ -70,23 +83,31 @@ class PinStore @Inject constructor(
     }
 
     // Pins at the end of the row. False when Home is full.
-    suspend fun pin(key: PinKey): Boolean {
+    suspend fun pin(key: PinKey): Boolean = ids.write {
+        val id = now(key)
         val relinkKey = when (key.kind) {
-            PinKind.Album -> dao.albumKey(key.id)?.searchKey ?: return false
-            PinKind.Artist -> dao.artistKey(key.id)?.searchKey ?: return false
+            PinKind.Album -> dao.albumKey(id)?.searchKey ?: return@write false
+            PinKind.Artist -> dao.artistKey(id)?.searchKey ?: return@write false
             // A playlist's id never changes.
-            PinKind.Playlist -> key.id
+            PinKind.Playlist -> id
         }
-        return dao.pin(PinnedItemEntity(key.kind.id, key.id, relinkKey, position = 0))
+        dao.pinEither(PinnedItemEntity(key.kind.id, id, relinkKey, position = 0))
     }
 
-    suspend fun unpin(key: PinKey) = dao.unpin(key.kind.id, key.id)
+    suspend fun unpin(key: PinKey) = ids.write { dao.unpinEither(key.kind.id, now(key)) }
 
-    suspend fun moveToFront(key: PinKey) = dao.moveToFront(key.kind.id, key.id)
+    suspend fun moveToFront(key: PinKey) = ids.write { dao.moveToFrontEither(key.kind.id, now(key)) }
+
+    // The id a pin's key names now; a playlist's never changes.
+    private suspend fun now(key: PinKey): String = when (key.kind) {
+        PinKind.Album -> ids.album(key.id)
+        PinKind.Artist -> ids.artist(key.id)
+        PinKind.Playlist -> key.id
+    }
 
     private fun itemFor(key: PinKey): Flow<PinnedItem?> = when (key.kind) {
         PinKind.Album -> catalog.album(key.id).map { it?.let(PinnedItem::Album) }
         PinKind.Artist -> catalog.artist(key.id).map { it?.let(PinnedItem::Artist) }
-        PinKind.Playlist -> playlists.playlists.map { list -> list.firstOrNull { it.id == key.id }?.let(PinnedItem::Playlist) }
+        PinKind.Playlist -> summary(key.id).map { it?.let(PinnedItem::Playlist) }
     }
 }

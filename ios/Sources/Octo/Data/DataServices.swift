@@ -60,7 +60,7 @@ final class DataServices {
         prefetcher = Prefetcher(connectivity: connectivity)
         prefetcher.context = { [weak session] in session.map { StreamContext.now($0) } }
         controls = ServerControls(session: session, library: library, sync: serverSync)
-        refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session)
+        refresh = LibraryRefresh(device: device, sync: serverSync, downloads: downloads, session: session) { words in announce(words, false) }
         serverSwitch = ServerSwitch(session: session, library: library, sync: serverSync, listening: listening,
                                     favorites: favoriteSync, playlists: playlistSync)
         let offline = offline

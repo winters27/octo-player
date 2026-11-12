@@ -84,6 +84,7 @@ class ServerSwitch @Inject constructor(
     private val sessions: SessionRepository,
     private val handoff: SessionHandoff,
     private val queue: QueueStore,
+    private val legacy: LegacyQueues,
     private val sync: ServerSync,
     private val serverQueue: QueueSync,
     private val listening: ListeningSync,
@@ -211,7 +212,9 @@ class ServerSwitch @Inject constructor(
         listening.noted()
         left?.queue?.let { serverQueue.leaving(it) }
         val next = to ?: PHONE_LIBRARY
-        queue.handOver(from.id, left?.queue, next, keepWhenNone = false)
+        // A queue the app kept the old way for `next` is brought in first.
+        legacy.bringParked(next)
+        queue.handOver(from.id, next, keepWhenNone = false)
         handedOver = true
         // The player waits for the next server's library on its own, even
         // should another switch follow at once.
@@ -226,7 +229,8 @@ class ServerSwitch @Inject constructor(
             handedOver = false
             return
         }
-        bringBack(to, queue.handOver(from, null, to, keepWhenNone = true))
+        legacy.bringParked(to)
+        bringBack(to, queue.handOver(from, to, keepWhenNone = true))
     }
 
     // Once the library of `to` is in place, its queue comes back into the

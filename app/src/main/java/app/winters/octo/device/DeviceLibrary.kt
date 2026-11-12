@@ -4,22 +4,24 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.ContentObserver
+import android.database.sqlite.SQLiteException
+import android.database.sqlite.SQLiteFullException
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
-import android.os.SystemClock
-import androidx.core.net.toUri
-import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.CatalogMerge
-import app.winters.octo.catalog.SourceDao
-import app.winters.octo.catalog.toSource
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import app.winters.octo.catalog.FreeSpace
+import app.winters.octo.catalog.NotEnoughSpace
+import app.winters.octo.catalog.StageAborted
+import app.winters.octo.data.userMessage
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -37,34 +39,36 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// How many files are read for tags at once.
-private const val READERS = 4
-
-// Raised whenever reading tags learns something new, so every file is
-// read again once. Rows saved before genres were read are version 0.
-// Version 2 reads original years, credits, MusicBrainz ids, sort names,
-// loudness and the other details, and more spellings of every tag.
-private const val TAGS_VERSION = 2
-
 // Whether the app may read the phone's music.
 enum class Access { Granted, NotAsked, Denied, DeniedForever }
 
 // Keeps the catalog in step with the music on the phone: scans when
 // access is granted, and again whenever the phone's media library changes.
+//
+// One scan runs at a time. Asking for a scan waits for one that starts
+// after the ask; asks that come while one runs share the next, and an
+// asker that stops waiting (a screen closed) leaves the scan running.
 @Singleton
 class DeviceLibrary @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val scanner: DeviceScanner,
-    private val reader: TagReader,
-    private val dao: CatalogDao,
+    scanner: DeviceScanner,
+    reader: TagReader,
     private val rules: FolderRules,
-    private val sources: SourceDao,
+    db: CatalogDatabase,
     private val merge: CatalogMerge,
+    freeSpace: FreeSpace,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val scanLock = Mutex()
     private val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val dao = db.phoneScanDao()
     private var started = false
+
+    internal val scan = PhoneScan(db, merge, scanner, reader, freeSpace)
+
+    // Scans asked for and not yet begun, and whether the runner is going.
+    private val asks = ArrayList<CompletableDeferred<Unit>>()
+    private var running = false
 
     val permissionName: String =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_MEDIA_AUDIO
@@ -76,21 +80,20 @@ class DeviceLibrary @Inject constructor(
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning
 
+    // Whether a scan has finished, now or on an earlier launch, so "no phone
+    // songs" can be told from "not looked yet".
+    private val _scanned = MutableStateFlow(false)
+    val scanned: StateFlow<Boolean> = _scanned
+
+    // Why the last scan could not be saved, in words, while it stands: the
+    // phone ran short of room (as a copy of the library says it). Null once
+    // a scan is saved.
+    private val _problem = MutableStateFlow<String?>(null)
+    val problem: StateFlow<String?> = _problem
+
     // Every folder music was found in, including switched-off ones.
     private val _folders = MutableStateFlow<List<MusicFolder>>(emptyList())
     val folders: StateFlow<List<MusicFolder>> = _folders
-
-    // Where each song in the library from the phone sits, as folder names,
-    // by media id. Kept in memory from the last scan, which runs each time
-    // the app starts; null until then.
-    private val _paths = MutableStateFlow<Map<Long, List<String>>?>(null)
-    val paths: StateFlow<Map<Long, List<String>>?> = _paths
-
-    // Each phone song's file as a path from the top of its storage, like
-    // "Music/Kavinsky/Nightcall/01 Nightcall.mp3", by media id. For reading
-    // and writing playlist files. Also from the last scan; null until then.
-    private val _files = MutableStateFlow<Map<Long, String>?>(null)
-    val files: StateFlow<Map<Long, String>?> = _files
 
     suspend fun setFolderIncluded(folder: String, included: Boolean) = rules.setIncluded(folder, included)
 
@@ -98,6 +101,7 @@ class DeviceLibrary @Inject constructor(
     fun start() {
         if (started) return
         started = true
+        scope.launch { if (dao.state()?.digest != null) _scanned.value = true }
         // A big copy fires many changes; wait for a quiet moment, then scan once.
         scope.launch { changes.debounce(2000).collect { rescan() } }
         // Switching a folder on or off rebuilds the library straight away.
@@ -112,6 +116,8 @@ class DeviceLibrary @Inject constructor(
             },
         )
         scope.launch { rescan() }
+        // A merge cut off by the app closing is finished, phone access or not.
+        scope.launch { merge.repair() }
     }
 
     // Called with the answer to the permission request.
@@ -141,73 +147,78 @@ class DeviceLibrary @Inject constructor(
         scope.launch { rescan() }
     }
 
+    // Asks for a scan and waits for it.
     suspend fun rescan() {
         if (!granted()) return
-        scanLock.withLock {
-            _scanning.value = true
+        val done = CompletableDeferred<Unit>()
+        val start = synchronized(asks) {
+            asks += done
+            if (running) false else true.also { running = true }
+        }
+        if (start) scope.launch { runScans() }
+        done.await()
+    }
+
+    private suspend fun runScans() {
+        while (true) {
+            val batch = synchronized(asks) {
+                if (asks.isEmpty()) {
+                    running = false
+                    return
+                }
+                asks.toList().also { asks.clear() }
+            }
             try {
-                val started = SystemClock.elapsedRealtime()
-                val files = scanner.list()
-                // Tags are kept for every file, so switching a folder back on
-                // needs no re-reading.
-                val tags = refreshTags(files)
-                val excluded = rules.excluded.first()
-                _folders.value = files.folders(excluded)
-                val included = files.withoutFolders(excluded)
-                val catalog = buildDeviceCatalog(included.map { it.toRow(tags[it.id]) })
-                // The phone's own copy, then the library rebuilt with any
-                // server's music merged in.
-                sources.replaceSource(
-                    DEVICE,
-                    catalog.tracks,
-                    catalog.albums.map { it.toSource() },
-                    catalog.artists.map { it.toSource() },
-                )
-                val library = merge.rebuild()
-                _paths.value = included.folderPaths()
-                _files.value = included.associate { it.id to relativeFile(it.folder, it.fileName) }
-                // Counts only, so the library can be checked against the phone.
-                Log.i(
-                    "Octo",
-                    "phone scan: ${catalog.tracks.size} tracks, ${catalog.albums.size} albums, " +
-                        "${catalog.artists.size} artists, $lastReread files read, " +
-                        "${SystemClock.elapsedRealtime() - started} ms; library ${library.tracks.size} tracks, " +
-                        "${library.albums.size} albums, ${library.artists.size} artists",
-                )
-            } finally {
-                _scanning.value = false
+                scanLock.withLock { scanTwice() }
+                batch.forEach { it.complete(Unit) }
+            } catch (e: CancellationException) {
+                batch.forEach { it.cancel(e) }
+                synchronized(asks) { running = false }
+                throw e
+            } catch (e: Exception) {
+                batch.forEach { it.completeExceptionally(e) }
             }
         }
     }
 
-    private var lastReread = 0
-
-    // Brings the saved tags up to date: reads only files that are new or
-    // changed since last time, and forgets files that are gone.
-    private suspend fun refreshTags(files: List<DeviceFile>): Map<Long, FileTags> {
-        val saved = dao.fileTags().associateBy { it.mediaId }
-        val stale = files.filter { file ->
-            val known = saved[file.id]
-            known == null || known.modifiedAt != file.modifiedAt || known.size != file.sizeBytes ||
-                known.tagsVersion != TAGS_VERSION
+    // One scan; when the merge drops its copy, one more, and then no more
+    // until something else asks. A full disk, a database that refuses a
+    // write and a dropped copy end it without failing the askers.
+    private suspend fun scanTwice() {
+        _scanning.value = true
+        try {
+            for (attempt in 1..2) {
+                val started = SystemClock.elapsedRealtime()
+                try {
+                    val excluded = rules.excluded.first()
+                    val result = scan.run(excluded) { _folders.value = it }
+                    _problem.value = null
+                    // Counts only, so the library can be checked against the phone.
+                    Log.i(
+                        "Octo",
+                        "phone scan: ${if (result.quiet) "nothing changed" else "built"}, ${result.tracks} tracks, " +
+                            "${result.albums} albums, ${result.artists} artists, ${result.reread} files read, " +
+                            "${SystemClock.elapsedRealtime() - started} ms",
+                    )
+                    return
+                } catch (e: StageAborted) {
+                    if (e.noRoom) _problem.value = e.reason
+                    Log.w("Octo", "phone scan not saved: the merge did not take it in" + if (attempt == 2) ", stopping until asked again" else "")
+                } catch (e: NotEnoughSpace) {
+                    _problem.value = e.userMessage()
+                    Log.w("Octo", "phone scan not saved: not enough space")
+                    return
+                } catch (e: SQLiteException) {
+                    if (e is SQLiteFullException) _problem.value = e.userMessage()
+                    Log.w("Octo", "phone scan not saved: ${e.javaClass.simpleName}")
+                    return
+                }
+            }
+        } finally {
+            _scanning.value = false
+            _scanned.value = true
         }
-        // Several files at once; each read opens its own handle.
-        val fresh = coroutineScope {
-            stale.chunked((stale.size / READERS).coerceAtLeast(1) + 1).map { batch ->
-                async(Dispatchers.IO) { batch.map { file -> file.toSaved(reader.read(file.uri.toUri())) } }
-            }.awaitAll().flatten()
-        }
-        fresh.chunked(500).forEach { dao.upsertFileTags(it) }
-        val gone = saved.keys - files.map { it.id }.toSet()
-        gone.chunked(500).forEach { dao.deleteFileTags(it) }
-        lastReread = fresh.size
-
-        return (saved - gone + fresh.associateBy { it.mediaId })
-            .filterValues { it.readOk }
-            .mapValues { (_, t) -> t.toTags() }
     }
-
-    private fun DeviceFile.toSaved(tags: FileTags?) = savedTags(id, modifiedAt, sizeBytes, tags, TAGS_VERSION)
 
     private fun granted() =
         ContextCompat.checkSelfPermission(context, permissionName) == PackageManager.PERMISSION_GRANTED

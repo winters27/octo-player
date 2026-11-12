@@ -18,15 +18,19 @@ import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.listening.TotalsFailed
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.offline.DownloadStatus
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.output.OutputChoice
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.LikeStore
+import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
-import app.winters.octo.playback.RADIO_LENGTH
+import app.winters.octo.playback.RadioAround
+import app.winters.octo.playback.Shown
 import app.winters.octo.playback.RatingStore
 import app.winters.octo.playback.queueAddWords
 import app.winters.octo.player.PlayerSettings
@@ -290,16 +294,19 @@ class SongMenuViewModel @Inject constructor(
     val family: FamilyHub,
     sound: SoundEngine,
     playerSettings: PlayerSettings,
+    // Finds a start plays before their rows are written.
+    private val finds: FindMap,
 ) : ViewModel() {
-    val liked: StateFlow<Set<String>> = likes.liked
+    // Whether this one song is liked, as that changes.
+    fun liked(trackId: String): Flow<Boolean> = likes.likedFlow(trackId)
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
 
     // What a swipe right on a song row does, as Settings say.
     val swipeAction: StateFlow<SwipeAction> = playerSettings.prefs.map { it.swipeAction }
         .stateIn(viewModelScope, SharingStarted.Eagerly, SwipeAction.PlayNext)
 
-    // Library songs downloaded to the phone, or on their way.
-    val kept: StateFlow<Map<String, DownloadEntity>> = offline.byTrack
+    // This song's download to the phone, done or on its way, as it changes.
+    fun kept(trackId: String): Flow<DownloadEntity?> = offline.keptRow(trackId)
 
     fun keepOffline(id: String) = offline.download(listOf(id))
     fun removeOffline(id: String) = offline.remove(id) { restore -> feedback.undoable("Download removed", restore) }
@@ -365,18 +372,18 @@ class SongMenuViewModel @Inject constructor(
 
     // A library song, or a song found online shaped like one.
     fun track(id: String): Flow<TrackEntity?> =
-        if (isFind(id)) online.songFlow(id).map { it?.asTrack() } else catalog.trackFlow(id)
+        if (isFind(id)) online.songFlow(id).map { (it ?: finds[id])?.asTrack() } else catalog.trackFlow(id)
 
     fun toggleLike(id: String) = likes.toggle(id)
     fun rate(id: String, rating: Int) = ratings.rate(id, rating)
 
     // Play next, which says so and offers to take that one song back out of the queue.
     fun playNextUndoable(id: String) =
-        playback.playNextUndoable(listOf(id)) { count, undo -> feedback.undoable(queueAddWords(count, next = true), undo) }
+        playback.addList(ListSpec.Ids(listOf(id)), next = true, inserted = { count, undo -> feedback.undoable(queueAddWords(count, next = true), undo) })
 
     // Add to queue, which says so and offers to take that one song back out of the queue.
     fun playLastUndoable(id: String) =
-        playback.playLastUndoable(listOf(id)) { count, undo -> feedback.undoable(queueAddWords(count, next = false), undo) }
+        playback.addList(ListSpec.Ids(listOf(id)), next = false, inserted = { count, undo -> feedback.undoable(queueAddWords(count, next = false), undo) })
 
     // Takes the song's row out of a playlist, with an Undo that puts it back.
     fun removeFromPlaylist(playlistId: String, itemId: Long) {
@@ -392,29 +399,20 @@ class SongMenuViewModel @Inject constructor(
         viewModelScope.launch { downloads.request(track) }
     }
 
-    // Plays the song and then songs like it, in place of the queue.
-    fun startRadio(track: TrackEntity) {
-        viewModelScope.launch { playRadio(listOf(track), libraryRadio, playback, feedback) }
-    }
+    // Plays the song at once and then songs like it, in place of the queue.
+    fun startRadio(track: TrackEntity) = playRadio(track, playback)
 }
 
-// Plays the first of `seeds`, then songs like them, in place of the queue:
-// from the library and, with a server signed in, its suggestions, songs it
-// found online among them. `exclude` keeps songs out, like the rest of an
-// album.
-internal suspend fun playRadio(
-    seeds: List<TrackEntity>,
-    radio: LibraryRadio,
-    playback: PlaybackConnection,
-    feedback: Feedback,
-    exclude: Set<String> = emptySet(),
-) {
-    val seed = seeds.firstOrNull() ?: return
-    val songs = radio.songsLike(seeds, RADIO_LENGTH, exclude, before = listOf(seed.id))
-    if (songs.isNotEmpty()) {
-        playback.playTracks(listOf(seed.id) + songs, 0, source = "${seed.title} radio")
-    } else {
-        feedback.show("No similar songs found")
-    }
-}
+// Plays `seed` at once in place of the queue, then songs like it once they
+// are found: from the library and, with a server signed in, its
+// suggestions, songs it found online among them. Around an album or an
+// artist, their first songs shape the likeness too, and an album's own
+// songs are left out. With none found, or while the play counts cannot be
+// brought up to date, the seed plays and the words say so.
+internal fun playRadio(seed: TrackEntity, playback: PlaybackConnection, around: RadioAround? = null, shown: Shown? = null) =
+    playback.playList(
+        ListSpec.Radio(seed.id, "${seed.title} radio", around),
+        source = "${seed.title} radio",
+        shown = shown ?: Shown(seed.title, seed.artist, seed.artwork),
+    )
 

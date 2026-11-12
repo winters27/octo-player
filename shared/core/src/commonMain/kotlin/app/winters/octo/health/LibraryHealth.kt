@@ -293,14 +293,12 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
 
     songs.forEachIndexed { index, song ->
         val place = fields.place(song)
-        val codes = SongIdentity.isrcs(fields.isrcs(song)).map { "i:$it" } +
-            listOfNotNull(fields.recordingId(song)?.trim()?.lowercase()?.takeIf(String::isNotEmpty)?.let { "m:$it" })
-        for (code in codes) {
+        for (code in recordingCodes(song, fields)) {
             val key = "$place\u0000$code"
             val first = byTag[key]
             if (first == null) {
                 byTag[key] = index
-            } else if (lengthsClose(fields.seconds(songs[first]), fields.seconds(song), TAGGED_LENGTH_SECONDS)) {
+            } else if (tagsClose(fields.seconds(songs[first]), fields.seconds(song))) {
                 if (sets.join(first, index)) {
                     tagged[first] = true
                     tagged[index] = true
@@ -309,7 +307,7 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
         }
         val match = keys[index]
         // A title with nothing to read in it is never matched on its words.
-        if (match.substringAfter('|').isNotEmpty()) byTitle.getOrPut("$place\u0000$match") { ArrayList(2) } += index
+        if (titleReadable(match)) byTitle.getOrPut("$place\u0000$match") { ArrayList(2) } += index
     }
 
     val versionsAt = arrayOfNulls<Set<String>>(songs.size)
@@ -323,9 +321,7 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
             for (j in i + 1 until bucket.size) {
                 if (sets.same(bucket[i], bucket[j])) continue
                 val b = songs[bucket[j]]
-                if (!lengthsClose(fields.seconds(a), fields.seconds(b), SAME_LENGTH_SECONDS)) continue
-                if (albumVersionsOf(bucket[i]) != albumVersionsOf(bucket[j])) continue
-                if (SongIdentity.same(refA, refOf(b, fields), DuplicateTitles).isSame) sets.join(bucket[i], bucket[j])
+                if (sameByTitle(a, b, fields, refA, albumVersionsOf(bucket[i]), albumVersionsOf(bucket[j]))) sets.join(bucket[i], bucket[j])
             }
         }
     }
@@ -339,7 +335,37 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
         val copies = members.map(songs::get).sortedWith(order)
         val basis = if (members.any { tagged[it] }) DuplicateBasis.Tags else DuplicateBasis.TitleAndLength
         DuplicateGroup(copies, basis, bestReason(copies, fields))
-    }.sortedWith(compareBy<DuplicateGroup<T>> { sortKey(fields.artist(it.best)) }.thenBy { sortKey(fields.title(it.best)) }.thenBy { fields.id(it.best) })
+    }.sortedWith(compareBy<DuplicateGroup<T>> { healthSortKey(fields.artist(it.best)) }.thenBy { healthSortKey(fields.title(it.best)) }.thenBy { fields.id(it.best) })
+}
+
+// The codes that name a song's recording, each with its kind: its ISRCs and
+// its MusicBrainz recording id.
+fun <T> recordingCodes(song: T, fields: HealthFields<T>): List<String> =
+    SongIdentity.isrcs(fields.isrcs(song)).map { "i:$it" } +
+        listOfNotNull(fields.recordingId(song)?.trim()?.lowercase()?.takeIf(String::isNotEmpty)?.let { "m:$it" })
+
+// Whether two copies sharing a recording code are close enough in length
+// for the code to count.
+fun tagsClose(a: Int, b: Int): Boolean = lengthsClose(a, b, TAGGED_LENGTH_SECONDS)
+
+// Whether a match key has a title part to compare by.
+fun titleReadable(matchKey: String): Boolean = matchKey.substringAfter('|').isNotEmpty()
+
+// Whether two copies with one match key are one recording by their titles:
+// lengths within a few seconds, the same versions named by their albums,
+// and the same song in the same version. `refA` and the album versions may
+// be given when already worked out.
+fun <T> sameByTitle(
+    a: T,
+    b: T,
+    fields: HealthFields<T>,
+    refA: SongRef = refOf(a, fields),
+    versionsA: Set<String> = albumVersions(a, fields),
+    versionsB: Set<String>? = null,
+): Boolean {
+    if (!lengthsClose(fields.seconds(a), fields.seconds(b), SAME_LENGTH_SECONDS)) return false
+    if (versionsA != (versionsB ?: albumVersions(b, fields))) return false
+    return SongIdentity.same(refA, refOf(b, fields), DuplicateTitles).isSame
 }
 
 // The versions a song's album names beyond what its title says. Two songs
@@ -347,7 +373,7 @@ fun <T> findDuplicates(songs: List<T>, fields: HealthFields<T>): List<DuplicateG
 // recordings: "Let's Get Lost" on "Let's Get Lost Remixes" is a remix
 // tagged plainly, not a copy of the one on the studio album, however close
 // their lengths.
-private fun <T> albumVersions(song: T, fields: HealthFields<T>): Set<String> {
+fun <T> albumVersions(song: T, fields: HealthFields<T>): Set<String> {
     val album = fields.album(song) ?: return emptySet()
     val inTitle = VersionVariant.requested(fields.title(song), null)
     return VersionVariant.inFolder(album, fields.artist(song)) - inTitle
@@ -397,7 +423,7 @@ fun <T> tagsOf(song: T, fields: HealthFields<T>): Int =
         !fields.cover(song).isNullOrBlank(),
     ).count { it }
 
-private fun <T> bestReason(copies: List<T>, fields: HealthFields<T>): BestReason {
+fun <T> bestReason(copies: List<T>, fields: HealthFields<T>): BestReason {
     val best = copies[0]
     val next = copies[1]
     return when {
@@ -434,48 +460,62 @@ fun <T> findSplitAlbums(songs: List<T>, fields: HealthFields<T>): List<SplitAlbu
     }
     val found = ArrayList<SplitAlbum<T>>()
     for ((bucket, parts) in buckets) {
-        if (parts.size < 2) continue
-        val title = bucket.substringAfter('\u0000')
-        val sets = Sets(parts.size)
-        val reasons = ArrayList<Pair<Int, SplitReason>>()
-        for (i in parts.indices) for (j in i + 1 until parts.size) {
-            val a = parts[i]
-            val b = parts[j]
-            if (!yearsAgree(a.years, b.years)) continue
-            if (a.artistKey == b.artistKey) {
-                sets.join(i, j)
-                continue
-            }
-            val reason = sameRelease(a, b) ?: sharedArtist(a, b, title) ?: continue
-            sets.join(i, j)
-            reasons += i to reason
-        }
-        parts.indices.groupBy(sets::root).values.filter { it.size > 1 }.forEach { together ->
-            val bySize = together.sortedWith(compareByDescending<Int> { parts[it].size }.thenBy { parts[it].id })
-            // A part whose album artist already names every part's artist
-            // leads; otherwise the largest does.
-            val artists = together.mapTo(HashSet()) { parts[it].artistKey }
-            val lead = (if (artists.size > 1) bySize.firstOrNull { i -> artists.all(parts[i].albumArtists::containsKey) } else null) ?: bySize[0]
-            val ordered = (listOf(lead) + bySize.filter { it != lead }).map { i ->
+        for (set in splitSets(bucket.substringAfter('\u0000'), parts)) {
+            val ordered = set.parts.map { i ->
                 val id = parts[i].id
                 AlbumPart(id, byAlbum.getValue(id).sortedWith(albumOrder(fields)))
             }
             val leadSongs = ordered[0].songs
-            val root = sets.root(together[0])
             found += SplitAlbum(
                 title = fields.album(leadSongs[0]).orEmpty(),
                 artist = albumArtistOf(leadSongs, fields),
                 parts = ordered,
                 differences = differencesOf(ordered, fields),
-                reasons = reasons.filter { sets.root(it.first) == root }.map { it.second }.distinct(),
+                reasons = set.reasons,
             )
         }
     }
-    return found.sortedWith(compareBy<SplitAlbum<T>> { sortKey(it.artist) }.thenBy { sortKey(it.title) }.thenBy { it.parts[0].albumId })
+    return found.sortedWith(compareBy<SplitAlbum<T>> { healthSortKey(it.artist) }.thenBy { healthSortKey(it.title) }.thenBy { it.parts[0].albumId })
 }
 
-// What the split check reads of one album part.
-private class PartFacts(
+// Parts of one bucket taken for one album: their places in the bucket's
+// list, the one the others join first, then the rest largest first; and
+// why parts with different album artists were taken for one.
+class SplitSet(val parts: List<Int>, val reasons: List<SplitReason>)
+
+// The albums among one bucket's parts (one title in one place, each part
+// in order of its first song): every pair whose years agree and whose
+// album artist is one, or which are one release or share an artist, joins.
+fun splitSets(title: String, parts: List<PartFacts>): List<SplitSet> {
+    if (parts.size < 2) return emptyList()
+    val sets = Sets(parts.size)
+    val reasons = ArrayList<Pair<Int, SplitReason>>()
+    for (i in parts.indices) for (j in i + 1 until parts.size) {
+        val a = parts[i]
+        val b = parts[j]
+        if (!yearsAgree(a.years, b.years)) continue
+        if (a.artistKey == b.artistKey) {
+            sets.join(i, j)
+            continue
+        }
+        val reason = sameRelease(a, b) ?: sharedArtist(a, b, title) ?: continue
+        sets.join(i, j)
+        reasons += i to reason
+    }
+    return parts.indices.groupBy(sets::root).values.filter { it.size > 1 }.map { together ->
+        val bySize = together.sortedWith(compareByDescending<Int> { parts[it].size }.thenBy { parts[it].id })
+        // A part whose album artist already names every part's artist
+        // leads; otherwise the largest does.
+        val artists = together.mapTo(HashSet()) { parts[it].artistKey }
+        val lead = (if (artists.size > 1) bySize.firstOrNull { i -> artists.all(parts[i].albumArtists::containsKey) } else null) ?: bySize[0]
+        val root = sets.root(together[0])
+        SplitSet(listOf(lead) + bySize.filter { it != lead }, reasons.filter { sets.root(it.first) == root }.map { it.second }.distinct())
+    }
+}
+
+// What the split check reads of one album part. `credits` answers, for an
+// artist's key, a song of the part that credits them (the first), or null.
+class PartFacts(
     val id: String,
     val size: Int,
     // The album artist as shown, and the key of its first artist.
@@ -483,8 +523,7 @@ private class PartFacts(
     val artistKey: String,
     // Every artist the album artist names, by key, as written.
     val albumArtists: Map<String, String>,
-    // Every artist the songs credit, by key, with one song of theirs.
-    val credits: Map<String, String>,
+    val credits: (String) -> String?,
     val years: Set<Int>,
     val releases: Set<String>,
     val groups: Set<String>,
@@ -493,16 +532,34 @@ private class PartFacts(
     val labels: Map<String, String>,
 )
 
+// Every artist an album artist names, by key, as written: those the songs
+// name, else the album artist shown.
+fun albumArtistsNamed(named: List<String>, artist: String): Map<String, String> {
+    val albumArtists = LinkedHashMap<String, String>()
+    for (credit in named.filter(String::isNotBlank).distinct().ifEmpty { listOf(artist) }) {
+        for (name in namesIn(credit)) albumArtists.putIfAbsent(SongIdentity.key(name), name)
+    }
+    return albumArtists
+}
+
+// The keys of the artists a credit names, each with the name as written.
+fun creditKeys(credit: String): List<Pair<String, String>> = namesIn(credit).map { SongIdentity.key(it) to it }
+
+// The key of an album artist's first artist, or empty.
+fun albumArtistKey(artist: String): String = SongIdentity.key(SongIdentity.primaryArtist(artist))
+
+// A release code, a release group or a barcode as the split check compares
+// it.
+fun releaseCode(code: String): String = code.trim().lowercase()
+
 private fun <T> partFacts(id: String, members: List<T>, fields: HealthFields<T>): PartFacts? {
     val artist = albumArtistOf(members, fields)
-    val artistKey = SongIdentity.key(SongIdentity.primaryArtist(artist))
+    val artistKey = albumArtistKey(artist)
     if (artistKey.isEmpty()) return null
-    val albumArtists = LinkedHashMap<String, String>()
-    val named = members.flatMap(fields::albumArtists).filter(String::isNotBlank).distinct().ifEmpty { listOf(artist) }
-    for (credit in named) for (name in namesIn(credit)) albumArtists.putIfAbsent(SongIdentity.key(name), name)
+    val albumArtists = albumArtistsNamed(members.flatMap(fields::albumArtists), artist)
     val credits = HashMap<String, String>()
     for (song in members) {
-        for (credit in fields.artists(song)) for (name in namesIn(credit)) credits.putIfAbsent(SongIdentity.key(name), fields.title(song))
+        for (credit in fields.artists(song)) for ((key, _) in creditKeys(credit)) credits.putIfAbsent(key, fields.title(song))
     }
     fun codes(of: (T) -> String?, clean: (String) -> String) =
         members.mapNotNullTo(HashSet()) { song -> of(song)?.let(clean)?.takeIf(String::isNotEmpty) }
@@ -516,7 +573,7 @@ private fun <T> partFacts(id: String, members: List<T>, fields: HealthFields<T>)
         artist = artist,
         artistKey = artistKey,
         albumArtists = albumArtists,
-        credits = credits,
+        credits = credits::get,
         years = members.mapNotNullTo(HashSet()) { fields.year(it)?.takeIf { y -> y > 0 } },
         releases = codes(fields::releaseId) { it.trim().lowercase() },
         groups = codes(fields::releaseGroupId) { it.trim().lowercase() },
@@ -557,7 +614,7 @@ private fun sharedArtist(a: PartFacts, b: PartFacts, title: String): SplitReason
                 if (named == null) named = SplitReason(SplitBasis.SharedArtist, artist = name, other = if (mine.artistKey == key) theirs.artist else mine.artist)
                 continue
             }
-            theirs.credits[key]?.let { song -> return SplitReason(SplitBasis.SharedArtist, artist = name, other = theirs.artist, song = song) }
+            theirs.credits(key)?.let { song -> return SplitReason(SplitBasis.SharedArtist, artist = name, other = theirs.artist, song = song) }
         }
     }
     return named
@@ -581,14 +638,14 @@ private val CommonTitleStarts = listOf(
 private fun isCommonTitle(title: String) = title in CommonTitles || CommonTitleStarts.any(title::startsWith)
 
 // The album artist most of an album's songs name, or their artist.
-private fun <T> albumArtistOf(songs: List<T>, fields: HealthFields<T>): String {
+fun <T> albumArtistOf(songs: List<T>, fields: HealthFields<T>): String {
     val named = songs.mapNotNull { fields.albumArtist(it)?.takeIf(String::isNotBlank) }
     val pool = named.ifEmpty { songs.mapNotNull { fields.artist(it)?.takeIf(String::isNotBlank) } }
     return pool.groupingBy { it }.eachCount().maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenByDescending { it.key })?.key.orEmpty()
 }
 
 // What the parts disagree on, as each part says it.
-private fun <T> differencesOf(parts: List<AlbumPart<T>>, fields: HealthFields<T>): List<AlbumDifferenceValues> {
+fun <T> differencesOf(parts: List<AlbumPart<T>>, fields: HealthFields<T>): List<AlbumDifferenceValues> {
     val found = ArrayList<AlbumDifferenceValues>()
     fun check(kind: AlbumDifference, of: (List<T>) -> String) {
         val values = parts.map { of(it.songs) }
@@ -629,14 +686,15 @@ fun <T> findMissingTags(songs: List<T>, fields: HealthFields<T>): Map<HealthTag,
 }
 
 // Songs of one album in its order: disc, track, then title.
-private fun <T> albumOrder(fields: HealthFields<T>): Comparator<T> =
-    compareBy<T> { fields.disc(it) ?: 0 }.thenBy { fields.track(it)?.takeIf { t -> t > 0 } ?: Int.MAX_VALUE }.thenBy { sortKey(fields.title(it)) }.thenBy { fields.id(it) }
+fun <T> albumOrder(fields: HealthFields<T>): Comparator<T> =
+    compareBy<T> { fields.disc(it) ?: 0 }.thenBy { fields.track(it)?.takeIf { t -> t > 0 } ?: Int.MAX_VALUE }.thenBy { healthSortKey(fields.title(it)) }.thenBy { fields.id(it) }
 
 // Songs from many albums: by artist, then album, then album order.
 private fun <T> albumOrderAcross(fields: HealthFields<T>): Comparator<T> =
-    compareBy<T> { sortKey(fields.albumArtist(it) ?: fields.artist(it)) }.thenBy { sortKey(fields.album(it)) }.thenBy { fields.albumId(it).orEmpty() }.then(albumOrder(fields))
+    compareBy<T> { healthSortKey(fields.albumArtist(it) ?: fields.artist(it)) }.thenBy { healthSortKey(fields.album(it)) }.thenBy { fields.albumId(it).orEmpty() }.then(albumOrder(fields))
 
-private fun sortKey(text: String?): String = text.orEmpty().trim().lowercase()
+// A name as the checks order lists by it.
+fun healthSortKey(text: String?): String = text.orEmpty().trim().lowercase()
 
 // Sets of songs joined as they are found to belong together, by index.
 private class Sets(count: Int) {

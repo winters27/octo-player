@@ -49,6 +49,7 @@ import app.winters.octo.design.OctoType
 import app.winters.octo.playback.ServerSwitch
 import app.winters.octo.playback.SwitchOutcome
 import app.winters.octo.playlists.PlaylistSync
+import app.winters.octo.server.CopyRunState
 import app.winters.octo.server.LastSync
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.PasswordDraft
@@ -64,6 +65,7 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
+import app.winters.octo.ui.common.rememberCopyNoticeAsk
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
@@ -123,6 +125,7 @@ class ServerViewModel @Inject constructor(
     fun remove(id: String, forgetHere: Boolean) = switcher.remove(id, forgetHere)
     val syncing: StateFlow<Boolean> = sync.syncing
     val problem: StateFlow<String?> = sync.problem
+    val copyRun: StateFlow<CopyRunState?> = sync.copyRun
     val last: StateFlow<LastSync?> = sync.last.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val place: StateFlow<Place> = chooser.place
 
@@ -170,6 +173,8 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
     val problem by vm.problem.collectAsStateWithLifecycle()
     val last by vm.last.collectAsStateWithLifecycle()
     val place by vm.place.collectAsStateWithLifecycle()
+    val copyRun by vm.copyRun.collectAsStateWithLifecycle()
+    val noticeAsk = rememberCopyNoticeAsk()
     val playlistsAvailable by vm.playlistsAvailable.collectAsStateWithLifecycle()
     val newPlaylistsOnServer by vm.newPlaylistsOnServer.collectAsStateWithLifecycle()
     val prompt = LocalDisconnectPrompt.current
@@ -250,8 +255,15 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
                         InfoRow(null, "%,d".format(copy.songs), title = "Songs")
                         InfoRow(null, "%,d".format(copy.albums), title = "Albums")
                     }
-                    ActionRow(SettingsIndex.SyncNow, onClick = vm::syncNow, busy = syncing, chevron = false)
-                    problem?.let { NoteRow(it, color = OctoColors.Error) }
+                    // A copy under way shows how far it is, over an older problem.
+                    val run = copyRun?.takeIf { it.account == current.session.id }
+                    if (run != null) {
+                        CopyProgressRow(run)
+                        if (run.whole) noticeAsk?.let { CopyNoticeAskRow(it) }
+                    } else {
+                        ActionRow(SettingsIndex.SyncNow, onClick = vm::syncNow, busy = syncing, chevron = false)
+                        problem?.let { NoteRow(it, color = OctoColors.Error) }
+                    }
                     ServerQueueRow()
                     if (playlistsAvailable) {
                         SwitchRow(

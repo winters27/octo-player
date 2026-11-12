@@ -23,7 +23,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -38,10 +40,11 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import app.winters.octo.catalog.NotEnoughSpace
 import app.winters.octo.catalog.PlaylistSummary
-import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.UserDao
+import app.winters.octo.data.spaceWords
 import app.winters.octo.design.AccentButton
+import app.winters.octo.playback.ListSpec
 import app.winters.octo.design.GlassPopup
 import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
@@ -74,11 +77,8 @@ import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.livelists.liveCopyMessage
 import app.winters.octo.ui.livelists.nothingToCopy
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -86,8 +86,10 @@ import javax.inject.Inject
 // The menus and forms for playlists. They pop up over everything, the bar
 // included, so any page can open one.
 sealed interface PlaylistSheet {
-    // Choose a playlist to add songs to: many picked in a list, say.
-    data class Pick(val trackIds: List<String>) : PlaylistSheet {
+    // Choose a playlist to add songs to: many picked in a list, say, or a
+    // whole album, artist or playlist.
+    data class Pick(val source: AddSource) : PlaylistSheet {
+        constructor(trackIds: List<String>) : this(AddSource.Ids(trackIds))
         constructor(trackId: String) : this(listOf(trackId))
     }
 
@@ -96,17 +98,17 @@ sealed interface PlaylistSheet {
 
     // Rename or delete a playlist, or save one only on the phone to the
     // server when `canSave`. `onServer` is one kept with the server.
-    // `canDownload` when some of its songs are only on a server. `keep`,
-    // the playlist's songs, offers its Keep downloaded switch, from its page.
-    // A family playlist (`family`) is renamed and deleted only by a manager
-    // (`canRename`, `canDelete`).
+    // `canDownload` when some of its songs are only on a server. `keep`
+    // offers its Keep downloaded switch, from its page. A family playlist
+    // (`family`) is renamed and deleted only by a manager (`canRename`,
+    // `canDelete`).
     data class Options(
         val id: String,
         val name: String,
         val onServer: Boolean = false,
         val canSave: Boolean = false,
         val canDownload: Boolean = false,
-        val keep: List<TrackEntity>? = null,
+        val keep: Boolean = false,
         val family: Boolean = false,
         val canRename: Boolean = true,
         val canDelete: Boolean = true,
@@ -154,11 +156,11 @@ class PlaylistSheetsViewModel @Inject constructor(
     private val store: PlaylistStore,
     private val offline: OfflineDownloads,
     private val files: PlaylistFiles,
-    private val userDao: UserDao,
     private val feedback: Feedback,
     private val recent: RecentPlaylists,
     private val liveLists: LiveListStore,
     private val liveSongs: LiveListSongs,
+    private val sources: AddSources,
 ) : ViewModel() {
     val playlists: StateFlow<List<PlaylistSummary>> =
         store.playlists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -171,12 +173,9 @@ class PlaylistSheetsViewModel @Inject constructor(
         viewModelScope.launch { recent.used(id) }
     }
 
-    // Which of the songs each playlist has already, by playlist.
-    fun holdings(trackIds: List<String>): Flow<Map<String, Set<String>>> {
-        val parts = trackIds.distinct().chunked(900).map { userDao.playlistHoldings(it) }
-        if (parts.isEmpty()) return flowOf(emptyMap())
-        return combine(parts) { rows -> holdingsByPlaylist(rows.flatMap { part -> part.map { it.playlistId to it.trackId } }) }
-    }
+    // How adding `source` to a playlist would go, counted chunk by chunk
+    // against the playlist's songs.
+    suspend fun check(playlist: PlaylistSummary, source: AddSource): Pair<AddCounts, AddPlan?> = sources.check(playlist.id, source)
 
     // A new playlist with songs in it says where they went, since nothing
     // on screen shows it.
@@ -188,6 +187,16 @@ class PlaylistSheetsViewModel @Inject constructor(
         }
     }
 
+    // A new playlist of what `source` brings, each song once.
+    fun create(name: String, source: AddSource) {
+        if (source is AddSource.Ids) return create(name, source.ids.distinct())
+        viewModelScope.launch {
+            val (id, count) = store.createDistinct(name) { emit -> sources.pages(source, emit) }
+            used(id)
+            if (count > 0) feedback.show(addedMessage(name.trim(), count))
+        }
+    }
+
     fun rename(id: String, name: String) = store.rename(id, name)
     fun delete(id: String) = store.delete(id)
 
@@ -195,11 +204,25 @@ class PlaylistSheetsViewModel @Inject constructor(
     fun add(playlist: PlaylistSummary, trackIds: List<String>) {
         used(playlist.id)
         store.add(playlist.id, trackIds) { rows ->
-            feedback.undoable(addedMessage(playlist.name, rows.size)) { store.removeRows(playlist.id, rows) }
+            feedback.undoable(addedMessage(playlist.name, rows.count)) { store.undoAdd(playlist.id, rows) }
+        }
+    }
+
+    // Adds what `source` brings a page at a time, each song once (with
+    // `newOnly` only those the playlist does not hold yet), with an Undo.
+    fun add(playlist: PlaylistSummary, source: AddSource, newOnly: Boolean, plan: AddPlan?) {
+        if (source is AddSource.Ids && plan != null) return add(playlist, if (newOnly) plan.fresh else plan.songs)
+        used(playlist.id)
+        viewModelScope.launch {
+            val rows = store.addPages(playlist.id, newOnly) { emit -> sources.pages(source, emit) } ?: return@launch
+            feedback.undoable(addedMessage(playlist.name, rows.count)) { store.undoAdd(playlist.id, rows) }
         }
     }
 
     fun saveToServer(id: String) = store.saveToServer(id)
+
+    // How many songs a list holds, for the picker's title.
+    suspend fun countOf(spec: ListSpec): Int? = sources.count(spec)
 
     // Live lists.
 
@@ -219,17 +242,17 @@ class PlaylistSheetsViewModel @Inject constructor(
     }
 
     // A playlist of the songs the live list holds now: a copy, which does
-    // not change with the rules.
+    // not change with the rules, written a page at a time.
     fun copyLive(id: String) {
         viewModelScope.launch {
             val list = liveLists.byId(id) ?: return@launch
-            val songs = liveSongs.now(list)
-            if (songs.isEmpty()) {
-                feedback.show(nothingToCopy(list.name))
+            val count = try {
+                liveSongs.copy(list) { pages -> store.createFrom(list.name, pages) }
+            } catch (e: NotEnoughSpace) {
+                feedback.show(spaceWords(e.doing, e.neededBytes))
                 return@launch
             }
-            store.create(list.name, songs.map { it.id })
-            feedback.show(liveCopyMessage(list.name, songs.size))
+            feedback.show(if (count == 0) nothingToCopy(list.name) else liveCopyMessage(list.name, count))
         }
     }
 
@@ -238,9 +261,9 @@ class PlaylistSheetsViewModel @Inject constructor(
 
     fun export(id: String, uri: Uri) {
         viewModelScope.launch {
-            if (!files.export(id, uri)) {
+            files.export(id, uri)?.let { problem ->
                 Log.w("Octo", "playlist export: could not write the file")
-                feedback.show("Could not export the playlist")
+                feedback.show(problem)
             }
         }
     }
@@ -272,7 +295,7 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
         PopupPager(sheets.pages) { sheet, canGoBack ->
             val back: (() -> Unit)? = if (canGoBack) ({ sheets.pages.back() }) else null
             when (sheet) {
-                is PlaylistSheet.Pick -> PlaylistPickerPage(sheet.trackIds, onBack = back, onDone = sheets::close, vm = vm)
+                is PlaylistSheet.Pick -> PlaylistPickerPage(sheet.source, onBack = back, onDone = sheets::close, vm = vm)
                 is PlaylistSheet.Create -> PopupNameForm("New playlist", "Playlist name", "Create", onBack = back, onDone = { name ->
                     vm.create(name, sheet.trackIds)
                     sheets.close()
@@ -293,7 +316,7 @@ fun PlaylistSheetsHost(sheets: PlaylistSheets, vm: PlaylistSheetsViewModel = hil
                             sheets.close()
                         })
                     }
-                    sheet.keep?.let { tracks -> keepPlaylistItem(sheet.id, tracks)?.let { GlassMenuSwitch(it) } }
+                    if (sheet.keep) keepPlaylistItem(sheet.id)?.let { GlassMenuSwitch(it) }
                     GlassMenuAction(OctoIcons.Share, "Export as M3U", onClick = {
                         exporting = sheet.id
                         sheets.close()
@@ -367,43 +390,70 @@ fun PlaylistPickerPage(
     onDone: () -> Unit,
     vm: PlaylistSheetsViewModel = hiltViewModel(),
     start: String? = null,
+) = PlaylistPickerPage(AddSource.Ids(trackIds), onBack, onDone, vm, start)
+
+// The same for songs named by what they are, an album or a playlist say:
+// the title counts them, and a tapped playlist is checked against them a
+// chunk at a time, saying "Checking the playlist" meanwhile.
+@Composable
+fun PlaylistPickerPage(
+    source: AddSource,
+    onBack: (() -> Unit)?,
+    onDone: () -> Unit,
+    vm: PlaylistSheetsViewModel = hiltViewModel(),
+    start: String? = null,
 ) {
     val all by vm.playlists.collectAsStateWithLifecycle()
     val recent by vm.recentIds.collectAsStateWithLifecycle()
     // A family playlist the listener may only listen to takes no songs.
     val playlists = remember(all, recent) { recentFirst(all.filterNot { it.family && !it.familyMayAdd }, recent) { it.id } }
-    val holdings by remember(trackIds) { vm.holdings(trackIds) }.collectAsStateWithLifecycle(null)
-    var asking by remember { mutableStateOf<Pair<PlaylistSummary, AddPlan>?>(null) }
+    var asking by remember { mutableStateOf<Triple<PlaylistSummary, AddCounts, AddPlan?>?>(null) }
     var naming by remember { mutableStateOf(false) }
-    // Whether the `start` playlist has been looked at yet.
+    // A playlist being checked, and the `start` playlist once looked at.
+    var checking by remember { mutableStateOf<PlaylistSummary?>(null) }
     var started by remember { mutableStateOf(start == null) }
-    val add = { playlist: PlaylistSummary, songs: List<String> ->
-        vm.add(playlist, songs)
+    val scope = rememberCoroutineScope()
+    val add = { playlist: PlaylistSummary, newOnly: Boolean, plan: AddPlan? ->
+        vm.add(playlist, source, newOnly, plan)
         onDone()
     }
-    LaunchedEffect(start, all, holdings) {
+    val tap = { playlist: PlaylistSummary ->
+        checking = playlist
+        scope.launch {
+            val (counts, plan) = vm.check(playlist, source)
+            checking = null
+            if (counts.asks) asking = Triple(playlist, counts, plan) else add(playlist, false, plan)
+        }
+        Unit
+    }
+    LaunchedEffect(start, all) {
         if (started) return@LaunchedEffect
         val playlist = all.firstOrNull { it.id == start } ?: return@LaunchedEffect
-        val held = holdings ?: return@LaunchedEffect
         started = true
-        val plan = planAdd(trackIds, held[playlist.id].orEmpty())
-        if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
+        tap(playlist)
     }
-    asking?.let { (playlist, plan) ->
+    asking?.let { (playlist, counts, plan) ->
         ConfirmAgain(
-            addAgainQuestion(playlist.name, plan),
-            plan,
+            addAgainQuestion(playlist.name, counts),
+            counts,
             onCancel = { asking = null },
-            onAddAll = { add(playlist, plan.songs) },
-            onAddNew = { add(playlist, plan.fresh) },
+            onAddAll = { add(playlist, false, plan) },
+            onAddNew = { add(playlist, true, plan) },
         )
         return
     }
-    if (!started) {
+    if (!started || checking != null) {
         GlassMenuPage { GlassMenuNote("Checking the playlist") }
         return
     }
-    val title = if (trackIds.size == 1) "Add to playlist" else "Add ${songs(trackIds.size)} to a playlist"
+    val size by produceState<Int?>((source as? AddSource.Ids)?.ids?.distinct()?.size, source) {
+        if (source is AddSource.Spec) value = vm.countOf(source.spec)
+    }
+    val title = when (val n = size) {
+        1 -> "Add to playlist"
+        null -> "Add to a playlist"
+        else -> "Add ${songs(n)} to a playlist"
+    }
     Column(Modifier.width(MenuWidth).padding(6.dp)) {
         if (onBack != null) GlassMenuBack(title, onBack) else GlassMenuHeading(title)
         LazyColumn(Modifier.weight(1f, fill = false)) {
@@ -413,7 +463,7 @@ fun PlaylistPickerPage(
                         "Playlist name",
                         "Create",
                         onDone = { name ->
-                            vm.create(name, trackIds.distinct())
+                            vm.create(name, source)
                             onDone()
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
@@ -423,10 +473,7 @@ fun PlaylistPickerPage(
                 }
             }
             items(playlists, key = { it.id }) { playlist ->
-                PickLine(playlist) {
-                    val plan = planAdd(trackIds, holdings?.get(playlist.id).orEmpty())
-                    if (plan.asks) asking = playlist to plan else add(playlist, plan.songs)
-                }
+                PickLine(playlist) { tap(playlist) }
             }
         }
     }
@@ -461,17 +508,17 @@ private fun PickLine(playlist: PlaylistSummary, onClick: () -> Unit) {
 // Asks before songs go on a playlist that has them already. With some new
 // ones among them, the choice is all of them or only the new ones.
 @Composable
-private fun ConfirmAgain(question: String, plan: AddPlan, onCancel: () -> Unit, onAddAll: () -> Unit, onAddNew: () -> Unit) {
-    if (plan.offersNewOnly) {
+private fun ConfirmAgain(question: String, counts: AddCounts, onCancel: () -> Unit, onAddAll: () -> Unit, onAddNew: () -> Unit) {
+    if (counts.offersNewOnly) {
         Column(Modifier.width(MenuWidth).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp)) {
             Text(question, style = OctoType.body, color = OctoColors.TextPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AccentButton(ADD_NEW_ONES, onClick = onAddNew)
-                GlazeButton(addAgainChoice(plan), onClick = onAddAll)
+                GlazeButton(addAgainChoice(counts), onClick = onAddAll)
             }
         }
     } else {
-        PopupQuestion(question, null, addAgainChoice(plan), onConfirm = onAddAll, onCancel = onCancel)
+        PopupQuestion(question, null, addAgainChoice(counts), onConfirm = onAddAll, onCancel = onCancel)
     }
 }
 

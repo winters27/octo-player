@@ -5,9 +5,13 @@ package app.winters.octo.discovery
 // song lands, not one per song. Downloads asked for before the app started
 // arrive quietly.
 class Arrivals {
-    private class AlbumAsk(val title: String, val waiting: MutableSet<String>) {
+    // An album asked for, its songs still to come. One asked for a page of
+    // songs at a time stays open until its last page joins, so it never
+    // settles between two pages.
+    class AlbumAsk internal constructor(val title: String, val waiting: MutableSet<String>) {
         val landed = HashSet<String>()
         val failed = HashSet<String>()
+        internal var open = false
     }
 
     private val songs = HashMap<String, String>()
@@ -32,8 +36,38 @@ class Arrivals {
         if (findIds.isEmpty()) return
         findIds.forEach { id -> songs.remove(id) }
         albums.forEach { it.waiting.removeAll(findIds.toSet()) }
-        albums.removeAll { it.waiting.isEmpty() && it.landed.isEmpty() }
+        albums.removeAll { !it.open && it.waiting.isEmpty() && it.landed.isEmpty() }
         albums += AlbumAsk(title.ifBlank { "The album" }, findIds.toMutableSet())
+    }
+
+    // A whole album asked for a page of songs at a time: `opened` starts
+    // its one ask, each page joins it, and `closed` ends it once the last
+    // page has, answering what to say if every song landed meanwhile.
+    @Synchronized
+    fun opened(title: String): AlbumAsk = AlbumAsk(title.ifBlank { "The album" }, HashSet()).also {
+        it.open = true
+        albums += it
+    }
+
+    @Synchronized
+    fun joined(ask: AlbumAsk, findIds: Collection<String>) {
+        if (findIds.isEmpty()) return
+        findIds.forEach { id -> songs.remove(id) }
+        albums.forEach { if (it !== ask) it.waiting.removeAll(findIds.toSet()) }
+        albums.removeAll { it !== ask && !it.open && it.waiting.isEmpty() && it.landed.isEmpty() }
+        if (ask !in albums) albums += ask
+        ask.waiting += findIds
+    }
+
+    @Synchronized
+    fun closed(ask: AlbumAsk): String? {
+        ask.open = false
+        if (ask !in albums) return null
+        if (ask.waiting.isEmpty() && ask.landed.isEmpty() && ask.failed.isEmpty()) {
+            albums.remove(ask)
+            return null
+        }
+        return settle(ask)
     }
 
     // A song reached the library. Answers what to say, if anything.
@@ -57,7 +91,7 @@ class Arrivals {
     }
 
     private fun settle(album: AlbumAsk): String? {
-        if (album.waiting.isNotEmpty()) return null
+        if (album.waiting.isNotEmpty() || album.open) return null
         albums.remove(album)
         return when {
             album.landed.isEmpty() -> null

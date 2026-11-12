@@ -2,8 +2,9 @@ package app.winters.octo.server
 
 import app.winters.octo.ui.family.offersRemoveOn
 import android.util.Log
-import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.SourceDao
+import app.winters.octo.ui.paging.serverAlbumVote
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
@@ -84,7 +85,7 @@ fun looksGenerated(station: RadioStationDetails, isOcto: Boolean): Boolean = isO
 class ServerControls @Inject constructor(
     private val sessions: SessionRepository,
     private val sources: SourceDao,
-    private val catalog: CatalogDao,
+    private val db: CatalogDatabase,
     private val sync: ServerSync,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -154,16 +155,11 @@ class ServerControls @Inject constructor(
     }
 
     // The server's id for a library album, when its songs came from one
-    // album there.
+    // album there: the album most of its songs are in on the server, counted
+    // a page of the album at a time.
     suspend fun serverAlbumId(albumId: String): String? {
         val session = session() ?: return null
-        val trackIds = catalog.albumTrackIds(albumId)
-        if (trackIds.isEmpty()) return null
-        val albums = trackIds.chunked(900).flatMap { sources.copiesOf(it) }
-            .filter { it.sourceId == session.sourceId }
-            .mapNotNull { serverAlbumIdOf(session.sourceId, it.albumId) }
-        // The album most of its songs are in on the server.
-        return albums.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        return serverAlbumVote(db, albumId, session.sourceId) { serverAlbumIdOf(session.sourceId, it) }
     }
 
     // Makes a link. Throws SubsonicException when the server cannot; one

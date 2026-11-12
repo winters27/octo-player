@@ -31,12 +31,12 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
 import androidx.media3.extractor.DefaultExtractorsFactory
 import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.connection.ConnectionSecurity
+import app.winters.octo.data.KeptServers
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.offline.StreamCache
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
-import app.winters.octo.server.sourceId
 import app.winters.octo.subsonic.SubsonicClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -268,11 +268,9 @@ class Streams @Inject constructor(
 
     fun currentSourceId(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
 
-    // Whether a song is another kept server's than the one in use.
-    private fun fromAnotherServer(ref: StreamRef, inUse: String?): Boolean {
-        val source = ref.sourceId ?: return false
-        return source != inUse && sessions.servers.value.servers.any { it.sourceId == source }
-    }
+    // Whether a song is another source's than the server in use: neither
+    // that server's own nor one of the addresses it had before an edit.
+    private fun fromAnotherServer(ref: StreamRef, inUse: String?): Boolean = refusedSource(ref.sourceId, inUse, sessions.servers.value)
 
     // Runs on the loading thread, before the saved copy is looked for.
     private fun pin(uri: Uri): Uri {
@@ -287,9 +285,10 @@ class Streams @Inject constructor(
             ?: throw StreamUnavailable("No server signed in")
         val client = session.client
         val ref = parseStreamUri(uri.toString()) ?: throw StreamUnavailable("No song id")
-        // Another kept server's song never goes to this one, where its id
-        // would be some other song. (A song kept under this server's old
-        // address, before it was edited, still plays.)
+        // Another source's song never goes to this server, where its id
+        // would be some other song or none: a kept server's, or one removed
+        // since. A song kept under this server's old address, before it was
+        // edited, still plays.
         if (fromAnotherServer(ref, session.sourceId)) throw StreamUnavailable("Another server's song")
         val request = ref.request(quality(current.value))
         return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString().toUri()
@@ -445,6 +444,14 @@ private class SplitDataSource(private val pick: (DataSpec) -> DataSource) : Data
         }
     }
 }
+
+// Whether a song from `source` is refused by the server in use (`inUse`,
+// kept as `kept.inUse`): it streams only when it names no source, that
+// server's own, or an address that server had before an edit. Any other
+// source's id, a kept server's or a removed one's, would name some other
+// song on this server, or none.
+internal fun refusedSource(source: String?, inUse: String?, kept: KeptServers): Boolean =
+    source != null && source != inUse && source !in kept.inUse?.formerSourceIds.orEmpty()
 
 // The quality a stream asks for: this app's, for the connection the phone
 // is on, when it picks; otherwise the file as it is, and the server applies

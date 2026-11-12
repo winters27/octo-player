@@ -267,26 +267,38 @@ enum class CarInput {
     LibraryOnly,
     CoverStyle,
     Offer,
+    Copy,
+
+    // Whether the stored play counts could be brought up to date: a list
+    // that reads them shows the words for why not, until they are.
+    Totals,
 }
 
-// The inputs a list reads. Play history is none of them, so Recently played
-// and Most played stay as they are while the car shows them.
+// The inputs a list reads. Plays themselves are none of them, so Recently
+// played and Most played stay as they are while the car shows them.
 fun carInputsOf(node: CarNode): Set<CarInput> = when (node) {
-    CarNode.Home, is CarNode.Shelf -> setOf(
+    CarNode.Home -> setOf(
         CarInput.Library, CarInput.Playlists, CarInput.Favorites, CarInput.Kept, CarInput.Shelves,
-        CarInput.HomeOrder, CarInput.Pins, CarInput.Adopted, CarInput.Downloads, CarInput.Offer, CarInput.CoverStyle,
+        CarInput.HomeOrder, CarInput.Pins, CarInput.Adopted, CarInput.Downloads, CarInput.Offer, CarInput.CoverStyle, CarInput.Copy,
+        CarInput.Totals,
+    )
+    is CarNode.Shelf -> setOf(
+        CarInput.Library, CarInput.Playlists, CarInput.Favorites, CarInput.Kept, CarInput.Shelves,
+        CarInput.HomeOrder, CarInput.Pins, CarInput.Adopted, CarInput.Downloads, CarInput.Offer, CarInput.CoverStyle, CarInput.Totals,
     )
     CarNode.Radio -> setOf(CarInput.Kept, CarInput.Shelves)
     CarNode.Playlists -> setOf(CarInput.Playlists, CarInput.Liked, CarInput.LiveLists, CarInput.Shelves, CarInput.Sorts, CarInput.CoverStyle)
-    CarNode.Albums, CarNode.Artists, CarNode.Genres, is CarNode.Genre -> setOf(CarInput.Library, CarInput.Sorts)
-    CarNode.Songs -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Downloads)
+    CarNode.Albums, CarNode.Artists -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Copy, CarInput.Totals)
+    CarNode.Genres -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Copy)
+    is CarNode.Genre -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Totals)
+    CarNode.Songs -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Downloads, CarInput.Copy, CarInput.Totals)
     CarNode.FavoriteAlbums, CarNode.FavoriteArtists -> setOf(CarInput.Favorites, CarInput.Sorts)
-    CarNode.Liked -> setOf(CarInput.Liked, CarInput.Sorts, CarInput.Downloads)
+    CarNode.Liked -> setOf(CarInput.Liked, CarInput.Sorts, CarInput.Downloads, CarInput.Totals)
     CarNode.Downloads -> setOf(CarInput.Downloads, CarInput.Sorts)
     is CarNode.Album -> setOf(CarInput.Library, CarInput.Adopted, CarInput.LibraryOnly, CarInput.Downloads)
-    is CarNode.Artist -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Adopted, CarInput.LibraryOnly)
+    is CarNode.Artist -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Adopted, CarInput.LibraryOnly, CarInput.Totals)
     is CarNode.Playlist -> setOf(CarInput.Playlists, CarInput.Downloads, CarInput.Adopted)
-    is CarNode.LiveList -> setOf(CarInput.Library, CarInput.LiveLists, CarInput.Liked)
+    is CarNode.LiveList -> setOf(CarInput.Library, CarInput.LiveLists, CarInput.Liked, CarInput.Totals)
     CarNode.Charts, CarNode.Chart, is CarNode.OctoList, is CarNode.Station, is CarNode.ChartList -> setOf(CarInput.Shelves, CarInput.Adopted)
     is CarNode.OnlineAlbum, is CarNode.OnlineArtist, is CarNode.Found, is CarNode.Top, is CarNode.Retry -> setOf(CarInput.Adopted, CarInput.LibraryOnly)
     is CarNode.Heading -> carInputsOf(node.parent)

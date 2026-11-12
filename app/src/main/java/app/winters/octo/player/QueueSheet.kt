@@ -22,6 +22,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,11 +97,17 @@ fun QueueSheets(model: PlayerViewModel, shuffle: Boolean, visible: Boolean, onDi
     GlassSheet(visible = visible, onDismiss = onDismiss) {
         val played by model.played.collectAsStateWithLifecycle()
         val upNext by model.upNext.collectAsStateWithLifecycle()
+        val building by model.building.collectAsStateWithLifecycle()
+        val tail by model.tail.collectAsStateWithLifecycle()
+        val head by model.head.collectAsStateWithLifecycle()
+        val tailCount by model.tailCount.collectAsStateWithLifecycle()
         QueueSheet(
             played = played,
             queue = upNext,
             shuffle = shuffle,
             backdrop = backdrop,
+            building = building,
+            past = QueuePast(head, tail, tailCount.first, tailCount.second, model::moreHead, model::moreTail, model::playEntry),
             actions = QueueActions(
                 move = model::moveInQueue,
                 remove = model::removeFromQueue,
@@ -144,6 +151,19 @@ enum class QueuePlace { Played, Current, Upcoming }
 
 class QueueMenuFor(val entry: QueueEntry, val place: QueuePlace)
 
+// The queue past the songs the player holds: the songs before them read so
+// far (`head`) and after them (`tail`), how many come after them in all and
+// how long they play, the reads of the next page each way, and a tap.
+class QueuePast(
+    val head: List<QueueEntry> = emptyList(),
+    val tail: List<QueueEntry> = emptyList(),
+    val tailCount: Int = 0,
+    val tailMs: Long = 0,
+    val moreHead: () -> Unit = {},
+    val moreTail: () -> Unit = {},
+    val play: (QueueEntry) -> Unit = {},
+)
+
 // What the queue sheet's rows and tools do.
 class QueueActions(
     val move: (from: Int, to: Int) -> Unit,
@@ -165,7 +185,18 @@ class QueueActions(
 // More menu clears the queue, takes out the songs played or saves it as a
 // playlist.
 @Composable
-fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, shuffle: Boolean, actions: QueueActions, backdrop: HazeState) {
+fun ColumnScope.QueueSheet(
+    played: List<QueueEntry>,
+    queue: List<QueueEntry>,
+    shuffle: Boolean,
+    actions: QueueActions,
+    backdrop: HazeState,
+    // Lists still being added, each shown as one quiet row after the songs
+    // the player holds; the rest of the list shows once it is in.
+    building: List<app.winters.octo.playback.BuildingRow> = emptyList(),
+    // The queue past the songs the player holds, read as the list reaches it.
+    past: QueuePast = QueuePast(),
+) {
     val current = queue.firstOrNull()
     val upcoming = queue.drop(1)
     // The rows as drawn. A drag moves them at once; the queue catches up on drop.
@@ -173,6 +204,16 @@ fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, sh
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = played.size)
+    // The next page each way once the list shows its top or its end.
+    val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    val atEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            info.totalItemsCount > 0 && (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - 3
+        }
+    }
+    LaunchedEffect(atTop, past.head.size) { if (atTop) past.moreHead() }
+    LaunchedEffect(atEnd, past.tail.size, past.tailCount) { if (atEnd && building.isEmpty()) past.moreTail() }
     val reorder = rememberReorderableLazyListState(listState) { from, to ->
         val a = rows.indexOfFirst { it.key == from.key }
         val b = rows.indexOfFirst { it.key == to.key }
@@ -195,7 +236,7 @@ fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, sh
     ) {
         Text("Up next", style = OctoType.section, color = OctoColors.TextPrimary, maxLines = 1)
         Text(
-            queueSummary(rows),
+            queueSummary(rows, past.tailCount, past.tailMs),
             style = OctoType.caption,
             color = OctoColors.TextMuted,
             maxLines = 2,
@@ -210,6 +251,16 @@ fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, sh
         state = listState,
         contentPadding = PaddingValues(top = 4.dp, bottom = 12.dp),
     ) {
+        // Played songs before the player's window, read as the list reaches them.
+        items(past.head, key = { it.key }) { entry ->
+            SongLine(
+                entry,
+                Modifier
+                    .alpha(PLAYED_ALPHA)
+                    .combinedClickable(onClickLabel = "Play", onClick = { past.play(entry) })
+                    .padding(horizontal = 20.dp),
+            )
+        }
         items(played, key = { it.key }) { entry ->
             SongLine(
                 entry,
@@ -302,8 +353,64 @@ fun ColumnScope.QueueSheet(played: List<QueueEntry>, queue: List<QueueEntry>, sh
                 }
             }
         }
+        // The songs after the player's window, read as the list reaches them:
+        // tap to play, swipe to take out. While a list is being added the
+        // rest waits for it.
+        if (building.isEmpty()) {
+            items(past.tail, key = { it.key }) { entry ->
+                val swipe = rememberSwipeToDismissBoxState()
+                SwipeToDismissBox(
+                    state = swipe,
+                    enableDismissFromStartToEnd = false,
+                    onDismiss = { actions.remove(entry) },
+                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
+                ) {
+                    SongLine(
+                        entry,
+                        Modifier
+                            .background(RowFill, RowShape)
+                            .combinedClickable(onClickLabel = "Play", onClick = { past.play(entry) })
+                            .padding(horizontal = 20.dp),
+                    )
+                }
+            }
+            val left = past.tailCount - past.tail.size
+            if (left > 0) item(key = "tail-count") { TailLine(left) }
+        }
+        // A list still being added: one quiet row where its songs go.
+        building.forEach { list ->
+            item(key = "building:${list.listId}") { BuildingLine(list.play) }
+        }
     }
 }
+
+// The quiet row under the songs read so far: how many more the queue holds.
+@Composable
+private fun TailLine(left: Int) {
+    Text(
+        tailWords(left),
+        style = OctoType.caption,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+    )
+}
+
+// "1 more song", "240 more songs".
+fun tailWords(left: Int): String = if (left == 1) "1 more song" else "$left more songs"
+
+// The quiet row of a list still being added to the queue.
+@Composable
+private fun BuildingLine(play: Boolean) {
+    Text(
+        buildingWords(play),
+        style = OctoType.caption,
+        color = OctoColors.TextMuted,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+    )
+}
+
+// What a list still being added says: a played list's rest, or a big add.
+fun buildingWords(play: Boolean): String = if (play) "Adding the rest of the list" else "Adding songs to the queue"
 
 // The heading over one part of what is to come.
 @Composable
@@ -318,9 +425,11 @@ private fun PartHeading(title: String) {
 
 // The count and length of the listener's own songs still to come, and how
 // many Autoplay added after them.
-private fun queueSummary(rows: List<QueueEntry>): String {
+// What is to come: the songs the player holds and, past them, the rest of
+// the queue (`tailCount` songs playing `tailMs`).
+private fun queueSummary(rows: List<QueueEntry>, tailCount: Int = 0, tailMs: Long = 0): String {
     val (auto, own) = rows.partition { it.autoplay }
-    val base = "${songs(own.size)} · ${(own.sumOf { it.durationMs } / 1000).toInt().asLength()}"
+    val base = "${songs(own.size + tailCount)} · ${((own.sumOf { it.durationMs } + tailMs) / 1000).toInt().asLength()}"
     return if (auto.isEmpty()) base else "$base · ${auto.size} from Autoplay"
 }
 

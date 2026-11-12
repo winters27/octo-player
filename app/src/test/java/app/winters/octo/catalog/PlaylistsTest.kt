@@ -1,12 +1,18 @@
 package app.winters.octo.catalog
 
+import app.winters.octo.catalog.today.appendedItems
+import app.winters.octo.catalog.today.movedItem
+import app.winters.octo.catalog.today.ordAt
+import app.winters.octo.catalog.today.place
+import app.winters.octo.catalog.today.renumbered
+import app.winters.octo.catalog.today.restoredItems
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
 
 class PlaylistsTest {
     private fun item(id: Long, position: Int) =
-        PlaylistItemEntity(id = id, playlistId = "p", trackId = "device:$id", relinkKey = "key$id", position = position)
+        PlaylistItemEntity(id = id, playlistId = "p", trackId = "device:$id", relinkKey = "key$id", ord = ordAt(position))
 
     private fun order(items: List<PlaylistItemEntity>) = items.map { it.id }
 
@@ -23,14 +29,14 @@ class PlaylistsTest {
     fun movingDownTakesTheTargetsPlace() {
         val moved = movedItem(items, itemId = 10, targetId = 12)
         assertEquals(listOf(11L, 12L, 10L, 13L), order(moved))
-        assertEquals(listOf(0, 1, 2, 3), moved.map { it.position })
+        assertEquals(listOf(0, 1, 2, 3), moved.map { it.place })
     }
 
     @Test
     fun movingUpTakesTheTargetsPlace() {
         val moved = movedItem(items, itemId = 13, targetId = 11)
         assertEquals(listOf(10L, 13L, 11L, 12L), order(moved))
-        assertEquals(listOf(0, 1, 2, 3), moved.map { it.position })
+        assertEquals(listOf(0, 1, 2, 3), moved.map { it.place })
     }
 
     @Test
@@ -50,7 +56,7 @@ class PlaylistsTest {
         val gappy = listOf(item(10, 0), item(12, 2), item(13, 5))
         val fixed = renumbered(gappy)
         assertEquals(listOf(10L, 12L, 13L), order(fixed))
-        assertEquals(listOf(0, 1, 2), fixed.map { it.position })
+        assertEquals(listOf(0, 1, 2), fixed.map { it.place })
         // A row already in place is the same row, so it is not written again.
         assertSame(gappy[0], fixed[0])
     }
@@ -58,7 +64,8 @@ class PlaylistsTest {
     @Test
     fun appendedSongsNumberOnAndKeepTheirRelinkKeys() {
         val rows = appendedItems("p", start = 4, tracks = listOf(track("device:1", "a"), track("device:2", "b")))
-        assertEquals(listOf(4, 5), rows.map { it.position })
+        assertEquals(listOf(4, 5), rows.map { it.place })
+        assertEquals(listOf(4L shl 20, 5L shl 20), rows.map { it.ord })
         assertEquals(listOf("device:1", "device:2"), rows.map { it.trackId })
         assertEquals(listOf("a", "b"), rows.map { it.relinkKey })
         assertEquals(listOf("p", "p"), rows.map { it.playlistId })
@@ -91,7 +98,7 @@ class PlaylistsTest {
         val rest = renumbered(listOf(item(10, 0), item(12, 2), item(13, 3)))
         val restored = restoredItems(rest, item(11, 1))
         assertEquals(listOf(10L, 11L, 12L, 13L), order(restored))
-        assertEquals(listOf(0, 1, 2, 3), restored.map { it.position })
+        assertEquals(listOf(0, 1, 2, 3), restored.map { it.place })
     }
 
     @Test
@@ -104,7 +111,7 @@ class PlaylistsTest {
     fun anUndoAfterTheListShrankPutsTheRowLast() {
         val restored = restoredItems(listOf(item(10, 0)), item(13, 3))
         assertEquals(listOf(10L, 13L), order(restored))
-        assertEquals(listOf(0, 1), restored.map { it.position })
+        assertEquals(listOf(0, 1), restored.map { it.place })
     }
 
     @Test
@@ -112,36 +119,35 @@ class PlaylistsTest {
         assertSame(items, restoredItems(items, item(12, 0)))
     }
 
+    private fun row(id: String, name: String, at: Long, sourceId: String? = null, notice: String? = null) =
+        PlaylistRow(id, name, at, at, sourceId, notice, false, false, false, false, false, itemSet = 0)
+
     @Test
     fun summariesCountLengthAndCoversPerPlaylist() {
-        val playlists = listOf(
-            PlaylistEntity("new", "Empty", createdAt = 2, updatedAt = 2),
-            PlaylistEntity("p", "Road", createdAt = 1, updatedAt = 1),
-        )
-        val entries = listOf(
-            PlaylistEntry("p", albumId = "a", durationMs = 1_000, artwork = "cover:a"),
-            PlaylistEntry("p", albumId = "b", durationMs = 2_000, artwork = "cover:b"),
+        assertEquals(
+            PlaylistSummary("new", "Empty", songCount = 0, durationMs = 0, covers = emptyList(), createdAt = 2, updatedAt = 2),
+            summaryOf(row("new", "Empty", 2), 0, 0, emptyList()),
         )
         assertEquals(
-            listOf(
-                PlaylistSummary("new", "Empty", songCount = 0, durationMs = 0, covers = emptyList(), createdAt = 2, updatedAt = 2),
-                PlaylistSummary(
-                    "p",
-                    "Road",
-                    songCount = 2,
-                    durationMs = 3_000,
-                    covers = listOf("cover:a", "cover:b"),
-                    createdAt = 1,
-                    updatedAt = 1,
-                ),
-            ),
-            summarize(playlists, entries),
+            PlaylistSummary("p", "Road", songCount = 2, durationMs = 3_000, covers = listOf("cover:a", "cover:b"), createdAt = 1, updatedAt = 1),
+            summaryOf(row("p", "Road", 1), 2, 3_000, listOf("cover:a", "cover:b")),
         )
     }
 
     @Test
     fun aSummaryCarriesTheServersNoticeMark() {
-        val playlists = listOf(PlaylistEntity("r", "Review", createdAt = 1, updatedAt = 1, serverId = "pl9", sourceId = "s", octoNotice = "review"))
-        assertEquals("review", summarize(playlists, emptyList()).single().octoNotice)
+        val summary = summaryOf(row("r", "Review", 1, sourceId = "s", notice = "review"), 0, 0, emptyList())
+        assertEquals("review", summary.octoNotice)
+        assertEquals(true, summary.onServer)
+    }
+
+    // Picked a song at a time, the covers are the ones the whole list gives.
+    @Test
+    fun thePickerTakesTheMosaicsCovers() {
+        val art = listOf("a" to null, "a" to "cover:a1", "c" to "cover:c", "a" to "cover:a2", "b" to "cover:b", "e" to null, "d" to "cover:d", "f" to "cover:f")
+        val picker = MosaicPicker()
+        art.forEach { (album, cover) -> picker.offer(album, cover) }
+        assertEquals(mosaicCovers(art), picker.covers)
+        assertEquals(true, picker.full)
     }
 }

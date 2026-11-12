@@ -3,6 +3,8 @@ package app.winters.octo
 import android.app.Application
 import app.winters.octo.admin.ServerUpdates
 import app.winters.octo.animated.AnimatedArts
+import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.catalog.UpgradeGuard
 import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.data.ServerDownloads
 import app.winters.octo.data.SessionRepository
@@ -13,8 +15,10 @@ import app.winters.octo.device.DeviceArtworkKeyer
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.family.FamilyHub
 import app.winters.octo.listening.ListenBrainzSync
+import app.winters.octo.listening.PlayTotals
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
 import app.winters.octo.server.ServerSync
@@ -59,6 +63,11 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var animatedArts: AnimatedArts
     @Inject lateinit var security: ConnectionSecurity
     @Inject lateinit var themes: ThemeStore
+    @Inject lateinit var upgradeGuard: UpgradeGuard
+    @Inject lateinit var merge: CatalogMerge
+    @Inject lateinit var totals: PlayTotals
+    @Inject lateinit var playlistSync: PlaylistSync
+    private var allStarted = false
 
     // Whether a main screen has been created in this process yet, for the
     // launch fade that only a cold start gets.
@@ -71,6 +80,23 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         // The system's night mode follows the theme, now and on every change.
         ThemeApplier.applyNightMode(this, themes.settings.value)
         scope.launch { themes.settings.collect { ThemeApplier.applyNightMode(this@OctoApp, it) } }
+        // An upgrade with no room on disk waits for the listener to free
+        // some (MainActivity asks); nothing that reads the library starts
+        // until then.
+        if (upgradeGuard.check()) startAll()
+    }
+
+    // Starts everything that keeps the library and the app up to date.
+    // Once, at launch, or after an upgrade waiting for space could run.
+    fun startAll() {
+        if (allStarted) return
+        allStarted = true
+        // Song keys an older Octo stored are worked out again, merge or not.
+        merge.start()
+        // Every song's plays are counted, then kept counted as they change.
+        totals.start()
+        // Playlist rows and server answers a write or a read cut off last time left go.
+        playlistSync.start()
         // Keep the library in step with the music on the phone.
         deviceLibrary.start()
         // And with the server's, when one is connected.

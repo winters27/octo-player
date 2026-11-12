@@ -16,14 +16,17 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
-import app.winters.octo.catalog.CatalogDao
+import androidx.room.RoomDatabase
+import androidx.room.withTransaction
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.CatalogMerge
+import app.winters.octo.catalog.PlaylistSets
+import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.playback.StreamUnavailable
 import app.winters.octo.playback.Streams
 import app.winters.octo.playback.bitrateOf
-import app.winters.octo.playback.compareQuality
 import app.winters.octo.playback.signInPageIn
 import app.winters.octo.playback.streamRequest
 import app.winters.octo.playback.streamUri
@@ -36,19 +39,23 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -59,6 +66,8 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 
 // How often a running download writes how far it has got.
 private const val PROGRESS_EVERY_MS = 500L
@@ -93,8 +102,10 @@ fun canRestore(removed: List<Pair<DownloadStatus, Boolean>>): Boolean =
 class OfflineDownloads @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dao: DownloadDao,
-    private val catalog: CatalogDao,
-    private val merge: CatalogMerge,
+    private val db: CatalogDatabase,
+    merge: CatalogMerge,
+    owners: WorkOwners,
+    sets: PlaylistSets,
     private val sessions: SessionRepository,
     private val streams: Streams,
     private val settings: OfflineSettings,
@@ -118,25 +129,48 @@ class OfflineDownloads @Inject constructor(
     // The "Download on Wi-Fi only" setting as it is now.
     @Volatile private var wifiOnly = OfflinePrefs().wifiOnly
 
-    // What the rules want, as last worked out.
-    @Volatile private var lastWanted: Map<String, Set<String>>? = null
+    // Every write of the download table goes through here.
+    private val book = DownloadBook(dao)
 
-    // Every download, by library song.
-    val byTrack: StateFlow<Map<String, DownloadEntity>> = dao.allFlow()
-        .map { rows -> rows.associateBy { it.trackId } }
-        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+    // The rules, and every walk of the download table a page at a time.
+    private val rules = OfflineRules(
+        db, merge, lock, book, owners, ::serverInUse,
+        dropped = ::dropped,
+        heldBack = { feedback.show(OFFLINE_COPIES_OFF) },
+        sets = sets,
+    )
 
-    // Library songs downloaded and ready to play.
-    val done: StateFlow<Set<String>> = byTrack
-        .map { rows -> rows.filterValues { it.state == DownloadStatus.Done }.keys }
-        .distinctUntilChanged()
-        .stateIn(scope, SharingStarted.Eagerly, emptySet())
+    // One rules walk at a time: the walks the rules' changes ask for and the
+    // one after each sync. Taken before the merge lock, never inside it.
+    private val walks = Mutex()
 
-    // The downloads page: the server in use's downloads.
-    val rows: Flow<List<DownloadRow>> = combine(dao.rows(), sessions.state) { rows, state ->
-        val source = (state as? SessionState.SignedIn)?.session?.sourceId
-        rows.filter { it.sourceId == source }
-    }
+    // Moves whenever the set of downloaded songs can change: the download
+    // marks on song rows and the car follow it.
+    val doneVersion: StateFlow<Long> get() = book.doneVersion
+
+    // Moves on every write of a download but a progress tick: readers of a
+    // download's state follow it.
+    val version: StateFlow<Long> get() = book.version
+
+    // Hears each requeue of downloads whose files had gone, once written,
+    // with how many it moved.
+    internal var requeued: (Int) -> Unit = {}
+
+    // Whether a library song has a finished download.
+    suspend fun isDone(trackId: String): Boolean = book.isDone(trackId)
+
+    // Which of these library songs have a finished download.
+    suspend fun doneAmong(trackIds: Collection<String>): Set<String> = book.doneAmong(trackIds)
+
+    // The downloads of these library songs, by song, read again on each
+    // write but a progress tick.
+    fun keptAmong(trackIds: Collection<String>): Flow<Map<String, DownloadEntity>> = book.keptAmong(trackIds)
+
+    // The download of one library song, likewise.
+    fun keptRow(trackId: String): Flow<DownloadEntity?> = book.keptRow(trackId)
+
+    // How far one download has got, as it goes.
+    fun progressOf(sourceId: String, serverId: String): Flow<Float> = book.progressOf(sourceId, serverId)
 
     fun start() {
         if (started) return
@@ -144,7 +178,7 @@ class OfflineDownloads @Inject constructor(
         scope.launch {
             // Files set aside by a removal the app closed on before it was final.
             asideDir().listFiles()?.forEach { it.delete() }
-            dao.requeueInterrupted()
+            book.requeueInterrupted()
             // The saved songs open in the background, not when a song first plays.
             saved.refreshUsed()
             watchRules()
@@ -168,26 +202,28 @@ class OfflineDownloads @Inject constructor(
     }
 
     // Downloads these library songs, the ones that can be: on a server and
-    // not on the phone.
+    // not on the phone. Each goes on the song its id names now (OfflineRules).
     fun download(trackIds: List<String>) {
         scope.launch {
-            lock.withLock {
-                val held = heldByTrack()
-                val manual = trackIds.distinct().associateWith { held[it].orEmpty() + Reasons.MANUAL }
-                val (fresh, known) = manual.entries.partition { it.key !in held }
-                known.forEach { (trackId, reasons) -> setReasons(trackId, reasons) }
-                add(fresh.associate { it.key to it.value })
-            }
+            rules.download(trackIds, refusedSource())
             poke()
         }
     }
 
+    // An album's songs, a page at a time.
     fun downloadAlbum(albumId: String) {
-        scope.launch { download(catalog.albumTrackIds(albumId)) }
+        scope.launch {
+            rules.downloadAlbum(albumId, refusedSource())
+            poke()
+        }
     }
 
+    // A playlist's songs as it shows them now, a page at a time.
     fun downloadPlaylist(playlistId: String) {
-        scope.launch { download(dao.playlistTrackIds(playlistId)) }
+        scope.launch {
+            rules.downloadPlaylist(playlistId, refusedSource())
+            poke()
+        }
     }
 
     // Lets go of a download asked for by hand. One a rule also keeps stays.
@@ -195,16 +231,8 @@ class OfflineDownloads @Inject constructor(
     // as long as its file could be set aside for a moment.
     fun remove(trackId: String, gone: (restore: () -> Unit) -> Unit = {}) {
         scope.launch {
-            val aside = lock.withLock {
-                val reasons = heldByTrack()[trackId] ?: return@withLock null
-                val left = reasons - Reasons.MANUAL
-                if (left.isEmpty()) {
-                    setAside(trackId)
-                } else {
-                    setReasons(trackId, left)
-                    null
-                }
-            } ?: return@launch
+            // Under every id the song's downloads are kept under now.
+            val aside = rules.unkeep(trackId) { held -> held.flatMap { setAside(it) } } ?: return@launch
             // The set aside files go for good once the undo has passed.
             scope.launch {
                 delay(UNDO_KEEP_MS)
@@ -216,24 +244,17 @@ class OfflineDownloads @Inject constructor(
     }
 
     // Takes back a removal: finished files move back, anything unfinished
-    // waits to download again. One asked for again meanwhile just stays
-    // wanted by hand.
+    // waits to download again, each on the song its id names now. One asked
+    // for again meanwhile just stays wanted by hand.
     private fun restore(aside: List<SetAside>) {
         scope.launch {
-            lock.withLock {
-                val rows = aside
-                    .filter { dao.get(it.row.sourceId, it.row.serverId) == null }
-                    .map { (row, file) ->
-                        when {
-                            row.state == DownloadStatus.Done && file != null && file.renameTo(File(row.path)) -> row
-                            row.state == DownloadStatus.Failed -> row
-                            else -> row.copy(state = DownloadStatus.Queued, progress = 0f, path = "", sizeBytes = 0)
-                        }
-                    }
-                if (rows.isNotEmpty()) dao.upsert(rows)
-                val held = heldByTrack()
-                aside.map { it.row.trackId }.distinct().forEach { trackId ->
-                    held[trackId]?.let { setReasons(trackId, it + Reasons.MANUAL) }
+            val files = aside.associate { key(it.row) to it.file }
+            rules.putBack(aside.map { it.row }) { row ->
+                val file = files[key(row)]
+                when {
+                    row.state == DownloadStatus.Done && file != null && file.renameTo(File(row.path)) -> row
+                    row.state == DownloadStatus.Failed -> row
+                    else -> row.copy(state = DownloadStatus.Queued, progress = 0f, path = "", sizeBytes = 0)
                 }
             }
             poke()
@@ -244,7 +265,7 @@ class OfflineDownloads @Inject constructor(
     // than deleting it. A file that cannot be moved is deleted.
     private suspend fun setAside(trackId: String): List<SetAside> = dao.forTrack(trackId).map { row ->
         running?.let { (key, job) -> if (key == key(row)) job.cancel() }
-        dao.delete(row.sourceId, row.serverId)
+        book.delete(row)
         val file = File(row.path).takeIf { row.path.isNotEmpty() && it.exists() }
         val kept = file?.let { File(asideDir(), "${System.nanoTime()}-${it.name}") }?.takeIf { file.renameTo(it) }
         if (file != null && kept == null) file.delete()
@@ -255,9 +276,7 @@ class OfflineDownloads @Inject constructor(
     fun removeAll() {
         scope.launch {
             settings.clearRules()
-            lock.withLock {
-                dao.all().forEach { deleteRow(it) }
-            }
+            rules.removeAll()
         }
     }
 
@@ -266,7 +285,7 @@ class OfflineDownloads @Inject constructor(
         scope.launch {
             dao.forTrack(trackId).filter { it.state == DownloadStatus.Failed }.forEach {
                 tries.remove(key(it))
-                dao.setState(it.sourceId, it.serverId, DownloadStatus.Queued, 0f)
+                book.setState(it.sourceId, it.serverId, DownloadStatus.Queued)
             }
             poke()
         }
@@ -274,7 +293,7 @@ class OfflineDownloads @Inject constructor(
 
     // Deletes the downloads of a server taken off the list, files and all.
     suspend fun forgetSource(sourceId: String) {
-        lock.withLock { dao.all().filter { it.sourceId == sourceId }.forEach { deleteRow(it) } }
+        rules.forgetSource(sourceId)
     }
 
     fun setKeepLiked(on: Boolean) {
@@ -285,54 +304,41 @@ class OfflineDownloads @Inject constructor(
         scope.launch { settings.setPlaylistKept(playlistId, kept) }
     }
 
-    // After each copy of the server's library: downloads follow their songs
-    // to new ids, and songs a rule wants that have just arrived download.
+    // After each copy of the server's library: a download whose server file
+    // is now another one downloads again (until it has, the song streams,
+    // so the old file never plays), downloads follow their songs to new
+    // ids, and songs a rule wants that have just arrived download.
     suspend fun afterSync() {
-        refreshSwapped()
-        lastWanted?.let { applyRules(it) }
+        rules.refreshSwapped()
+        val prefs = settings.prefs.first()
+        followRules(prefs.keepLiked, prefs.keptPlaylists)
         poke()
     }
 
-    // A download whose server file is now another one (the server swapped
-    // it for a better copy, say, under the same id) downloads again. Until
-    // it has, the song streams, so the old file never plays. Downloads made
-    // before the server's size was noted have it noted here.
-    private suspend fun refreshSwapped() = merge.betweenRebuilds {
-        val source = serverInUse() ?: return@betweenRebuilds
-        lock.withLock {
-            for (file in dao.doneFiles(source)) {
-                when (checkDownload(file)) {
-                    KeptCopyCheck.Keep -> Unit
-                    KeptCopyCheck.Note -> file.serverSize?.let { dao.noteFileSize(file.sourceId, file.serverId, it) }
-                    KeptCopyCheck.Refetch -> dao.setState(file.sourceId, file.serverId, DownloadStatus.Queued, 0f)
-                }
+    // The finished downloads of these library songs whose files are there.
+    // One whose file has gone waits to download again, written on the
+    // store's own scope, so a play never waits for a write; the song streams
+    // meanwhile.
+    suspend fun playableCopies(trackIds: List<String>): Map<String, DownloadEntity> =
+        book.playableCopies(trackIds) { requeue ->
+            scope.launch {
+                val moved = requeue()
+                if (moved > 0) poke()
+                requeued(moved)
             }
         }
-    }
-
-    // The finished downloads of these library songs whose files are there.
-    // One whose file has gone waits to download again.
-    suspend fun playableCopies(trackIds: List<String>): Map<String, DownloadEntity> = withContext(Dispatchers.IO) {
-        val rows = trackIds.distinct().chunked(900).flatMap { dao.doneFor(it) }
-        val (present, gone) = rows.partition { it.path.isNotEmpty() && File(it.path).isFile }
-        if (gone.isNotEmpty()) {
-            gone.forEach { dao.setState(it.sourceId, it.serverId, DownloadStatus.Queued, 0f) }
-            poke()
-        }
-        present.associateBy { it.trackId }
-    }
 
     // A downloaded file that turns out to be an HTML page (a sign-in page's
-    // answer kept before such answers were refused) is deleted, and its song
-    // downloads again. True when it was one.
-    suspend fun dropStoredHtml(uri: String): Boolean = withContext(Dispatchers.IO) {
+    // answer kept before such answers were refused) is deleted, and the
+    // downloads of `trackId` kept in it download again. A download kept in it
+    // under another id since is requeued once its file is found gone, as any
+    // is. True when it was one.
+    suspend fun dropStoredHtml(uri: String, trackId: String?): Boolean = withContext(Dispatchers.IO) {
         val path = uri.toUri().takeIf { it.scheme == "file" }?.path ?: return@withContext false
         if (!isHtmlFile(File(path))) return@withContext false
         lock.withLock {
-            dao.all().filter { it.path == path }.forEach { row ->
-                File(row.path).delete()
-                dao.setState(row.sourceId, row.serverId, DownloadStatus.Queued, 0f)
-            }
+            File(path).delete()
+            if (trackId != null) book.requeueFile(trackId, path)
         }
         poke()
         true
@@ -345,79 +351,37 @@ class OfflineDownloads @Inject constructor(
 
     // Rules
 
+    // The rules follow their settings and the songs they name: a like, a
+    // playlist's songs and a playlist's new list of songs each ask for a
+    // walk, once changes have settled. Asks made while a walk runs become
+    // one more walk.
+    @kotlin.OptIn(FlowPreview::class)
     private suspend fun watchRules() {
-        settings.prefs.map { it.keepLiked to it.keptPlaylists }
-            .distinctUntilChanged()
-            .flatMapLatest { (keepLiked, playlists) ->
-                val liked = if (keepLiked) dao.likedIds() else flowOf(emptyList())
-                val members = if (playlists.isEmpty()) flowOf(emptyList()) else dao.playlistMembers(playlists.toList())
-                combine(liked, members) { likedIds, songs -> wantedByRules(keepLiked, likedIds, songs) }
-            }
+        val songs = flow {
+            var changes = 0L
+            db.invalidationTracker.createFlow("liked_track", "playlist_item", "playlist").collect { emit(++changes) }
+        }
+        combine(settings.prefs.map { it.keepLiked to it.keptPlaylists }.distinctUntilChanged(), songs) { setting, _ -> setting }
             .debounce(RULES_SETTLE_MS)
-            .collect { wanted ->
-                lastWanted = wanted
-                applyRules(wanted)
+            .conflate()
+            .collect { (keepLiked, playlists) ->
+                followRules(keepLiked, playlists)
                 poke()
             }
     }
 
-    // Never while the library is being rebuilt, when song ids are changing.
-    private suspend fun applyRules(wanted: Map<String, Set<String>>) = merge.betweenRebuilds {
-        lock.withLock {
-            dao.relink()
-            val held = heldByTrack()
-            val fresh = wanted.keys.filter { it !in held }
-            val downloadable = fresh.chunked(900).flatMap { dao.downloadable(it) }.toSet()
-            val plan = planDownloads(held, wanted, downloadable)
-            if (plan.isEmpty) return@withLock
-            plan.remove.forEach { delete(it) }
-            plan.change.forEach { (trackId, reasons) -> setReasons(trackId, reasons) }
-            add(plan.add)
-        }
-    }
-
-    // The downloads of the server in use. Another kept server's files stay
-    // as they are until it is in use again: its songs are not in the
-    // library meanwhile, and would look unwanted.
-    private suspend fun heldByTrack(): Map<String, Set<String>> {
-        val source = serverInUse() ?: return emptyMap()
-        return dao.all().filter { it.sourceId == source }.groupBy { it.trackId }.mapValues { (_, rows) -> rows.flatMapTo(HashSet()) { it.reasons } }
-    }
-
-    private fun serverInUse(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
-
-    private suspend fun setReasons(trackId: String, reasons: Set<String>) {
-        dao.forTrack(trackId).forEach { dao.setReason(it.sourceId, it.serverId, Reasons.join(reasons)) }
-    }
-
-    // Queues new downloads, each from the best copy on the server.
-    private suspend fun add(wanted: Map<String, Set<String>>) {
-        if (wanted.isEmpty()) return
-        val downloadable = wanted.keys.chunked(900).flatMap { dao.downloadable(it) }.toSet()
-        val copies = downloadable.toList().chunked(900).flatMap { dao.serverCopies(it) }.groupBy { it.mergedId }
-        val now = System.currentTimeMillis()
+    // One walk of the rules. Whether new downloads may come from the server
+    // in use is asked first, outside every lock: it may ask the server.
+    private suspend fun followRules(keepLiked: Boolean, playlists: Set<String>) {
         val refused = refusedSource()
-        val rows = wanted.filterKeys { it in downloadable }.mapNotNull { (trackId, reasons) ->
-            val copy = copies[trackId]?.reduce { best, next -> if (compareQuality(next, best) > 0) next else best } ?: return@mapNotNull null
-            DownloadEntity(
-                trackId = trackId,
-                sourceId = copy.sourceId,
-                serverId = copy.nativeId,
-                path = "",
-                sizeBytes = 0,
-                format = null,
-                state = DownloadStatus.Queued,
-                progress = 0f,
-                addedAt = now,
-                reason = Reasons.join(reasons),
-                title = copy.title,
-                artist = copy.artist,
-            )
-        }
-        val (kept, held) = rows.partition { it.sourceId != refused }
-        if (held.isNotEmpty()) feedback.show(OFFLINE_COPIES_OFF)
-        kept.chunked(500).forEach { dao.upsert(it) }
+        walks.withLock { rules.walk(keepLiked, playlists, refused) }
     }
+
+    // The downloads of the server in use are the ones the rules look at.
+    // Another kept server's files stay as they are until it is in use
+    // again: its songs are not in the library meanwhile, and would look
+    // unwanted.
+    private fun serverInUse(): String? = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId
 
     // The server in use, when its family plan has offline copies off for
     // this account; null when new downloads may go.
@@ -427,13 +391,10 @@ class OfflineDownloads @Inject constructor(
         return session.sourceId.takeUnless { offlineCopiesAllowed(family.plan()) }
     }
 
-    private suspend fun delete(trackId: String) {
-        dao.forTrack(trackId).forEach { deleteRow(it) }
-    }
-
-    private suspend fun deleteRow(row: DownloadEntity) {
+    // A download deleted: one running stops, its file goes, and the
+    // animated art kept beside it is looked at again.
+    private fun dropped(row: DownloadEntity) {
         running?.let { (key, job) -> if (key == key(row)) job.cancel() }
-        dao.delete(row.sourceId, row.serverId)
         if (row.path.isNotEmpty()) File(row.path).delete()
         loops.poke()
     }
@@ -463,10 +424,10 @@ class OfflineDownloads @Inject constructor(
         val key = key(row)
         val copy = dao.serverCopy(row.sourceId, row.serverId)
         if (copy == null) {
-            dao.setState(row.sourceId, row.serverId, DownloadStatus.Failed, 0f)
+            book.setState(row.sourceId, row.serverId, DownloadStatus.Failed)
             return
         }
-        dao.setState(row.sourceId, row.serverId, DownloadStatus.Downloading, 0f)
+        book.markDownloading(row.sourceId, row.serverId)
         val request = streamRequest(copy.mimeType, bitrateOf(copy), settings.prefs.first().downloadQuality)
         val ref = streams.refFor(copy).pin(request)
         val dir = downloadDir()
@@ -475,7 +436,7 @@ class OfflineDownloads @Inject constructor(
         val part = File(dir, target.name + ".part")
         try {
             val size = copyInto(streamUri(ref), part) { progress ->
-                dao.setState(row.sourceId, row.serverId, DownloadStatus.Downloading, progress)
+                book.setProgress(row.sourceId, row.serverId, progress)
             }
             if (dao.get(row.sourceId, row.serverId) == null) {
                 part.delete()
@@ -483,7 +444,7 @@ class OfflineDownloads @Inject constructor(
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) throw IOException("Could not save the file")
-            dao.finish(row.sourceId, row.serverId, target.absolutePath, size, format, copy.sizeBytes?.takeIf { it > 0 })
+            book.finish(row.sourceId, row.serverId, target.absolutePath, size, format, copy.sizeBytes?.takeIf { it > 0 })
             // A song downloaded again under a new name lets its old file go.
             if (row.path.isNotEmpty() && row.path != target.absolutePath) File(row.path).delete()
             tries.remove(key)
@@ -500,20 +461,20 @@ class OfflineDownloads @Inject constructor(
                 // No connection: it waits for one, however long that takes.
                 e is StreamUnavailable || !streams.online() -> {
                     tries.remove(key)
-                    dao.setState(row.sourceId, row.serverId, DownloadStatus.Queued, 0f)
+                    book.setState(row.sourceId, row.serverId, DownloadStatus.Queued)
                 }
                 // A sign-in page answered in place of the song: nothing is
                 // kept, a saved copy that is one goes, and the download
                 // waits to be tried again by hand.
                 signInPageIn(e) -> {
                     streams.dropStoredHtml(streamUri(ref))
-                    dao.setState(row.sourceId, row.serverId, DownloadStatus.Failed, 0f)
+                    book.setState(row.sourceId, row.serverId, DownloadStatus.Failed)
                 }
                 // The server said no; asking again will not change that.
                 e is HttpDataSource.InvalidResponseCodeException || tried >= TRIES ->
-                    dao.setState(row.sourceId, row.serverId, DownloadStatus.Failed, 0f)
+                    book.setState(row.sourceId, row.serverId, DownloadStatus.Failed)
                 else -> {
-                    dao.setState(row.sourceId, row.serverId, DownloadStatus.Queued, 0f)
+                    book.setState(row.sourceId, row.serverId, DownloadStatus.Queued)
                     delay(RETRY_AFTER_MS)
                 }
             }
@@ -569,4 +530,162 @@ class OfflineDownloads @Inject constructor(
     private fun asideDir(): File = File(downloadDir(), ".removed").apply { mkdirs() }
 
     private fun key(row: DownloadEntity) = "${row.sourceId}|${row.serverId}"
+}
+
+// How many songs one lookup asks the database about, under its limit.
+internal const val LOOKUP_CHUNK = 900
+
+// The download table as OfflineDownloads keeps it: every write, each
+// moving the counters it can change, and the lookups by library song. Both
+// counters live in memory and start from 0. doneVersion moves when the set
+// of downloaded songs can change: a finish, a delete or a change of a
+// finished download, a restore of one, a relink. version moves on every
+// write but a progress tick. Each moves after its write returns, or, for a
+// write inside one of the book's transactions, once that has committed. A
+// running download's progress reaches its readers through progressOf,
+// never a counter, so a tick re-reads nothing.
+internal class DownloadBook(private val dao: DownloadDao) {
+    private val done = MutableStateFlow(0L)
+    private val any = MutableStateFlow(0L)
+
+    val doneVersion: StateFlow<Long> = done.asStateFlow()
+    val version: StateFlow<Long> = any.asStateFlow()
+
+    // The counter moves of one transaction's writes, held until it commits.
+    private class Pending(val book: DownloadBook) : AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<Pending>
+
+        @Volatile var any = false
+        @Volatile var done = false
+    }
+
+    private suspend fun wrote(doneMayChange: Boolean) {
+        val pending = currentCoroutineContext()[Pending]?.takeIf { it.book === this }
+        if (pending != null) {
+            pending.any = true
+            if (doneMayChange) pending.done = true
+            return
+        }
+        any.update { it + 1 }
+        if (doneMayChange) done.update { it + 1 }
+    }
+
+    // Runs `block` as one transaction of `db`. The counters move for its
+    // writes once it has committed, never before, so a reader a counter
+    // wakes reads what was written; one rolled back moves neither. Inside
+    // another of the book's transactions it is part of that one.
+    suspend fun <T> transaction(db: RoomDatabase, block: suspend () -> T): T {
+        if (currentCoroutineContext()[Pending]?.book === this) return db.withTransaction(block)
+        val pending = Pending(this)
+        var committed = false
+        try {
+            return withContext(pending) { db.withTransaction(block).also { committed = true } }
+        } finally {
+            if (committed && pending.any) {
+                any.update { it + 1 }
+                if (pending.done) done.update { it + 1 }
+            }
+        }
+    }
+
+    // New downloads, or rows put back as they were. A new download that
+    // takes the place of a finished one under the same key (another
+    // server's song kept from before, say) changes the downloaded set too.
+    suspend fun upsert(rows: List<DownloadEntity>) {
+        if (rows.isEmpty()) return
+        val replacesDone = rows.any { dao.keyDone(it.sourceId, it.serverId) }
+        dao.upsert(rows)
+        wrote(doneMayChange = replacesDone || rows.any { it.state == DownloadStatus.Done })
+    }
+
+    suspend fun setReason(sourceId: String, serverId: String, reason: String) {
+        dao.setReason(sourceId, serverId, reason)
+        wrote(doneMayChange = false)
+    }
+
+    // A download not finished waits again or has failed.
+    suspend fun setState(sourceId: String, serverId: String, state: DownloadStatus) {
+        dao.setState(sourceId, serverId, state, 0f)
+        wrote(doneMayChange = false)
+    }
+
+    // A finished download downloads again.
+    suspend fun refetch(sourceId: String, serverId: String) {
+        dao.setState(sourceId, serverId, DownloadStatus.Queued, 0f)
+        wrote(doneMayChange = true)
+    }
+
+    suspend fun markDownloading(sourceId: String, serverId: String) {
+        dao.markDownloading(sourceId, serverId)
+        wrote(doneMayChange = false)
+    }
+
+    suspend fun setProgress(sourceId: String, serverId: String, progress: Float) {
+        dao.setProgress(sourceId, serverId, progress)
+    }
+
+    suspend fun finish(sourceId: String, serverId: String, path: String, size: Long, format: String?, fileSize: Long?) {
+        dao.finish(sourceId, serverId, path, size, format, fileSize)
+        wrote(doneMayChange = true)
+    }
+
+    suspend fun noteFileSize(sourceId: String, serverId: String, fileSize: Long) {
+        dao.noteFileSize(sourceId, serverId, fileSize)
+        wrote(doneMayChange = false)
+    }
+
+    suspend fun requeueInterrupted() {
+        dao.requeueInterrupted()
+        wrote(doneMayChange = false)
+    }
+
+    // A row read while it downloaded may have finished since.
+    suspend fun delete(row: DownloadEntity) {
+        dao.delete(row.sourceId, row.serverId)
+        wrote(doneMayChange = row.state == DownloadStatus.Done || row.state == DownloadStatus.Downloading)
+    }
+
+    suspend fun relink() {
+        if (dao.relink() > 0) wrote(doneMayChange = true)
+    }
+
+    // Finished downloads whose files have gone wait to download again, each
+    // only while it is still finished with that file. Answers how many did.
+    suspend fun requeueGone(rows: List<DownloadEntity>): Int {
+        val moved = rows.sumOf { dao.requeueGone(it.sourceId, it.serverId, it.path) }
+        if (moved > 0) wrote(doneMayChange = true)
+        return moved
+    }
+
+    // The finished downloads of `trackId` kept in the file at `path` wait to
+    // download again. Answers how many did.
+    suspend fun requeueFile(trackId: String, path: String): Int = requeueGone(dao.forTrack(trackId).filter { it.path == path })
+
+    // The finished downloads of these library songs whose files are there,
+    // by song. It writes nothing: the ones whose files have gone are handed
+    // to `later` as a requeue to run, which answers how many it moved.
+    suspend fun playableCopies(trackIds: List<String>, later: (suspend () -> Int) -> Unit): Map<String, DownloadEntity> =
+        withContext(Dispatchers.IO) {
+            val rows = trackIds.distinct().chunked(LOOKUP_CHUNK).flatMap { dao.doneFor(it) }
+            val (present, gone) = rows.partition { it.path.isNotEmpty() && File(it.path).isFile }
+            if (gone.isNotEmpty()) later { requeueGone(gone) }
+            present.associateBy { it.trackId }
+        }
+
+    suspend fun isDone(trackId: String): Boolean = dao.isDone(trackId)
+
+    suspend fun doneAmong(trackIds: Collection<String>): Set<String> =
+        trackIds.distinct().chunked(LOOKUP_CHUNK).flatMapTo(HashSet()) { dao.doneAmong(it) }
+
+    // A song with downloads from more than one server keeps the one written
+    // last, as a map over every row in the order written would.
+    fun keptAmong(trackIds: Collection<String>): Flow<Map<String, DownloadEntity>> {
+        val chunks = trackIds.distinct().chunked(LOOKUP_CHUNK)
+        return version.map { chunks.flatMap { dao.keptAmong(it) }.associateBy { it.trackId } }.distinctUntilChanged()
+    }
+
+    fun keptRow(trackId: String): Flow<DownloadEntity?> = version.map { dao.keptRow(trackId) }.distinctUntilChanged()
+
+    fun progressOf(sourceId: String, serverId: String): Flow<Float> =
+        dao.progressOf(sourceId, serverId).map { it ?: 0f }.distinctUntilChanged()
 }

@@ -4,10 +4,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 // Several servers are kept, one in use: only the phone's music and the
 // server in use make the library, so two servers' copies of a song never
 // become one row.
+@RunWith(RobolectricTestRunner::class)
 class LibrarySourcesTest {
     private fun track(source: String, native: String = "1") = SourceTrackEntity(
         id = "$source:$native", sourceId = source, nativeId = native, title = "Hotline Bling", searchKey = "hotline bling",
@@ -36,7 +39,7 @@ class LibrarySourcesTest {
     @Test
     fun twoServersCopiesOfASongAreNeverOneRow() {
         val all = listOf("device", "server:home.test", "server:work.test").map(::source)
-        val merged = mergeCatalogs(all.filter { inLibrary(it.sourceId, "server:work.test") })
+        val merged = mergeThroughDatabase(all.filter { inLibrary(it.sourceId, "server:work.test") })
         val song = merged.tracks.single()
         assertEquals("the phone's copy keeps its id", "device:1", song.id)
         assertEquals("device:1", merged.mergedIds["server:work.test:1"])
@@ -46,7 +49,7 @@ class LibrarySourcesTest {
     @Test
     fun withNoServerInUseTheLibraryIsThePhonesOwn() {
         val all = listOf("server:home.test", "server:work.test").map(::source)
-        val merged = mergeCatalogs(all.filter { inLibrary(it.sourceId, null) })
+        val merged = mergeThroughDatabase(all.filter { inLibrary(it.sourceId, null) })
         assertTrue(merged.tracks.isEmpty())
     }
 }

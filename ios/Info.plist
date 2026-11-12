@@ -27,6 +27,7 @@
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <string>app.winters.octo.family-notices</string>
+        <string>app.winters.octo.copy.*</string>
     </array>
     <key>NSCameraUsageDescription</key>
     <string>Octo uses the camera to scan a family QR code.</string>

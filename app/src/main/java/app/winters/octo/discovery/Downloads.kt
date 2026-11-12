@@ -8,15 +8,19 @@ import app.winters.octo.admin.AdminUnavailable
 import app.winters.octo.admin.DownloadRecord
 import app.winters.octo.admin.OctoAdmin
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FIND_PREFIX
+import app.winters.octo.catalog.HoldKind
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
+import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
+import app.winters.octo.playback.FindMap
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.server.sourceId
@@ -88,12 +92,17 @@ class Downloads @Inject constructor(
     private val online: OnlineDao,
     private val catalog: CatalogDao,
     private val sync: Lazy<ServerSync>,
+    // For reading songs and adopting finds between rebuilds.
+    private val merge: Lazy<CatalogMerge>,
     private val admin: OctoAdmin,
     private val feedback: Feedback,
     private val hint: AddHint,
     // The server downloads sheet, told when a song is asked for so its
     // list looks now. Lazy: it only follows, and nothing here waits on it.
     private val serverDownloads: Lazy<app.winters.octo.data.ServerDownloads>,
+    // Finds a start plays before their rows are written: a write to one's
+    // row waits for its keep.
+    private val finds: FindMap,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -127,7 +136,7 @@ class Downloads @Inject constructor(
             override suspend fun takeIn(libraryId: String): String? = sync.get().takeInSong(libraryId)
 
             override suspend fun adopt(findId: String, trackId: String) {
-                val find = online.song(findId) ?: return
+                val find = online.song(findId) ?: finds[findId] ?: return
                 if (find.adoptedId.isNotEmpty()) return
                 val track = catalog.tracksByIdsUnordered(listOf(trackId)).firstOrNull() ?: return
                 adoptAs(find.id, track)
@@ -214,7 +223,7 @@ class Downloads @Inject constructor(
         val client = client() ?: return false
         return try {
             client.star(listOf(track.id.removePrefix(FIND_PREFIX)))
-            online.setRequested(track.id, System.currentTimeMillis())
+            markRequested(online, finds, listOf(track.id), System.currentTimeMillis())
             hint.added()
             arrivals.askedSong(track.id, track.title)
             tracker.retry(track.id)
@@ -233,12 +242,41 @@ class Downloads @Inject constructor(
         return try {
             client.starAlbums(listOf(albumId))
             val now = System.currentTimeMillis()
-            val finds = songs.filter { isFind(it.id) }
-            finds.forEach { online.setRequested(it.id, now) }
+            val asked = songs.filter { isFind(it.id) }
+            markRequested(online, finds, asked.map { it.id }, now)
             hint.added()
-            val coming = finds.filter { state(it.id) != DownloadState.Done }
+            val coming = asked.filter { state(it.id) != DownloadState.Done }
             arrivals.askedAlbum(title.ifBlank { coming.firstOrNull()?.album.orEmpty() }, coming.map { it.id })
             coming.forEach { tracker.retry(it.id) }
+            serverDownloads.get().wake()
+            follow()
+            true
+        } catch (e: SubsonicException) {
+            false
+        }
+    }
+
+    // The same for an album too big to hold: `pages` hands its finds a page
+    // at a time, each page asked for and followed in turn, and the album
+    // settles in one line once its last page has joined.
+    suspend fun requestAlbumPaged(albumId: String, title: String, pages: suspend (suspend (List<TrackEntity>) -> Unit) -> Unit): Boolean {
+        val client = client() ?: return false
+        return try {
+            client.starAlbums(listOf(albumId))
+            val now = System.currentTimeMillis()
+            hint.added()
+            val ask = arrivals.opened(title)
+            try {
+                pages { page ->
+                    val asked = page.filter { isFind(it.id) }
+                    markRequested(online, finds, asked.map { it.id }, now)
+                    val coming = asked.filter { state(it.id) != DownloadState.Done }
+                    arrivals.joined(ask, coming.map { it.id })
+                    coming.forEach { tracker.retry(it.id) }
+                }
+            } finally {
+                arrivals.closed(ask)?.let(feedback::done)
+            }
             serverDownloads.get().wake()
             follow()
             true
@@ -265,27 +303,28 @@ class Downloads @Inject constructor(
         online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         forgetDeleted(serverSourceId(client.primaryUrl))
         val waiting = online.waiting().ifEmpty { return }
-        val candidates = waiting.flatMap { titleKeys(it.title) }.distinct().chunked(900).flatMap { catalog.tracksWithKeys(it) }
-        val adopted = adoptions(waiting, candidates.filter { !isFind(it.id) })
-        for (find in waiting) adopted[find.id]?.let { adoptAs(find.id, it) }
+        adoptWaiting(
+            waiting,
+            page = { key, after -> catalog.tracksWithKeyPage(key, after, FIND_PAGE) },
+            locked = { block -> merge.get().betweenRebuilds(HoldKind.Page, block) },
+            adopt = { find, track -> adoptAs(find.id, track) },
+        )
     }
 
     // A find whose library song this server's library no longer holds, as
     // when it was deleted there, is neither asked for nor arrived: it offers
     // its add again, not a check for a song that is gone. Not after a copy
-    // that found no songs at all.
+    // that found no songs at all. One statement reads and clears, so a find
+    // adopted while it runs keeps its song.
     private suspend fun forgetDeleted(sourceId: String) {
-        val adopted = online.adopted(sourceId).ifEmpty { return }
         if (catalog.trackCount(sourceId).first() == 0) return
-        val present = adopted.map { it.adoptedId }.distinct().chunked(900)
-            .flatMap { catalog.tracksByIdsUnordered(it) }.mapTo(HashSet()) { it.id }
-        goneFinds(adopted, present).chunked(900).forEach { online.forget(it) }
+        merge.get().betweenRebuilds(HoldKind.Page) { online.forgetGone(sourceId) }
     }
 
     // A find became this library song: the two are linked. Downloading is
     // not liking, so the song is not hearted; that stays the listener's call.
     private suspend fun adoptAs(findId: String, track: TrackEntity) {
-        online.adopt(findId, track.id)
+        adoptFind(online, finds, findId, track.id)
     }
 
     // Follows the downloads asked for: by asking the server how they are
@@ -447,10 +486,65 @@ fun adoptions(waiting: List<OnlineSongEntity>, library: List<TrackEntity>): Map<
     }.toMap()
 }
 
-// The finds whose library song is not among `present`, the library songs
-// still there.
-fun goneFinds(adopted: List<OnlineSongEntity>, present: Set<String>): List<String> =
-    adopted.filter { it.adoptedId.isNotEmpty() && it.adoptedId !in present }.map { it.id }
+// Marks finds asked for at `at`: each waits for its row's keep when a
+// start holds it (FindMap), so the mark finds the row.
+internal suspend fun markRequested(online: OnlineDao, finds: FindMap, ids: List<String>, at: Long) {
+    for (id in ids) {
+        finds.awaitKept(id)
+        online.setRequested(id, at)
+    }
+}
+
+// Links a find to the library song it became, after its row's keep.
+internal suspend fun adoptFind(online: OnlineDao, finds: FindMap, findId: String, trackId: String) {
+    finds.awaitKept(findId)
+    online.adopt(findId, trackId)
+}
+
+// How many library songs one read of the finds' walk takes.
+internal const val FIND_PAGE = 50
+
+// Adopts what adoptions would over every song filed under the waiting
+// finds' title keys, sorted by search key and then id, without reading
+// them all at once: the keys are walked in order, each a page at a time,
+// and each song is offered to every find still waiting that a title lookup
+// reaches; a find takes the first that is the same song. The walk stops
+// once every find has its song. Each page is read and its finds adopted
+// inside `locked`, so a rebuild never lands in between.
+internal suspend fun adoptWaiting(
+    waiting: List<OnlineSongEntity>,
+    page: suspend (key: String, after: String) -> List<TrackEntity>,
+    locked: suspend (suspend () -> Unit) -> Unit,
+    adopt: suspend (OnlineSongEntity, TrackEntity) -> Unit,
+) {
+    val open = LinkedHashMap<String, OnlineSongEntity>()
+    waiting.forEach { open[it.id] = it }
+    val lookups = waiting.associate { it.id to SongIdentity.titleLookupKeys(it.title, it.artist) }
+    for (key in waiting.flatMap { titleKeys(it.title) }.distinct().sorted()) {
+        var after = ""
+        while (open.isNotEmpty()) {
+            var read = 0
+            locked {
+                val tracks = page(key, after)
+                read = tracks.size
+                tracks.lastOrNull()?.let { after = it.id }
+                for (track in tracks) {
+                    if (isFind(track.id)) continue
+                    val keys = SongIdentity.titleLookupKeys(track.title, track.artist)
+                    val found = open.values.filter { find ->
+                        keys.any { it in lookups.getValue(find.id) } && sameSong(find.title, find.artist, find.durationMs, track)
+                    }
+                    for (find in found) {
+                        adopt(find, track)
+                        open.remove(find.id)
+                    }
+                }
+            }
+            if (read < FIND_PAGE) break
+        }
+        if (open.isEmpty()) return
+    }
+}
 
 // Whether a song Octo finished downloading is the one asked for: the same
 // recording by the same artist.

@@ -44,10 +44,17 @@ import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import androidx.lifecycle.viewModelScope
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.LikeStore
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.QUEUE_WINDOW
 import app.winters.octo.playback.queueAddWords
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import app.winters.octo.health.DELETE_FROM_DISK
 import app.winters.octo.ui.menu.DiskDeleteHost
 import app.winters.octo.ui.menu.DiskDeleteViewModel
@@ -67,20 +74,44 @@ class SelectionBarViewModel @Inject constructor(
     private val offline: OfflineDownloads,
     private val feedback: Feedback,
 ) : ViewModel() {
-    val liked: StateFlow<Set<String>> = likes.liked
+    // Which of these songs are liked, as that changes.
+    fun likedAmong(ids: List<String>): Flow<Set<String>> = likes.likedAmong(ids)
 
-    fun play(ids: List<String>) = playback.playTracks(ids, 0)
-    fun playNext(ids: List<String>) =
-        playback.playNextUndoable(ids) { count, undo -> feedback.undoable(queueAddWords(count, next = true), undo) }
-    fun addToQueue(ids: List<String>) =
-        playback.playLastUndoable(ids) { count, undo -> feedback.undoable(queueAddWords(count, next = false), undo) }
+    // The picked rows play as part of the list they were picked on, in its
+    // order now, from the first; a list held whole plays them as they are.
+    fun play(target: SelectionTarget) {
+        viewModelScope.launch {
+            val picked = target.ordered()
+            val first = picked.firstOrNull() ?: return@launch
+            playback.playList(specOf(target, picked), ListStart.First(first.trackId, first.rowKey))
+        }
+    }
+
+    fun add(target: SelectionTarget, next: Boolean) {
+        viewModelScope.launch {
+            val picked = target.ordered()
+            if (picked.isEmpty()) return@launch
+            playback.addList(specOf(target, picked), next, inserted = { count, undo -> feedback.undoable(queueAddWords(count, next), undo) })
+        }
+    }
+
+    private fun specOf(target: SelectionTarget, picked: List<Picked>): ListSpec =
+        target.spec?.let { ListSpec.Selection(it, picked.map(Picked::key)) } ?: ListSpec.Ids(picked.map(Picked::trackId).take(QUEUE_WINDOW))
+
+    // The picked library songs in the list's order, for a playlist.
+    fun withOrdered(target: SelectionTarget, use: (List<Picked>) -> Unit) {
+        viewModelScope.launch { use(target.ordered()) }
+    }
 
     // Downloads the ones only on a server; the rest are on the phone already.
     fun download(ids: List<String>) = offline.download(ids)
 
-    // Likes every song, or takes the like off every one.
+    // Likes every song, or takes the like off every one, as they stand.
     fun setLiked(ids: List<String>, like: Boolean) {
-        ids.filter { (it in liked.value) != like }.forEach(likes::toggle)
+        viewModelScope.launch {
+            val liked = likes.likedAmong(ids).first()
+            ids.filter { (it in liked) != like }.forEach(likes::toggle)
+        }
     }
 }
 
@@ -115,22 +146,22 @@ fun SelectionBarHost(
 
 @Composable
 private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, vm: SelectionBarViewModel, disk: DiskDeleteViewModel) {
-    val liked by vm.liked.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
-    val picked = target.picked()
-    val ids = picked.map { it.track.id }
+    val picked = target.picks
+    val ids = picked.map { it.trackId }
     val library = ids.filterNot(::isFind)
+    val liked by remember(library) { vm.likedAmong(library) }.collectAsStateWithLifecycle(emptySet())
     val allLiked = library.isNotEmpty() && library.all { it in liked }
-    val canDownload = picked.any { !it.track.onPhone && !isFind(it.track.id) }
+    val canDownload = picked.any { !it.onPhone && !isFind(it.trackId) }
     // Files are shared or deleted only when every picked song has one.
-    val allOnPhone = picked.isNotEmpty() && picked.all { it.track.onPhone && !isFind(it.track.id) }
+    val allOnPhone = picked.isNotEmpty() && picked.all { it.onPhone && !isFind(it.trackId) }
     // Deleted from the server's disk only when every picked song has a
     // copy there and the server lets this user.
     val canRemove by disk.canRemove.collectAsStateWithLifecycle()
     val onDisk by produceState(emptyList<String>(), library, canRemove) { value = if (canRemove) disk.deletable(library) else emptyList() }
     val allOnDisk = library.isNotEmpty() && library.size == ids.size && onDisk.size == library.size
     val choices = LocalChoiceSheet.current
-    val askDisk = { disk.ask(library, picked.map { it.track.title }) }
+    val askDisk = { disk.ask(library, picked.map { it.title }) }
     val remove = target.remove
     // Every action ends the picking once done.
     val act = { action: () -> Unit ->
@@ -178,11 +209,11 @@ private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, 
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 val each = Modifier.weight(1f)
-                BarButton(OctoIcons.Play, "Play", each) { act { vm.play(ids) } }
-                BarButton(OctoIcons.PlayNext, "Play next", each) { act { vm.playNext(ids) } }
-                BarButton(OctoIcons.AddToQueue, "Add to queue", each) { act { vm.addToQueue(ids) } }
+                BarButton(OctoIcons.Play, "Play", each) { act { vm.play(target) } }
+                BarButton(OctoIcons.PlayNext, "Play next", each) { act { vm.add(target, next = true) } }
+                BarButton(OctoIcons.AddToQueue, "Add to queue", each) { act { vm.add(target, next = false) } }
                 BarButton(OctoIcons.AddToPlaylist, "Add to playlist", each, enabled = library.isNotEmpty()) {
-                    act { sheets.show(PlaylistSheet.Pick(library)) }
+                    act { vm.withOrdered(target) { rows -> sheets.show(PlaylistSheet.Pick(rows.map { it.trackId }.filterNot(::isFind))) } }
                 }
                 BarButton(OctoIcons.Download, "Download", each, enabled = canDownload) { act { vm.download(library) } }
                 BarButton(

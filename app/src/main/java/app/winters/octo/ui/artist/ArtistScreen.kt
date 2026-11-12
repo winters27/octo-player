@@ -48,12 +48,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.ambient.PageArtwork
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import androidx.paging.compose.collectAsLazyPagingItems
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.artistSongOrder
 import app.winters.octo.catalog.groupReleases
+import app.winters.octo.playback.ArtistOrder
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
+import app.winters.octo.ui.paging.Keyed
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.PLAY_TOTAL
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.tableChanges
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.onStart
 import app.winters.octo.catalog.splitLines
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.OctoColors
@@ -68,9 +83,10 @@ import app.winters.octo.discovery.SimilarArtist
 import app.winters.octo.discovery.inLibraryOnly
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.listening.FavouriteKind
-import app.winters.octo.listening.PlayHistory
 import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.RadioAround
+import app.winters.octo.playback.Shown
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.sort.Sorted
@@ -128,13 +144,15 @@ class ArtistViewModel @AssistedInject constructor(
     @Assisted private val id: String,
     dao: CatalogDao,
     private val extrasSource: ArtistExtrasSource,
-    history: PlayHistory,
     private val sorted: SortedLibrary,
     private val playback: PlaybackConnection,
     private val libraryRadio: LibraryRadio,
     private val feedback: Feedback,
     downloads: Downloads,
     player: PlayerSettings,
+    private val loaders: ListLoaders,
+    private val reads: LibraryReads,
+    db: CatalogDatabase,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -174,28 +192,40 @@ class ArtistViewModel @AssistedInject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Their songs in the library, the most played first once any have been
-    // played, otherwise album by album.
-    val songs: StateFlow<List<TrackEntity>> =
-        combine(dao.artistTracks(id), history.tracks) { tracks, played -> artistSongOrder(tracks, played) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // played, otherwise album by album: read in pages, never whole.
+    private val spec = ListSpec.Artist(id, ArtistOrder.Page)
+    private val loader = loaders.artist(id, ArtistOrder.Page)
+
+    // The first songs, for the page's short list, and one more to say
+    // whether there are more than it shows.
+    val songs: StateFlow<List<Keyed<TrackEntity>>> = db.tableChanges(loader.tables).onStart { emit(Unit) }.conflate()
+        .map { firstSongs(ARTIST_SONGS + 1) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // Every song, in pages, once "See all" is on.
+    val pages = ListHandle(viewModelScope, Unit, { loaders.artist(id, ArtistOrder.Page) }, reads, { _, l -> db.tableChanges(l.tables) })
+
+    private suspend fun firstSongs(limit: Int): List<Keyed<TrackEntity>> =
+        reads.read(PLAY_TOTAL in loader.tables, prepare = {}) { loader.after(null, limit) }
 
     // Whether there can be a radio: always, since the library alone can make one.
     val radio: StateFlow<Boolean> = MutableStateFlow(true)
 
     // Plays all their songs in the order shown, or shuffled.
     fun play(shuffle: Boolean) {
-        playback.playTracks(songs.value.map { it.id }, 0, shuffle, artist.value?.name)
+        playback.playList(spec, null, shuffle, artist.value?.name)
     }
 
-    fun playSong(index: Int) {
-        playback.playTracks(songs.value.map { it.id }, index, source = artist.value?.name)
+    fun playSong(song: Keyed<TrackEntity>) {
+        playback.playList(spec, ListStart.Row(song.row.id, song.key), source = artist.value?.name)
     }
 
     // Plays their most played song, then songs like theirs, theirs among them.
     fun startRadio() {
-        val seeds = songs.value.take(200)
-        if (seeds.isEmpty()) return
-        viewModelScope.launch { playRadio(seeds, libraryRadio, playback, feedback) }
+        viewModelScope.launch {
+            val seed = firstSongs(1).firstOrNull()?.row ?: return@launch
+            playRadio(seed, playback, RadioAround.Artist(id), Shown(artist.value?.name ?: seed.artist, null, artist.value?.artwork))
+        }
     }
 
     init {
@@ -214,6 +244,10 @@ class ArtistViewModel @AssistedInject constructor(
     fun reloadExtras() {
         extrasSource.forget(id)
         reload.update { it + 1 }
+    }
+
+    override fun onCleared() {
+        pages.close()
     }
 
     // Plays the top songs from one of them.
@@ -250,10 +284,22 @@ fun ArtistScreen(
     var allSongs by rememberSaveable { mutableStateOf(false) }
     PageArtwork(ArtistRoute(id), artist?.artwork)
     val grid = rememberLazyGridState()
+    val everySong = vm.pages.pages.collectAsLazyPagingItems()
+    // With "See all" on, every song is a line of its own after the songs'
+    // title line.
+    val pagedSongs = if (allSongs && ownSongs.isNotEmpty()) everySong.itemCount else 0
+    val songsStart = listOf(artist != null, ownSongs.isNotEmpty()).count { it }
     // A new order scrolls back to the albums' own line, below the header,
     // the songs and any top songs.
-    val above = listOf(artist != null, ownSongs.isNotEmpty(), top.isNotEmpty()).count { it }
+    val above = songsStart + pagedSongs + (if (top.isNotEmpty()) 1 else 0)
     sortedAlbums?.let { TopOnNewOrder(it.order, grid, top = above) }
+    // The first song line in view tells the list where to read again from.
+    LaunchedEffect(grid, everySong, allSongs, songsStart) {
+        snapshotFlow { grid.firstVisibleItemIndex }.distinctUntilChanged().collect { index ->
+            val at = index - songsStart
+            vm.pages.visible(if (allSongs && at in 0 until everySong.itemCount) everySong.peek(at)?.key else null)
+        }
+    }
 
     Refreshable(onRefresh = vm::reloadExtras) {
         ArtistGrid(grid) {
@@ -282,9 +328,26 @@ fun ArtistScreen(
                             SectionTitle("Songs", Modifier.weight(1f))
                             if (more) QuietButton(if (allSongs) "Show fewer" else "See all") { allSongs = !allSongs }
                         }
-                        val shown = if (allSongs) ownSongs else ownSongs.take(ARTIST_SONGS)
-                        shown.forEachIndexed { index, track ->
-                            SongRow(track, subtitle = { it.album }) { vm.playSong(index) }
+                        if (!allSongs) {
+                            ownSongs.take(ARTIST_SONGS).forEach { song ->
+                                SongRow(song.row, subtitle = { it.album }) { vm.playSong(song) }
+                            }
+                        }
+                    }
+                }
+                if (allSongs) {
+                    items(
+                        count = everySong.itemCount,
+                        key = { at -> everySong.peek(at)?.key?.token?.let { "song:$it" } ?: "song-at:$at" },
+                        span = { GridItemSpan(maxLineSpan) },
+                    ) { at ->
+                        val song = everySong[at]
+                        Box(Modifier.bleed(GridSideMargin)) {
+                            if (song == null) {
+                                RowPlaceholder()
+                            } else {
+                                SongRow(song.row, subtitle = { it.album }) { vm.playSong(Keyed(song.key, song.row)) }
+                            }
                         }
                     }
                 }

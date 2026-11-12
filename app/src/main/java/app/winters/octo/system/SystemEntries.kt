@@ -9,13 +9,19 @@ import androidx.activity.ComponentActivity
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.withResumed
+import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.server.COPY_LIKES_ON_ITS_WAY
+import app.winters.octo.server.COPY_STILL_ON_ITS_WAY
+import app.winters.octo.server.ServerSync
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.widget.QuickPick
 import app.winters.octo.widget.QuickPicks
 import app.winters.octo.widget.WidgetCommand
 import app.winters.octo.widget.commandIntent
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -27,6 +33,7 @@ class SystemEntries @Inject constructor(
     private val playback: PlaybackConnection,
     private val openedFiles: OpenedFiles,
     private val feedback: Feedback,
+    private val sync: ServerSync,
 ) {
     // Plays what the intent asks for once the screen is up, then opens the
     // player. Coming back from recents hands over the old intent again,
@@ -46,12 +53,16 @@ class SystemEntries @Inject constructor(
 
     private suspend fun start(shortcut: LauncherShortcut): Boolean {
         ShortcutManagerCompat.reportShortcutUsed(context, shortcut.id)
+        // While the server's first copy is still to come, the music is on its
+        // way. A shortcut that opens the app cold waits for that first read.
+        val coming = sync.copyWait.filterNotNull().first().awaiting
+        val noSongs = if (coming) COPY_STILL_ON_ITS_WAY else "No songs in your library yet"
         return when (shortcut) {
-            LauncherShortcut.ShuffleAll -> play(picks.everything(), shuffle = true, empty = "No songs in your library yet")
-            LauncherShortcut.Liked -> picks.songsFor(QuickPick.Liked).let { (ids, shuffle) -> play(ids, shuffle, "No liked songs yet") }
-            LauncherShortcut.RecentlyAdded -> picks.songsFor(QuickPick.RecentlyAdded).let { (ids, shuffle) ->
-                play(ids, shuffle, "No songs in your library yet")
+            LauncherShortcut.ShuffleAll -> play(picks.everything().takeIf { picks.hasSongs() }, shuffle = true, empty = noSongs)
+            LauncherShortcut.Liked -> picks.specFor(QuickPick.Liked).let { pick ->
+                play(pick?.first?.takeIf { picks.hasLiked() }, pick?.second ?: true, if (coming) COPY_LIKES_ON_ITS_WAY else "No liked songs yet")
             }
+            LauncherShortcut.RecentlyAdded -> picks.specFor(QuickPick.RecentlyAdded).let { pick -> play(pick?.first, pick?.second ?: false, noSongs) }
             // Exactly the widget's Resume: carry on with the queue, or with
             // none, shuffle everything.
             LauncherShortcut.Resume -> try {
@@ -64,12 +75,12 @@ class SystemEntries @Inject constructor(
         }
     }
 
-    private fun play(ids: List<String>, shuffle: Boolean, empty: String): Boolean {
-        if (ids.isEmpty()) {
+    private fun play(spec: ListSpec?, shuffle: Boolean, empty: String): Boolean {
+        if (spec == null) {
             feedback.show(empty)
             return false
         }
-        playback.playTracks(ids, shuffle = shuffle)
+        playback.playList(spec, null, shuffle)
         return true
     }
 
@@ -80,7 +91,7 @@ class SystemEntries @Inject constructor(
             feedback.show("Octo cannot open that file")
             return false
         }
-        playback.playTracks(listOf(id))
+        playback.playList(ListSpec.Ids(listOf(id)))
         return true
     }
 }

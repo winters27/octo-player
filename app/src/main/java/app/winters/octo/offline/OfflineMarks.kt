@@ -27,21 +27,26 @@ import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// What song rows show about copies kept on the phone: which songs are
-// downloaded, and, with no connection, which server songs cannot play.
+// What song rows show about copies kept on the phone: whether there is a
+// connection, which server songs are saved whole, and a count that moves
+// whenever the set of downloaded songs can change. Each row asks for its own
+// song whether it is downloaded, again only when that count moves.
 @Immutable
 data class OfflineMarks(
-    val downloaded: Set<String> = emptySet(),
     val offline: Boolean = false,
     // Server songs saved whole, as "<server>|<song id there>".
     val saved: Set<String> = emptySet(),
+    val doneVersion: Long = 0,
 ) {
-    fun isDownloaded(track: TrackEntity): Boolean = track.id in downloaded
+    // Whether a song cannot play right now unless it is downloaded: no
+    // connection, and neither on the phone nor saved from an earlier play.
+    fun outOfReachUnlessDownloaded(track: TrackEntity): Boolean =
+        offline && !track.onPhone && savedSong(track.sourceId, track.nativeId) !in saved
+}
 
-    // A song that cannot play right now: no connection, and neither on the
-    // phone, downloaded nor saved from an earlier play.
-    fun isOutOfReach(track: TrackEntity): Boolean =
-        offline && !track.onPhone && track.id !in downloaded && savedSong(track.sourceId, track.nativeId) !in saved
+// How a song row asks whether its song is downloaded.
+interface DownloadLookup {
+    suspend fun isDone(trackId: String): Boolean
 }
 
 fun savedSong(sourceId: String, serverId: String) = "$sourceId|$serverId"
@@ -90,7 +95,11 @@ class OfflineMarksSource @Inject constructor(
         }
     }
 
-    val marks: StateFlow<OfflineMarks> = combine(downloads.done, saved) { done, (offline, keys) ->
-        OfflineMarks(done, offline, keys)
+    val marks: StateFlow<OfflineMarks> = combine(downloads.doneVersion, saved) { done, (offline, keys) ->
+        OfflineMarks(offline, keys, done)
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), OfflineMarks())
+
+    val lookup: DownloadLookup = object : DownloadLookup {
+        override suspend fun isDone(trackId: String) = downloads.isDone(trackId)
+    }
 }

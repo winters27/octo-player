@@ -3,29 +3,37 @@ import Observation
 import OctoKit
 
 /// What a pull on a library page does: rescans the phone and, when a server is signed in, copies
-/// its library afresh, both at once, and asks how the downloads on their way are going.
+/// its library afresh (a copy already running is waited for instead), and asks how the downloads
+/// on their way are going. The pull ends with the rescan: a copy can take minutes and shows its
+/// own progress; one that fails says why through `announce` when it ends.
 @MainActor
 final class LibraryRefresh {
     private let device: DeviceLibrary
     private let sync: ServerSync
     private let downloads: Downloads
     private let session: Session
+    private let announce: @MainActor (String) -> Void
 
-    init(device: DeviceLibrary, sync: ServerSync, downloads: Downloads, session: Session) {
+    init(device: DeviceLibrary, sync: ServerSync, downloads: Downloads, session: Session, announce: @escaping @MainActor (String) -> Void) {
         self.device = device
         self.sync = sync
         self.downloads = downloads
         self.session = session
+        self.announce = announce
     }
 
-    /// Returns once both are done, with why the server copy failed, in words, or nil when it worked
-    /// or there is no server.
+    /// Returns once the phone is rescanned. Answers nothing to say: the copy says its own failure.
     func refresh() async -> String? {
         Task { await downloads.refreshProgress() }
-        async let phone: Void = device.rescan()
-        let problem: String? = session.inUse != nil ? await sync.syncNowAndWait() : nil
-        await phone
-        return problem
+        if session.inUse != nil {
+            let sync = sync
+            let announce = announce
+            Task { @MainActor in
+                if let problem = await sync.syncNowAndWait(origin: .asked) { announce(problem) }
+            }
+        }
+        await device.rescan()
+        return nil
     }
 }
 

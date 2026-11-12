@@ -1,5 +1,9 @@
 package app.winters.octo.data
 
+import android.database.sqlite.SQLiteFullException
+import app.winters.octo.catalog.NotEnoughSpace
+import app.winters.octo.catalog.SpaceFor
+import app.winters.octo.catalog.megabytes
 import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.isDistrusted
@@ -20,7 +24,18 @@ fun Throwable.userMessage(): String = when (this) {
         else "The server doesn't take this way of signing in."
     is SubsonicException.NotFound -> "That isn't on the server any more."
     is SubsonicException.Server -> "The server said: $message"
+    is NotEnoughSpace -> spaceWords(doing, neededBytes)
+    is SQLiteFullException -> spaceWords(SpaceFor.Copy, null)
     else -> "Something went wrong."
+}
+
+// The words for running out of room while doing something: how much to
+// free when that is known, then what to do again. A queue is played again;
+// everything else is tried again.
+fun spaceWords(doing: SpaceFor, neededBytes: Long?): String {
+    val free = if (neededBytes != null) "Free up ${megabytes(neededBytes)} MB" else "Free up some space"
+    val again = if (doing == SpaceFor.Queue) "play it again" else "try again"
+    return "Not enough space to ${doing.doing}. $free, then $again."
 }
 
 fun SignInError.userMessage(): String = when (this) {

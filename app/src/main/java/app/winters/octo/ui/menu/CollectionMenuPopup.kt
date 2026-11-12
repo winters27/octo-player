@@ -33,11 +33,12 @@ import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.nav.ArtistRoute
 import app.winters.octo.ui.playlist.ConfirmDelete
 import app.winters.octo.ui.playlist.PlaylistCover
+import app.winters.octo.data.AlbumUpgrade
+import app.winters.octo.ui.playlist.AddSource
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.upgrade.KEEPS_ORIGINAL
-import app.winters.octo.ui.upgrade.UpgradeAsk
 import app.winters.octo.ui.upgrade.findHigherQualityAsk
 import app.winters.octo.ui.upgrade.findHigherQualityLabel
 import dev.chrisbanes.haze.HazeState
@@ -70,16 +71,9 @@ fun CollectionMenuHost(
                     is CollectionTarget.Artist -> ArtistMenu(target, state, vm)
                     is CollectionTarget.Playlist -> PlaylistMenu(target, state, vm)
                 }
-                CollectionPage.AddToPlaylist -> {
-                    // The songs are read as the page opens.
-                    val ids by produceState<List<String>?>(null, target) { value = vm.songIds(target) }
-                    val shown = ids
-                    if (shown == null) {
-                        GlassMenuPage { GlassMenuNote("Gathering the songs") }
-                    } else {
-                        PlaylistPickerPage(shown, onBack = back, onDone = state::close)
-                    }
-                }
+                // The songs are named by what they are, and walked a page at
+                // a time once a playlist is picked.
+                CollectionPage.AddToPlaylist -> PlaylistPickerPage(AddSource.Spec(vm.specOf(target)), onBack = back, onDone = state::close)
                 CollectionPage.Rename -> PlaylistRename(target, onBack = back, onDone = state::close)
                 CollectionPage.Delete -> PlaylistDelete(target, vm, onBack = back, onDone = state::close)
                 CollectionPage.FindFlac -> AlbumFindFlac(target, vm, onBack = back, onDone = state::close)
@@ -91,20 +85,20 @@ fun CollectionMenuHost(
 @Composable
 private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState, vm: CollectionMenuViewModel, onOpen: (NavKey) -> Unit) {
     val album by remember(target) { vm.album(target.id) }.collectAsStateWithLifecycle(null)
-    val tracks by remember(target) { vm.albumTracks(target.id) }.collectAsStateWithLifecycle(emptyList())
-    val kept by vm.kept.collectAsStateWithLifecycle()
+    val canDownload by remember(target) { vm.canDownload(target.id) }.collectAsStateWithLifecycle(false)
+    val changes by remember { vm.trackChanges }.collectAsStateWithLifecycle(Unit)
     val favourites by vm.favouriteAlbums.collectAsStateWithLifecycle()
-    val pinned by vm.pinned.collectAsStateWithLifecycle()
+    val pin = PinKey(PinKind.Album, target.id)
+    // From the row as it stands, so the menu opens on the right choice.
+    val spot by remember(target) { vm.spotOf(pin) }.collectAsStateWithLifecycle(pinSpot(vm.pinned.value, pin))
     val radio by vm.radio.collectAsStateWithLifecycle()
     val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
     // Read again when the album's songs change, as after a FLAC lands.
-    val lossy by produceState(emptyList<UpgradeAsk>(), target, canUpgrade, tracks) {
-        value = if (canUpgrade) vm.upgradableInAlbum(target.id) else emptyList()
+    val lossy by produceState(0, target, canUpgrade, changes) {
+        value = if (canUpgrade) vm.upgradableInAlbum(target.id).count else 0
     }
     val shown = album ?: return
-    val waiting = tracks.filter { !it.onPhone && it.id !in kept }.map { it.id }
-    val pin = PinKey(PinKind.Album, target.id)
-    val actions = albumActions(canDownload = waiting.isNotEmpty(), favourite = target.id in favourites, pin = pinSpot(pinned, pin), radio = radio, lossy = lossy.size)
+    val actions = albumActions(canDownload = canDownload, favourite = target.id in favourites, pin = spot, radio = radio, lossy = lossy)
     CollectionActionsPage(
         shown.title,
         shown.artist,
@@ -113,10 +107,10 @@ private fun AlbumMenu(target: CollectionTarget.Album, state: CollectionMenuState
         actions,
         state,
         vm,
-        lossy = lossy.size,
+        lossy = lossy,
     ) { action ->
         when (action) {
-            CollectionAction.Download -> vm.download(waiting)
+            CollectionAction.Download -> vm.downloadAlbum(target.id)
             CollectionAction.GoToArtist -> onOpen(ArtistRoute(shown.artistId))
             CollectionAction.StartRadio -> vm.startAlbumRadio(target.id)
             else -> favouriteOrPin(action, vm, FavouriteKind.Album, pin)
@@ -129,10 +123,10 @@ private fun ArtistMenu(target: CollectionTarget.Artist, state: CollectionMenuSta
     val artist by remember(target) { vm.artist(target.id) }.collectAsStateWithLifecycle(null)
     val radio by vm.radio.collectAsStateWithLifecycle()
     val favourites by vm.favouriteArtists.collectAsStateWithLifecycle()
-    val pinned by vm.pinned.collectAsStateWithLifecycle()
-    val shown = artist ?: return
     val pin = PinKey(PinKind.Artist, target.id)
-    val actions = artistActions(radio, favourite = target.id in favourites, pin = pinSpot(pinned, pin))
+    val spot by remember(target) { vm.spotOf(pin) }.collectAsStateWithLifecycle(pinSpot(vm.pinned.value, pin))
+    val shown = artist ?: return
+    val actions = artistActions(radio, favourite = target.id in favourites, pin = spot)
     CollectionActionsPage(shown.name, albums(shown.albumCount), { Artwork(shown.artwork, 40.dp, shape = CircleShape) }, target, actions, state, vm) { action ->
         if (action == CollectionAction.StartRadio) vm.startRadio(target.id) else favouriteOrPin(action, vm, FavouriteKind.Artist, pin)
     }
@@ -259,13 +253,13 @@ private fun PlaylistRename(target: CollectionTarget, onBack: () -> Unit, onDone:
 @Composable
 private fun AlbumFindFlac(target: CollectionTarget, vm: CollectionMenuViewModel, onBack: () -> Unit, onDone: () -> Unit) {
     val album = target as? CollectionTarget.Album ?: return
-    val asks by produceState<List<UpgradeAsk>?>(null, album) { value = vm.upgradableInAlbum(album.id) }
+    val asks by produceState<AlbumUpgrade?>(null, album) { value = vm.upgradableInAlbum(album.id) }
     val source by vm.upgradeSource.collectAsStateWithLifecycle()
     val shown = asks
     when {
         shown == null -> GlassMenuPage { GlassMenuNote("Gathering the songs") }
-        shown.isEmpty() -> GlassMenuPage { GlassMenuNote("Every song here is being looked for already") }
-        else -> PopupQuestion(findHigherQualityAsk(shown.size, source), KEEPS_ORIGINAL, "Find higher quality", onConfirm = {
+        shown.count == 0 -> GlassMenuPage { GlassMenuNote("Every song here is being looked for already") }
+        else -> PopupQuestion(findHigherQualityAsk(shown.count, source), KEEPS_ORIGINAL, "Find higher quality", onConfirm = {
             vm.findFlac(shown)
             onDone()
         }, onCancel = onBack)

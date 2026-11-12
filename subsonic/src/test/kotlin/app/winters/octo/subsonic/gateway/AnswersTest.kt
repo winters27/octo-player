@@ -5,9 +5,12 @@ import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.subsonic.FamilyWeb
 import app.winters.octo.subsonic.OCTO_FAMILY
+import app.winters.octo.subsonic.PagedValues
+import app.winters.octo.subsonic.StarredItem
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.redeemFamilySignIn
+import java.io.File
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -78,6 +81,31 @@ class AnswersTest {
             enqueue()
             assertEquals(gateway, refusal { client().ping() }.gateway)
         }
+    }
+
+    @Test
+    fun everyGatewayIsNamedOnAnAnswerReadAsItArrives() = runTest {
+        val file = File.createTempFile("answers", ".json").apply { deleteOnExit() }
+        try {
+            for ((gateway, enqueue) in cases()) {
+                enqueue()
+                assertEquals(gateway, refusal { client().starredInto { } }.gateway)
+                enqueue()
+                assertEquals(gateway, refusal { client().playlistInto("p", file) { } }.gateway)
+                enqueue()
+                assertEquals(gateway, refusal { client().createPlaylist("Road", PagedValues.of(listOf("s1"))) }.gateway)
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun anAnswerReadAsItArrivesStillReadsWhole() = runTest {
+        own.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","version":"1.16.1","starred2":{"song":[{"id":"s1","title":"One"}]}}}""").build())
+        val pages = mutableListOf<StarredItem>()
+        client().starredInto { pages += it }
+        assertEquals(1, pages.size)
     }
 
     @Test

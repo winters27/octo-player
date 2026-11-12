@@ -1,17 +1,40 @@
 package app.winters.octo.playback
 
 import app.winters.octo.data.userMessage
-import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.listening.TotalsFailed
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.CancellationException
 
-// A list a car plays from: its songs, its queue heading, whether it came
-// from the server just now, the song to begin at and where in it.
-data class CarList(val ids: List<String>, val source: QueueSource, val network: Boolean = false, val positionMs: Long = 0, val start: Int = 0)
+// A list a car plays from, named by what it is: the list, its queue
+// heading, whether it waits on the server, where to begin (its top for
+// null), and, as a page says it, that it shows more than QUEUE_WINDOW songs
+// and the owner of the listing the car shows of it.
+data class CarList(
+    val spec: ListSpec,
+    val source: QueueSource,
+    val network: Boolean = false,
+    val start: ListStart? = null,
+    val shownOverWindow: Boolean = false,
+    val pageOwner: String? = null,
+)
 
-// What a choice made in a car plays: the songs, the one to start at, where
-// in it, under which heading, and whether it waited on the server.
-data class CarPlay(val ids: List<String>, val start: Int, val source: QueueSource, val network: Boolean, val positionMs: Long = 0)
+// What a choice made in a car plays: the list, where it starts, under which
+// heading, whether it waited on the server, whether it is shuffled, what a
+// page says of it, and the words for a list that turns out empty.
+data class CarPlay(
+    val spec: ListSpec,
+    val start: ListStart?,
+    val source: QueueSource,
+    val network: Boolean,
+    val shuffle: Boolean = false,
+    val shownOverWindow: Boolean = false,
+    val pageOwner: String? = null,
+    val emptyWords: String = CAR_NOTHING_TO_PLAY,
+)
+
+// A list of songs named one by one, at most QUEUE_WINDOW of them.
+fun carIds(ids: List<String>, source: QueueSource, network: Boolean = false, start: Int? = null): CarList =
+    CarList(ListSpec.Ids(ids.take(QUEUE_WINDOW)), source, network, start?.let { ListStart.At(it.coerceIn(0, (ids.size - 1).coerceAtLeast(0)), 0) })
 
 sealed interface CarPlayAnswer {
     data class Play(val play: CarPlay) : CarPlayAnswer
@@ -31,29 +54,18 @@ fun nothingFoundLine(words: String): String = if (words.isBlank()) CAR_NOTHING_T
 // A list the server holds, opened with no server signed in.
 class CarNotSignedIn : Exception()
 
-// "Start radio" on a song in a car: the song, then songs like it (`like`,
-// as the phone's song radio picks them), under "<title> radio".
-const val NO_SIMILAR_SONGS = "No similar songs found"
-
-suspend fun carRadio(seed: TrackEntity?, like: suspend (TrackEntity) -> List<String>): CarPlayAnswer {
-    if (seed == null) return CarPlayAnswer.Refused(CAR_NOTHING_TO_PLAY)
-    val songs = like(seed)
-    if (songs.isEmpty()) return CarPlayAnswer.Refused(NO_SIMILAR_SONGS)
-    return CarPlayAnswer.Play(CarPlay(listOf(seed.id) + songs, 0, QueueSource.Played("${seed.title} radio"), network = true))
-}
-
 fun nothingOnLine(name: String): String = "Nothing is playing on $name right now"
 
 fun goneLine(name: String): String = "$name isn't on the server any more"
 
 fun couldNotStartLine(name: String): String = "Could not start $name"
 
-// What a choice made in a car plays. `songsOf` gives a list's songs: `fresh`
-// asks the server again (a list's own play), otherwise what the car was last
-// shown serves (a song chosen inside it). `signedIn` says whether a server
-// can be asked at all, and `gone` hears of a list the server no longer has.
-// A song chosen in a list plays that list from it, or alone when the list
-// no longer holds it.
+// What a choice made in a car plays. `songsOf` gives a list by what it is:
+// `fresh` asks the server again (a list's own play), otherwise what the car
+// was last shown serves (a song chosen inside it). `signedIn` says whether a
+// server can be asked at all, and `gone` hears of a list the server no
+// longer has. A song chosen in a list plays that list from it; the queue
+// plays it alone when the list no longer holds it.
 class CarPlays(
     private val songsOf: suspend (CarNode, Boolean) -> CarList?,
     private val signedIn: () -> Boolean,
@@ -61,37 +73,35 @@ class CarPlays(
 ) {
     // Null only for an id that is not a car's (the app's own requests). A
     // car's choice that holds nothing to play (a place that does not play,
-    // a list gone or empty) is refused, so the queue stays as it is.
+    // a list gone or empty) is refused, so the queue stays as it is; a list
+    // found empty only once the queue reads it is refused with `emptyWords`.
     suspend fun playFor(id: String): CarPlayAnswer? {
         val node = parseCarId(id) ?: return null
         if (node is CarNode.Song) return song(node)
+        val empty = emptyWords(node) ?: CAR_NOTHING_TO_PLAY
         return when (val got = load(node, fresh = true)) {
             is Got.Refused -> CarPlayAnswer.Refused(got.words)
-            Got.Nothing -> CarPlayAnswer.Refused(emptyWords(node) ?: CAR_NOTHING_TO_PLAY)
-            is Got.Songs -> if (got.list.ids.isEmpty()) {
-                CarPlayAnswer.Refused(emptyWords(node) ?: CAR_NOTHING_TO_PLAY)
+            Got.Nothing -> CarPlayAnswer.Refused(empty)
+            is Got.Songs -> if ((got.list.spec as? ListSpec.Ids)?.ids?.isEmpty() == true) {
+                CarPlayAnswer.Refused(empty)
             } else {
-                CarPlayAnswer.Play(CarPlay(got.list.ids, got.list.start.coerceIn(got.list.ids.indices), got.list.source, got.list.network, got.list.positionMs))
+                CarPlayAnswer.Play(got.list.play(got.list.start, empty))
             }
         }
     }
 
     private suspend fun song(node: CarNode.Song): CarPlayAnswer {
-        val alone = CarPlay(listOf(node.trackId), 0, NoSource, network = false)
+        val alone = CarPlay(ListSpec.Ids(listOf(node.trackId)), null, NoSource, network = false)
         val parent = node.list ?: return CarPlayAnswer.Play(alone)
         return when (val got = load(parent, fresh = false)) {
             is Got.Refused -> CarPlayAnswer.Refused(got.words)
             Got.Nothing -> CarPlayAnswer.Play(alone)
-            is Got.Songs -> {
-                val start = got.list.ids.indexOf(node.trackId)
-                if (start < 0) {
-                    CarPlayAnswer.Play(alone.copy(source = got.list.source, network = got.list.network))
-                } else {
-                    CarPlayAnswer.Play(CarPlay(got.list.ids, start, got.list.source, got.list.network))
-                }
-            }
+            is Got.Songs -> CarPlayAnswer.Play(got.list.play(ListStart.Track(node.trackId), CAR_NOTHING_TO_PLAY))
         }
     }
+
+    private fun CarList.play(start: ListStart?, empty: String) =
+        CarPlay(spec, start, source, network, shownOverWindow = shownOverWindow, pageOwner = pageOwner, emptyWords = empty)
 
     private sealed interface Got {
         class Songs(val list: CarList) : Got
@@ -107,6 +117,8 @@ class CarPlays(
             songsOf(node, fresh)?.let { Got.Songs(it) } ?: Got.Nothing
         } catch (e: CancellationException) {
             throw e
+        } catch (e: TotalsFailed) {
+            Got.Refused(e.words)
         } catch (e: SubsonicException.NotFound) {
             listIdOf(node)?.let(gone)
             Got.Refused(name?.let(::goneLine) ?: e.userMessage())

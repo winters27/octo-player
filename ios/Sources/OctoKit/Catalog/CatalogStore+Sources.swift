@@ -137,12 +137,28 @@ extension CatalogStore {
     }
 
     /// Swaps in everything one source has, in one go.
-    public func replaceSource(_ sourceId: String, tracks: [SourceTrack], albums: [SourceAlbum], artists: [SourceArtist]) throws {
+    /// `progress` hears how much of it is written (0 to 1) after each chunk.
+    public func replaceSource(_ sourceId: String, tracks: [SourceTrack], albums: [SourceAlbum], artists: [SourceArtist],
+                              progress: @Sendable (Double) -> Void = { _ in }) throws {
+        let total = max(1, artists.count + albums.count + tracks.count)
+        var written = 0
         try db.transaction {
             try deleteSourceRows(sourceId)
-            for chunk in artists.catalogChunks(500) { try db.insert(Array(chunk), .replace) }
-            for chunk in albums.catalogChunks(500) { try db.insert(Array(chunk), .replace) }
-            for chunk in tracks.catalogChunks(500) { try db.insert(Array(chunk), .replace) }
+            for chunk in artists.catalogChunks(500) {
+                try db.insert(Array(chunk), .replace)
+                written += chunk.count
+                progress(Double(written) / Double(total))
+            }
+            for chunk in albums.catalogChunks(500) {
+                try db.insert(Array(chunk), .replace)
+                written += chunk.count
+                progress(Double(written) / Double(total))
+            }
+            for chunk in tracks.catalogChunks(500) {
+                try db.insert(Array(chunk), .replace)
+                written += chunk.count
+                progress(Double(written) / Double(total))
+            }
         }
         changed(.sources)
     }
@@ -175,8 +191,9 @@ extension CatalogStore {
     /// so nothing that looks up a song's copies finds them. Afterwards likes, plays, playlist songs
     /// and ratings follow songs whose ids changed, so do favorite albums and artists and pins, and
     /// songs no server rated show the phone's rating. Returns the merged library.
+    /// `progress` hears how far it is (0 to 1) after each of its parts.
     @discardableResult
-    public func rebuild(serverInUse: String?) throws -> MergedCatalog {
+    public func rebuild(serverInUse: String?, progress: @Sendable (Double) -> Void = { _ in }) throws -> MergedCatalog {
         let all = try sourceIds()
             .filter { inLibrary($0, serverInUse: serverInUse) }
             .sorted { ($0 == deviceSource ? "" : $0) < ($1 == deviceSource ? "" : $1) }
@@ -184,9 +201,12 @@ extension CatalogStore {
                 SourceCatalog(sourceId: id, onPhone: id == deviceSource, tracks: try sourceTracks(id), albums: try sourceAlbums(id),
                               artists: try sourceArtists(id))
             }
-        let merged = mergeCatalogs(all)
+        progress(0.25)
+        let merged = mergeCatalogs(all) { part in progress(0.25 + 0.25 * part) }
+        progress(0.5)
         try batch {
-            try replaceAll(merged.tracks, merged.albums, merged.artists)
+            try replaceAll(merged.tracks, merged.albums, merged.artists) { part in progress(0.5 + 0.3 * part) }
+            progress(0.8)
             let kept = all.map(\.sourceId)
             if kept.isEmpty {
                 try db.run("UPDATE source_track SET mergedId = '' WHERE mergedId != ''")
@@ -202,6 +222,7 @@ extension CatalogStore {
             try relinkDownloads()
             changed([.library, .sources, .likes, .ratings, .plays, .playlists, .favorites, .pins, .downloads])
         }
+        progress(1)
         return merged
     }
 }

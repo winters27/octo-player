@@ -1,0 +1,256 @@
+package app.winters.octo.catalog
+
+import kotlin.math.abs
+
+// The merge as it was before it moved into the database, kept to check the
+// new one makes the same library.
+
+// Two copies of a song count as the same one if their lengths differ by
+// no more than this.
+private const val OLD_SAME_LENGTH_MS = 3_000L
+
+// Merges the sources into one library, so something on the phone and on a
+// server shows once.
+//
+// - Artists match by name, albums by album artist and title, and songs by
+//   title and length within an album. Track numbers are not needed, since
+//   phone files often lack them. A song's title is read by SongIdentity, so
+//   "Song - Remastered 2011" is "Song", but "Song (Live)" stays apart.
+// - The first source to have something gives it its id, so give the phone
+//   first: its songs keep their ids, and likes and playlists keep working.
+// - A merged song or album takes the best of its copies. Copies are asked
+//   in source order, the phone's first, and for each field:
+//   - added: the earliest real time any copy was added. A server stamps
+//     every song with the day it first scanned it, while the phone's time
+//     comes from the file, so the earliest is the nearest to when the song
+//     was really got. Unknown times (0) are passed over. Albums alike.
+//   - year: the first copy's original release year; failing that, the
+//     first copy's own year. So a remaster shows the year the song came out.
+//   - genre: the first copy's main genre; the song info sheet shows every
+//     copy's genres together (songDetails).
+//   - artist: the fullest credit, the copy naming the most artists (say,
+//     "A, B" over "A"); on equal credits the first copy's stays.
+//   - track and disc numbers and the server rating: the first copy's.
+//   - explicit or clean: the first copy that says, so a server's mark
+//     reaches a phone file whose tags say nothing.
+//   - composer, tempo, MusicBrainz ids and the other details the library
+//     does not keep: read from the copies when needed, by the same order
+//     (songDetails).
+// - Anything only one source has is passed through exactly as it was,
+//   apart from its year, which is its original year when it has one.
+internal fun oldMergeCatalogs(sources: List<SourceCatalog>): MergedCatalog {
+    // Artists and albums match only across sources: two a source keeps
+    // apart (say, two albums of the same name) stay apart.
+    val artistBases = oldAcrossSources(sources, { it.artists }, { it.id }, { matchKey(it.name) })
+    val artistIdFor = artistBases.idFor
+    val albumBases = oldAcrossSources(sources, { it.albums }, { it.id }, { matchKey(it.artist) + "|" + matchKey(it.title) })
+    val albumIdFor = albumBases.idFor
+
+    // Songs, matched within each merged album
+    val inAlbum = HashMap<String, MutableList<OldMergingSong>>()
+    // Every song so far by title and artist, for the second chance below.
+    val everywhere = HashMap<String, MutableList<OldMergingSong>>()
+    val mergedIds = HashMap<String, String>()
+    // Each copy's keys, read once, and once for copies tagged alike.
+    val keys = HashMap<String, SongKeys>()
+    val tagged = HashMap<Pair<String, String>, SongKeys>()
+    fun keysOf(track: SourceTrackEntity) = keys.getOrPut(track.id) {
+        tagged.getOrPut(track.artist to track.title) { SongIdentity.songKeys(track.artist, track.title) }
+    }
+    for (source in sources) {
+        // A song matches at most one copy from each source.
+        val taken = HashSet<String>()
+        for (track in source.tracks.sortedBy { it.albumOrder }) {
+            val albumId = albumIdFor[track.albumId] ?: track.albumId
+            val trackKeys = keysOf(track)
+            fun fits(song: OldMergingSong) = song.id !in taken && song.sources.none { it == source.sourceId } &&
+                keysOf(song.base).title == trackKeys.title &&
+                abs(song.base.durationMs - track.durationMs) <= OLD_SAME_LENGTH_MS
+            // First within the matched album. Failing that, the same song by
+            // the same artist anywhere: sources often file an album under a
+            // different album artist or edition name.
+            val match = inAlbum[albumId]?.firstOrNull(::fits)
+                ?: everywhere[trackKeys.matchKey]?.firstOrNull(::fits)
+            if (match != null) {
+                match.add(track, source)
+                taken += match.id
+                mergedIds[track.id] = match.id
+            } else {
+                val song = OldMergingSong(track, source, albumId, artistIdFor[track.artistId] ?: track.artistId)
+                inAlbum.getOrPut(albumId) { mutableListOf() } += song
+                everywhere.getOrPut(trackKeys.matchKey) { mutableListOf() } += song
+                mergedIds[track.id] = song.id
+            }
+        }
+    }
+
+    // Album order: an album filled from more than one source is put in
+    // track number order when every song has one; otherwise its songs keep
+    // the order they came in. Single-source albums keep their own order.
+    val tracks = ArrayList<TrackEntity>(mergedIds.size)
+    for ((_, songs) in inAlbum) {
+        val mixed = songs.flatMap { it.sources }.toSet().size > 1
+        val ordered = when {
+            !mixed -> songs.map { it.toTrack(it.base.albumOrder) }
+            songs.all { it.trackNo != null } ->
+                songs.sortedWith(compareBy({ it.discNo ?: 1 }, { it.trackNo }))
+                    .mapIndexed { index, song -> song.toTrack(index) }
+            else -> songs.mapIndexed { index, song -> song.toTrack(index) }
+        }
+        tracks += ordered
+    }
+    val tracksByAlbum = tracks.groupBy { it.albumId }
+
+    // An album whose songs all turned out to be copies of songs already in
+    // another album has nothing left, and is left out.
+    val albums = albumBases.bases.filter { it.id in tracksByAlbum }.map { base ->
+        val extras = albumBases.extras[base.id].orEmpty()
+        val albumTracks = tracksByAlbum.getValue(base.id)
+        // Counts are only worked out again for albums whose songs changed:
+        // made from several sources, or with songs gone to another album.
+        val recount = extras.isNotEmpty() || albumTracks.size != base.songCount
+        AlbumEntity(
+            id = base.id,
+            sourceId = base.sourceId,
+            nativeId = base.nativeId,
+            title = base.title,
+            searchKey = base.searchKey,
+            sortKey = base.sortKey,
+            artist = base.artist,
+            artistId = artistIdFor[base.artistId] ?: base.artistId,
+            year = base.year ?: extras.firstNotNullOfOrNull { it.year },
+            songCount = if (recount) albumTracks.size else base.songCount,
+            durationMs = if (recount) albumTracks.sumOf { it.durationMs } else base.durationMs,
+            addedAt = earliestAdded(listOf(base.addedAt) + extras.map { it.addedAt }),
+            artwork = base.artwork ?: extras.firstNotNullOfOrNull { it.artwork },
+            releaseTypes = base.releaseTypes.ifEmpty { extras.firstOrNull { it.releaseTypes.isNotEmpty() }?.releaseTypes.orEmpty() },
+        )
+    }
+
+    // Artists from a later source with nothing left of their own are left
+    // out too; the phone's artists always stay as they were.
+    val firstSource = sources.firstOrNull()?.sourceId
+    val artists = artistBases.bases.mapNotNull { base ->
+        val several = artistBases.extras[base.id].orEmpty().isNotEmpty()
+        val later = base.sourceId != firstSource
+        val albumCount = albums.count { it.artistId == base.id }
+        val songCount = tracks.count { it.artistId == base.id }
+        if (later && albumCount == 0 && songCount == 0) return@mapNotNull null
+        ArtistEntity(
+            id = base.id,
+            sourceId = base.sourceId,
+            name = base.name,
+            searchKey = base.searchKey,
+            sortKey = base.sortKey,
+            albumCount = if (several || later) albumCount else base.albumCount,
+            songCount = if (several || later) songCount else base.songCount,
+            artwork = base.artwork,
+        )
+    }
+
+    return MergedCatalog(tracks, albums, artists, mergedIds)
+}
+
+// Things matched across sources: the first copy of each (the base, whose
+// id the library uses), the other copies of it, and which base every copy
+// belongs to.
+private class OldMatched<T>(val bases: List<T>, val extras: Map<String, List<T>>, val idFor: Map<String, String>)
+
+private fun <T> oldAcrossSources(
+    sources: List<SourceCatalog>,
+    items: (SourceCatalog) -> List<T>,
+    id: (T) -> String,
+    key: (T) -> String,
+): OldMatched<T> {
+    val bases = ArrayList<T>()
+    val extras = HashMap<String, MutableList<T>>()
+    val idFor = HashMap<String, String>()
+    // Bases from earlier sources, by key, that no copy from the current
+    // source has claimed yet.
+    val earlier = HashMap<String, ArrayDeque<T>>()
+    for (source in sources) {
+        val added = HashMap<String, ArrayDeque<T>>()
+        for (item in items(source)) {
+            val k = key(item)
+            val base = earlier[k]?.removeFirstOrNull()
+            if (base != null) {
+                idFor[id(item)] = id(base)
+                extras.getOrPut(id(base)) { mutableListOf() } += item
+            } else {
+                bases += item
+                idFor[id(item)] = id(item)
+                added.getOrPut(k) { ArrayDeque() } += item
+            }
+        }
+        for ((k, list) in added) earlier.getOrPut(k) { ArrayDeque() } += list
+    }
+    return OldMatched(bases, extras, idFor)
+}
+
+// One library song while its copies are gathered.
+private class OldMergingSong(
+    val base: SourceTrackEntity,
+    source: SourceCatalog,
+    val albumId: String,
+    val artistId: String,
+) {
+    val id = base.id
+    val sources = mutableListOf(source.sourceId)
+    var onPhone = source.onPhone
+    var trackNo = base.trackNo
+    var discNo = base.discNo
+    var year = base.year
+    var originalYear = base.originalYear
+    var genre = base.genre
+    var rating = base.rating?.takeIf { it in 1..5 }
+    var explicit = base.explicit
+    var addedAt = base.addedAt
+    var artist = base.artist
+    var credits = splitLines(base.artists).size
+
+    fun add(copy: SourceTrackEntity, source: SourceCatalog) {
+        sources += source.sourceId
+        onPhone = onPhone || source.onPhone
+        trackNo = trackNo ?: copy.trackNo
+        discNo = discNo ?: copy.discNo
+        year = year ?: copy.year
+        originalYear = originalYear ?: copy.originalYear
+        if (genre.isEmpty()) genre = copy.genre
+        rating = rating ?: copy.rating?.takeIf { it in 1..5 }
+        explicit = explicit ?: copy.explicit
+        addedAt = earliestAdded(listOf(addedAt, copy.addedAt))
+        val copyCredits = splitLines(copy.artists).size
+        if (copyCredits > credits && copy.artist.isNotBlank()) {
+            artist = copy.artist
+            credits = copyCredits
+        }
+    }
+
+    fun toTrack(order: Int) = TrackEntity(
+        id = base.id,
+        sourceId = base.sourceId,
+        nativeId = base.nativeId,
+        title = base.title,
+        searchKey = base.searchKey,
+        sortKey = base.sortKey,
+        artist = artist,
+        artistId = artistId,
+        album = base.album,
+        albumId = albumId,
+        trackNo = trackNo,
+        discNo = discNo,
+        year = originalYear ?: year,
+        durationMs = base.durationMs,
+        addedAt = addedAt,
+        mimeType = base.mimeType,
+        sizeBytes = base.sizeBytes,
+        artwork = base.artwork,
+        uri = base.uri,
+        albumOrder = order,
+        relinkKey = base.relinkKey,
+        genre = genre,
+        onPhone = onPhone,
+        rating = rating ?: 0,
+        explicit = explicit,
+    )
+}

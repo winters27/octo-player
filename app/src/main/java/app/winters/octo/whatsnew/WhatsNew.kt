@@ -14,7 +14,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // The one line the card on Home shows. Kept short.
-const val WhatsNewSummary = "Hearts get the version you heard, and Android Auto gets the whole app"
+const val WhatsNewSummary = "Themes, big libraries, and hearts that get the version you heard"
 
 // What this update brings, part by part, as markdown in the app's assets.
 // Rewrite it with each update.

@@ -89,6 +89,50 @@ class SongIdentityCasesTest {
         assertNoFailures(failures)
     }
 
+    // A song parsed once compares as its ref does, read afresh: every
+    // case's two sides are parsed once and compared both ways and against
+    // the next case's sides, with the case's options and the defaults, each
+    // comparison twice; the case's own pair still reads as the file says,
+    // and the parsed form gives the lookup keys its title and artist give.
+    @Test
+    fun aSongParsedOnceComparesAsItsRef() {
+        val failures = ArrayList<String>()
+        val compare = section("compare")
+        val refs = compare.map { case -> listOf(ref(case.getValue("a").jsonObject), ref(case.getValue("b").jsonObject)) }
+        val parsed = refs.map { pair -> pair.map(SongIdentity::parseSong) }
+        for ((i, case) in compare.withIndex()) {
+            val note = text(case["note"])
+            val next = (i + 1) % compare.size
+            val pairs = listOf(
+                "forward" to listOf(i to 0, i to 1),
+                "reversed" to listOf(i to 1, i to 0),
+                "against the next case's first side" to listOf(i to 0, next to 0),
+                "against the next case's second side" to listOf(i to 1, next to 1),
+            )
+            for (options in listOf(options(case), SongMatchOptions.Default)) {
+                for ((label, sides) in pairs) {
+                    val (a, b) = sides
+                    repeat(2) {
+                        val fresh = SongIdentity.same(refs[a.first][a.second], refs[b.first][b.second], options)
+                        val once = SongIdentity.same(parsed[a.first][a.second], parsed[b.first][b.second], options)
+                        if (once != fresh) failures += "$note ($label) parsed once gave $once, read afresh $fresh"
+                    }
+                }
+            }
+            val expect = text(case["expect"])
+            val verdict = SongIdentity.same(parsed[i][0], parsed[i][1], options(case)).verdict
+            if (verdict != mapOf("same" to SongVerdict.Same, "version" to SongVerdict.SameSongDifferentVersion, "different" to SongVerdict.Different)[expect]) {
+                failures += "$note parsed once expected $expect, got $verdict"
+            }
+            for (side in 0..1) {
+                val ref = refs[i][side]
+                val keys = SongIdentity.titleLookupKeys(parsed[i][side])
+                if (keys != SongIdentity.titleLookupKeys(ref.title, ref.artist)) failures += "$note side $side lookup keys $keys"
+            }
+        }
+        assertNoFailures(failures)
+    }
+
     @Test
     fun everyTitleAndCreditParsesAsTheFileSays() {
         val failures = ArrayList<String>()

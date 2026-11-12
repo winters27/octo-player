@@ -111,7 +111,7 @@ struct SongsPage: View {
                 }
                 if let sorted {
                     if sorted.items.isEmpty {
-                        EmptyLibraryNote()
+                        CopyAwareNote { EmptyLibraryNote() }
                     } else if let shown {
                         if shown.items.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
@@ -322,7 +322,7 @@ struct GenresPage: View {
                     .padding(.top, pageTopGap)
                 if let genres {
                     if genres.isEmpty {
-                        MutedNote("None of your songs has a genre yet")
+                        CopyAwareNote { MutedNote("None of your songs has a genre yet") }
                     }
                     ForEach(genres, id: \.name) { genre in
                         NavigationLink(value: Route.library(.genre(genre.name))) {

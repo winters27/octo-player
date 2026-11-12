@@ -133,6 +133,16 @@ class ConnectionDraft(
     val gateway: GatewayKind = GatewayKind.None,
 )
 
+// The library sources a kept server's address had before, once it is kept
+// at `address`: the one it had before this change joins them when the new
+// address is another source, and the new one is never among them, so a
+// song kept under any older address still streams from this server.
+internal fun formerSourceIds(before: StoredServer?, address: HttpUrl): List<String> {
+    val now = serverSourceId(address)
+    val old = before?.serverUrl?.toHttpUrlOrNull()?.let(::serverSourceId)
+    return (before?.formerSourceIds.orEmpty() + listOfNotNull(old)).distinct().filter { it != now }
+}
+
 // A quick look at the signed-in server: how long it took to answer (null
 // when it did not), and its folders scan, when it says.
 class ServerLook(val answerMs: Long?, val scan: ScanStatus?)
@@ -416,6 +426,7 @@ class SessionRepository @Inject constructor(
             connection = encodeConnection(settings.sealed(vault::seal)),
             id = id,
             label = request.label?.trim() ?: before?.label.orEmpty(),
+            formerSourceIds = formerSourceIds(before, main),
         )
         if (!use) {
             _servers.value = store.update { now ->

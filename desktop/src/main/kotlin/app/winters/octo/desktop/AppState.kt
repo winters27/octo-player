@@ -661,7 +661,7 @@ class AppState(
     )
 
     private fun viewsOf(connection: Connection): ServerViews {
-        val store = LibraryStore(connection.client, scope)
+        val store = LibraryStore(connection.client, scope, connection.server.name)
         return ServerViews(
             store,
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,

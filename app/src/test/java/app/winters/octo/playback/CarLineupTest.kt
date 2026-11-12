@@ -24,8 +24,8 @@ class CarLineupTest {
     @Test
     fun theShelfPlaysFromTheStationChosen() {
         val (lineup, _) = liveLineupOf(shelf, "kept:uuid-kept")!!
-        assertEquals(3, lineup.ids.size)
-        assertEquals(2, lineup.start)
+        assertEquals(3, (lineup.spec as ListSpec.Ids).ids.size)
+        assertEquals(ListStart.At(2, 0), lineup.start)
     }
 
     @Test

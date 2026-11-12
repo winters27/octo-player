@@ -1,6 +1,7 @@
 package app.winters.octo.ui.favourites
 
 import app.winters.octo.ui.common.sortItem
+import app.winters.octo.ui.common.CopyNote
 import app.winters.octo.ui.common.playShuffleItems
 import app.winters.octo.ui.common.LineSegments
 import androidx.compose.foundation.background
@@ -43,8 +44,28 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation3.runtime.NavKey
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.TrackEntity
+import app.winters.octo.catalog.UserDao
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.ListStart
+import app.winters.octo.ui.common.picked
+import app.winters.octo.ui.paging.HiddenRows
+import app.winters.octo.ui.paging.LibraryReads
+import app.winters.octo.ui.paging.ListHandle
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.ListLoaders
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
+import app.winters.octo.ui.paging.tableChanges
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.LikeStore
@@ -78,6 +99,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class FavouritesViewModel @Inject constructor(
     dao: FavouritesDao,
@@ -86,10 +108,36 @@ class FavouritesViewModel @Inject constructor(
     private val playback: PlaybackConnection,
     private val likes: LikeStore,
     private val feedback: Feedback,
+    loaders: ListLoaders,
+    reads: LibraryReads,
+    db: CatalogDatabase,
+    user: UserDao,
 ) : ViewModel() {
-    // Liked songs, in the Liked songs order. Null until first read.
-    val songs: StateFlow<Sorted<TrackEntity>?> =
-        library.songs(SortList.Liked, SongScope.Liked).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // The Liked songs order; null until read.
+    val songOrder: StateFlow<SortOrder?> = library.settings.order(SortList.Liked).stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private var handle: ListHandle<SortOrder, TrackEntity>? = null
+
+    // Liked songs in pages, in the Liked songs order. Null until the order
+    // is read.
+    val songs: StateFlow<ListHandle<SortOrder, TrackEntity>?> = songOrder.filterNotNull().map { order ->
+        handle?.also { it.ask(order) } ?: ListHandle(
+            viewModelScope,
+            order,
+            { o -> loaders.songs(SongScope.Liked, o) },
+            reads,
+            { _, loader -> db.tableChanges(loader.tables) },
+        ).also { handle = it }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // How many liked songs the library has, by a count.
+    val songCount: StateFlow<Int?> = user.likedCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Songs swiped away, shown gone at once, each until a generation of the
+    // list that began after its unlike (by number) shows.
+    private val hiddenRows = HiddenRows()
+    val hidden: StateFlow<Set<String>> = hiddenRows.among(songs.flatMapLatest { it?.shown ?: flowOf(null) })
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     // Favourite albums and artists in the chosen order, one order for both.
     // Null until first read.
@@ -105,11 +153,16 @@ class FavouritesViewModel @Inject constructor(
             Sorted(sorted.map { it.artist }, order, null)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private fun songIds() = songs.value?.items.orEmpty().map { it.id }
+    private fun spec() = songOrder.value?.let { ListSpec.Songs(SongScope.Liked, it) }
 
-    fun playSongs(index: Int) = playback.playTracks(songIds(), index, source = "Favorites")
+    fun playSongs(item: ListItem<TrackEntity>?) {
+        val spec = spec() ?: return
+        playback.playList(spec, item?.let { ListStart.Row(it.row.id, it.key) }, source = "Favorites")
+    }
 
-    fun shuffleSongs() = playback.playTracks(songIds(), shuffle = true, source = "Favorites")
+    fun shuffleSongs() {
+        spec()?.let { playback.playList(it, null, shuffle = true, source = "Favorites") }
+    }
 
     fun setOrder(order: SortOrder) {
         viewModelScope.launch { sorting.set(SortList.Favourites, order) }
@@ -121,8 +174,16 @@ class FavouritesViewModel @Inject constructor(
     }
 
     // Unlikes a song, with an Undo that likes it again in the same place.
-    fun unlike(trackId: String) = likes.unlike(trackId) { row ->
-        feedback.undoable("Removed from Liked songs") { likes.restore(row) }
+    // It shows gone at once, until a generation begun after the unlike shows.
+    fun unlike(trackId: String) {
+        hiddenRows.hide(trackId)
+        likes.unlike(trackId) { row ->
+            hiddenRows.committed(trackId, handle?.generationNow ?: 0)
+            feedback.undoable("Removed from Liked songs") {
+                hiddenRows.show(trackId)
+                likes.restore(row)
+            }
+        }
     }
 }
 
@@ -149,46 +210,47 @@ fun FavouritesScreen(
     vm: FavouritesViewModel = hiltViewModel(),
 ) {
     val songs by vm.songs.collectAsStateWithLifecycle()
+    val songOrder by vm.songOrder.collectAsStateWithLifecycle()
+    val songCount by vm.songCount.collectAsStateWithLifecycle()
     val albums by vm.albums.collectAsStateWithLifecycle()
     val artists by vm.artists.collectAsStateWithLifecycle()
     var chosen by rememberSaveable { mutableStateOf(openOn) }
     // The segment to open on is picked once all three are read, then kept,
     // so the page never jumps while it is open.
-    val ready = songs != null && albums != null && artists != null
+    val ready = songCount != null && albums != null && artists != null
     LaunchedEffect(ready) {
         if (ready && chosen == null) {
-            chosen = firstSegment(songs?.items.orEmpty().size, albums?.items.orEmpty().size, artists?.items.orEmpty().size)
+            chosen = firstSegment(songCount ?: 0, albums?.items.orEmpty().size, artists?.items.orEmpty().size)
         }
     }
     val segment = chosen
 
     Refreshable {
         Column(Modifier.fillMaxSize().statusBarsPadding().padding(top = 8.dp)) {
-            val liked = songs?.items.orEmpty()
-            val keep = keepLikedItem(liked)
+            val keep = keepLikedItem()
             PageHeader(
                 "Favorites",
                 onBack,
-                count = segment?.let { favouriteCount(it, songs?.items?.size, albums?.items?.size, artists?.items?.size) },
+                count = segment?.let { favouriteCount(it, songCount, albums?.items?.size, artists?.items?.size) },
                 // The order, the three parts as segments, and on Liked songs
                 // Play, Shuffle and More with Keep downloaded. On a narrow
                 // phone the sort moves into More first.
                 lead = listOfNotNull(
                     when (segment) {
                         null -> null
-                        FavouriteSegment.Songs -> songs?.let { sortItem(SortList.Liked, it.order, vm::setSongOrder) }
+                        FavouriteSegment.Songs -> songOrder?.let { sortItem(SortList.Liked, it, vm::setSongOrder) }
                         else -> (albums ?: artists)?.let { sortItem(SortList.Favourites, it.order, vm::setOrder) }
                     },
                 ),
                 segments = segment?.let { part ->
                     LineSegments(FavouriteSegment.entries.map { it.label }, part.ordinal, "Show") { chosen = FavouriteSegment.entries[it] }
                 },
-                tail = if (segment == FavouriteSegment.Songs && liked.isNotEmpty()) playShuffleItems({ vm.playSongs(0) }, vm::shuffleSongs) else emptyList(),
+                tail = if (segment == FavouriteSegment.Songs && (songCount ?: 0) > 0) playShuffleItems({ vm.playSongs(null) }, vm::shuffleSongs) else emptyList(),
                 more = if (segment == FavouriteSegment.Songs) listOfNotNull(keep) else emptyList(),
             )
             when (segment) {
                 null -> Loading()
-                FavouriteSegment.Songs -> FavouriteSongs(songs, vm::playSongs, vm::unlike)
+                FavouriteSegment.Songs -> FavouriteSongs(songs, songOrder, songCount, vm)
                 FavouriteSegment.Albums -> FavouriteAlbums(albums, onOpen)
                 FavouriteSegment.Artists -> FavouriteArtists(artists, onOpen)
             }
@@ -196,49 +258,48 @@ fun FavouritesScreen(
     }
 }
 
-// Liked songs in their order, under the header's Play and Shuffle. Swipe a
-// song left to unlike it, with an Undo; long press to pick several.
+// Liked songs in their order, in pages, under the header's Play and
+// Shuffle. Swipe a song left to unlike it, with an Undo: it goes at once
+// and stays gone until the list reads again after the unlike; long press
+// to pick several.
 @Composable
-private fun FavouriteSongs(
-    list: Sorted<TrackEntity>?,
-    onPlay: (Int) -> Unit,
-    onUnlike: (String) -> Unit,
-) {
-    if (list == null) {
+private fun FavouriteSongs(handle: ListHandle<SortOrder, TrackEntity>?, order: SortOrder?, count: Int?, vm: FavouritesViewModel) {
+    if (handle == null || order == null || count == null) {
         Loading()
         return
     }
-    val tracks = list.items
-    // The rows as drawn: a swiped one goes at once, the list catches up.
-    var rows by remember(tracks) { mutableStateOf(tracks) }
+    val hidden by vm.hidden.collectAsStateWithLifecycle()
     val state = rememberLazyListState()
-    TopOnNewOrder(list.order, state, top = FIRST_SONG)
-    val pickable = remember(rows) { rows.map { Pickable(it.id, it) } }
-    SelectableSongs(pickable) {
+    TopOnNewOrder(order, state, top = FIRST_SONG)
+    val items = rememberListRows(handle, state)
+    PagedPicks(handle, items, pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null }, base = ListSpec.Songs(SongScope.Liked, order)) {
         val selecting = LocalSongSelection.current?.active == true
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = PaddingValues(top = 4.dp, bottom = 140.dp)) {
-            if (rows.isEmpty()) {
-                item(key = "empty") { EmptyText(SONGS_EMPTY) }
+            if (count == 0) {
+                item(key = "empty") { CopyNote(likes = true) { EmptyText(SONGS_EMPTY) } }
             }
-            items(rows, key = { it.id }) { track ->
-                val swipe = rememberSwipeToDismissBoxState()
-                SwipeToDismissBox(
-                    state = swipe,
-                    modifier = Modifier.animateItem(),
-                    enableDismissFromStartToEnd = false,
-                    gesturesEnabled = !selecting,
-                    onDismiss = {
-                        rows = rows - track
-                        onUnlike(track.id)
-                    },
-                    backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
-                ) {
-                    // Solid under the row while it moves, so it hides what it
-                    // passes over; clear at rest, so the page's glow shows.
-                    val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
-                    Box(Modifier.background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)) {
-                        // A swipe left unlikes here, so it does not also play next.
-                        SongRow(track, queueSwipe = false) { onPlay(tracks.indexOf(track)) }
+            listRows(items, null, heading = {}) { item ->
+                when {
+                    item == null -> RowPlaceholder()
+                    item.row.id in hidden -> Unit
+                    else -> {
+                        val track = item.row
+                        val swipe = rememberSwipeToDismissBoxState()
+                        SwipeToDismissBox(
+                            state = swipe,
+                            enableDismissFromStartToEnd = false,
+                            gesturesEnabled = !selecting,
+                            onDismiss = { vm.unlike(track.id) },
+                            backgroundContent = { RemoveBackground(swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart, RowShape) },
+                        ) {
+                            // Solid under the row while it moves, so it hides what it
+                            // passes over; clear at rest, so the page's glow shows.
+                            val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                            Box(Modifier.background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)) {
+                                // A swipe left unlikes here, so it does not also play next.
+                                SongRow(track, queueSwipe = false) { vm.playSongs(item) }
+                            }
+                        }
                     }
                 }
             }
@@ -283,7 +344,7 @@ private fun FavouriteArtists(artists: Sorted<ArtistEntity>?, onOpen: (NavKey) ->
 private fun <T> Shown(sorted: Sorted<T>?, empty: String, content: @Composable (Sorted<T>) -> Unit) {
     when {
         sorted == null -> Loading()
-        sorted.items.isEmpty() -> EmptyText(empty)
+        sorted.items.isEmpty() -> CopyNote(likes = true) { EmptyText(empty) }
         else -> content(sorted)
     }
 }

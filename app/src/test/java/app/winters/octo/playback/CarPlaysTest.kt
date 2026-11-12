@@ -29,42 +29,62 @@ class CarPlaysTest {
     private fun refused(answer: CarPlayAnswer?) = (answer as? CarPlayAnswer.Refused)?.words ?: throw AssertionError("expected a refusal, got $answer")
 
     @Test
-    fun aStationPlaysItsSongsUnderItsNameFreshFromTheServer() = runTest {
+    fun aStationPlaysUnderItsNameFreshFromTheServer() = runTest {
         val station = CarNode.Station("or1", "Discovery Radio")
-        lists = { CarList(listOf("find:1", "device:2"), QueueSource.Station("or1", "Discovery Radio"), network = true) }
+        lists = { CarList(ListSpec.Online(OnlineKind.Station, "or1"), QueueSource.Station("or1", "Discovery Radio"), network = true) }
         val got = play(plays.playFor(carId(station)))
-        assertEquals(listOf("find:1", "device:2"), got.ids)
+        assertEquals(ListSpec.Online(OnlineKind.Station, "or1"), got.spec)
+        assertEquals(null, got.start)
         assertEquals(QueueSource.Station("or1", "Discovery Radio"), got.source)
         assertTrue(got.network)
+        assertEquals("Nothing is playing on Discovery Radio right now", got.emptyWords)
         assertEquals(listOf(station to true), asked)
     }
 
     @Test
     fun aSongInAListPlaysTheListFromItAsShown() = runTest {
         val list = CarNode.OctoList("og1", "Deep Cuts")
-        lists = { CarList(listOf("a", "b", "c"), QueueSource.Played("Deep Cuts")) }
+        lists = { CarList(ListSpec.Online(OnlineKind.List, "og1"), QueueSource.Played("Deep Cuts"), network = true) }
         val got = play(plays.playFor(carId(CarNode.Song("b", list))))
-        assertEquals(1, got.start)
+        assertEquals(ListStart.Track("b"), got.start)
+        assertEquals(ListSpec.Online(OnlineKind.List, "og1"), got.spec)
         assertEquals(listOf(list to false), asked)
     }
 
+    // The queue finds the song in the list, or plays it alone when the list
+    // no longer holds it.
     @Test
-    fun aSongNoLongerInItsListPlaysAlone() = runTest {
-        lists = { CarList(listOf("a", "c"), QueueSource.Played("Charts")) }
+    fun aSongInAListOfSongsStartsThereByItsId() = runTest {
+        lists = { carIds(listOf("a", "c"), QueueSource.Played("Charts")) }
         val got = play(plays.playFor(carId(CarNode.Song("b", CarNode.Chart))))
-        assertEquals(listOf("b"), got.ids)
-        assertEquals(0, got.start)
+        assertEquals(ListSpec.Ids(listOf("a", "c")), got.spec)
+        assertEquals(ListStart.Track("b"), got.start)
+        assertEquals(QueueSource.Played("Charts"), got.source)
+    }
+
+    @Test
+    fun aSongWithNoListPlaysAlone() = runTest {
+        val got = play(plays.playFor(carId(CarNode.Song("b", null))))
+        assertEquals(ListSpec.Ids(listOf("b")), got.spec)
+        assertTrue(asked.isEmpty())
+    }
+
+    @Test
+    fun aLongListOfSongsIsNamedAtMostAWindowOfThem() = runTest {
+        lists = { carIds(List(QUEUE_WINDOW + 40) { "device:$it" }, NoSource) }
+        val got = play(plays.playFor(carId(CarNode.Chart)))
+        assertEquals(QUEUE_WINDOW, (got.spec as ListSpec.Ids).ids.size)
     }
 
     @Test
     fun aLineupStartsAtTheStationChosen() = runTest {
-        lists = { CarList(listOf("radio:a", "radio:b", "radio:c"), QueueSource.Played("Live radio"), start = 2) }
-        assertEquals(2, play(plays.playFor(carId(CarNode.Live("kept:c")))).start)
+        lists = { carIds(listOf("radio:a", "radio:b", "radio:c"), QueueSource.Played("Live radio"), start = 2) }
+        assertEquals(ListStart.At(2, 0), play(plays.playFor(carId(CarNode.Live("kept:c")))).start)
     }
 
     @Test
     fun anEmptyStationSaysNothingIsPlaying() = runTest {
-        lists = { CarList(emptyList(), QueueSource.Station("or1", "Late Night")) }
+        lists = { carIds(emptyList(), QueueSource.Station("or1", "Late Night")) }
         assertEquals("Nothing is playing on Late Night right now", refused(plays.playFor(carId(CarNode.Station("or1", "Late Night")))))
     }
 
@@ -92,8 +112,12 @@ class CarPlaysTest {
 
     @Test
     fun aGoneQueueToPickUpSaysSo() = runTest {
-        lists = { CarList(emptyList(), NoSource, network = true) }
+        lists = { carIds(emptyList(), NoSource, network = true) }
         assertEquals(CAR_RESUME_GONE, refused(plays.playFor(carId(CarNode.Resume))))
+        // The queue read again from the server: found empty only then, it is
+        // refused with the same words.
+        lists = { CarList(ListSpec.ServerQueue, NoSource, network = true) }
+        assertEquals(CAR_RESUME_GONE, play(plays.playFor(carId(CarNode.Resume))).emptyWords)
     }
 
     @Test
@@ -107,8 +131,14 @@ class CarPlaysTest {
         lists = { null }
         assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Live("kept:gone")))))
         assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Home))))
-        // A list of the phone's that is empty now.
-        lists = { CarList(emptyList(), QueueSource.Played(CAR_LIKED)) }
+        // A list of songs named one by one that is empty now.
+        lists = { carIds(emptyList(), QueueSource.Played(CAR_LIKED)) }
         assertEquals(CAR_NOTHING_TO_PLAY, refused(plays.playFor(carId(CarNode.Liked))))
+    }
+
+    @Test
+    fun playCountsThatCannotBeBroughtUpToDateSayWhy() = runTest {
+        failure = app.winters.octo.listening.TotalsFailed("Couldn't update play counts.")
+        assertEquals("Couldn't update play counts.", refused(plays.playFor(carId(CarNode.MostPlayed))))
     }
 }

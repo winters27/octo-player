@@ -30,7 +30,9 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
+import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.Shown
 import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ResumeOffer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,20 +52,28 @@ class ResumeViewModel @Inject constructor(
     var loading by mutableStateOf(false)
         private set
 
-    // Puts the other device's queue in place of this one, paused where it was.
+    // Puts the other device's queue in place of this one, paused where it
+    // was: the queue is read from the server as it plays, and the card
+    // shows loading until it has.
     fun resume(offer: ResumeOffer) {
         if (loading) return
         loading = true
         viewModelScope.launch {
             try {
-                val songs = queue.take(offer) ?: return@launch
-                playback.loadQueue(songs.trackIds, songs.index, songs.positionMs)
+                queue.taken(offer)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w("Octo", "resume failed: ${e.javaClass.simpleName}")
-            } finally {
+            }
+            playback.playList(
+                ListSpec.ServerQueue,
+                playWhenReady = false,
+                handlesRefusal = true,
+                shown = Shown(offer.title, offer.artist),
+            ) { answer ->
                 loading = false
+                answer.refusal?.let { Log.w("Octo", "resume failed: $it") }
             }
         }
     }

@@ -1,4 +1,4 @@
-**Hearts get the version you heard**, **Android Auto gets the whole app**, and downloads that need you say so.
+**Themes**, **big libraries that fit on your phone**, **hearts get the version you heard**, and **Android Auto gets the whole app**.
 
 ## Sound
 
@@ -6,6 +6,10 @@
 
 ## Library
 
+- **Big libraries fit.** Copying your server's library takes the same small amount of memory however big it is, and Home, lists, playlists, the phone scan and Android Auto read it a page at a time, so a library of hundreds of thousands of songs no longer closes the app.
+- **A copy shows how far it is**, you can play while it saves, and a long one keeps going with a notification when you leave the app.
+- When the phone is short of room for a copy or for this update, Octo says how much to free instead of failing.
+- Your likes, favorite albums and artists, and Home pins stay with their songs when the server files them anew.
 - **A heart gets the version you heard.** When you heart a song, your Octo server downloads the best copy of the take you were listening to, checked by its sound, not just its name. A lossless remaster of it counts, but a live take, a cover or an edit doesn't.
 - **Downloads that need you say so.** When the server can't prove a version yet, the song waits and says why, like "Play it once so Octo can keep the version you hear". Keep anyway keeps the copy as it is.
 - **Albums too.** A hearted album keeps the tracks it can prove and holds the rest, each one proven by a play or kept with Keep these anyway.
@@ -25,6 +29,8 @@
 
 ## Server
 
+- **Servers behind a sign-in page work.** If your server sits behind Authentik, Authelia or Cloudflare Access, Octo signs in through it, and when the sign-in page turns Octo away, Octo names it instead of saying the server can't be reached. A sign-in page is never played or kept as a song.
+- **Certificates from eMudhra's compromised keys are refused**, so no one can pose as your server with one. Octo says so when a server uses one.
 - Hearts that get the version you heard need an Octo server from this update.
 - Imports waiting for Mornye's check say so, and say when they will go on. Health names Mornye and octo-sonic, and Mornye's row offers Pass on the dashboard while its check is paused.
 - A higher quality copy that waits says the server's own words for why.
@@ -45,4 +51,5 @@
 
 ## Settings
 
-- Settings work as before. Nothing changed here in this update.
+- **Themes.** Pick Octo, Moss, Dusk, Daylight or Paper, or let Octo match the system's light and dark. Every screen draws in the theme's colors, and backups keep your theme.
+- Backups of a big library save and restore a page at a time.

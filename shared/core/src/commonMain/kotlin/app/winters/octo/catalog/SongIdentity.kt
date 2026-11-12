@@ -998,22 +998,38 @@ object SongIdentity {
 
     private fun describe(versions: Set<String>): String = if (versions.isEmpty()) "the original" else versions.sorted().joinToString(" + ")
 
+    // A song read once, for comparing it with many others: its title and its
+    // credit as `same` reads them and its ISRCs, each read when first needed
+    // and then kept. `same` over two of these answers exactly as over the
+    // refs they were read from.
+    class ParsedSong internal constructor(val ref: SongRef) {
+        val title: SongTitle by lazy(LazyThreadSafetyMode.PUBLICATION) { SongIdentity.parseTitle(ref.title, ref.artist ?: "") }
+        internal val credit: SongArtists by lazy(LazyThreadSafetyMode.PUBLICATION) { SongIdentity.creditOf(ref.artist, title) }
+        internal val codes: Set<String> by lazy(LazyThreadSafetyMode.PUBLICATION) { SongIdentity.isrcs(ref.isrcs) }
+    }
+
+    fun parseSong(ref: SongRef): ParsedSong = ParsedSong(ref)
+
     // Whether two songs are the same recording. Both artists must be known:
     // a title alone is not an identity.
-    fun same(a: SongRef, b: SongRef, options: SongMatchOptions = SongMatchOptions.Default): SongMatch {
+    fun same(a: SongRef, b: SongRef, options: SongMatchOptions = SongMatchOptions.Default): SongMatch =
+        same(parseSong(a), parseSong(b), options)
+
+    // The same, for songs read once.
+    fun same(a: ParsedSong, b: ParsedSong, options: SongMatchOptions = SongMatchOptions.Default): SongMatch {
         // First, and above the text: a romanised title and the same title in
         // its own script share no letter, and one ISRC still says they are
         // one recording. Different ISRCs fall through to the text, since a
         // re-release can carry a new code for the same audio.
-        if (sharesIsrc(a.isrcs, b.isrcs)) return SongMatch(SongVerdict.Same, 1.0, "same ISRC")
+        if (a.codes.isNotEmpty() && b.codes.any { it in a.codes }) return SongMatch(SongVerdict.Same, 1.0, "same ISRC")
 
-        val titleA = parseTitle(a.title, a.artist ?: "")
-        val titleB = parseTitle(b.title, b.artist ?: "")
+        val titleA = a.title
+        val titleB = b.title
         val title = compareTitles(titleA, titleB, options)
         if (title.verdict == SongVerdict.Different) return title
 
-        val artistA = creditOf(a.artist, titleA)
-        val artistB = creditOf(b.artist, titleB)
+        val artistA = a.credit
+        val artistB = b.credit
         val artist = compareArtists(artistA, artistB)
         when (artist) {
             ArtistAgreement.Unknown -> return SongMatch(SongVerdict.Different, 0.6, "no artist to compare")
@@ -1033,8 +1049,8 @@ object SongIdentity {
 
         val tolerance = options.lengthToleranceSeconds
         if (tolerance != null) {
-            val secondsA = a.seconds
-            val secondsB = b.seconds
+            val secondsA = a.ref.seconds
+            val secondsB = b.ref.seconds
             if (secondsA != null && secondsA > 0 && secondsB != null && secondsB > 0) {
                 val apart = abs(secondsA - secondsB)
                 if (apart > tolerance) return SongMatch(SongVerdict.SameSongDifferentVersion, 0.8, "lengths differ by ${oneDecimal(apart)} s")
@@ -1091,8 +1107,12 @@ object SongIdentity {
     // comparing before comparing them: the key's letters (the key itself
     // when it has none) and the loose key. Two titles `same` reads as one
     // song always share one.
-    fun titleLookupKeys(title: String?, artist: String?): Set<String> {
-        val parsed = parseTitle(title, artist ?: "")
+    fun titleLookupKeys(title: String?, artist: String?): Set<String> = lookupKeysOf(parseTitle(title, artist ?: ""))
+
+    // The same keys for a song read once.
+    fun titleLookupKeys(song: ParsedSong): Set<String> = lookupKeysOf(song.title)
+
+    private fun lookupKeysOf(parsed: SongTitle): Set<String> {
         if (parsed.key.isEmpty()) return emptySet()
         val letters = parsed.key.filter { it.isLetter() }
         return setOf(letters.ifEmpty { parsed.key }, parsed.looseKey)

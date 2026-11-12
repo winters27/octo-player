@@ -20,6 +20,8 @@ final class SettingsFeeds {
     var syncing = false
     /// Why the last copy failed, in words, while it is the latest news.
     var syncProblem: String?
+    /// How far the copy running is.
+    var copyRun: CopyRunState?
     var lastSync: LastSync?
 
     /// How much the cache of songs played lately holds now.

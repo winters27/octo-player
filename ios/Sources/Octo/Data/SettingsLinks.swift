@@ -18,6 +18,7 @@ final class SettingsLinks {
         var syncing: Bool
         var problem: String?
         var last: LastSync?
+        var run: CopyRunState?
     }
 
     init(device: DeviceLibrary, sync: ServerSync) {
@@ -44,12 +45,13 @@ final class SettingsLinks {
         let feeds = SettingsFeeds.shared
         let readSync: @MainActor () -> SyncState? = { [weak sync] in
             guard let sync else { return nil }
-            return SyncState(syncing: sync.syncing, problem: sync.problem, last: sync.last)
+            return SyncState(syncing: sync.syncing, problem: sync.problem, last: sync.last, run: sync.copyRun)
         }
         let showSync: @MainActor (SyncState?) -> Void = { state in
             guard let state else { return }
             if feeds.syncing != state.syncing { feeds.syncing = state.syncing }
             if feeds.syncProblem != state.problem { feeds.syncProblem = state.problem }
+            if feeds.copyRun != state.run { feeds.copyRun = state.run }
             let last = state.last.map { SettingsFeeds.LastSync(serverId: $0.accountId, at: Date(timeIntervalSince1970: Double($0.at) / 1000)) }
             if feeds.lastSync != last { feeds.lastSync = last }
         }

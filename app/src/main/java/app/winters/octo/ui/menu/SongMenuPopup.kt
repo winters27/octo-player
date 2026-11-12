@@ -156,9 +156,9 @@ private fun SongActionsPage(
     // A family playlist the listener may only listen to is never the quick add.
     val last = recent.firstOrNull()?.let { id -> playlists.firstOrNull { it.id == id && (!it.family || it.familyMayAdd) } }
     val context = state.lastContext
-    val liked by vm.liked.collectAsStateWithLifecycle()
+    val isLiked by remember(trackId) { vm.liked(trackId) }.collectAsStateWithLifecycle(false)
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
-    val kept by vm.kept.collectAsStateWithLifecycle()
+    val keptRow by remember(trackId) { vm.kept(trackId) }.collectAsStateWithLifecycle(null)
     val radio by vm.radio.collectAsStateWithLifecycle()
     val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
     val canFindSongs by vm.canFindSongs.collectAsStateWithLifecycle()
@@ -167,8 +167,6 @@ private fun SongActionsPage(
     val onDisk by produceState(false, trackId, canRemove) { value = canRemove && vm.deletable(trackId) }
     val removesFromMine = vm.family.removesFromMine
     val inMine by produceState(false, trackId, removesFromMine) { value = removesFromMine && vm.removableFromMine(trackId) }
-    val isLiked = trackId in liked
-    val keptRow = kept[trackId]
     val byHand = keptRow?.reasons?.contains(Reasons.MANUAL) == true
     val place = menuPlace(context, song.albumId, song.artistId)
     val phone = song.onPhone && !isFind(trackId)

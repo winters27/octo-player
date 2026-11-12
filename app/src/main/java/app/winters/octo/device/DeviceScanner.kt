@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.os.Build
 import android.provider.MediaStore
+import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,7 +16,22 @@ import javax.inject.Inject
 class DeviceScanner @Inject constructor(@ApplicationContext private val context: Context) {
     private val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
 
-    suspend fun list(): List<DeviceFile> = withContext(Dispatchers.IO) {
+    // The time now in seconds, which tells a real time from a broken clock
+    // (fileAddedAt). Tests set their own.
+    @VisibleForTesting
+    internal var nowSeconds: () -> Long = { System.currentTimeMillis() / 1000 }
+
+    // Every file at once, for checks.
+    @VisibleForTesting
+    suspend fun list(): List<DeviceFile> {
+        val files = ArrayList<DeviceFile>()
+        walk(500) { files += it }
+        return files
+    }
+
+    // Reads the files in the order the media library lists them, handing
+    // them to `each` `page` at a time; only one page is held at once.
+    suspend fun walk(page: Int, each: suspend (List<DeviceFile>) -> Unit): Unit = withContext(Dispatchers.IO) {
         val projection = buildList {
             add(MediaStore.Audio.Media._ID)
             add(MediaStore.Audio.Media.DISPLAY_NAME)
@@ -39,8 +55,7 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
             }
         }.toTypedArray()
 
-        val files = mutableListOf<DeviceFile>()
-        val now = System.currentTimeMillis() / 1000
+        val now = nowSeconds()
         context.contentResolver.query(
             collection,
             projection,
@@ -48,43 +63,53 @@ class DeviceScanner @Inject constructor(@ApplicationContext private val context:
             null,
             null,
         )?.use { c ->
+            val files = ArrayList<DeviceFile>(page)
             while (c.moveToNext()) {
-                val id = c.long(MediaStore.Audio.Media._ID) ?: continue
-                // Older phones pack the disc into the track number: 2003 is disc 2, track 3.
-                val packed = c.int(MediaStore.Audio.Media.TRACK)
-                val disc = c.string(MediaStore.Audio.Media.DISC_NUMBER)?.let(::positionNumber)
-                    ?: packed?.takeIf { it >= 1000 }?.div(1000)
-                val modified = c.long(MediaStore.Audio.Media.DATE_MODIFIED) ?: 0
-                files += DeviceFile(
-                    id = id,
-                    uri = ContentUris.withAppendedId(collection, id).toString(),
-                    fileName = c.string(MediaStore.Audio.Media.DISPLAY_NAME) ?: "",
-                    folder = c.string(MediaStore.Audio.Media.RELATIVE_PATH),
-                    modifiedAt = modified,
-                    sizeBytes = c.long(MediaStore.Audio.Media.SIZE) ?: 0,
-                    durationMs = c.long(MediaStore.Audio.Media.DURATION) ?: 0,
-                    addedAtSeconds = fileAddedAt(
-                        modifiedSeconds = modified,
-                        addedSeconds = c.long(MediaStore.Audio.Media.DATE_ADDED) ?: 0,
-                        takenMs = c.long(MediaStore.Audio.Media.DATE_TAKEN),
-                        nowSeconds = now,
-                    ),
-                    mimeType = c.string(MediaStore.Audio.Media.MIME_TYPE),
-                    fallback = FileTags(
-                        title = c.string(MediaStore.Audio.Media.TITLE)?.takeIf(String::isNotBlank),
-                        artist = c.string(MediaStore.Audio.Media.ARTIST)?.takeIf { it.isNotBlank() && it != "<unknown>" },
-                        albumArtist = c.string(MediaStore.Audio.Media.ALBUM_ARTIST)?.takeIf(String::isNotBlank),
-                        album = c.string(MediaStore.Audio.Media.ALBUM)?.takeIf(String::isNotBlank),
-                        trackNo = packed?.rem(1000)?.takeIf { it > 0 },
-                        discNo = disc,
-                        year = c.int(MediaStore.Audio.Media.YEAR)?.takeIf { it > 0 },
-                        genres = parseGenres(listOfNotNull(c.string(MediaStore.Audio.Media.GENRE))),
-                    ),
-                    volume = c.string(MediaStore.Audio.Media.VOLUME_NAME),
-                )
+                files += c.file(now) ?: continue
+                if (files.size == page) {
+                    each(files.toList())
+                    files.clear()
+                }
             }
+            if (files.isNotEmpty()) each(files.toList())
         }
-        files
+    }
+
+    // The file at the cursor's row; null for a row with no id.
+    private fun Cursor.file(now: Long): DeviceFile? {
+        val id = long(MediaStore.Audio.Media._ID) ?: return null
+        // Older phones pack the disc into the track number: 2003 is disc 2, track 3.
+        val packed = int(MediaStore.Audio.Media.TRACK)
+        val disc = string(MediaStore.Audio.Media.DISC_NUMBER)?.let(::positionNumber)
+            ?: packed?.takeIf { it >= 1000 }?.div(1000)
+        val modified = long(MediaStore.Audio.Media.DATE_MODIFIED) ?: 0
+        return DeviceFile(
+            id = id,
+            uri = ContentUris.withAppendedId(collection, id).toString(),
+            fileName = string(MediaStore.Audio.Media.DISPLAY_NAME) ?: "",
+            folder = string(MediaStore.Audio.Media.RELATIVE_PATH),
+            modifiedAt = modified,
+            sizeBytes = long(MediaStore.Audio.Media.SIZE) ?: 0,
+            durationMs = long(MediaStore.Audio.Media.DURATION) ?: 0,
+            addedAtSeconds = fileAddedAt(
+                modifiedSeconds = modified,
+                addedSeconds = long(MediaStore.Audio.Media.DATE_ADDED) ?: 0,
+                takenMs = long(MediaStore.Audio.Media.DATE_TAKEN),
+                nowSeconds = now,
+            ),
+            mimeType = string(MediaStore.Audio.Media.MIME_TYPE),
+            fallback = FileTags(
+                title = string(MediaStore.Audio.Media.TITLE)?.takeIf(String::isNotBlank),
+                artist = string(MediaStore.Audio.Media.ARTIST)?.takeIf { it.isNotBlank() && it != "<unknown>" },
+                albumArtist = string(MediaStore.Audio.Media.ALBUM_ARTIST)?.takeIf(String::isNotBlank),
+                album = string(MediaStore.Audio.Media.ALBUM)?.takeIf(String::isNotBlank),
+                trackNo = packed?.rem(1000)?.takeIf { it > 0 },
+                discNo = disc,
+                year = int(MediaStore.Audio.Media.YEAR)?.takeIf { it > 0 },
+                genres = parseGenres(listOfNotNull(string(MediaStore.Audio.Media.GENRE))),
+            ),
+            volume = string(MediaStore.Audio.Media.VOLUME_NAME),
+        )
     }
 }
 

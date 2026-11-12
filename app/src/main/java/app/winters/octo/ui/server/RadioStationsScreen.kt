@@ -50,7 +50,12 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.playback.LIST_MADE_ANEW
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.NOTHING_TO_PLAY
+import app.winters.octo.playback.OnlineKind
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.Shown
 import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
@@ -193,23 +198,20 @@ class RadioStationsViewModel @Inject constructor(
             return
         }
         starting = station.id
-        viewModelScope.launch {
-            try {
-                val songs = withContext(Dispatchers.IO) { discovery.stationSongs(station.id) }
-                if (songs.isNotEmpty()) {
-                    playback.playTracks(songs.map { it.id })
-                } else if (station.streamUrl.isNotBlank()) {
-                    playback.playTracks(listOf(station.radioId()))
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: SubsonicException.NotFound) {
+        // The songs the station has lined up, with no source of its own;
+        // with none lined up, its stream.
+        playback.playList(
+            ListSpec.Online(OnlineKind.Station, station.id),
+            handlesRefusal = true,
+            shown = Shown(station.name),
+        ) { answer ->
+            starting = null
+            when (answer.refusal) {
+                null -> Unit
+                NOTHING_TO_PLAY -> if (station.streamUrl.isNotBlank()) playback.playTracks(listOf(station.radioId()))
                 // Octo made it anew since the list was read: read it again.
-                reload()
-            } catch (e: Exception) {
-                Log.w("Octo", "station failed to start: ${e.javaClass.simpleName}")
-            } finally {
-                starting = null
+                LIST_MADE_ANEW -> reload()
+                else -> Log.w("Octo", "station failed to start: ${answer.refusal}")
             }
         }
     }

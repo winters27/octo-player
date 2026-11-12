@@ -2,6 +2,18 @@ package app.winters.octo.ui.home
 
 import app.winters.octo.ui.nav.ChartsRoute
 import app.winters.octo.ui.nav.HomeSectionsRoute
+import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.LaunchedEffect
+import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.OctoDuration
+import app.winters.octo.design.OctoMotion
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +66,7 @@ import app.winters.octo.ui.common.PageHeader
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.SectionTitle
 import app.winters.octo.ui.common.SongCard
+import app.winters.octo.ui.common.rememberCopyNoticeAsk
 import app.winters.octo.ui.common.accessButtonLabel
 import app.winters.octo.ui.common.rememberAccessRequest
 import app.winters.octo.ui.common.screenPadding
@@ -89,9 +102,14 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val favouriteAlbums by vm.favouriteAlbums.collectAsStateWithLifecycle()
     val rediscovery by vm.rediscovery.collectAsStateWithLifecycle()
+    val playCountsProblem by vm.playCountsProblem.collectAsStateWithLifecycle()
     val sections by vm.sections.collectAsStateWithLifecycle()
     val keptStations by vm.keptStations.collectAsStateWithLifecycle()
+    val copyCard by vm.copyCard.collectAsStateWithLifecycle()
+    val copyWait by vm.copyWait.collectAsStateWithLifecycle()
     val sheet = LocalChoiceSheet.current
+    val activity = LocalActivity.current
+    val noticeAsk = rememberCopyNoticeAsk()
     // The Live radio shelf: the way to stations near the listener, then the
     // server's stations and the ones kept on this phone.
     val liveRadio: LazyListScope.(String) -> Unit = { title ->
@@ -109,7 +127,7 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
 
     LifecycleResumeEffect(Unit) {
         vm.onShown()
-        onPauseOrDispose { }
+        onPauseOrDispose { vm.leftHome(turning = activity?.isChangingConfigurations == true) }
     }
 
     PullToRefreshBox(
@@ -131,9 +149,12 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
             if (layout.askAccess) item(key = "access") { AccessCard(access, vm) }
             item(key = "resume") { ResumeCard() }
             item(key = "whats-new") { WhatsNewCard() }
+            copyCard?.let { card -> item(key = "copy") { CopySlot(card, vm, noticeAsk, Modifier.animateItem()) } }
             when {
                 layout.empty -> {
-                    item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
+                    // Until whether the server's music is on its way is read,
+                    // neither its card nor this note shows.
+                    if (copyCard == null && copyWait != null) item(key = "empty") { EmptyCard(offerAccess = !layout.askAccess) }
                     // An empty library is where the charts and live radio
                     // help most: music to start from.
                     songShelf("Charts", vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
@@ -143,25 +164,30 @@ fun HomeScreen(onOpen: (NavKey) -> Unit, vm: HomeViewModel = hiltViewModel()) {
                     // The shelves in the order kept in Settings, the hidden
                     // ones left out. Nothing is drawn until the order is read.
                     val order = sections
-                    order?.filter { it.shown }.orEmpty().forEach { entry ->
+                    val shown = order?.filter { it.shown }.orEmpty()
+                    // Play counts that cannot be read now say so once, where
+                    // the first shelf made from them would be.
+                    val problemAt = playCountsProblem?.let { shown.firstOrNull { it.section in PlayCountShelves }?.section }
+                    shown.forEach { entry ->
                         val title = entry.section.title
+                        if (entry.section == problemAt) playCountsCard(title, playCountsProblem.orEmpty(), vm::retryPlayCounts)
                         when (entry.section) {
                             HomeSection.Pinned -> pinnedShelf(pinned, onOpen)
-                            HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed, onOpen, onTitle = { onOpen(HistoryRoute()) })
+                            HomeSection.RecentlyPlayed -> shelf(title, recentlyPlayed.orEmpty(), onOpen, onTitle = { onOpen(HistoryRoute()) })
                             HomeSection.MadeForYou -> stationShelf(title, vm.madeForYou, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.Stations -> stationShelf(title, vm.stations.filter { it.streamUrl == null }, vm.startingStation, onOpen, vm::playStation)
                             HomeSection.InternetRadio -> liveRadio(title)
                             HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
                                 stationShelf(title, vm.mixes[entry.section.mixGroup].orEmpty(), vm.startingStation, onOpen, vm::playStation)
                             HomeSection.RecentlyAdded -> shelf(title, recent.orEmpty(), onOpen)
-                            HomeSection.MostPlayed -> songShelf(title, mostPlayed, vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
+                            HomeSection.MostPlayed -> songShelf(title, mostPlayed.orEmpty(), vm::play, onTitle = { onOpen(HistoryRoute(mostPlayed = true)) })
                             HomeSection.FavoriteAlbums -> shelf(title, favouriteAlbums, onOpen, onTitle = { onOpen(FavouritesRoute(albums = true)) })
                             HomeSection.Charts -> songShelf(title, vm.charts, vm::play, onTitle = { onOpen(ChartsRoute) })
                             HomeSection.Artists -> artistShelf(vm, onOpen)
                             HomeSection.SomethingDifferent -> shelf(title, vm.surprise, onOpen)
-                            HomeSection.NotPlayedLately -> shelf(title, rediscovery.notPlayedLately, onOpen)
-                            HomeSection.NeverFinished -> shelf(title, rediscovery.neverFinished, onOpen)
-                            HomeSection.NeverPlayed -> shelf(title, rediscovery.neverPlayed, onOpen)
+                            HomeSection.NotPlayedLately -> shelf(title, rediscovery?.notPlayedLately.orEmpty(), onOpen)
+                            HomeSection.NeverFinished -> shelf(title, rediscovery?.neverFinished.orEmpty(), onOpen)
+                            HomeSection.NeverPlayed -> shelf(title, rediscovery?.neverPlayed.orEmpty(), onOpen)
                         }
                     }
                 }
@@ -209,6 +235,33 @@ private fun LazyListScope.shelf(
             items(albums, key = { it.id }) { album ->
                 AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) })
             }
+        }
+    }
+}
+
+// The shelves made from play counts.
+private val PlayCountShelves = setOf(
+    HomeSection.RecentlyPlayed,
+    HomeSection.MostPlayed,
+    HomeSection.NotPlayedLately,
+    HomeSection.NeverFinished,
+    HomeSection.NeverPlayed,
+)
+
+// Play counts that cannot be brought up to date, under the shelf's title:
+// why, and Try again.
+private fun LazyListScope.playCountsCard(title: String, words: String, onTryAgain: () -> Unit) {
+    moving(key = "title:$title") { ShelfTitle(title, null) }
+    moving(key = "play-counts") {
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth()
+                .glassPanel(RoundedCornerShape(20.dp))
+                .padding(20.dp),
+        ) {
+            Text(words, style = OctoType.bodySmall, color = OctoColors.TextSecondary)
+            AccentButton("Try again", onClick = onTryAgain, size = ButtonSize.Medium, modifier = Modifier.padding(top = 12.dp))
         }
     }
 }
@@ -350,6 +403,39 @@ private fun AccessCard(access: Access, vm: HomeViewModel) {
             GlazeButton("Not now", onClick = vm::dismissAccess)
         }
     }
+}
+
+// Home's one copy slot: the hero, banner, done card and failed card take
+// turns in it, fading between each other while it settles to the new size.
+// `noticeAsk` offers a notification for while the copy runs.
+@Composable
+private fun CopySlot(card: HomeCopyCard, vm: HomeViewModel, noticeAsk: (() -> Unit)?, modifier: Modifier) {
+    val still = LocalReduceMotion.current
+    val done = (card as? HomeCopyCard.Here)?.token
+    LaunchedEffect(done) { vm.copyCardShown(done) }
+    AnimatedContent(
+        card,
+        modifier,
+        transitionSpec = {
+            (fadeIn(tween(OctoDuration.Card)) togetherWith fadeOut(tween(OctoDuration.Card)))
+                .using(SizeTransform(clip = false) { _, _ -> if (still) snap() else OctoMotion.calm() })
+        },
+        contentKey = { it.slotKind() },
+        label = "copy slot",
+    ) { shown ->
+        when (shown) {
+            is HomeCopyCard.Coming -> if (shown.big) CopyHero(shown, onAsk = noticeAsk) else CopyBanner(shown)
+            is HomeCopyCard.Here -> CopyDone(shown, onDismiss = { vm.dismissCopy(shown.token) })
+            is HomeCopyCard.Stopped -> CopyFailed(shown, onTryAgain = vm::tryCopyAgain)
+        }
+    }
+}
+
+// Cards of one kind change in place; another kind fades in.
+private fun HomeCopyCard.slotKind(): String = when (this) {
+    is HomeCopyCard.Coming -> if (big) "hero" else "banner"
+    is HomeCopyCard.Here -> "done"
+    is HomeCopyCard.Stopped -> if (big) "stopped" else "stopped-banner"
 }
 
 // A library with no songs at all, from anywhere. `offerAccess` is off

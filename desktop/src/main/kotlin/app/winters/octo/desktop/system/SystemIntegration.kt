@@ -1,12 +1,15 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.pages.openFamilyLink
+import app.winters.octo.server.READ_FAILED_TITLE
 import app.winters.octo.subsonic.parseFamilyLink
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.painter.Painter
@@ -38,6 +41,7 @@ import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.ui.GpuCacheTrim
 import app.winters.octo.desktop.ui.anyOutside
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -171,6 +175,12 @@ class SystemIntegration(
             app.player.state.collect { state ->
                 val notice = notices.noticeFor(nowPlayingOf(state), app.settings.current.system.nowPlayingNotices, windowVisible && windowInFront)
                 notice?.let { (title, text) -> notifier?.show(title, text) }
+            }
+        }
+        // A read of the library that fails while the window is in the tray says so.
+        app.scope.launch {
+            snapshotFlow { app.library }.collectLatest { store ->
+                store?.state?.collect { state -> if (state is LibraryState.Failed && !windowVisible) notifier?.show(READ_FAILED_TITLE, state.message) }
             }
         }
         instance?.onLaunch { args -> app.scope.launch { arrived(args) } }
@@ -437,7 +447,8 @@ class SystemIntegration(
         val now = nowPlayingOf(state)
         val icon = trayIcon ?: windowIcon
         if (trayAvailable && icon != null) {
-            OctoTray(icon, trayState, now, miniPlayerOpen, ::onTray)
+            val read by remember(app.library) { app.library?.progress ?: MutableStateFlow(null) }.collectAsState()
+            OctoTray(icon, trayState, now, miniPlayerOpen, ::onTray, read.takeIf { !windowVisible })
         }
         if (miniPlayerOpen) {
             val spot = placeMiniPlayer(app.settings.current.system.miniPlayer, screenAreas())

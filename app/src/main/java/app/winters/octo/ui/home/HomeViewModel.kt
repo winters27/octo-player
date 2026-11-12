@@ -14,10 +14,9 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogMerge
 import app.winters.octo.catalog.FavouritesDao
 import app.winters.octo.catalog.TrackEntity
-import app.winters.octo.catalog.byLatestPlay
-import app.winters.octo.catalog.byPlayCount
 import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Station
@@ -29,6 +28,8 @@ import app.winters.octo.home.Rediscovery
 import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.listening.PlayShelves
+import app.winters.octo.listening.TotalsAnswer
 import app.winters.octo.liveradio.KeptStations
 import app.winters.octo.liveradio.LiveShelfEntry
 import app.winters.octo.liveradio.LiveRadioStore
@@ -37,20 +38,35 @@ import app.winters.octo.liveradio.RadioBrowser
 import app.winters.octo.liveradio.lineupOf
 import app.winters.octo.liveradio.radioId
 import app.winters.octo.liveradio.streamUrl
+import app.winters.octo.playback.LIST_MADE_ANEW
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.playback.NOTHING_TO_PLAY
+import app.winters.octo.playback.OnlineKind
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.QueueSource
+import app.winters.octo.playback.Shown
+import app.winters.octo.playback.encoded
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
+import app.winters.octo.server.CopyOutcome
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.CopyWait
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.common.Feedback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -62,22 +78,38 @@ import app.winters.octo.lists.OctoListGroup
 import app.winters.octo.home.MixShelves
 import app.winters.octo.home.mixGroup
 
+// The library's size as Home's surprise picks key on it: read afresh each
+// time no save is applying (`applyStamp` even), and answered only while the
+// stamp is still the one the read began on, so nothing a save's groups
+// landed part way is ever answered. A save that lands in many groups changes
+// it once, at its end (or at a stop, which turns the stamp even).
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun pickCount(applyStamp: StateFlow<Long>, count: () -> Flow<Int>): Flow<Int> =
+    applyStamp.filter { it % 2 == 0L }.flatMapLatest { stamp -> count().filter { applyStamp.value == stamp } }
+
+// What Home's surprise picks are made again on: the library's size as
+// pickCount reads it, and when the server's library was last copied.
+internal fun homePickKey(applyStamp: StateFlow<Long>, count: () -> Flow<Int>, syncedAt: Flow<Long?>): Flow<Pair<Int, Long?>> =
+    combine(pickCount(applyStamp, count), syncedAt) { size, at -> size to at }.distinctUntilChanged()
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val dao: CatalogDao,
-    history: PlayHistory,
+    private val history: PlayHistory,
     private val playback: PlaybackConnection,
     private val discovery: Discovery,
     val library: DeviceLibrary,
     private val prefs: HomePrefs,
     private val feedback: Feedback,
-    serverSync: ServerSync,
+    private val serverSync: ServerSync,
+    sessions: SessionRepository,
     pins: PinStore,
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
     keptFiles: KeptShelvesFiles,
     private val liveRadio: LiveRadioStore,
     private val radioCatalog: RadioBrowser,
+    private val merge: CatalogMerge,
 ) : ViewModel() {
     // The live stations kept on this phone, for the Live radio shelf.
     val keptStations: StateFlow<KeptStations> =
@@ -89,25 +121,34 @@ class HomeViewModel @Inject constructor(
 
     // The latest favourite albums, newest favourite first.
     val favouriteAlbums: StateFlow<List<AlbumEntity>> =
-        favourites.likedAlbums().map { rows -> rows.sortedByDescending { it.likedAt }.take(20).map { it.album } }
+        favourites.latestLikedAlbums(20).map { rows -> rows.map { it.album } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Both follow the play history, here and on the server, so a song that
-    // just counted shows up.
-    val recentlyPlayed: StateFlow<List<AlbumEntity>> =
-        history.albums.map { byLatestPlay(it, 20) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // The shelves of what was played, here and on the server, from the
+    // stored play counts, so a song that just counted shows up. Null until
+    // the counts are first read.
+    private val playShelves: StateFlow<TotalsAnswer<PlayShelves>?> =
+        history.shelves.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val mostPlayed: StateFlow<List<TrackEntity>> =
-        history.tracks.map { byPlayCount(it, 20) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // Each is null while the play counts load, or while they cannot be read.
+    val recentlyPlayed: StateFlow<List<AlbumEntity>?> = playShelf { it.recentlyPlayed }
+
+    val mostPlayed: StateFlow<List<TrackEntity>?> = playShelf { it.mostPlayed }
 
     // Albums worth going back to, from the library's own plays: not played
     // in six months, never finished, never played.
-    val rediscovery: StateFlow<Rediscovery<AlbumEntity>> =
-        combine(dao.albums(), history.tracks) { albums, played -> homeRediscovery(albums, played, System.currentTimeMillis()) }
-            .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Rediscovery())
+    val rediscovery: StateFlow<Rediscovery<AlbumEntity>?> = playShelf { it.rediscovery }
+
+    // Why the play counts cannot be read now, to show with Try again.
+    val playCountsProblem: StateFlow<String?> =
+        playShelves.map { (it as? TotalsAnswer.Problem)?.words }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun retryPlayCounts() = history.tryAgain()
+
+    private fun <T> playShelf(of: (PlayShelves) -> T): StateFlow<T?> =
+        playShelves.map { (it as? TotalsAnswer.Value)?.value?.let(of) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val recent: StateFlow<List<AlbumEntity>?> =
         dao.recentAlbums(20).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -124,6 +165,40 @@ class HomeViewModel @Inject constructor(
     // Whether the phone access card was put away with "Not now". Null until read.
     val accessDismissed: StateFlow<Boolean?> =
         prefs.accessDismissed.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Whether the server's music is still to come. Null until read, and
+    // Home's empty note waits for it.
+    val copyWait: StateFlow<CopyWait?> = serverSync.copyWait
+
+    // The card in Home's copy slot, if any, from its first frame, so the
+    // empty note never shows for a moment before it.
+    val copyCard: StateFlow<HomeCopyCard?> =
+        combine(serverSync.copyWait, serverSync.copyRun, serverSync.copyOutcome, sessions.state, ::copyCardOf)
+            .distinctUntilChanged()
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                copyCardOf(serverSync.copyWait.value, serverSync.copyRun.value, serverSync.copyOutcome.value, sessions.state.value),
+            )
+
+    private fun copyCardOf(wait: CopyWait?, run: CopyRunState?, outcome: CopyOutcome?, state: SessionState): HomeCopyCard? {
+        val session = (state as? SessionState.SignedIn)?.session
+        return homeCopyCard(wait, run, outcome, session?.id, session?.name.orEmpty())
+    }
+
+    private val doneSeen = DoneCardSeen()
+
+    // The done card shown now (its token), or none.
+    fun copyCardShown(token: Long?) = doneSeen.shown(token)
+
+    // Home was left: the done card it showed goes, unless the screen only turned.
+    fun leftHome(turning: Boolean) {
+        doneSeen.paused(turning)?.let(serverSync::dismissCopy)
+    }
+
+    fun dismissCopy(token: Long) = serverSync.dismissCopy(token)
+
+    fun tryCopyAgain() = serverSync.tryAgain()
 
     // Picked once, then again on a pull, when the library changes size, or
     // after a server copy (which can change the music without changing the count).
@@ -191,9 +266,7 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            combine(dao.libraryTrackCount(), serverSync.last.map { it?.at }) { count, syncedAt -> count to syncedAt }
-                .distinctUntilChanged()
-                .collect { reroll() }
+            homePickKey(merge.applyStamp, { dao.libraryTrackCount() }, serverSync.last.map { it?.at }).collect { reroll() }
         }
         // A new sign-in or another kept server shows the shelves it gave
         // last time at once, or none, and asks it again; signing out, or a
@@ -270,27 +343,32 @@ class HomeViewModel @Inject constructor(
             return
         }
         startingStation = station.id
-        viewModelScope.launch {
-            try {
-                val songs = withContext(Dispatchers.IO) { discovery.stationSongs(station.id) }
-                if (songs.isEmpty()) feedback.show("Nothing is playing on ${station.name} right now")
-                val ids = songs.map { it.id }
-                if (station.isRadio) playback.playStation(ids, 0, station.id, station.name) else playback.playTracks(ids, 0, source = station.name)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: SubsonicException.NotFound) {
+        // A station keeps going past the songs it has lined up, under its
+        // own name; a list Octo made is named after itself.
+        playback.playList(
+            ListSpec.Online(if (station.isRadio) OnlineKind.Station else OnlineKind.List, station.id),
+            source = station.name,
+            word = if (station.isRadio) QueueSource.Station(station.id, station.name).encoded() else null,
+            handlesRefusal = true,
+            shown = Shown(station.name, null, station.artwork),
+        ) { answer ->
+            startingStation = null
+            when (answer.refusal) {
+                null -> Unit
+                NOTHING_TO_PLAY -> feedback.show("Nothing is playing on ${station.name} right now")
                 // Made anew on the server since the list was read: off Home,
                 // and the list read again.
-                stations = stations.filterNot { it.id == station.id }
-                madeForYou = madeForYou.filterNot { it.id == station.id }
-                stationsLoadedAt = null
-                loadStations()
-                feedback.show(stationGoneLine(station.name))
-            } catch (e: Exception) {
-                Log.w("Octo", "station failed to start: ${e.javaClass.simpleName}")
-                feedback.show("Could not start ${station.name}")
-            } finally {
-                startingStation = null
+                LIST_MADE_ANEW -> {
+                    stations = stations.filterNot { it.id == station.id }
+                    madeForYou = madeForYou.filterNot { it.id == station.id }
+                    stationsLoadedAt = null
+                    loadStations()
+                    feedback.show(stationGoneLine(station.name))
+                }
+                else -> {
+                    Log.w("Octo", "station failed to start: ${answer.refusal}")
+                    feedback.show("Could not start ${station.name}")
+                }
             }
         }
     }

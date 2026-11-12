@@ -63,7 +63,10 @@ import Testing
     }
 
     @Test func server() {
-        #expect(SettingsSummaries.serverStatus(syncing: true, place: .home, syncedAt: now, now: now) == "Syncing…")
+        #expect(SettingsSummaries.serverStatus(syncing: true, place: .home, syncedAt: now, now: now) == "Syncing")
+        let reading = CopyRunState(token: 1, account: "acc", server: "Home", arriving: true, step: .read, done: 300, of: 2_000,
+                                   fraction: 0.15, artwork: nil, songs: 0, albums: 0, dismissed: false)
+        #expect(SettingsSummaries.serverStatus(syncing: true, place: .home, syncedAt: now, now: now, run: reading) == "Syncing, 15%")
         #expect(SettingsSummaries.serverStatus(syncing: false, place: .home, syncedAt: now - 5 * minute, now: now)
             == "Connected at home · Synced 5 min ago")
         #expect(SettingsSummaries.serverStatus(syncing: false, place: .away, syncedAt: nil, now: now) == "Connected away · Not synced yet")

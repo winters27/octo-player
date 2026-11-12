@@ -104,14 +104,9 @@ class DownloadProgressTest {
     }
 
     @Test
-    fun aFindWhoseLibrarySongIsGoneIsForgotten() {
-        val kept = find("a", "Nightcall", adoptedId = "t1")
-        val deleted = find("b", "Odd Look", adoptedId = "t2")
-        assertEquals(listOf("find:b"), goneFinds(listOf(kept, deleted), setOf("t1")))
-        assertEquals(emptyList<String>(), goneFinds(listOf(kept, deleted), setOf("t1", "t2")))
-        assertEquals(emptyList<String>(), goneFinds(listOf(find("c", "Protovision")), emptySet()))
+    fun aForgottenFindOffersItsAddAgain() {
         // Forgotten, it offers its add again whatever the server last said of it.
-        val forgotten = deleted.copy(requestedAt = 0, adoptedId = "")
+        val forgotten = find("b", "Odd Look").copy(requestedAt = 0, adoptedId = "")
         assertEquals(DownloadPhase.None, phaseFor(forgotten, DownloadPhase.Adding, NOW))
     }
 

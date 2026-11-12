@@ -3,8 +3,11 @@ package app.winters.octo.catalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 // Which copy each field of a merged song or album comes from.
+@RunWith(RobolectricTestRunner::class)
 class MergeRulesTest {
     private fun copy(
         id: String,
@@ -32,7 +35,7 @@ class MergeRulesTest {
     private fun artist(source: String) = SourceArtistEntity("$source:artist", source, "Daft Punk", "daft punk", "daft punk", 1, 1, null)
 
     private fun merge(phone: SourceTrackEntity, server: SourceTrackEntity, phoneAlbumAdded: Long = 0, serverAlbumAdded: Long = 0) =
-        mergeCatalogs(
+        mergeThroughDatabase(
             listOf(
                 SourceCatalog("device", onPhone = true, listOf(phone), listOf(album("device", phoneAlbumAdded)), listOf(artist("device"))),
                 SourceCatalog("server:x", onPhone = false, listOf(server), listOf(album("server:x", serverAlbumAdded)), listOf(artist("server:x"))),

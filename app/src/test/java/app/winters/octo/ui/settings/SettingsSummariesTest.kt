@@ -3,6 +3,8 @@ package app.winters.octo.ui.settings
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.connection.Place
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.CopyStep
 import app.winters.octo.device.Access
 import app.winters.octo.device.MusicFolder
 import app.winters.octo.listening.ListenBrainzPrefs
@@ -65,7 +67,10 @@ class SettingsSummariesTest {
 
     @Test
     fun server() {
-        assertEquals("Syncing…", serverStatus(syncing = true, place = Place.Home, syncedAt = now, now = now))
+        assertEquals("Syncing", serverStatus(syncing = true, place = Place.Home, syncedAt = now, now = now))
+        val reading = CopyRunState(1, 1, "acc", "Home", true, true, CopyStep.Read, 300, 2_000, 0.15f, null, 0, 0, false)
+        assertEquals("Syncing, 15%", serverStatus(syncing = true, place = Place.Home, syncedAt = now, now = now, run = reading))
+        assertEquals("Syncing", serverStatus(true, null, now, now, run = reading.copy(step = CopyStep.Settle)))
         assertEquals("Connected at home · Synced 5 min ago", serverStatus(false, Place.Home, now - 5 * minute, now))
         assertEquals("Connected away · Not synced yet", serverStatus(false, Place.Away, null, now))
         assertEquals("Synced just now", serverStatus(false, null, now, now))

@@ -1,20 +1,10 @@
 package app.winters.octo.ui.library.health
 
-import app.winters.octo.catalog.AlbumEntity
 import app.winters.octo.catalog.SourceTrackEntity
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.splitLines
-import app.winters.octo.health.DuplicateGroup
-import app.winters.octo.health.HealthCheck
 import app.winters.octo.health.HealthFields
-import app.winters.octo.health.HealthReport
 import app.winters.octo.health.HealthTag
-import app.winters.octo.health.findDuplicates
-import app.winters.octo.health.findMissingTags
-import app.winters.octo.health.findSplitAlbums
-import app.winters.octo.health.heading
-import app.winters.octo.health.qualityText
-import app.winters.octo.health.summary
 import app.winters.octo.playback.bitrateOf
 import app.winters.octo.playback.isLossless
 import app.winters.octo.query.isLosslessFormat
@@ -85,72 +75,4 @@ class TrackHealth(
     override fun releaseId(song: TrackEntity) = copies[song.id]?.mbAlbumId?.ifBlank { null }
     override fun releaseGroupId(song: TrackEntity) = copies[song.id]?.mbReleaseGroupId?.ifBlank { null }
     override val seen = setOf(HealthTag.Genre, HealthTag.Year, HealthTag.TrackNumber, HealthTag.Cover)
-}
-
-// One line of a check's list: a heading over a set of copies or a split
-// album, or a song with a note under it.
-sealed interface HealthLine {
-    data class Heading(val title: String, val detail: String) : HealthLine
-    data class Song(val track: TrackEntity, val note: String?) : HealthLine
-}
-
-// What the checks found, ready for the screens.
-class PhoneHealth(
-    val report: HealthReport<TrackEntity>,
-    // Each set of copies' heading and summary, in the report's order.
-    private val duplicateWords: List<Pair<String, String>> = emptyList(),
-    // How each copy in a set sounds, by library song.
-    private val quality: Map<String, String> = emptyMap(),
-    // Each set of copies as the source keeps them, in the report's order:
-    // the files a fix keeps and removes.
-    val copyGroups: List<DuplicateGroup<SourceTrackEntity>> = emptyList(),
-    // Every library song and every source's copy, as checked.
-    val tracks: List<TrackEntity> = emptyList(),
-    val copies: List<SourceTrackEntity> = emptyList(),
-    val fields: TrackHealth = TrackHealth(),
-) {
-    // A check's list: headings and songs.
-    fun lines(check: HealthCheck): List<HealthLine> = when (check) {
-        HealthCheck.Duplicates -> report.duplicates.flatMapIndexed { i, group ->
-            val (title, detail) = duplicateWords[i]
-            listOf(HealthLine.Heading(title, detail)) + group.copies.map { track ->
-                HealthLine.Song(track, listOfNotNull(quality[track.id], track.album.ifBlank { null }).joinToString(" • ").ifEmpty { null })
-            }
-        }
-        HealthCheck.SplitAlbums -> report.splitAlbums.flatMap { album ->
-            listOf(HealthLine.Heading(album.heading(), album.summary())) +
-                album.parts.flatMap { part -> part.songs.map { HealthLine.Song(it, null) } }
-        }
-        else -> report.songs(check).map { HealthLine.Song(it, null) }
-    }
-
-    // A check's songs, in the list's order, for playing from one of them.
-    fun songs(check: HealthCheck): List<TrackEntity> = lines(check).mapNotNull { (it as? HealthLine.Song)?.track }
-}
-
-// Runs the checks: copies among each source's own, the rest on the library
-// as shown.
-fun phoneHealth(tracks: List<TrackEntity>, albums: List<AlbumEntity>, copies: List<SourceTrackEntity>): PhoneHealth {
-    val byId = tracks.associateBy { it.id }
-    val fields = TrackHealth(albums.associate { it.id to it.artist }, copies.filter { it.mergedId.isNotEmpty() }.associateBy { it.mergedId })
-    val groups = ArrayList<DuplicateGroup<TrackEntity>>()
-    val sourceGroups = ArrayList<DuplicateGroup<SourceTrackEntity>>()
-    val words = ArrayList<Pair<String, String>>()
-    val quality = HashMap<String, String>()
-    for (group in findDuplicates(copies, SourceCopyHealth)) {
-        val mapped = group.copies.mapNotNull { copy -> byId[copy.mergedId]?.also { quality[it.id] = qualityText(copy, SourceCopyHealth) } }
-            .distinctBy { it.id }
-        if (mapped.size < 2) continue
-        groups += DuplicateGroup(mapped, group.basis, group.bestReason)
-        sourceGroups += group
-        words += group.heading(SourceCopyHealth) to group.summary(SourceCopyHealth)
-    }
-    val report = HealthReport(
-        checked = tracks.size,
-        duplicates = groups,
-        splitAlbums = findSplitAlbums(tracks, fields),
-        noLength = tracks.filter { fields.seconds(it) <= 0 },
-        missing = findMissingTags(tracks, fields),
-    )
-    return PhoneHealth(report, words, quality, sourceGroups, tracks, copies, fields)
 }

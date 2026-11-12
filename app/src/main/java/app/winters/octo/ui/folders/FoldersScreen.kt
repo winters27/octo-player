@@ -41,10 +41,9 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
-import app.winters.octo.folders.ServerLevel
+import app.winters.octo.folders.LevelRow
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
-import app.winters.octo.sort.sortFolderSongs
 import app.winters.octo.ui.common.EmptyLibraryNote
 import app.winters.octo.ui.common.LoadState
 import app.winters.octo.ui.common.Pickable
@@ -60,6 +59,14 @@ import app.winters.octo.ui.common.HeaderDropdown
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.showDropdown
 import app.winters.octo.ui.common.songs
+import app.winters.octo.ui.common.picked
+import app.winters.octo.playback.ListSpec
+import app.winters.octo.ui.paging.ListItem
+import app.winters.octo.ui.paging.PagedPicks
+import app.winters.octo.ui.paging.RowPlaceholder
+import app.winters.octo.ui.paging.listRows
+import app.winters.octo.ui.paging.rememberListRows
+import androidx.paging.compose.LazyPagingItems
 
 // Music as it is filed: folders on the phone and on the server. With both,
 // the page starts with one of each; with one, it starts inside it. Back
@@ -74,6 +81,7 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
     val gathering by vm.gathering.collectAsStateWithLifecycle()
     val note by vm.note.collectAsStateWithLifecycle()
     val order by vm.order.collectAsStateWithLifecycle()
+    val phoneSongs by vm.songs.collectAsStateWithLifecycle()
 
     BackHandler(enabled = trail.isNotEmpty()) { vm.up() }
 
@@ -94,51 +102,99 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
                 val names = stops.map { known.label(it) }
                 // This folder's own songs and how many rows come before them.
                 val level = (here as? FolderStop.Server)?.let { levels[it.id.orEmpty()] }
-                val (songs, songsAt) = when (here) {
-                    FolderStop.Top -> null to 0
-                    is FolderStop.Phone -> known.phone?.root?.at(here.path)?.let { it.songs to 1 + it.folders.size } ?: (null to 0)
-                    is FolderStop.Server -> (level as? LoadState.Ready)?.data?.let { it.songs to 1 + it.folders.size } ?: (null to 0)
+                val serverPage = (level as? LoadState.Ready)?.data
+                val phoneNode = (here as? FolderStop.Phone)?.let { known.phone?.root?.at(it.path) }
+                val songsAt = when (here) {
+                    FolderStop.Top -> 0
+                    is FolderStop.Phone -> phoneNode?.let { 1 + it.folders.size } ?: 0
+                    is FolderStop.Server -> 0
                 }
-                val sortedSongs = remember(songs, order) { songs?.let { sortFolderSongs(it, order) }.orEmpty() }
+                // A phone folder's songs are read whole when it has few, else
+                // in pages; a server folder's whole level is read in pages,
+                // its folders as the server lists them, then its songs in the
+                // chosen order.
+                val paged = if (here is FolderStop.Phone) (phoneSongs as? FolderSongs.Paged)?.handle else null
+                val held = if (here is FolderStop.Phone) (phoneSongs as? FolderSongs.Held)?.songs.orEmpty() else emptyList()
+                val problem = if (here is FolderStop.Phone) (phoneSongs as? FolderSongs.Problem)?.message else null
+                val head: LazyListScope.() -> Unit = {
+                    item(key = "header") {
+                        PageHeader(
+                            names.last(),
+                            onBack = { if (!vm.up()) onBack() },
+                            count = phoneNode?.let { folderCount(it.folders.size, it.total) },
+                            lead = listOfNotNull(if (names.size > 1) breadcrumbItem(names, onCrumb = { vm.goTo(it - 1) }) else null),
+                            tail = when (here) {
+                                FolderStop.Top -> emptyList()
+                                is FolderStop.Phone -> phoneNode?.let { node ->
+                                    playShuffleItems(
+                                        { vm.playPhone(here.path, node, shuffle = false) },
+                                        { vm.playPhone(here.path, node, shuffle = true) },
+                                        enabled = node.total > 0,
+                                    )
+                                }.orEmpty()
+                                is FolderStop.Server -> playShuffleItems(
+                                    { vm.playServer(here.id, names.last(), shuffle = false) },
+                                    { vm.playServer(here.id, names.last(), shuffle = true) },
+                                    loading = gathering,
+                                )
+                            },
+                        )
+                    }
+                    // What came of the last Play, while there is something to say.
+                    note?.let { item(key = "note") { Quiet(it) } }
+                    when (here) {
+                        FolderStop.Top -> topLevel(known, vm::open)
+                        is FolderStop.Phone -> phoneLevel(known, here, vm)
+                        is FolderStop.Server -> serverLevel(here, level, vm)
+                    }
+                    problem?.let { item(key = "problem") { Quiet(it) } }
+                }
                 // A fresh list for each folder, so each one opens at its top.
                 key(here) {
                     val state = rememberLazyListState()
-                    TopOnNewOrder(order, state, top = songsAt)
-                    val pickable = remember(sortedSongs) { sortedSongs.map { Pickable(it.id, it) } }
-                    SelectableSongs(pickable) {
-                        LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
-                            item(key = "header") {
-                                val phoneNode = (here as? FolderStop.Phone)?.let { known.phone?.root?.at(it.path) }
-                                PageHeader(
-                                    names.last(),
-                                    onBack = { if (!vm.up()) onBack() },
-                                    count = phoneNode?.let { folderCount(it.folders.size, it.songCount) },
-                                    lead = listOfNotNull(if (names.size > 1) breadcrumbItem(names, onCrumb = { vm.goTo(it - 1) }) else null),
-                                    tail = when (here) {
-                                        FolderStop.Top -> emptyList()
-                                        is FolderStop.Phone -> phoneNode?.let { node ->
-                                            playShuffleItems(
-                                                { vm.playPhone(node, shuffle = false) },
-                                                { vm.playPhone(node, shuffle = true) },
-                                                enabled = node.songCount > 0,
-                                            )
-                                        }.orEmpty()
-                                        is FolderStop.Server -> playShuffleItems(
-                                            { vm.playServer(here.id, shuffle = false) },
-                                            { vm.playServer(here.id, shuffle = true) },
-                                            loading = gathering,
-                                        )
-                                    },
-                                )
+                    when {
+                        paged != null && here is FolderStop.Phone -> {
+                            TopOnNewOrder(order, state, top = songsAt)
+                            val above = songsAt + (if (note != null) 1 else 0) + 1
+                            val items = rememberListRows(paged, state, above = above)
+                            PagedPicks(
+                                paged,
+                                items,
+                                pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null },
+                                base = ListSpec.Folder(here.path.joinToString("/"), recursive = false, order = order),
+                            ) {
+                                LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
+                                    head()
+                                    pagedSongRows(items, order, here.path, vm)
+                                }
                             }
-                            // What came of the last Play, while there is something to say.
-                            note?.let { item(key = "note") { Quiet(it) } }
-                            when (here) {
-                                FolderStop.Top -> topLevel(known, vm::open)
-                                is FolderStop.Phone -> phoneLevel(known, here, vm)
-                                is FolderStop.Server -> serverLevel(here, level, vm)
+                        }
+                        serverPage != null -> {
+                            val above = 1 + (if (note != null) 1 else 0)
+                            TopOnNewOrder(order, state, top = above + serverPage.level.folders)
+                            val items = rememberListRows(serverPage.handle, state, above = above)
+                            val meta by serverPage.handle.shown.collectAsStateWithLifecycle()
+                            PagedPicks(
+                                serverPage.handle,
+                                items,
+                                pickOf = { key, item -> (item.row as? LevelRow.Song)?.track?.takeIf { it.id == key }?.let { Pickable(key, it, item.key).picked() } },
+                                base = null,
+                            ) {
+                                LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
+                                    head()
+                                    serverRows(items, serverPage, empty = meta?.count == 0, order, vm)
+                                }
                             }
-                            songRows(sortedSongs, order, vm)
+                        }
+                        else -> {
+                            TopOnNewOrder(order, state, top = songsAt)
+                            val pickable = remember(held) { held.map { Pickable(it.id, it) } }
+                            SelectableSongs(pickable) {
+                                LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding()) {
+                                    head()
+                                    songRows(held, order, vm)
+                                }
+                            }
                         }
                     }
                 }
@@ -166,7 +222,7 @@ private fun LazyListScope.topLevel(sources: FolderSources, open: (FolderStop) ->
     item(key = "phone") {
         Column {
             SectionTitle("On this phone")
-            FolderRow(sources.phoneName, songs(phone.root.songCount)) { open(FolderStop.Phone(emptyList())) }
+            FolderRow(sources.phoneName, songs(phone.root.total)) { open(FolderStop.Phone(emptyList())) }
         }
     }
     item(key = "server") {
@@ -187,12 +243,14 @@ private fun LazyListScope.phoneLevel(sources: FolderSources, here: FolderStop.Ph
     itemsIndexed(node.folders, key = { _, folder -> "folder:${folder.name}" }) { index, folder ->
         Column {
             if (index > 0) Separator()
-            FolderRow(folder.name, songs(folder.songCount)) { vm.open(FolderStop.Phone(here.path + folder.name)) }
+            FolderRow(folder.name, songs(folder.total)) { vm.open(FolderStop.Phone(here.path + folder.name)) }
         }
     }
 }
 
-private fun LazyListScope.serverLevel(here: FolderStop.Server, state: LoadState<ServerLevel>?, vm: FoldersViewModel) {
+// A server level on its way or that could not be read; once read, its rows
+// come in pages (serverRows).
+private fun LazyListScope.serverLevel(here: FolderStop.Server, state: LoadState<ServerLevelPage>?, vm: FoldersViewModel) {
     when (state) {
         null, LoadState.Loading -> item(key = "loading") {
             Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -205,19 +263,32 @@ private fun LazyListScope.serverLevel(here: FolderStop.Server, state: LoadState<
                 GlazeButton("Try again", onClick = { vm.load(here.id, again = true) })
             }
         }
-        is LoadState.Ready -> {
-            val level = state.data
-            if (level.folders.isEmpty() && level.songs.isEmpty()) {
-                item(key = "empty") { Quiet("Nothing in this folder.") }
+        is LoadState.Ready -> Unit
+    }
+}
+
+// A server level a page at a time: its folders as the server lists them,
+// then its songs in the chosen order under their sort bar. A folder goes
+// in; a song plays the folder's songs from it, and a long press opens its
+// menu. Keyed by place as well as id, since a server may list a folder
+// twice.
+private fun LazyListScope.serverRows(items: LazyPagingItems<ListItem<LevelRow>>, page: ServerLevelPage, empty: Boolean, order: SortOrder, vm: FoldersViewModel) {
+    if (empty) {
+        item(key = "empty") { Quiet("Nothing in this folder.") }
+        return
+    }
+    val folders = page.level.folders
+    items(items.itemCount, key = { at -> items.peek(at)?.key?.token ?: "row:$at" }) { at ->
+        val item = items[at]
+        when (val row = item?.row) {
+            null -> if (at < folders) Box(Modifier.fillMaxWidth().height(56.dp)) else RowPlaceholder()
+            is LevelRow.Folder -> Column {
+                if (at > 0) Separator()
+                FolderRow(row.folder.name.ifBlank { "Untitled folder" }, null) { vm.open(FolderStop.Server(row.folder.id, row.folder.name)) }
             }
-            // Keyed by place as well as id, since a server may list a folder twice.
-            itemsIndexed(level.folders, key = { index, folder -> "folder:$index:${folder.id}" }) { index, folder ->
-                Column {
-                    if (index > 0) Separator()
-                    FolderRow(folder.name.ifBlank { "Untitled folder" }, null) {
-                        vm.open(FolderStop.Server(folder.id, folder.name))
-                    }
-                }
+            is LevelRow.Song -> Column {
+                if (at == folders) SortBar(SortList.FolderSongs, order, vm::setOrder, Modifier.padding(top = 12.dp), title = "Songs")
+                SongRow(row.track) { vm.playFrom(page, item) }
             }
         }
     }
@@ -230,6 +301,15 @@ private fun LazyListScope.songRows(list: List<TrackEntity>, order: SortOrder, vm
     item(key = "songs") { SortBar(SortList.FolderSongs, order, vm::setOrder, Modifier.padding(top = 12.dp), title = "Songs") }
     items(list, key = { "song:${it.id}" }) { track ->
         Box(Modifier.animateItem()) { SongRow(track) { vm.playFrom(list, track) } }
+    }
+}
+
+// A big phone folder's own songs, in pages of its ordered copy.
+private fun LazyListScope.pagedSongRows(items: LazyPagingItems<ListItem<TrackEntity>>, order: SortOrder, path: List<String>, vm: FoldersViewModel) {
+    if (items.itemCount == 0) return
+    item(key = "songs") { SortBar(SortList.FolderSongs, order, vm::setOrder, Modifier.padding(top = 12.dp), title = "Songs") }
+    listRows(items, null, heading = {}) { item ->
+        if (item == null) RowPlaceholder() else SongRow(item.row) { vm.playFrom(path, item) }
     }
 }
 

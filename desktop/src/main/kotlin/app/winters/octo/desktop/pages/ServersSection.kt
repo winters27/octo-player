@@ -79,6 +79,8 @@ import app.winters.octo.desktop.server.overviewOf
 import app.winters.octo.desktop.server.statusLine
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.name
+import app.winters.octo.desktop.ui.readLine
+import app.winters.octo.desktop.ui.readingAgain
 import app.winters.octo.desktop.ui.windowRect
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.PasswordDraft
@@ -250,10 +252,16 @@ private fun OverviewCards(app: AppState, connection: Connection) {
         }
     }
     SettingsCard("Maintenance", OctoIcons.Wrench) {
-        ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
-            app.library?.load()
-            app.refreshPlaylists()
-        })
+        // A read under way says how far it is in the row's words.
+        val read = readingAgain(app)
+        if (read != null) {
+            SettingRow("Read the library again", readLine(read)) { Spinner(size = IconSize.Table) }
+        } else {
+            ActionRow("Read the library again", "When new music hasn't shown up yet.", "Read again", {
+                app.library?.load()
+                app.refreshPlaylists()
+            })
+        }
         if (overview.canScan) {
             val caption = facts.scanProblem ?: overview.scan ?: "Has the server look for music added to its folders."
             SettingRow("Scan the server", caption) {

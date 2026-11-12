@@ -27,6 +27,7 @@ import app.winters.octo.catalog.CatalogDao
 import app.winters.octo.catalog.GenreSummary
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
+import app.winters.octo.ui.common.CopyNote
 import app.winters.octo.ui.common.PageHeader
 import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.Refreshable
@@ -57,12 +58,14 @@ fun GenresScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: GenresViewMod
             genres?.let { list ->
                 if (list.isEmpty()) {
                     item(key = "empty") {
-                        Text(
-                            "None of your songs has a genre yet",
-                            style = OctoType.bodySmall,
-                            color = OctoColors.TextMuted,
-                            modifier = Modifier.padding(horizontal = 20.dp),
-                        )
+                        CopyNote {
+                            Text(
+                                "None of your songs has a genre yet",
+                                style = OctoType.bodySmall,
+                                color = OctoColors.TextMuted,
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                            )
+                        }
                     }
                 }
                 items(list, key = { "genre:${it.name}" }) { genre ->

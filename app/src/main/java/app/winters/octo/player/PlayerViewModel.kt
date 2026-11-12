@@ -18,6 +18,7 @@ import app.winters.octo.lyrics.LyricsRepository
 import app.winters.octo.lyrics.LyricsSong
 import app.winters.octo.lyrics.NetworkWatch
 import app.winters.octo.playback.DeviceVolume
+import app.winters.octo.playback.FindMap
 import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.NowPlaying
 import app.winters.octo.playback.PlaybackConnection
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -72,14 +74,89 @@ class PlayerViewModel @Inject constructor(
     private val lyricsChoices: LyricsChoices,
     private val networkWatch: NetworkWatch,
     private val editor: QueueEditor,
+    private val queueStore: app.winters.octo.playback.QueueStore,
     private val playlists: PlaylistStore,
     private val feedback: Feedback,
     private val artwork: WashArtwork,
     animatedArts: AnimatedArts,
+    // Finds a start plays before their rows are written.
+    finds: FindMap,
 ) : ViewModel() {
     val now: StateFlow<NowPlaying> = playback.now
     val upNext: StateFlow<List<QueueEntry>> = playback.upNext
     val played: StateFlow<List<QueueEntry>> = playback.played
+
+    // A play just asked for, shown at once until its first song plays.
+    val starting: StateFlow<app.winters.octo.playback.StartingPlay?> = playback.starting
+
+    // Lists still being written into the queue, each a quiet row in Up next.
+    val building: StateFlow<List<app.winters.octo.playback.BuildingRow>> = playback.building
+
+    // Up next past the songs the player holds, read from the queue a page
+    // at a time as the list reaches them: the songs after its last one (the
+    // tail, with how many there are and how long they play) and before its
+    // first (the head). Read again whenever the player's window moves.
+    private val _tail = MutableStateFlow<List<QueueEntry>>(emptyList())
+    val tail: StateFlow<List<QueueEntry>> = _tail
+    private val _head = MutableStateFlow<List<QueueEntry>>(emptyList())
+    val head: StateFlow<List<QueueEntry>> = _head
+    private val _tailCount = MutableStateFlow(0 to 0L)
+    val tailCount: StateFlow<Pair<Int, Long>> = _tailCount
+    private var tailDone = false
+    private var headDone = false
+    private var reading = false
+
+    init {
+        viewModelScope.launch {
+            combine(upNext, played) { u, p -> u.lastOrNull()?.key to (p.firstOrNull() ?: u.firstOrNull())?.key }
+                .distinctUntilChanged()
+                .collectLatest { (last, first) ->
+                    _tail.value = emptyList()
+                    _head.value = emptyList()
+                    tailDone = last == null
+                    headDone = first == null
+                    _tailCount.value = last?.let { playback.queueTail(it) } ?: (0 to 0L)
+                    if (_tailCount.value.first == 0) tailDone = true
+                }
+        }
+    }
+
+    // The next page of the tail, once the list shows its end.
+    fun moreTail() {
+        if (tailDone || reading) return
+        val from = (_tail.value.lastOrNull() ?: upNext.value.lastOrNull())?.key ?: return
+        reading = true
+        viewModelScope.launch {
+            try {
+                val page = playback.queueRows(from, forward = true, limit = QUEUE_SHEET_PAGE)
+                val shown = upNext.value.mapTo(HashSet()) { it.key } + _tail.value.map { it.key }
+                _tail.value = _tail.value + page.filterNot { it.key in shown }
+                if (page.size < QUEUE_SHEET_PAGE) tailDone = true
+            } finally {
+                reading = false
+            }
+        }
+    }
+
+    // The page of the head before what the list shows, once it shows its top.
+    fun moreHead() {
+        if (headDone || reading) return
+        val from = (_head.value.firstOrNull() ?: played.value.firstOrNull() ?: upNext.value.firstOrNull())?.key ?: return
+        reading = true
+        viewModelScope.launch {
+            try {
+                val page = playback.queueRows(from, forward = false, limit = QUEUE_SHEET_PAGE)
+                val shown = played.value.mapTo(HashSet()) { it.key } + _head.value.map { it.key }
+                _head.value = page.filterNot { it.key in shown }.reversed() + _head.value
+                if (page.size < QUEUE_SHEET_PAGE) headDone = true
+            } finally {
+                reading = false
+            }
+        }
+    }
+
+    // A song past the window plays: the queue's window moves to it.
+    fun playEntry(entry: QueueEntry) = playback.playEntry(entry.key)
 
     // The album name for the top of the player, or nothing for a single. A
     // song found online has no album in the library to count, so it shows none.
@@ -96,7 +173,10 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Whether the song on now is in Liked songs.
-    val liked: StateFlow<Boolean> = combine(playback.now, likes.liked) { now, liked -> now.trackId in liked }
+    val liked: StateFlow<Boolean> = playback.now
+        .map { it.trackId }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(false) else likes.likedFlow(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun toggleLike() {
@@ -109,7 +189,7 @@ class PlayerViewModel @Inject constructor(
         .map { it.trackId }
         .distinctUntilChanged()
         .flatMapLatest { id ->
-            if (id != null && isFind(id)) online.songFlow(id).map { it?.asTrack() } else flowOf(null)
+            if (id != null && isFind(id)) online.songFlow(id).map { (it ?: finds[id])?.asTrack() } else flowOf(null)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -187,29 +267,38 @@ class PlayerViewModel @Inject constructor(
     // Queue edits go by each song's key, so a quick second swipe never
     // takes out the wrong song. Those that take songs out can be undone.
     fun removeFromQueue(entry: QueueEntry) {
-        val undo = editor.remove(entry.key) ?: return
-        feedback.undoable("Removed from the queue") { editor.undo(undo) }
+        // A song past the window leaves the rows read so far at once.
+        if (_tail.value.any { it.key == entry.key }) {
+            _tail.value = _tail.value.filterNot { it.key == entry.key }
+            _tailCount.value = (_tailCount.value.first - 1).coerceAtLeast(0) to (_tailCount.value.second - entry.durationMs).coerceAtLeast(0)
+        }
+        editor.remove(entry.key) { undo -> feedback.undoable("Removed from the queue") { editor.undo(undo) } }
     }
 
     // Everything but the song that is on.
     fun clearQueue() {
-        val undo = editor.clear() ?: return
-        feedback.undoable("Queue cleared") { editor.undo(undo) }
+        editor.clear { undo -> feedback.undoable("Queue cleared") { editor.undo(undo) } }
     }
 
+    // Once its Undo is no longer offered, the played songs' rows go for good.
     fun removePlayed() {
-        val undo = editor.removePlayed() ?: return
-        feedback.undoable("Played songs removed") { editor.undo(undo) }
+        editor.removePlayed { undo ->
+            feedback.undoable("Played songs removed") { editor.undo(undo) }
+            val shown = feedback.message.value
+            editor.expireFloorsWhen { feedback.message.first { it !== shown } }
+        }
     }
 
     fun playNextInQueue(entry: QueueEntry) = editor.playNext(entry.key)
 
     // The listener's queue as a playlist: what played, the song on now and
-    // what is still to come, without the songs Autoplay added.
+    // what is still to come, without the songs Autoplay added, a page at a
+    // time from the whole queue.
     fun saveQueueAsPlaylist(name: String) {
-        val ids = (played.value + upNext.value).filterNot { it.autoplay || isRadio(it.trackId) }.map { it.trackId }
-        playlists.create(name, ids)
-        feedback.show("Saved as ${name.trim()}")
+        viewModelScope.launch {
+            playlists.createFrom(name) { emit -> queueStore.savePages(emit) }
+            feedback.show("Saved as ${name.trim()}")
+        }
     }
 
     val sleep: StateFlow<SleepState> = sleepTimer.state
@@ -321,6 +410,9 @@ class PlayerViewModel @Inject constructor(
 private data class AlbumOnServer(val id: String?)
 
 // How long the lyrics view may be gone before it counts as off screen.
+// How many of the queue's songs past the player's window Up next reads at a time.
+private const val QUEUE_SHEET_PAGE = 50
+
 private const val LYRICS_LEAVE_AFTER_MS = 5_000L
 
 // How long a song must stay on before its neighbours' lyrics are looked up.

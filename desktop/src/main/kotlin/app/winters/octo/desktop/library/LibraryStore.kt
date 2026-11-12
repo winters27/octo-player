@@ -7,7 +7,10 @@ import app.winters.octo.discovery.TitleIndex
 import app.winters.octo.discovery.knownLengthMs
 import app.winters.octo.discovery.sameSong
 import app.winters.octo.server.Arriving
+import app.winters.octo.server.CopyRunState
+import app.winters.octo.server.CopyStep
 import app.winters.octo.server.NewMusic
+import app.winters.octo.server.readIntoMemoryFraction
 import app.winters.octo.server.asListed
 import app.winters.octo.server.lastScanOf
 import app.winters.octo.server.lookForNewMusic
@@ -16,6 +19,7 @@ import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.AlbumWithSongs
 import app.winters.octo.subsonic.Artist
 import app.winters.octo.subsonic.Library
+import app.winters.octo.subsonic.ReadProgress
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
@@ -28,6 +32,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -151,7 +156,28 @@ sealed interface LibraryState {
     data object Idle : LibraryState
     data object Loading : LibraryState
     class Ready(val index: LibraryIndex) : LibraryState
-    class Failed(val message: String) : LibraryState
+
+    // The read stopped: why, and the step it stopped at with its count.
+    class Failed(val message: String, val step: CopyStep = CopyStep.Connect, val done: Long = 0) : LibraryState
+}
+
+// How far a read is after `progress`: songs read of the listed albums'
+// songs, the count only going up until the read is whole (then it is the
+// songs kept), the fraction only going up, a new cover kept. A read past
+// reading is left as it is.
+internal fun reading(run: CopyRunState, progress: ReadProgress): CopyRunState {
+    if (run.step > CopyStep.Read) return run
+    val same = run.step == CopyStep.Read
+    val done = if (progress.whole || !same) progress.songs else maxOf(run.done, progress.songs)
+    val of = progress.listed ?: run.of
+    val fraction = readIntoMemoryFraction(CopyStep.Read, done, of)
+    return run.copy(
+        step = CopyStep.Read,
+        done = done,
+        of = of,
+        fraction = if (fraction == null) run.fraction else maxOf(run.fraction ?: 0f, fraction),
+        artwork = progress.cover ?: run.artwork,
+    )
 }
 
 // Reads the library from the server, once, and again on request. The
@@ -160,19 +186,28 @@ sealed interface LibraryState {
 // finished index is handed back to the state the pages read. In between,
 // music the server takes in is added to the index: what a search finds
 // (takeIn), and what a look at the server's newest albums finds (look).
-// Both need `client`.
+// Both need `client`. `read` says how far it is to the function it is
+// given; `server` names the server in the read's first step.
 class LibraryStore(
-    private val read: suspend () -> Library,
+    private val read: suspend (onProgress: (ReadProgress) -> Unit) -> Library,
     private val scope: CoroutineScope,
     private val client: SubsonicClient? = null,
     // A clock that only goes forward, in milliseconds.
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val server: String = "",
 ) {
-    constructor(client: SubsonicClient, scope: CoroutineScope) : this({ client.readLibrary() }, scope, client)
+    constructor(client: SubsonicClient, scope: CoroutineScope, server: String = "") :
+        this({ onProgress -> client.readLibrary(onProgress = onProgress) }, scope, client, server = server)
 
     private val _state = MutableStateFlow<LibraryState>(LibraryState.Idle)
     val state: StateFlow<LibraryState> = _state
     private var job: Job? = null
+
+    // How far a read is while one runs, the first or a read again, by its
+    // token; null otherwise. `arriving` on the first, while nothing shows.
+    private val _progress = MutableStateFlow<CopyRunState?>(null)
+    val progress: StateFlow<CopyRunState?> = _progress
+    private var tokens = 0L
 
     // One take-in or look at a time.
     private val takeInLock = Mutex()
@@ -188,21 +223,35 @@ class LibraryStore(
     fun load() {
         if (job?.isActive == true) return
         val previous = index
+        val token = ++tokens
+        _progress.value = CopyRunState(
+            token, 1, account = "", server, arriving = previous == null, whole = true, step = CopyStep.Connect,
+            done = 0, of = null, fraction = null, artwork = null, songs = 0, albums = 0, dismissed = false,
+        )
         if (previous == null) _state.value = LibraryState.Loading
         job = scope.launch {
-            _state.value = try {
-                val (scan, fresh) = withContext(Dispatchers.Default) {
-                    // Asked before the read, so a look afterwards reads on
-                    // only once the server has read its folders again.
-                    val scan = client?.let { lastScanOf(it) }
-                    scan to LibraryIndex.of(read())
+            try {
+                _state.value = try {
+                    val (scan, fresh) = withContext(Dispatchers.Default) {
+                        // Asked before the read, so a look afterwards reads on
+                        // only once the server has read its folders again.
+                        val scan = client?.let { lastScanOf(it) }
+                        val library = read { progress -> _progress.update { run -> if (run?.token == token) reading(run, progress) else run } }
+                        _progress.update { run ->
+                            if (run?.token != token) run else run.copy(step = CopyStep.Build, fraction = readIntoMemoryFraction(CopyStep.Build, 0, null))
+                        }
+                        scan to LibraryIndex.of(library)
+                    }
+                    seenScan = scan
+                    lookedAt = clock()
+                    LibraryState.Ready(fresh)
+                } catch (e: SubsonicException) {
+                    // A failed refresh keeps what was read before.
+                    val at = _progress.value?.takeIf { it.token == token }
+                    previous?.let { LibraryState.Ready(it) } ?: LibraryState.Failed(e.userMessage(), at?.step ?: CopyStep.Connect, at?.done ?: 0)
                 }
-                seenScan = scan
-                lookedAt = clock()
-                LibraryState.Ready(fresh)
-            } catch (e: SubsonicException) {
-                // A failed refresh keeps what was read before.
-                previous?.let { LibraryState.Ready(it) } ?: LibraryState.Failed(e.userMessage())
+            } finally {
+                _progress.update { run -> if (run?.token == token) null else run }
             }
         }
     }

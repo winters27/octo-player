@@ -89,6 +89,8 @@ class MenuPlaceTest {
             listOf(PlayNext, AddToQueue, AddToPlaylist, Select, Like, Rate, GoToAlbum, GoToArtist, Info),
             songActions(find = false, radio = false, place = picking),
         )
+        // A row is picked as the list finds it among the rows it read.
+        selection.resolve = { key -> app.winters.octo.ui.common.Picked(key, key, null, true, key, "", null) }
         selection.start("t")
         assertFalse(place(SongMenuContext(selection = selection, selectKey = "t")).selectable)
         // A list that cannot pick offers no Select.

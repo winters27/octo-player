@@ -6,6 +6,41 @@ public let libraryPage = 500
 /// How many albums are asked for at once when songs are read album by album.
 private let albumsAtOnce = 4
 
+/// How many song pages a read goes between covers it hands on.
+private let pagesPerCover = 10
+
+/// The counts of a read whose albums and songs arrive side by side: songs read (outside ones
+/// left out), the albums' songs once all are listed, and the pages so far, for the covers.
+private final class ReadCounts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var songs = 0
+    private var listedSongs: Int?
+    private var pages = 0
+
+    func read(_ page: [ServerSong]) -> ReadProgress {
+        lock.lock()
+        defer { lock.unlock() }
+        songs += page.filter { !$0.isExternal }.count
+        pages += 1
+        let cover = pages == 1 || pages % pagesPerCover == 0 ? page.first { $0.coverArt != nil }?.coverArt : nil
+        return ReadProgress(songs: songs, listed: listedSongs, cover: cover)
+    }
+
+    func listed(_ count: Int) -> ReadProgress {
+        lock.lock()
+        defer { lock.unlock() }
+        listedSongs = count
+        return ReadProgress(songs: songs, listed: count)
+    }
+
+    func whole(_ count: Int) -> ReadProgress {
+        lock.lock()
+        defer { lock.unlock() }
+        songs = count
+        return ReadProgress(songs: count, listed: listedSongs, whole: true)
+    }
+}
+
 extension SubsonicClient {
     /// Every album, a page in alphabetical order, in one music folder when one is chosen.
     public func fullAlbumPage(size: Int, offset: Int, folder: String? = nil) async throws -> [ServerAlbum] {
@@ -50,15 +85,29 @@ extension SubsonicClient {
     /// Reads the whole library in pages. Songs come from an empty search where the server allows
     /// one, and otherwise album by album. Anything listed twice is kept once, and songs the server
     /// marks as outside the library are left out. Albums, artists and songs are read side by side.
-    public func readLibrary(page: Int = libraryPage, folder: String? = nil) async throws -> ServerLibrary {
-        async let albumsRead = Self.pages(page) { offset in try await self.fullAlbumPage(size: page, offset: offset, folder: folder) }
+    /// `onProgress` hears how far it is after each page, from either side, then the songs kept.
+    public func readLibrary(page: Int = libraryPage, folder: String? = nil,
+                            onProgress: @escaping @Sendable (ReadProgress) -> Void = { _ in }) async throws -> ServerLibrary {
+        let counts = ReadCounts()
+        // The albums say how many songs they hold as soon as all are listed, while songs still come.
+        async let albumsRead: [ServerAlbum] = {
+            var seen = Set<String>()
+            let all = try await Self.pages(page) { offset in try await self.fullAlbumPage(size: page, offset: offset, folder: folder) }
+                .filter { seen.insert($0.id).inserted }
+            onProgress(counts.listed(all.reduce(0) { $0 + $1.songCount }))
+            return all
+        }()
         async let artistsRead = fullArtists(folder: folder)
-        let listed = try await Self.pages(page) { offset in try await self.songPage(size: page, offset: offset, folder: folder) }
-        var seenAlbums = Set<String>()
-        let albums = try await albumsRead.filter { seenAlbums.insert($0.id).inserted }
-        let read = listed.isEmpty ? try await songsByAlbum(albums) : listed
+        let listed = try await Self.pages(page) { offset in
+            let songs = try await self.songPage(size: page, offset: offset, folder: folder)
+            onProgress(counts.read(songs))
+            return songs
+        }
+        let albums = try await albumsRead
+        let read = listed.isEmpty ? try await songsByAlbum(albums) { onProgress(counts.read($0)) } : listed
         var seenSongs = Set<String>()
         let songs = read.filter { !$0.isExternal && seenSongs.insert($0.id).inserted }
+        onProgress(counts.whole(songs.count))
         var seenArtists = Set<String>()
         let artists = try await artistsRead.filter { seenArtists.insert($0.id).inserted }
         return ServerLibrary(songs, albums, artists)
@@ -74,7 +123,8 @@ extension SubsonicClient {
         }
     }
 
-    private func songsByAlbum(_ albums: [ServerAlbum]) async throws -> [ServerSong] {
+    /// `read` hears the songs each batch of albums brought.
+    private func songsByAlbum(_ albums: [ServerAlbum], read: ([ServerSong]) -> Void = { _ in }) async throws -> [ServerSong] {
         var songs: [ServerSong] = []
         for start in stride(from: 0, to: albums.count, by: albumsAtOnce) {
             let batch = albums[start..<min(start + albumsAtOnce, albums.count)].map(\.id)
@@ -93,6 +143,7 @@ extension SubsonicClient {
                 for try await (index, part) in group { parts[index] = part }
                 return parts.flatMap { $0 }
             }
+            read(found)
             songs += found
         }
         return songs

@@ -23,18 +23,31 @@ fun planAdd(trackIds: List<String>, onPlaylist: Set<String>): AddPlan {
 }
 
 // What is asked before songs already on a playlist go on it again.
-fun addAgainQuestion(name: String, plan: AddPlan): String = when {
-    plan.songs.size == 1 -> "Already in $name. Add again?"
-    plan.fresh.isEmpty() -> "These songs are already in $name. Add them again?"
-    plan.repeats.size == 1 -> "1 of these songs is already in $name."
-    else -> "${plan.repeats.size} of these songs are already in $name."
-}
+fun addAgainQuestion(name: String, plan: AddPlan): String = addAgainQuestion(name, plan.counts())
 
 // The button that adds every song anyway: "Add" for one song, "Add again"
 // when all are there, "Add all" beside "Add new ones".
-fun addAgainChoice(plan: AddPlan): String = when {
-    plan.offersNewOnly -> "Add all"
-    plan.songs.size == 1 -> "Add"
+fun addAgainChoice(plan: AddPlan): String = addAgainChoice(plan.counts())
+
+// The same plan as counts alone, for songs too many to hold: how many
+// songs (each once), how many are new to the playlist, how many are on it.
+data class AddCounts(val songs: Int, val fresh: Int, val repeats: Int) {
+    val asks: Boolean get() = repeats > 0
+    val offersNewOnly: Boolean get() = songs > 1 && fresh > 0
+}
+
+fun AddPlan.counts() = AddCounts(songs.size, fresh.size, repeats.size)
+
+fun addAgainQuestion(name: String, counts: AddCounts): String = when {
+    counts.songs == 1 -> "Already in $name. Add again?"
+    counts.fresh == 0 -> "These songs are already in $name. Add them again?"
+    counts.repeats == 1 -> "1 of these songs is already in $name."
+    else -> "${counts.repeats} of these songs are already in $name."
+}
+
+fun addAgainChoice(counts: AddCounts): String = when {
+    counts.offersNewOnly -> "Add all"
+    counts.songs == 1 -> "Add"
     else -> "Add again"
 }
 

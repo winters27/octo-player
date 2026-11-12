@@ -5,8 +5,12 @@ import android.app.Application
 import android.content.Context
 import android.os.Bundle
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.catalog.rawQuery
+import app.winters.octo.ui.paging.SqlValue
+import app.winters.octo.ui.upgrade.UPGRADE_BATCH
 import app.winters.octo.playback.isLossless
 import app.winters.octo.query.isLosslessFormat
 import app.winters.octo.server.ServerSync
@@ -50,6 +54,12 @@ const val UPGRADE_POLL_AWAY_MS = 30_000L
 
 // Why a song asked for on one server was not sent once another was in use.
 const val UPGRADE_OTHER_SERVER = "Another server is in use now"
+
+// One page of an album's songs, for its upgrade walk.
+private const val ALBUM_PAGE = 500
+
+// An album's songs a FLAC could replace: how many, and the first batch.
+data class AlbumUpgrade(val count: Int, val first: List<UpgradeAsk>)
 
 // Whether a FLAC could take the place of this copy of a song on a server:
 // its kind is known to be audio, and it loses detail. An m4a is Apple
@@ -111,8 +121,8 @@ class UpgradeWatch(
     // Sends the songs to the server one at a time, at most a batch, then
     // says how the asking went and follows those it took on. `send` asks
     // for one song; the host's own ask unless the caller binds it to a server.
-    fun request(asks: List<UpgradeAsk>, send: suspend (String) -> LibraryActionResult = host::ask) {
-        val taken = follower.ask(asks)
+    fun request(asks: List<UpgradeAsk>, beyond: Int = 0, send: suspend (String) -> LibraryActionResult = host::ask) {
+        val taken = follower.ask(asks, beyond)
         show()
         val job = scope.launch(start = CoroutineStart.LAZY) {
             for (ask in taken) {
@@ -196,6 +206,7 @@ class Upgrades @Inject constructor(
     private val sync: ServerSync,
     private val feedback: Feedback,
     private val serverDownloads: ServerDownloads,
+    private val db: CatalogDatabase,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running = false
@@ -281,15 +292,58 @@ class Upgrades @Inject constructor(
         }
     }
 
-    // The same for an album's songs.
-    suspend fun upgradableInAlbum(albumId: String): List<UpgradeAsk> = upgradable(catalog.albumTrackIds(albumId))
+    // The same for an album's songs, walked a page at a time in the album's
+    // order: how many a FLAC could replace, and the first batch of them to
+    // send.
+    suspend fun upgradableInAlbum(albumId: String): AlbumUpgrade = upgradableIn(UPGRADE_BATCH) { each ->
+        val lists = db.listsDao()
+        var afterOrder = Long.MIN_VALUE
+        var afterId = ""
+        while (true) {
+            val page = lists.tracks(
+                rawQuery(
+                    "SELECT t.*, NULL AS k0, NULL AS k1, NULL AS k2, NULL AS t0, NULL AS t1, 0 AS seg FROM track t " +
+                        "WHERE t.albumId = ? AND (t.albumOrder, t.id) > (?, ?) ORDER BY t.albumOrder, t.id LIMIT $ALBUM_PAGE",
+                    listOf(SqlValue.Text(albumId), SqlValue.Int64(afterOrder), SqlValue.Text(afterId)),
+                ),
+            )
+            if (page.isEmpty()) break
+            each(page.map { it.track.id })
+            if (page.size < ALBUM_PAGE) break
+            afterOrder = page.last().track.albumOrder.toLong()
+            afterId = page.last().track.id
+        }
+    }
+
+    // The same for the library songs `pages` hands, a page of ids at a
+    // time: how many a FLAC could replace, and the first `keep` of them.
+    suspend fun upgradableIn(keep: Int, pages: suspend (each: suspend (List<String>) -> Unit) -> Unit): AlbumUpgrade {
+        if (!canUpgrade.value) return AlbumUpgrade(0, emptyList())
+        val session = session() ?: return AlbumUpgrade(0, emptyList())
+        val pending = pending.value
+        var count = 0
+        val first = ArrayList<UpgradeAsk>()
+        pages { ids ->
+            val copies = ids.chunked(900).flatMap { sources.copiesOf(it) }.filter { it.sourceId == session.sourceId }.groupBy { it.mergedId }
+            for (id in ids) {
+                val onServer = copies[id].orEmpty()
+                if (onServer.isEmpty() || !onServer.all(::isUpgradableCopy)) continue
+                val copy = onServer.minBy { it.nativeId }
+                if (copy.nativeId in pending) continue
+                count++
+                if (first.size < keep) first += UpgradeAsk(copy.nativeId, copy.title)
+            }
+        }
+        return AlbumUpgrade(count, first)
+    }
 
     // The songs go to the server in use now, and to no other: should
     // another be in use before the last of them is sent, the rest are not.
-    fun request(asks: List<UpgradeAsk>) {
+    // `beyond` counts songs left out unread, for the line that says so.
+    fun request(asks: List<UpgradeAsk>, beyond: Int = 0) {
         if (!canUpgrade.value || asks.isEmpty()) return
         val on = session() ?: return
-        watch.request(asks) { id ->
+        watch.request(asks, beyond = beyond) { id ->
             if (session()?.id != on.id) {
                 LibraryActionResult(id, LIBRARY_ACTION_UPGRADE, "skipped", UPGRADE_OTHER_SERVER)
             } else {

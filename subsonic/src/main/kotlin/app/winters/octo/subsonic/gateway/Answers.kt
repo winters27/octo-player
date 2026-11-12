@@ -42,6 +42,17 @@ fun Response.jsonBody(endpoint: String): String {
     throw notSubsonic(endpoint, answerFacts(html))
 }
 
+// The same check for an answer read as it arrives: only its start is
+// peeked, so the body still reads whole afterwards. A 2xx answer that
+// starts as JSON or empty passes; anything else is the NotSubsonic error
+// for it. Blocks while the start arrives, so it runs off the main thread.
+fun Response.checkStreamed(endpoint: String) {
+    if (!isSuccessful) throw notSubsonic(endpoint)
+    val start = runCatching { peekBody(HTML_PEEK.toLong()).string() }.getOrDefault("")
+    if (isBlankBody(start) || looksLikeJson(start)) return
+    throw notSubsonic(endpoint, answerFacts(start.takeIf { isHtml(header("Content-Type")) }))
+}
+
 private fun Response.notSubsonic(endpoint: String, facts: AnswerFacts): SubsonicException.NotSubsonic {
     val gateway = recognizeGateway(facts)
     return if (isSuccessful) {

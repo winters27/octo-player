@@ -13,6 +13,8 @@ class SelectionTest {
         durationMs = 0, addedAt = 0, mimeType = null, sizeBytes = null, artwork = null, uri = null,
     )
 
+    private fun row(key: String, id: String = key) = Pickable(key, song(id)).picked()
+
     @Test
     fun nothingPickedIsNotPicking() {
         assertFalse(Picks().active)
@@ -20,25 +22,25 @@ class SelectionTest {
 
     @Test
     fun startingPicksJustThatSong() {
-        val picks = Picks(setOf("a", "b")).start("c")
+        val picks = Picks(mapOf("a" to row("a"), "b" to row("b"))).start(row("c"))
         assertEquals(setOf("c"), picks.keys)
         assertTrue(picks.active)
     }
 
     @Test
     fun aTapTogglesAndTakingTheLastOffEndsPicking() {
-        var picks = Picks().start("a")
-        picks = picks.toggle("b")
+        var picks = Picks().start(row("a"))
+        picks = picks.toggle(row("b"))
         assertEquals(setOf("a", "b"), picks.keys)
-        picks = picks.toggle("a")
+        picks = picks.toggle(row("a"))
         assertEquals(setOf("b"), picks.keys)
-        picks = picks.toggle("b")
+        picks = picks.toggle(row("b"))
         assertFalse(picks.active)
     }
 
     @Test
     fun songsThatLeaveTheListLeaveThePicks() {
-        val picks = Picks(setOf("a", "b", "c"))
+        val picks = Picks(listOf("a", "b", "c").associateWith { row(it) })
         assertEquals(setOf("a", "c"), picks.keepOnly(setOf("a", "c", "d")).keys)
         // Nothing gone keeps the same picks.
         assertTrue(picks.keepOnly(setOf("a", "b", "c", "d")) === picks)
@@ -48,21 +50,23 @@ class SelectionTest {
     @Test
     fun pickedSongsComeInTheListsOrderNotThePickingOrder() {
         val list = listOf("a", "b", "c", "d").map { Pickable(it, song(it)) }
-        val picks = Picks().start("d").toggle("a").toggle("c")
-        assertEquals(listOf("a", "c", "d"), picks.inOrder(list).map { it.key })
+        val picks = Picks().start(row("d")).toggle(row("a")).toggle(row("c"))
+        assertEquals(listOf("a", "c", "d"), inListOrder(list, picks.rows.values.toList()).map { it.key })
     }
 
     @Test
     fun aSongTwiceOnAPlaylistIsPickedByItsRow() {
         val same = song("t")
         val list = listOf(Pickable("1", same), Pickable("2", same))
-        val picks = Picks().start("2")
-        assertEquals(listOf("2"), picks.inOrder(list).map { it.key })
+        val picks = Picks().start(list[1].picked())
+        assertEquals(listOf("2"), inListOrder(list, picks.rows.values.toList()).map { it.key })
+        assertEquals(listOf("t"), picks.rows.values.map { it.trackId })
     }
 
     @Test
     fun theHolderFollowsThePicks() {
         val selection = SongSelection()
+        selection.resolve = { key -> row(key) }
         assertFalse(selection.active)
         selection.start("a")
         selection.toggle("b")
