@@ -28,6 +28,7 @@ import app.winters.octo.update.AppUpdates
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import dagger.hilt.android.HiltAndroidApp
@@ -44,6 +45,20 @@ import javax.inject.Inject
 // queueing the urgent ones behind the rest, or the app's other calls
 // behind covers.
 private const val COVER_REQUESTS_PER_HOST = 16
+
+// The most the cover memory cache may hold, in bytes. Coil's own default is
+// a quarter of the heap; a 200,000-song library already peaks near 154 MB
+// of a 256 MB heap, and the playlist covers keep 24 MB of their own, so the
+// covers here keep to an eighth of the heap and never more than this. A
+// cover that falls out loads again from the disk cache.
+private const val COVER_MEMORY_MAX_BYTES = 32L * 1024 * 1024
+
+// The cover memory cache's size for a heap of `heapBytes`.
+internal fun coverMemoryBytes(heapBytes: Long): Long = minOf(heapBytes / 8, COVER_MEMORY_MAX_BYTES)
+
+// Gives the loader a cover memory cache sized for a heap of `heapBytes`.
+internal fun ImageLoader.Builder.coverMemoryCache(heapBytes: Long = Runtime.getRuntime().maxMemory()): ImageLoader.Builder =
+    memoryCache { MemoryCache.Builder().maxSizeBytes(coverMemoryBytes(heapBytes)).build() }
 
 @HiltAndroidApp
 class OctoApp : Application(), SingletonImageLoader.Factory {
@@ -138,6 +153,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
                 add(ServerArtworkFetcher.Factory(sessions))
                 add(ServerArtworkKeyer())
             }
+            .coverMemoryCache()
             .crossfade(true)
             .build()
     }
