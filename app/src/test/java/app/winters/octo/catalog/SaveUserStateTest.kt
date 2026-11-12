@@ -1,5 +1,6 @@
 package app.winters.octo.catalog
 
+import android.database.Cursor
 import app.winters.octo.device.DEVICE
 import app.winters.octo.favourites.PinKey
 import app.winters.octo.ui.menu.PinSpot
@@ -18,11 +19,23 @@ import org.robolectric.annotation.Config
 // rows and not others: every heart, favorite and pin, and stars, which never
 // flip back to the copies' older rating, a tap made during the save
 // included.
+//
+// At each park the stored state of every song renamed so far is read in
+// chunked IN queries: which ids hold a like (the split count), the stars
+// the library lists (`track.rating`) and the hearts through
+// LikeStore.likedAmong, all ids at once. The one-id reads (likedFlow and
+// UserDao.rating, RATING_EITHER_SQL) run on the renames whose answer can
+// have changed since the last park: every rename published since then,
+// every rename whose like or rating row (`liked_track`, `track_rating`) on
+// either id changed since then, and the tapped song; and on SPREAD renames
+// spaced evenly over all so far, first and last included, for a rename
+// whose rows did not move. Every rename is so read at the park it is
+// published and after each move of its rows.
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SaveUserStateTest {
     @Test
-    fun heartsStarsFavoritesAndPinsShowThroughEitherIdAtEveryPark() = guarded(240) {
+    fun heartsStarsFavoritesAndPinsShowThroughEitherIdAtEveryPark() = guarded(120) {
         for (bound in listOf(SAVE_GROUP_FLOOR, SAVE_GROUP_ENTRIES)) {
             IdsRig(bound).use { rig ->
                 val songs = if (bound == SAVE_GROUP_FLOOR) 80 else 1_200
@@ -45,10 +58,14 @@ class SaveUserStateTest {
                 // A song tapped to 4 stars at the first park, through its old id.
                 var tapped: String? = null
                 val wrong = ArrayList<String>()
+                // The song renames seen at earlier parks, and what each id
+                // held at the last one.
+                val known = HashSet<Pair<String, String>>()
+                var heldBefore = emptyMap<String, String>()
                 rig.hooks.between = { turn ->
                     parks++
                     parkedAt += turn
-                    val renames = rig.db.query("SELECT kind, `old`, `new` FROM save_rename", null).use { c ->
+                    val renames = rig.db.query("SELECT kind, `old`, `new` FROM save_rename ORDER BY rowid", null).use { c ->
                         buildList { while (c.moveToNext()) add(Triple(c.getString(0), c.getString(1), c.getString(2))) }
                     }
                     val songRenames = renames.filter { it.first == RENAME_SONG }
@@ -58,20 +75,42 @@ class SaveUserStateTest {
                         rig.ratings.rate(old, 4)
                         withTimeout(10_000) { while (rig.db.userDao().rating(new) != 4) delay(5) }
                     }
+                    val ids = songRenames.flatMap { listOf(it.second, it.third) }
+                    // Each id's like and rating rows, as text to compare.
+                    val held = HashMap<String, String>()
+                    val liked = HashSet<String>()
+                    rig.db.eachIn("SELECT trackId, relinkKey FROM liked_track WHERE trackId IN", ids) { c ->
+                        liked += c.getString(0)
+                        held[c.getString(0)] = "like ${c.getString(1)}"
+                    }
+                    rig.db.eachIn("SELECT trackId, relinkKey, rating FROM track_rating WHERE trackId IN", ids) { c ->
+                        held[c.getString(0)] = held[c.getString(0)].orEmpty() + " stars ${c.getString(1)} ${c.getInt(2)}"
+                    }
                     // A song split between its ids: renamed, with its like
                     // still on the old one.
-                    split += songRenames.count { rig.db.longOf("SELECT COUNT(*) FROM liked_track WHERE trackId = ?", it.second) == 1L }
-                    for ((_, old, new) in songRenames) {
+                    split += songRenames.count { it.second in liked }
+                    val listed = HashMap<String, Int>()
+                    rig.db.eachIn("SELECT id, rating FROM track WHERE id IN", ids) { c -> listed[c.getString(0)] = c.getInt(1) }
+                    val among = rig.likes.likedAmong(ids).first()
+                    val spread = if (songRenames.isEmpty()) emptySet() else (0 until SPREAD).map { it * (songRenames.size - 1) / (SPREAD - 1) }.toSet()
+                    for ((i, rename) in songRenames.withIndex()) {
+                        val (_, old, new) = rename
                         val stars = if (old == tapped) 4 else 5
+                        for (id in listOf(old, new)) {
+                            val shown = listed[id]
+                            if (shown != null && shown != stars) wrong += "turn $turn: $id shows $shown stars, not $stars"
+                        }
+                        if (old !in among || new !in among) wrong += "turn $turn: $old and $new among the liked"
+                        val moved = held[old] != heldBefore[old] || held[new] != heldBefore[new]
+                        if (i !in spread && (old to new) in known && !moved && old != tapped) continue
                         for (id in listOf(old, new)) {
                             if (!rig.likes.likedFlow(id).first()) wrong += "turn $turn: $id shows no heart"
                             val rated = rig.db.userDao().rating(id)
                             if (rated != stars) wrong += "turn $turn: $id keeps $rated stars, not $stars"
-                            val shown = rig.db.query("SELECT rating FROM track WHERE id = ?", arrayOf(id)).use { c -> if (c.moveToFirst()) c.getInt(0) else null }
-                            if (shown != null && shown != stars) wrong += "turn $turn: $id shows $shown stars, not $stars"
                         }
-                        if (rig.likes.likedAmong(listOf(old, new)).first() != setOf(old, new)) wrong += "turn $turn: $old and $new among the liked"
                     }
+                    songRenames.mapTo(known) { it.second to it.third }
+                    heldBefore = held
                     val favourites = rig.db.favouritesDao().favouriteAlbumIds().first().toSet()
                     val shown = rig.db.favouritesDao().shownPins().first().map { PinKey(PinKind.of(it.kind)!!, it.itemId) }.distinct()
                     withTimeout(10_000) { rig.pins.shown.first { it == shown } }
@@ -92,5 +131,19 @@ class SaveUserStateTest {
                 assertTrue("bound $bound: no song was tapped during the save", tapped != null)
             }
         }
+    }
+
+    private companion object {
+        // How many song renames, spaced evenly, the one-id reads cover at a
+        // park beside the ones whose rows moved.
+        const val SPREAD = 9
+    }
+}
+
+// Runs `sql`, which ends in `IN`, over `ids` a chunk at a time, each chunk
+// within the database's bind limit, and gives each row to `row`.
+private fun CatalogDatabase.eachIn(sql: String, ids: List<String>, row: (Cursor) -> Unit) {
+    for (chunk in ids.chunked(LIKE_LOOKUP_CHUNK)) {
+        query("$sql (${chunk.joinToString(",") { "?" }})", Array<Any?>(chunk.size) { chunk[it] }).use { c -> while (c.moveToNext()) row(c) }
     }
 }
