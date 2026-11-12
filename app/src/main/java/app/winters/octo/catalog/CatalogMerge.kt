@@ -134,15 +134,14 @@ internal const val SWITCH_BYTES_PER_SONG = 3_300L
 internal const val RECOPY_BYTES_PER_SONG = 615L
 
 // The most one save group's transaction writes into the write-ahead log,
-// for logRoom: per entry of the save's bound (SaveCosts), which binds a big
-// library's groups, and per song as above, which binds a small one's, whose
-// groups touch fewer pages than their entries. Measured as above, the log's
-// most less its checkpoint span, over two groups: 9,150 an entry at 200,000
-// songs (a switch, with writes and reads beside it, whose readers keep the
-// log from starting again for more than one group), 640 a song at 1,000;
-// each with a tenth more.
+// for logRoom, per entry of the save's bound (SaveCosts), or per song of a
+// save with fewer songs than its bound holds entries. Measured as above,
+// the log's most less its checkpoint span, over two groups: 9,150 an entry
+// at 200,000 songs (a switch, with writes and reads beside it, whose readers
+// keep the log from starting again for more than one group), and a tenth
+// more. A small library's groups write less than this a song, so it is
+// asked up to about 40 MB more than it takes.
 internal const val SAVE_LOG_BYTES_PER_ENTRY = 10_000L
-internal const val SAVE_LOG_BYTES_PER_SONG = 700L
 
 // What a save does to the library, as its free space check tells it from
 // the claim before the find: the first songs into an empty library
@@ -158,10 +157,28 @@ internal enum class SaveKind(val bytesPerSong: Long) {
     Recopy(RECOPY_BYTES_PER_SONG),
 }
 
-// How many stage rows one transaction of a swapped copy's clear deletes,
-// and how its writes are told apart when they are counted.
+// The most rows one transaction of a work table's clear deletes, and how a
+// swapped copy's stage clear's writes are told apart when they are counted.
+// The stage's clear and the merge's work clear take fewer, by what each row
+// costs (clearRowCost), so each transaction stays within SAVE_GROUP_ENTRIES.
 internal const val STAGE_CLEAR_ROWS = 2_000
 internal const val STAGE_CLEAR = "stage clear"
+
+// The reads one row's delete of a clear's page makes besides its writes:
+// the row by its key, the page's look-up of it through an index, and one
+// for the page's own check (a stage's source, a note's server copy).
+internal const val CLEAR_READS = 3L
+
+// The stage's tables, cleared one after another.
+internal val STAGE_TABLES = listOf("stage_track", "stage_album", "stage_artist")
+
+// What deleting one row of `table` in a clear costs (SaveCosts): its row
+// and its index entries written, the tracker's probe, and its reads.
+internal fun clearRowCost(costs: SaveCosts, table: String): Long = costs.whole(table) + CLEAR_READS
+
+// How many rows of `table` one transaction of a clear takes with `room`
+// of its cost left.
+internal fun clearPageRows(costs: SaveCosts, table: String, room: Long = SAVE_GROUP_ENTRIES): Int = (room / clearRowCost(costs, table)).toInt()
 
 // The clears of the merge's own work rows and of a copy's pages of the
 // server's library, each run after the work that left them, by name (their
@@ -632,10 +649,14 @@ class CatalogMerge internal constructor(
         // nothing is put back: the save stops, its groups stay, and each
         // claimed copy hears why.
         var started = false
+        // The save's kind and bound, and the library's songs, read before the
+        // merge writes, so a full disk is answered with no read after it.
+        var sizing: SaveSizing? = null
         return try {
+            if (claim.claimed.isNotEmpty()) sizing = SaveSizing(kindOf(claim), boundOf(claim), work.trackTotal())
             val counts = merger.merge(claim.sources, progressOf(claim))
             hooks.built()
-            checkSpace(claim, counts)
+            sizing?.let { checkSpace(claim, counts, it.kind, it.bound) }
             save(claim) { started = true }
             claim.claimed.forEach { stageOutcome(it.sourceId, it.generation).complete(Unit) }
             hooks.merged()
@@ -655,7 +676,8 @@ class CatalogMerge internal constructor(
                 abort(claim, e.userMessage())
                 throw e
             }
-            abort(claim, NotEnoughSpace(neededFor(claim, 0, kindOf(claim))).userMessage(), noRoom = true)
+            val needed = sizing?.let { neededFor(claim, it.songs, it.kind, it.bound) }
+            abort(claim, NotEnoughSpace(needed).userMessage(), noRoom = true)
             again()
             null
         } catch (e: CancellationException) {
@@ -776,29 +798,37 @@ class CatalogMerge internal constructor(
     // whether a stop started it.
     private class Resume(val record: SaveRecord, val state: MergeStateEntity, val auto: Boolean)
 
+    // What a claim's free space ask is worked out from: its save's kind and
+    // bound, and the songs the library holds before its merge.
+    private class SaveSizing(val kind: SaveKind, val bound: Long, val songs: Int)
+
     // The words of the save part applied: its stop's, or what a resume
     // still to come says.
     private fun pendingWords(): String = _applyStopped.value ?: STILL_SAVING
 
     // The merge's work rows, its output's and its save's (but never the
     // renames in force), and the take-in log and rating notes no copy keeps,
-    // go STAGE_CLEAR_ROWS a transaction, the tables one after another, so no
-    // write holds the lock for a whole merge's rows and a small merge's clear
-    // is one transaction. While a save is part applied (its record stands)
-    // nothing goes: its resume needs them, and clears its find's rows
-    // itself. A delete that fails leaves rows, and the next merge clears
-    // what is left first.
+    // go a page a transaction, the tables one after another, each
+    // transaction costing at most SAVE_GROUP_ENTRIES by what each table's
+    // rows cost (clearRowCost) and the record's read, so no write holds the
+    // lock for longer than a save's group and a small merge's clear is one
+    // transaction. While a save is part applied (its record stands) nothing
+    // goes: its resume needs them, and clears its find's rows itself. A
+    // delete that fails leaves rows, and the next merge clears what is left
+    // first.
     private suspend fun clearWork() {
         try {
-            val pages: List<suspend (Int) -> Int> = listOf<suspend (Int) -> Int>(
-                { work.deleteCandidatePage(it) },
-                { work.deleteMergedIdNextPage(it) },
-                { work.deleteAlbumNextPage(it) },
-                { work.deleteArtistNextPage(it) },
-            ) + SAVE_WORK_TABLES.map { table -> { limit: Int -> savePage(table, limit) } } + listOf<suspend (Int) -> Int>(
-                { work.deleteStaleTakeInPage(it) },
-                { work.deleteStaleNotePage(it) },
+            val pages: List<Pair<String, suspend (Int) -> Int>> = listOf<Pair<String, suspend (Int) -> Int>>(
+                "merge_candidate" to { work.deleteCandidatePage(it) },
+                "merged_id_next" to { work.deleteMergedIdNextPage(it) },
+                "album_next" to { work.deleteAlbumNextPage(it) },
+                "artist_next" to { work.deleteArtistNextPage(it) },
+            ) + SAVE_WORK_TABLES.map { table -> Pair<String, suspend (Int) -> Int>(table) { limit -> savePage(table, limit) } } + listOf<Pair<String, suspend (Int) -> Int>>(
+                "take_in_log" to { work.deleteStaleTakeInPage(it) },
+                "rating_note" to { work.deleteStaleNotePage(it) },
             )
+            val costs = SaveCosts.of(db.openHelper.writableDatabase, pages.map { it.first })
+            val rowCosts = pages.map { clearRowCost(costs, it.first) }
             val rows = withContext(WriteLabels.of(MERGE_WORK_CLEAR)) {
                 var rows = 0L
                 var at = 0
@@ -808,13 +838,21 @@ class CatalogMerge internal constructor(
                             at = pages.size
                             return@withTransaction 0
                         }
-                        var left = STAGE_CLEAR_ROWS
-                        while (at < pages.size && left > 0) {
-                            left -= pages[at](left)
-                            // A table that gave less than asked is empty now.
-                            if (left > 0) at++
+                        // What is left of the transaction's cost once the
+                        // record's read is counted.
+                        var room = SAVE_GROUP_ENTRIES - 1
+                        var gone = 0
+                        while (at < pages.size) {
+                            val ask = (room / rowCosts[at]).toInt()
+                            if (ask == 0) break
+                            val n = pages[at].second(ask)
+                            gone += n
+                            room -= n * rowCosts[at]
+                            // A table that gave less than asked is empty now;
+                            // one that gave all of it may hold more.
+                            if (n < ask) at++ else break
                         }
-                        STAGE_CLEAR_ROWS - left
+                        gone
                     }
                     rows += gone
                     hooks.clearPage(MERGE_WORK_CLEAR)
@@ -1193,30 +1231,32 @@ class CatalogMerge internal constructor(
     // largest transaction is one group. A save rewrites rows in place,
     // which the log holds though the file does not grow, so the log's room
     // is not held to the growth.
-    private fun neededFor(claim: Claim, songs: Int, kind: SaveKind): Long {
+    private fun neededFor(claim: Claim, songs: Int, kind: SaveKind, bound: Long): Long {
         val counted = claim.claimed.sumOf { it.tracks.toLong() } + songs
         val work = counted * kind.bytesPerSong
-        val bound = saveBoundFor(claim.sources.size.toLong().coerceAtLeast(1))
-        val group = minOf(bound * SAVE_LOG_BYTES_PER_ENTRY, counted * SAVE_LOG_BYTES_PER_SONG)
+        val group = minOf(bound, counted) * SAVE_LOG_BYTES_PER_ENTRY
         return work + logRoom(Long.MAX_VALUE, group)
     }
 
+    // The bound of the claim's save (saveBoundFor), by its copies.
+    private fun boundOf(claim: Claim): Long = saveBoundFor(claim.sources.size.toLong().coerceAtLeast(1))
+
     // What the claim's save does to the library (SaveKind), read before
     // its find: whether the library holds any song, whether it was last
-    // merged for the claim's server, and whether it holds songs from each
-    // claimed copy's source.
+    // merged for another server, and whether it holds songs from each
+    // claimed copy's source. No recorded server (a library from before the
+    // record was kept) says nothing, and the sources' songs decide.
     private fun kindOf(claim: Claim): SaveKind {
         if (db.readLong("SELECT EXISTS (SELECT 1 FROM track)") == 0L) return SaveKind.FirstCopy
         val merged = db.read("SELECT server FROM merge_state WHERE id = 0") { if (it.isNull(0)) null else it.getString(0) }.firstOrNull()
-        if (merged != claim.server) return SaveKind.Switch
+        if (merged != null && merged != claim.server) return SaveKind.Switch
         val newSource = claim.claimed.any { db.readLong("SELECT EXISTS (SELECT 1 FROM source_track WHERE sourceId = ?)", it.sourceId) == 0L }
         return if (newSource) SaveKind.Switch else SaveKind.Recopy
     }
 
-    private fun checkSpace(claim: Claim, counts: MergeCounts) {
+    private fun checkSpace(claim: Claim, counts: MergeCounts, kind: SaveKind, bound: Long) {
         if (claim.claimed.isEmpty()) return
-        val kind = kindOf(claim)
-        val needed = neededFor(claim, counts.tracks, kind)
+        val needed = neededFor(claim, counts.tracks, kind, bound)
         hooks.spaceAsked(kind, needed)
         if (freeSpace.bytes() < needed) throw StageAbort(NotEnoughSpace(needed).userMessage(), noRoom = true)
     }
@@ -1255,21 +1295,25 @@ class CatalogMerge internal constructor(
         if (work.stageClearing(sourceId) == true) clearOf(sourceId).await()
     }
 
-    // A source's stage rows go STAGE_CLEAR_ROWS a transaction, so no write
-    // holds the lock for a whole copy's rows, and the source stops being
-    // marked clearing once they are gone. A delete that fails leaves the
-    // mark, and the source's next copy clears what is left first.
+    // A source's stage rows go a page a transaction, each costing at most
+    // SAVE_GROUP_ENTRIES by what its table's rows cost (clearRowCost), so no
+    // write holds the lock for longer than a save's group, and the source
+    // stops being marked clearing once they are gone. A delete that fails
+    // leaves the mark, and the source's next copy clears what is left first.
     private suspend fun clearStage(sourceId: String) {
         val started = System.nanoTime()
         try {
             val rows = withContext(WriteLabels.of(STAGE_CLEAR)) {
+                val costs = SaveCosts.of(db.openHelper.writableDatabase, STAGE_TABLES)
                 var rows = 0L
-                for (page in listOf(work::deleteStageTrackPage, work::deleteStageAlbumPage, work::deleteStageArtistPage)) {
+                val pages = listOf(work::deleteStageTrackPage, work::deleteStageAlbumPage, work::deleteStageArtistPage)
+                for ((table, page) in STAGE_TABLES.zip(pages)) {
+                    val each = clearPageRows(costs, table)
                     while (true) {
-                        val gone = page(sourceId, STAGE_CLEAR_ROWS)
+                        val gone = page(sourceId, each)
                         rows += gone
                         hooks.stageClearPage(sourceId)
-                        if (gone < STAGE_CLEAR_ROWS) break
+                        if (gone < each) break
                     }
                 }
                 rows

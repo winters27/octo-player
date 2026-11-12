@@ -151,6 +151,22 @@ class OpenBoundTest {
                 assertTrue("$clearers: a transaction deleted ${most.totalChanges} rows, over its page $page: $most", most.totalChanges <= page)
                 assertTrue("$clearers: ${writes.size} transactions for its tables", writes.size >= 3)
                 println("OpenBoundTest $clearers: ${tables.size} tables, ${writes.size} transactions, largest ${most.totalChanges} rows (page $page)")
+                // The stage's clear and the merge's work clear cost at most a
+                // save group's bound a transaction, measured from what each ran.
+                if (clearers == setOf(WorkClearer.Stage) || clearers == setOf(WorkClearer.MergeWork)) {
+                    val label = if (clearers == setOf(WorkClearer.Stage)) STAGE_CLEAR else MERGE_WORK_CLEAR
+                    val statements = log.statements
+                    val all = log.transactions.sortedBy { it.beginSeq }
+                    val begins = all.map { it.beginSeq } + Long.MAX_VALUE
+                    val measure = Measure(db.openHelper.writableDatabase)
+                    val costs = all.withIndex().filter { (_, t) -> t.totalChanges > 0 && t.label == label }.map { (i, _) ->
+                        measure.of(statements.filter { it.inTransaction && !it.bookkeeping && it.label == label && it.seq > begins[i] && it.seq < begins[i + 1] })
+                    }
+                    assertTrue("$clearers: no $label transaction", costs.isNotEmpty())
+                    val largest = costs.maxBy { it.total }
+                    println("OpenBoundTest $clearers: largest cost ${largest.total} (${largest.reads} reads, ${largest.writes} writes)")
+                    assertTrue("$clearers: a transaction costs ${largest.total}, over $SAVE_GROUP_ENTRIES", largest.total <= SAVE_GROUP_ENTRIES)
+                }
             }
 
             val merge = db.boundMerge(null, bound)

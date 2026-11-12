@@ -517,8 +517,8 @@ class MigrationTest {
     // A server's library as a copy files it, written into a version 18 file
     // row by row in its source's order, as the copies before version 19
     // left it: after the upgrade the first everyday copy, which adds one
-    // song in the middle of the library, writes the new song's row and
-    // moves no place of any song, album or artist.
+    // song in the middle of the library, asks a copy again's room, writes
+    // the new song's row and moves no place of any song, album or artist.
     @Test
     fun theFirstCopyAfterTheUpgradeWritesOnlyTheNewRows() = runBlocking {
         val source = "server:upgrade.test"
@@ -560,6 +560,7 @@ class MigrationTest {
         val added = inAlbum.last().copy(id = "added-1", title = "Zz Added", track = (inAlbum.mapNotNull { it.track }.maxOrNull() ?: 0) + 1)
         val songs = library.songs.toMutableList().apply { add(indexOf(inAlbum.last()) + 1, added) }
         val steps = Collections.synchronizedMap(LinkedHashMap<String, Long>())
+        val asked = Collections.synchronizedList(ArrayList<SaveKind>())
         db.copyOf(
             source,
             Library(songs, library.albums, library.artists),
@@ -567,8 +568,16 @@ class MigrationTest {
                 override fun groupStep(turn: Long, step: String, rows: Long) {
                     steps.merge(step, rows, Long::plus)
                 }
+
+                override fun spaceAsked(kind: SaveKind, bytes: Long) {
+                    asked += kind
+                }
             },
         )
+        // The upgraded file records no server it was merged for, which says
+        // nothing: the copy of a source the library holds songs from asks a
+        // copy again's room, never a switch's.
+        assertEquals(listOf(SaveKind.Recopy), asked.toList())
         assertTrue("$steps", steps.isNotEmpty())
         assertEquals("no statement for places runs: $steps", emptyList<String>(), steps.keys.filter { it.startsWith("update seq of") })
         assertEquals("$steps", 1L, steps["insert source_track"])

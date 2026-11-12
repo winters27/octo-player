@@ -1,5 +1,6 @@
 package app.winters.octo.device
 
+import app.winters.octo.catalog.MERGE_WORK_CLEAR
 import app.winters.octo.catalog.STAGE_BUILDING
 import app.winters.octo.catalog.STAGE_NONE
 import app.winters.octo.catalog.SourceMetaEntity
@@ -10,6 +11,7 @@ import app.winters.octo.catalog.stringOf
 import app.winters.octo.testing.FakeMediaStore
 import app.winters.octo.testing.openTestCatalog
 import app.winters.octo.testing.phoneLibrary
+import app.winters.octo.testing.testMerge
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -30,7 +32,13 @@ class PhoneDeathTest {
         val dir = Files.createTempDirectory("catalog").toFile()
         var db = openTestCatalog(dir)
         val phone = skewedPhone(big = 300)
-        db.phoneLibrary(phone.listed(), now = PHONE_NOW).rescan()
+        val merge = db.testMerge(null)
+        db.phoneLibrary(phone.listed(), merge, now = PHONE_NOW).rescan()
+        // The copy leaves the stage, and the merge's work rows go, in the
+        // background a page at a time: both done before the rows are set
+        // up and the file opened again.
+        merge.awaitStageClear(DEVICE)
+        merge.awaitClear(MERGE_WORK_CLEAR)
 
         // As a scan leaves things between its start and its swap.
         val work = db.workDao()

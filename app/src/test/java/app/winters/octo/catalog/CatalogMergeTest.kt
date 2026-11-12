@@ -3,6 +3,7 @@ package app.winters.octo.catalog
 import android.database.sqlite.SQLiteException
 import app.winters.octo.data.userMessage
 import app.winters.octo.device.DEVICE
+import app.winters.octo.testing.counted
 import app.winters.octo.testing.openTestCatalog
 import app.winters.octo.testing.rawConnection
 import app.winters.octo.testing.testMerge
@@ -442,13 +443,64 @@ class CatalogMergeTest {
             // 20 staged songs, and 20 library songs (6 phone songs, 14 more
             // from the copy), asked as a first copy: the library holds no
             // song before its first merge. The log's room beside it is its
-            // checkpoint's span and two groups, each this small save's songs.
-            val log = LOG_CHECKPOINT_BYTES + 2 * (20L + 20L) * SAVE_LOG_BYTES_PER_SONG
+            // checkpoint's span and two groups, each this small save's songs
+            // (fewer than its bound's entries) at a bound entry's bytes.
+            val log = LOG_CHECKPOINT_BYTES + 2 * (20L + 20L) * SAVE_LOG_BYTES_PER_ENTRY
             assertEquals(NotEnoughSpace((20L + 20L) * FIRST_COPY_BYTES_PER_SONG + log).userMessage(), e.reason)
         }
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM stage_track"))
         assertEquals(STAGE_NONE, db.stringOf("SELECT stage FROM source_meta WHERE sourceId = ?", server))
         assertEquals(0L, db.longOf("SELECT COUNT(*) FROM source_track WHERE sourceId = ?", server))
+    }
+
+    // A build that fills the disk drops its copy with the room its save
+    // would ask, worked out before the build wrote from the copy's songs and
+    // the library's, and reads nothing between the full disk and the abort.
+    @Test
+    fun aBuildThatFillsTheDiskDropsItsCopyWithTheRoomItsSaveAsks() = run {
+        db.put(library(DEVICE, 300))
+        db.testMerge(server).also { it.rebuild() }.awaitClear(MERGE_WORK_CLEAR)
+        val inner = db.workDao()
+        val log = db.counted
+        var fail = true
+        var failedAt = Long.MAX_VALUE
+        val work = object : WorkDao by inner {
+            override suspend fun clearMergeWork() {
+                if (fail) {
+                    fail = false
+                    failedAt = log.mark()
+                    throw android.database.sqlite.SQLiteFullException("database or disk is full")
+                }
+                inner.clearMergeWork()
+            }
+        }
+        val merge = CatalogMerge(db, { Long.MAX_VALUE }, { server }, work)
+        db.stage(library(server, 400), generation = 3)
+        log.reset()
+        log.recording = true
+        try {
+            merge.rebuild()
+        } finally {
+            log.recording = false
+        }
+        val reason = try {
+            merge.awaitStage(server, 3)
+            fail("the copy was swapped in")
+            ""
+        } catch (e: StageAborted) {
+            e.reason
+        }
+        // The copy's 400 songs and the library's 300, a source the library
+        // holds no songs from (a switch), at the default bound: about 17 MB,
+        // where the copy's songs alone would ask about 10.
+        val songs = 400L + 300L
+        val needed = songs * SWITCH_BYTES_PER_SONG + LOG_CHECKPOINT_BYTES + 2 * minOf(SAVE_GROUP_ENTRIES, songs) * SAVE_LOG_BYTES_PER_ENTRY
+        assertEquals(NotEnoughSpace(needed).userMessage(), reason)
+        val abortAt = log.transactions.filter { it.label == "abort" && it.beginSeq > failedAt }.minOf { it.beginSeq }
+        val between = log.statements.filter { !it.bookkeeping && it.seq in (failedAt + 1) until abortAt }
+        assertEquals("statements between the full disk and the abort", emptyList<String>(), between.map { it.sql })
+        assertEquals(0L, db.longOf("SELECT COUNT(*) FROM stage_track"))
+        assertEquals(300L, db.longOf("SELECT COUNT(*) FROM track"))
     }
 
     @Test

@@ -181,16 +181,23 @@ class WorkClearTest {
     }
 
     // Each clear deletes at most STAGE_CLEAR_ROWS rows a transaction, under
-    // its own label, every row it leaves.
+    // its own label, every row it leaves. The stage's clear and the merge's
+    // work clear each cost at most SAVE_GROUP_ENTRIES a transaction, measured
+    // from what it ran as the save's groups are (Measure).
     @Test
     fun eachClearGoesAPageATransaction() = timed(120) {
         val rows = 2 * STAGE_CLEAR_ROWS + 300
         // A dropped copy's stage.
         val dropping = db.testMerge(server, space = 1)
         db.stage(library(server, rows), generation = 1)
-        fun labeled(label: String, block: suspend () -> Unit): List<CountedTransaction> {
-            db.counted.record { runBlocking { block() } }
-            return db.counted.transactions.filter { it.rowsChanged > 0 && it.label == label }
+        val measure = Measure(db.openHelper.writableDatabase)
+        fun labeled(label: String, block: suspend () -> Unit): List<Pair<CountedTransaction, SaveCost>> {
+            val (_, statements) = db.counted.record { runBlocking { block() } }
+            val all = db.counted.transactions.sortedBy { it.beginSeq }
+            val begins = all.map { it.beginSeq } + Long.MAX_VALUE
+            return all.withIndex().filter { (_, t) -> t.rowsChanged > 0 && t.label == label }.map { (i, t) ->
+                t to measure.of(statements.filter { it.inTransaction && !it.bookkeeping && it.label == label && it.seq > begins[i] && it.seq < begins[i + 1] })
+            }
         }
         val stage = labeled(STAGE_CLEAR) {
             runCatching { dropping.rebuild() }
@@ -211,7 +218,13 @@ class WorkClearTest {
         }
         for ((name, deletes) in listOf("stage" to stage, "work" to work, "pages" to pages)) {
             assertTrue("$name: ${deletes.size} clear transactions", deletes.size >= 3)
-            assertTrue("$name: ${deletes.maxOf { it.rowsChanged }} rows in one", deletes.all { it.rowsChanged <= STAGE_CLEAR_ROWS })
+            assertTrue("$name: ${deletes.maxOf { it.first.rowsChanged }} rows in one", deletes.all { it.first.rowsChanged <= STAGE_CLEAR_ROWS })
+        }
+        for ((name, deletes) in listOf("stage" to stage, "work" to work)) {
+            val most = deletes.maxBy { it.second.total }
+            println("WorkClearTest $name clear: ${deletes.size} transactions, largest cost ${most.second.total} (${most.second.reads} reads, ${most.second.writes} writes, ${most.first.rowsChanged} rows)")
+            assertTrue("$name: a transaction costs ${most.second.total}, over $SAVE_GROUP_ENTRIES", most.second.total <= SAVE_GROUP_ENTRIES)
+            assertTrue("$name: no cost measured", most.second.total > 0)
         }
         assertEquals(0L, stageRows() + workRows() + syncRows())
     }
