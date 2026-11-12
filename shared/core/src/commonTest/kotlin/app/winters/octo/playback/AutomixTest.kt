@@ -128,6 +128,39 @@ class AutomixTest {
     }
 
     @Test
+    fun everyPlanNamesTheLatestItMayEnd() {
+        // A planned blend: where the outgoing song's sound ends, at most
+        // END_MARGIN_MS before its end.
+        assertEquals(200_000L - END_MARGIN_MS, plan("hot-end").latestEndMs)
+        assertEquals(200_000L - END_MARGIN_MS, plan("same-tempo").latestEndMs)
+        assertEquals(192_000.0, plan("trailing-silence").latestEndMs.toDouble(), 30.0)
+        // A fading song blends at its outro, well before its sound ends.
+        val fading = plan("fade-out")
+        assertEquals(AutomixCases.tail("fade-out").features.soundEndMs, fading.latestEndMs)
+        assertTrue("${fading.startMs + fading.overlapMs}", fading.startMs + fading.overlapMs < fading.latestEndMs - 10_000)
+        // A late blend: the end it was placed against.
+        assertTrue(plan("late").late)
+        assertEquals(200_000L - END_MARGIN_MS, plan("late").latestEndMs)
+        assertEquals(220_000L - END_MARGIN_MS, plan("no-tail").let { assertTrue(it.late); it.latestEndMs })
+        // The fixed crossfade and the plain ones: the song's end.
+        assertEquals(200_000L, plan("smart-off").latestEndMs)
+        assertEquals(200_000L, plan("classical").latestEndMs)
+        assertEquals(200_000L, plan("podcast").latestEndMs)
+        // A gapless join, also when it is too late to blend: the song's end.
+        assertEquals(200_000L, plan("album-in-order").latestEndMs)
+        assertEquals(200_000L, plan("crossfade-off").latestEndMs)
+        assertEquals(TransitionKind.GAPLESS, plan("too-late").kind)
+        assertEquals(200_000L, plan("too-late").latestEndMs)
+        for (pair in AutomixCases.pairs) {
+            val p = AutomixCases.plan(pair)
+            assertTrue("${pair.name}: ${p.latestEndMs}", p.startMs + p.overlapMs <= p.latestEndMs)
+            assertEquals(pair.name, 0, p.lateMoveBars)
+            assertEquals(pair.name, 0.0, p.holdShare, 0.0)
+            assertEquals(pair.name, 0.0, p.riseShare, 0.0)
+        }
+    }
+
+    @Test
     fun aHotEndingHasNoOutro() {
         val features = AutomixCases.tail("hot-end").features
         assertEquals(200_000L, features.soundEndMs)
@@ -537,6 +570,87 @@ class AutomixTest {
         // With no S curve it is the existing equal-power fade.
         assertEquals(fadeOutVolume(0.3f).toDouble(), automixOutGain(0.3, 0.0), 1e-6)
         assertEquals(0.5, sCurve(0.5), 1e-12)
+    }
+
+    // An intro plan over `overlapMs` whose outgoing song starts to fade
+    // `fadeMs` before its end and whose incoming song rises over `riseMs`.
+    private fun introPlan(overlapMs: Long, fadeMs: Long, riseMs: Long) = TransitionPlan(
+        startMs = 180_000, entryMs = 0, overlapMs = overlapMs, kind = TransitionKind.INTRO, k = 0.0, filterStrength = 0.0,
+        beatMatchRate = null, beatMs = null, beatAnchorMs = null, late = false, headroomDb = OVERLAP_HEADROOM_DB, reason = "test",
+        holdShare = (overlapMs - fadeMs).toDouble() / overlapMs, riseShare = riseMs.toDouble() / overlapMs,
+    )
+
+    @Test
+    fun anIntroHoldsTheOutgoingSongThenFadesItOut() {
+        val hold = 10_500.0 / 13_500
+        for (t in listOf(-0.1, 0.0, 0.3, hold - 1e-9, hold)) assertEquals("at $t", 1.0, introOutGain(t, hold), 0.0)
+        // An equal-power fade from the hold to the end.
+        assertEquals(cos(PI / 4), introOutGain(hold + (1 - hold) / 2, hold), 1e-12)
+        assertEquals(cos(0.25 * PI / 2), introOutGain(hold + (1 - hold) / 4, hold), 1e-12)
+        assertEquals(0.0, introOutGain(1.0, hold), 1e-12)
+        assertEquals(0.0, introOutGain(1.2, hold), 1e-12)
+        var last = 1.0
+        for (step in 0..200) {
+            val out = introOutGain(step / 200.0, hold)
+            assertTrue(out <= last + 1e-12)
+            last = out
+        }
+        // No hold is a whole equal-power fade.
+        assertEquals(automixOutGain(0.3, 0.0), introOutGain(0.3, 0.0), 1e-12)
+    }
+
+    @Test
+    fun anIntroRaisesTheIncomingSongQuicklyThenHoldsIt() {
+        val rise = 1_000.0 / 13_500
+        assertEquals(0.0, introInGain(0.0, rise), 0.0)
+        assertEquals(0.0, introInGain(-0.1, rise), 0.0)
+        assertEquals(sin(PI / 4), introInGain(rise / 2, rise), 1e-12)
+        assertEquals(sin(PI / 2 * 0.2), introInGain(rise * 0.2, rise), 1e-12)
+        for (t in listOf(rise, 0.2, 0.5, 0.9, 1.0, 1.2)) assertEquals("at $t", 1.0, introInGain(t, rise), 0.0)
+        // No rise is full at once.
+        assertEquals(1.0, introInGain(0.0, 0.0), 0.0)
+    }
+
+    @Test
+    fun anIntroPlanPlaysWithTheIntroGains() {
+        val plan = introPlan(13_500, 3_000, 1_000)
+        for (step in 0..100) {
+            val t = step / 100.0
+            assertEquals("out at $t", introOutGain(t, plan.holdShare), plan.outGain(t), 0.0)
+            assertEquals("in at $t", introInGain(t, plan.riseShare), plan.inGain(t), 0.0)
+        }
+        assertEquals(1.0, plan.outGain(0.7), 0.0)
+        assertEquals(1.0, plan.inGain(0.5), 0.0)
+        // Other kinds keep their own shares at 0 and their curves.
+        val blend = plan.copy(kind = TransitionKind.BLEND, k = BLEND_CURVE, holdShare = 0.0, riseShare = 0.0)
+        assertEquals(automixOutGain(0.7, BLEND_CURVE), blend.outGain(0.7), 0.0)
+    }
+
+    @Test
+    fun anIntroKeepsTheLevelUpAcrossTheIncomingSongsFullPoint() {
+        // Both songs' bodies at one level (0 dB); the incoming song's intro
+        // 24 dB under it until its full point, where the outgoing song's
+        // fade is halfway. Unlocked: a 12 s quiet stretch, a 3 s fade.
+        // Locked at 120 BPM: an 11 s stretch takes 6 bars, a 2-bar fade, a
+        // 1-bar rise.
+        for ((plan, fullAtMs) in listOf(introPlan(13_500, 3_000, 1_000) to 12_000L, introPlan(14_000, 4_000, 2_000) to 12_000L)) {
+            val fadeMs = (1 - plan.holdShare) * plan.overlapMs
+            assertEquals(fullAtMs.toDouble(), plan.overlapMs - fadeMs / 2, 1e-6)
+            val hopMs = 10
+            val hops = (plan.overlapMs / hopMs).toInt()
+            val power = DoubleArray(hops) { i ->
+                val ms = i * hopMs + hopMs / 2.0
+                val t = ms / plan.overlapMs
+                val incoming = if (ms < fullAtMs) Math.pow(10.0, -24.0 / 10) else 1.0
+                plan.outGain(t).let { it * it } + plan.inGain(t).let { it * it } * incoming
+            }
+            // Every 400 ms of the mix from the start of the fade on.
+            val window = 40
+            for (from in ((plan.holdShare * plan.overlapMs) / hopMs).toInt()..hops - window) {
+                val db = 10 * kotlin.math.log10(power.copyOfRange(from, from + window).average())
+                assertTrue("${plan.overlapMs} ms intro at ${from * hopMs} ms: $db dB", abs(db) <= 3.0)
+            }
+        }
     }
 
     @Test

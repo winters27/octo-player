@@ -6,6 +6,7 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 // The curve weight of each kind of transition: how much of the S-shaped
@@ -59,6 +60,25 @@ fun automixOutGain(t: Double, k: Double): Double {
 fun automixInGain(t: Double, k: Double): Double {
     val out = automixOutGain(t, k)
     return sqrt(max(0.0, 1 - out * out))
+}
+
+// The outgoing song's volume at `t` through an intro (0 to 1): full until
+// `holdShare`, then an equal-power fade to nothing at the end.
+fun introOutGain(t: Double, holdShare: Double): Double {
+    val p = t.coerceIn(0.0, 1.0)
+    val hold = holdShare.coerceIn(0.0, 1.0)
+    if (p <= hold) return 1.0
+    return cos((p - hold) / (1 - hold) * PI / 2).coerceIn(0.0, 1.0)
+}
+
+// The incoming song's volume through an intro: rising as sin(pi/2 * t /
+// riseShare) to full by `riseShare`, then full, so its quiet start plays at
+// its own level.
+fun introInGain(t: Double, riseShare: Double): Double {
+    val p = t.coerceIn(0.0, 1.0)
+    val rise = riseShare.coerceIn(0.0, 1.0)
+    if (p >= rise) return 1.0
+    return sin(PI / 2 * p / rise).coerceIn(0.0, 1.0)
 }
 
 // Moves from `from` to `to` on a log scale as u goes from 0 to 1.

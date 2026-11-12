@@ -38,6 +38,41 @@ const val ENTRY_SNAP_MS = 300.0
 // does not clip.
 const val OVERLAP_HEADROOM_DB = 1.0
 
+// Automix's longest blend, and its longest intro played under the end of
+// the song before, both in song time.
+const val AUTOMIX_LONGEST_BLEND_MS = 8_000L
+const val AUTOMIX_LONGEST_INTRO_MS = 16_000L
+
+// An intro plays under the outgoing song only when its quiet stretch lasts
+// at least this long.
+const val INTRO_SHORTEST_MS = 4_000L
+
+// The outgoing song fades out under an intro over this many bars when the
+// blend is locked to the bar, else over INTRO_FADE_MS.
+const val INTRO_FADE_BARS = 2
+const val INTRO_FADE_MS = 3_000L
+
+// The incoming song rises to its own level over this long at the start of
+// an intro (one bar when locked).
+const val INTRO_RISE_MS = 1_000L
+
+// Music at full level the outgoing song would lose after a blend's end:
+// above KEPT_MUSIC_LIMIT_MS the start is left out, and each second below it
+// costs KEPT_MUSIC_WEIGHT. Full level is within KEPT_MUSIC_BELOW_BODY_DB of
+// the body.
+const val KEPT_MUSIC_LIMIT_MS = 1_000L
+const val KEPT_MUSIC_WEIGHT = 0.5
+const val KEPT_MUSIC_BELOW_BODY_DB = 6.0
+
+// Match tempo reaches tempos this far apart, as a share.
+const val BEAT_MATCH_LARGEST_GAP = 0.06
+
+// Wherever both songs are clearly heard together, their beats drift apart
+// by at most this much; clearly heard is within BOTH_HEARD_BELOW_BODY_DB of
+// a song's body.
+const val DRIFT_LIMIT_MS = 40.0
+const val BOTH_HEARD_BELOW_BODY_DB = 10.0
+
 // Songs in these genres get the plain crossfade, never a planned one.
 val PLAIN_CROSSFADE_GENRES = Regex("classical|opera|spoken|audiobook|podcast|comedy", RegexOption.IGNORE_CASE)
 
@@ -57,12 +92,20 @@ enum class TransitionKind {
 
     // A planned blend.
     BLEND,
+
+    // The next song's quiet start played under the end of this one: the
+    // outgoing song holds its level, then fades out around the moment the
+    // incoming one reaches its full level.
+    INTRO,
 }
 
 // What the player sets for planned transitions.
 data class AutomixSettings(
-    // The longest blend, from the crossfade slider; 0 turns crossfade off.
+    // The longest blend: Crossfade's length, or AUTOMIX_LONGEST_BLEND_MS
+    // for Automix; 0 plays every song gapless.
     val maxOverlapMs: Long,
+    // The longest intro played under the end of the song before.
+    val longestIntroMs: Long = AUTOMIX_LONGEST_INTRO_MS,
     // Off plays the fixed crossfade at the end of each song.
     val smart: Boolean = true,
     val filterSweeps: Boolean = true,
@@ -95,8 +138,8 @@ data class TransitionContext(
 // How to move from one song to the next. At startMs into the outgoing song
 // the incoming song starts playing from entryMs, and over overlapMs the
 // volumes follow automixOutGain / automixInGain with curve weight k (or,
-// for a curve other than equal power, fadeOutGain / fadeInGain), both
-// lowered by headroomDb. With a filterStrength above 0 the filter sweeps
+// for a curve other than equal power, fadeOutGain / fadeInGain, and for an
+// intro introOutGain / introInGain), both lowered by headroomDb. With a filterStrength above 0 the filter sweeps
 // run through the overlap and are bypassed once it ends. beatMatchRate,
 // when set, is the incoming song's playback rate through the blend.
 // beatMs and beatAnchorMs, when set, are the outgoing song's beat length
@@ -104,6 +147,17 @@ data class TransitionContext(
 // low-pass steps on the beat. `late` marks a blend placed at the end
 // because there was no time or data to choose a better place. `reason`
 // says why this plan was chosen.
+//
+// An intro's shape is in shares of the overlap: the outgoing song holds
+// its level until holdShare, then fades out; the incoming one rises over
+// riseShare, then holds. Both are 0 for every other kind. `latestEndMs` is
+// the latest the blend may end in the outgoing song's time: where its
+// sound ends (at most END_MARGIN_MS before its end) for a planned blend,
+// the end a late blend was placed against, the song's length for a fixed
+// crossfade and for a gapless join. `lateMoveBars` is how many whole bars
+// of the outgoing song a player that starts the plan late may move it
+// later as it is, LATE_MOVE_UNBOUNDED when any number may; past that the
+// player plans again from where it is.
 data class TransitionPlan(
     val startMs: Long,
     val entryMs: Long,
@@ -118,17 +172,29 @@ data class TransitionPlan(
     val headroomDb: Double,
     val reason: String,
     val curve: FadeCurve = FadeCurve.EqualPower,
+    val holdShare: Double = 0.0,
+    val riseShare: Double = 0.0,
+    val latestEndMs: Long = startMs + overlapMs,
+    val lateMoveBars: Int = 0,
 ) {
     val barLocked: Boolean get() = beatMs != null
 
     fun progressAt(outgoingMs: Double): Double =
         if (overlapMs <= 0) 1.0 else ((outgoingMs - startMs) / overlapMs).coerceIn(0.0, 1.0)
 
-    fun outGain(t: Double): Double =
-        if (curve == FadeCurve.EqualPower) automixOutGain(t, k) else fadeOutGain(curve, t, overlapMs.toDouble())
+    // Each song's volume at `t` through the blend: an intro's hold and
+    // rise, else the curve.
+    fun outGain(t: Double): Double = when {
+        kind == TransitionKind.INTRO -> introOutGain(t, holdShare)
+        curve == FadeCurve.EqualPower -> automixOutGain(t, k)
+        else -> fadeOutGain(curve, t, overlapMs.toDouble())
+    }
 
-    fun inGain(t: Double): Double =
-        if (curve == FadeCurve.EqualPower) automixInGain(t, k) else fadeInGain(curve, t, overlapMs.toDouble())
+    fun inGain(t: Double): Double = when {
+        kind == TransitionKind.INTRO -> introInGain(t, riseShare)
+        curve == FadeCurve.EqualPower -> automixInGain(t, k)
+        else -> fadeInGain(curve, t, overlapMs.toDouble())
+    }
 
     // The outgoing song's beats inside the blend as places through it (0 to
     // 1). A beat within a twentieth of a beat of either end counts as the
@@ -338,6 +404,8 @@ fun planTransition(
         late = false,
         headroomDb = OVERLAP_HEADROOM_DB,
         reason = reason,
+        latestEndMs = floor(latestEnd + 0.5).toLong(),
+        lateMoveBars = 0,
     )
 }
 
@@ -363,6 +431,8 @@ private fun curveOf(kind: TransitionKind): Double = when (kind) {
     TransitionKind.CUT -> CUT_CURVE
     TransitionKind.LIFT -> LIFT_CURVE
     TransitionKind.BLEND -> BLEND_CURVE
+    // An intro's shape has no curve weight.
+    TransitionKind.INTRO -> 0.0
     else -> CROSSFADE_CURVE
 }
 
@@ -398,6 +468,8 @@ private fun latePlan(
         late = true,
         headroomDb = OVERLAP_HEADROOM_DB,
         reason = "late ${kind.name.lowercase()} at ${seconds(startMs)} over ${seconds(length.toLong())}, next song from ${seconds(entryMs)}: $why",
+        latestEndMs = floor(latestEnd + 0.5).toLong(),
+        lateMoveBars = 0,
     )
 }
 
@@ -414,6 +486,8 @@ private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
     late = false,
     headroomDb = 0.0,
     reason = "gapless: $reason",
+    latestEndMs = max(0L, current.durationMs),
+    lateMoveBars = 0,
 )
 
 // The crossfade at the end of the song, as it was before planned
@@ -435,6 +509,8 @@ fun fixedCrossfadePlan(lenA: Long, length: Long, why: String, curve: FadeCurve =
         headroomDb = fadeHeadroomDb(curve),
         reason = "crossfade at ${seconds(start)} over ${seconds(length)}: $why",
         curve = curve,
+        latestEndMs = lenA,
+        lateMoveBars = 0,
     )
 }
 
@@ -451,6 +527,8 @@ private fun crossfadePlan(lenA: Long, length: Long, why: String) = TransitionPla
     late = false,
     headroomDb = OVERLAP_HEADROOM_DB,
     reason = "crossfade at ${seconds(lenA - length)} over ${seconds(length)}: $why",
+    latestEndMs = lenA,
+    lateMoveBars = 0,
 )
 
 private fun gaplessReason(current: FadeSong, next: FadeSong?, fadeMs: Long, repeatOne: Boolean, stopAtEndOfSong: Boolean): String = when {
