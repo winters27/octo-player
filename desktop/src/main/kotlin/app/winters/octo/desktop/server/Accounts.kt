@@ -107,10 +107,15 @@ class Connection(
     val behindSignInPage: Boolean get() = headers.keys.any(GatewayNames::isGatewayName)
 }
 
+// The saved form of a server's extensions: "name:version" for each version
+// it lists, in order.
+fun extensionKeysOf(extensions: List<Extension>): List<String> =
+    extensions.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }.sorted()
+
 // What testing a connection found: which server, which version, and the
 // extensions it lists.
 class ServerFacts(val info: ServerInfo, val extensions: List<Extension>) {
-    val extensionKeys: List<String> get() = extensions.flatMap { ext -> ext.versions.map { "${ext.name}:$it" } }.sorted()
+    val extensionKeys: List<String> get() = extensionKeysOf(extensions)
 
     // A plain sentence about the server, for the sign-in page.
     fun summary(): String {
@@ -571,6 +576,23 @@ class Accounts(
             return null
         }
         return activate(saved, password, headers, ticket())
+    }
+
+    // What the server in use offers is saved at sign-in, and a server gains
+    // extensions over time (an Octo updated since). So it is asked again:
+    // the saved list is brought up to date, and the connection comes back
+    // with it. Null when the list is the same, when the server gives none
+    // (what was saved stands), or when `connection` is no longer in use.
+    suspend fun refreshExtensions(connection: Connection): Connection? {
+        val fresh = runCatching { connection.client.extensions() }.getOrNull()?.let(::extensionKeysOf) ?: return null
+        if (fresh.isEmpty() || fresh == connection.server.extensions) return null
+        return synchronized(handover) {
+            val id = connection.server.id
+            if (!isInUse(connection) || active?.takeIf { it.id == id && !it.signedOut } == null) return null
+            settings.update { s -> s.copy(servers = s.servers.map { if (it.id == id) it.copy(extensions = fresh) else it }) }
+            val saved = find(id) ?: return null
+            Connection(connection.client, saved, connection.headers, connection.generation, connection.gatewayOrigins)
+        }
     }
 
     // The kept server whose sign-in page opens at start, and why: the one

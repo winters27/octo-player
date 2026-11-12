@@ -101,6 +101,49 @@ class AccountsTest {
     }
 
     @Test
+    fun askedAgainTheServerInUseShowsWhatItGainedSince() = runTest {
+        octoServer()
+        accounts.signIn(server.address, "winters", "correct horse")
+        // Octo on the server was updated while the app was closed.
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"songLyrics","versions":[1,2]},{"name":"octoAcquisitions","versions":[1]},{"name":"octoPreview","versions":[2]}]""", type = "octo")
+        val later = Accounts(SettingsStore(settingsFile), secrets, OkHttpClient())
+        val restored = later.restore()!!
+        assertFalse("restoring asks nothing of the server", restored.supports("octoPreview", 2))
+        val fresh = later.refreshExtensions(restored)
+        assertNotNull("the server lists more now", fresh)
+        assertTrue(fresh!!.supports("octoPreview", 2))
+        assertTrue(fresh.supports("songLyrics", 2))
+        assertTrue("still the connection in use", later.isInUse(fresh))
+        assertTrue("and the next run knows it already", later.active!!.extensions.contains("octoPreview:2"))
+        assertNull("asked again, nothing changed", later.refreshExtensions(fresh))
+    }
+
+    @Test
+    fun aServerThatGivesNoListKeepsTheSavedOne() = runTest {
+        octoServer()
+        accounts.signIn(server.address, "winters", "correct horse")
+        val later = Accounts(SettingsStore(settingsFile), secrets, OkHttpClient())
+        val restored = later.restore()!!
+        server.fail("getOpenSubsonicExtensions", 0, "not now")
+        assertNull(later.refreshExtensions(restored))
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[]""", type = "octo")
+        assertNull("an empty list is no answer", later.refreshExtensions(restored))
+        assertTrue(later.active!!.extensions.contains("songLyrics:2"))
+    }
+
+    @Test
+    fun aServerLeftWhileItWasAskedIsLetBe() = runTest {
+        octoServer()
+        accounts.signIn(server.address, "winters", "correct horse")
+        val later = Accounts(SettingsStore(settingsFile), secrets, OkHttpClient())
+        val restored = later.restore()!!
+        later.signOut()
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoPreview","versions":[2]}]""", type = "octo")
+        assertNull(later.refreshExtensions(restored))
+        assertFalse(later.servers.single().extensions.contains("octoPreview:2"))
+    }
+
+    @Test
     fun withoutTheStoredPasswordThereIsNothingToRestore() = runTest {
         octoServer()
         accounts.signIn(server.address, "winters", "correct horse")

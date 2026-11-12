@@ -544,6 +544,11 @@ class AppState(
     // listing wrong; null while the listing stands.
     fun realSeconds(song: Song): Int? = realLengths[song.id]?.let { ((it + 500) / 1_000).toInt() }
 
+    // The start's second look at what the restored server offers (see
+    // refreshExtensions), while it runs or once it is done.
+    internal var extensionsAsked: Job? = null
+        private set
+
     init {
         scope.launch { player.lengths.corrected.collect { realLengths = it } }
         if (listeningRoot != null) {
@@ -561,8 +566,20 @@ class AppState(
         // as kept fills the sign-in page, saying why.
         if (restored != null) {
             signedIn(restored)
+            refreshExtensions(restored)
         } else {
             accounts.takeStartAsk()?.let { (id, note) -> accounts.find(id)?.let { fillSignIn(it, note) } }
+        }
+    }
+
+    // The server signed in to when Octo closed is asked again what it
+    // offers, as the phone asks at each start, so an Octo updated since
+    // shows what it gained. The pages read it afresh only when its list
+    // changed, and only while it is still the one shown.
+    private fun refreshExtensions(restored: Connection) {
+        extensionsAsked = scope.launch {
+            val fresh = accounts.refreshExtensions(restored) ?: return@launch
+            if (connection === restored) useConnection(fresh)
         }
     }
 
