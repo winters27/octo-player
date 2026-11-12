@@ -181,9 +181,34 @@ class AutomixTest {
         for (pair in AutomixCases.pairs) {
             val p = AutomixCases.plan(pair)
             assertTrue("${pair.name}: ${p.latestEndMs}", p.startMs + p.overlapMs <= p.latestEndMs)
-            assertEquals(pair.name, 0, p.lateMoveBars)
             assertEquals(pair.name, 0.0, p.holdShare, 0.0)
             assertEquals(pair.name, 0.0, p.riseShare, 0.0)
+        }
+        // The plain crossfade for a short song: its end.
+        val short = planTransition(FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), AutomixCases.tail("hot-end"), AutomixCases.head("plain-b"), AutomixSettings(8_000))
+        assertEquals(TransitionKind.CROSSFADE, short.kind)
+        assertEquals(30_000L, short.latestEndMs)
+    }
+
+    @Test
+    fun aLateStartMayMoveAPlanAnyNumberOfBarsOnlyWhereItsBeatsCannotDrift() {
+        // No bar grid: the fixed crossfade, the plain ones, gapless joins,
+        // unlocked blends and late ones.
+        val unlocked = listOf("smart-off", "classical", "podcast", "album-in-order", "crossfade-off", "too-late", "hot-end", "no-analysis", "late", "pace", "skip-silence")
+        for (name in unlocked) {
+            assertTrue(name, !plan(name).barLocked)
+            assertEquals(name, LATE_MOVE_UNBOUNDED, plan(name).lateMoveBars)
+        }
+        val short = planTransition(FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), AutomixCases.tail("hot-end"), AutomixCases.head("plain-b"), AutomixSettings(8_000))
+        assertEquals(LATE_MOVE_UNBOUNDED, short.lateMoveBars)
+        // A rate keeps the beats together wherever the blend sits.
+        assertNotNull(plan("beat-match").beatMatchRate)
+        assertEquals(LATE_MOVE_UNBOUNDED, plan("beat-match").lateMoveBars)
+        // Locked to the bar with a tempo gap and no rate: no move.
+        for (name in listOf("tempo-clash", "beat-match-off", "same-tempo")) {
+            val p = plan(name)
+            assertTrue(name, p.barLocked && p.beatMatchRate == null)
+            assertEquals(name, 0, p.lateMoveBars)
         }
     }
 
@@ -604,7 +629,7 @@ class AutomixTest {
     private fun introPlan(overlapMs: Long, fadeMs: Long, riseMs: Long) = TransitionPlan(
         startMs = 180_000, entryMs = 0, overlapMs = overlapMs, kind = TransitionKind.INTRO, k = 0.0, filterStrength = 0.0,
         beatMatchRate = null, beatMs = null, beatAnchorMs = null, late = false, headroomDb = OVERLAP_HEADROOM_DB, reason = "test",
-        holdShare = (overlapMs - fadeMs).toDouble() / overlapMs, riseShare = riseMs.toDouble() / overlapMs,
+        holdShare = (overlapMs - fadeMs).toDouble() / overlapMs, riseShare = riseMs.toDouble() / overlapMs, lateMoveBars = 0,
     )
 
     @Test

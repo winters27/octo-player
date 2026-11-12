@@ -156,8 +156,9 @@ data class TransitionContext(
 // the end a late blend was placed against, the song's length for a fixed
 // crossfade and for a gapless join. `lateMoveBars` is how many whole bars
 // of the outgoing song a player that starts the plan late may move it
-// later as it is, LATE_MOVE_UNBOUNDED when any number may; past that the
-// player plans again from where it is.
+// later as it is, LATE_MOVE_UNBOUNDED when any number may (a plan with no
+// bar grid, a matched rate or two equal tempos); past that the player
+// plans again from where it is. Every plan sets it.
 data class TransitionPlan(
     val startMs: Long,
     val entryMs: Long,
@@ -175,7 +176,7 @@ data class TransitionPlan(
     val holdShare: Double = 0.0,
     val riseShare: Double = 0.0,
     val latestEndMs: Long = startMs + overlapMs,
-    val lateMoveBars: Int = 0,
+    val lateMoveBars: Int,
 ) {
     val barLocked: Boolean get() = beatMs != null
 
@@ -378,6 +379,10 @@ fun planTransition(
     }
 
     val kind = kindOf(overlap, measured, head, bestStart, entry)
+    // Beats that cannot drift apart let a late start move the plan any
+    // number of bars: no bar grid, a matched rate, or two equal tempos. A
+    // bar-locked plan with a tempo gap and no rate may not move.
+    val anyMove = lockA == null || rate != null || (ratio != null && abs(ratio - 1) == 0.0)
     val start = floor(bestStart + 0.5).toLong()
     val entryMs = floor(entry + 0.5).toLong()
     val reason = buildString {
@@ -405,7 +410,7 @@ fun planTransition(
         headroomDb = OVERLAP_HEADROOM_DB,
         reason = reason,
         latestEndMs = floor(latestEnd + 0.5).toLong(),
-        lateMoveBars = 0,
+        lateMoveBars = if (anyMove) LATE_MOVE_UNBOUNDED else 0,
     )
 }
 
@@ -469,7 +474,7 @@ private fun latePlan(
         headroomDb = OVERLAP_HEADROOM_DB,
         reason = "late ${kind.name.lowercase()} at ${seconds(startMs)} over ${seconds(length.toLong())}, next song from ${seconds(entryMs)}: $why",
         latestEndMs = floor(latestEnd + 0.5).toLong(),
-        lateMoveBars = 0,
+        lateMoveBars = LATE_MOVE_UNBOUNDED,
     )
 }
 
@@ -487,7 +492,7 @@ private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
     headroomDb = 0.0,
     reason = "gapless: $reason",
     latestEndMs = max(0L, current.durationMs),
-    lateMoveBars = 0,
+    lateMoveBars = LATE_MOVE_UNBOUNDED,
 )
 
 // The crossfade at the end of the song, as it was before planned
@@ -510,7 +515,7 @@ fun fixedCrossfadePlan(lenA: Long, length: Long, why: String, curve: FadeCurve =
         reason = "crossfade at ${seconds(start)} over ${seconds(length)}: $why",
         curve = curve,
         latestEndMs = lenA,
-        lateMoveBars = 0,
+        lateMoveBars = LATE_MOVE_UNBOUNDED,
     )
 }
 
@@ -528,7 +533,7 @@ private fun crossfadePlan(lenA: Long, length: Long, why: String) = TransitionPla
     headroomDb = OVERLAP_HEADROOM_DB,
     reason = "crossfade at ${seconds(lenA - length)} over ${seconds(length)}: $why",
     latestEndMs = lenA,
-    lateMoveBars = 0,
+    lateMoveBars = LATE_MOVE_UNBOUNDED,
 )
 
 private fun gaplessReason(current: FadeSong, next: FadeSong?, fadeMs: Long, repeatOne: Boolean, stopAtEndOfSong: Boolean): String = when {

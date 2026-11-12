@@ -371,7 +371,7 @@
             ]
         },
         "long-intro": {
-            "rate": 22050,
+            "rate": 44100,
             "channels": 1,
             "lengthMs": 180000,
             "layers": [
@@ -410,7 +410,7 @@
             ]
         },
         "endless-intro": {
-            "rate": 22050,
+            "rate": 44100,
             "channels": 1,
             "lengthMs": 200000,
             "layers": [
@@ -3189,142 +3189,133 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -15.2362,
-                    "lowDb": -20.4162,
+                    "db": -15.246,
+                    "lowDb": -20.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1,
-                    "db": -15.2557,
-                    "lowDb": -20.214,
-                    "onset": 0.9958,
-                    "lowOnset": 0.8716
+                    "db": -15.246,
+                    "lowDb": -20.2248,
+                    "onset": 0.4979,
+                    "lowOnset": 0.4615
                 },
                 {
                     "index": 2,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.2593,
-                    "lowOnset": 0.2446
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0127,
+                    "lowOnset": 0.0124
                 },
                 {
                     "index": 3,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 0.0499,
-                    "lowOnset": 0.0475
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.0043,
-                    "lowOnset": 0.0041
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 5,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 1.0E-4,
-                    "lowOnset": 1.0E-4
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 5000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 5500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -15.2457,
+                "bodyDb": -15.246,
                 "gateDb": -60.0,
                 "soundStartMs": 120000,
                 "soundEndMs": 180000,
                 "outroStartMs": 180000,
                 "introEndMs": 120000,
                 "boundariesMs": [],
-                "tempo": {
-                    "bpm": 107.0791,
-                    "confidence": 0.0,
-                    "consistency": 0.0093,
-                    "steady": false,
-                    "confident": false,
-                    "beatMs": 560.3333,
-                    "firstBeatMs": 120010.0,
-                    "downbeatMs": 120010.0
-                }
+                "tempo": null
             }
         },
         {
@@ -3339,105 +3330,98 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -39.2362,
-                    "lowDb": -44.4162,
+                    "db": -39.246,
+                    "lowDb": -44.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -15.2362,
-                    "lowDb": -20.4851,
-                    "onset": 0.5837,
-                    "lowOnset": 0.4946
+                    "db": -15.246,
+                    "lowDb": -20.4603,
+                    "onset": 1.7763,
+                    "lowOnset": 1.4703
                 },
                 {
                     "index": 3501,
-                    "db": -15.2557,
-                    "lowDb": -20.2138,
-                    "onset": 0.9642,
-                    "lowOnset": 0.8452
+                    "db": -15.246,
+                    "lowDb": -20.2246,
+                    "onset": 0.4667,
+                    "lowOnset": 0.4315
                 },
                 {
                     "index": 3502,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.253,
-                    "lowOnset": 0.2388
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0119,
+                    "lowOnset": 0.0116
                 },
                 {
                     "index": 3503,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 0.0473,
-                    "lowOnset": 0.0448
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 3504,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.004,
-                    "lowOnset": 0.0039
-                },
-                {
-                    "index": 3505,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 1.0E-4,
-                    "lowOnset": 1.0E-4
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -39.2457,
+                "bodyDb": -39.246,
                 "gateDb": -60.0,
                 "soundStartMs": 0,
                 "soundEndMs": 45000,
@@ -3461,142 +3445,133 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -15.2362,
-                    "lowDb": -20.4162,
+                    "db": -15.246,
+                    "lowDb": -20.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1,
-                    "db": -15.2557,
-                    "lowDb": -20.214,
-                    "onset": 0.9958,
-                    "lowOnset": 0.8716
+                    "db": -15.246,
+                    "lowDb": -20.2248,
+                    "onset": 0.4979,
+                    "lowOnset": 0.4615
                 },
                 {
                     "index": 2,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.2593,
-                    "lowOnset": 0.2446
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0127,
+                    "lowOnset": 0.0124
                 },
                 {
                     "index": 3,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 0.0499,
-                    "lowOnset": 0.0475
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.0043,
-                    "lowOnset": 0.0041
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 5,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 1.0E-4,
-                    "lowOnset": 1.0E-4
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 5000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 5500,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -15.2457,
+                "bodyDb": -15.246,
                 "gateDb": -60.0,
                 "soundStartMs": 140000,
                 "soundEndMs": 200000,
                 "outroStartMs": 200000,
                 "introEndMs": 140000,
                 "boundariesMs": [],
-                "tempo": {
-                    "bpm": 107.0791,
-                    "confidence": 0.0,
-                    "consistency": 0.0093,
-                    "steady": false,
-                    "confident": false,
-                    "beatMs": 560.3333,
-                    "firstBeatMs": 140010.0,
-                    "downbeatMs": 140010.0
-                }
+                "tempo": null
             }
         },
         {
@@ -3611,105 +3586,105 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -39.2362,
-                    "lowDb": -44.4162,
+                    "db": -39.246,
+                    "lowDb": -44.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1,
-                    "db": -39.2557,
-                    "lowDb": -44.214,
-                    "onset": 0.1777,
-                    "lowOnset": 0.1608
+                    "db": -39.246,
+                    "lowDb": -44.2248,
+                    "onset": 0.1873,
+                    "lowOnset": 0.1729
                 },
                 {
                     "index": 2,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
-                    "onset": 0.0871,
-                    "lowOnset": 0.0812
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0055,
+                    "lowOnset": 0.0053
                 },
                 {
                     "index": 3,
-                    "db": -39.2557,
-                    "lowDb": -44.2113,
-                    "onset": 0.0226,
-                    "lowOnset": 0.0213
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
-                    "onset": 0.0021,
-                    "lowOnset": 0.002
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 5,
-                    "db": -39.2557,
-                    "lowDb": -44.2113,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -39.2457,
+                "bodyDb": -39.246,
                 "gateDb": -60.0,
                 "soundStartMs": 0,
                 "soundEndMs": 45000,
@@ -4528,7 +4503,7 @@
             "song": "long-intro",
             "part": "head",
             "tagBpm": null,
-            "bodyLevelDb": -15.2457,
+            "bodyLevelDb": -15.246,
             "fromMs": 0,
             "toMs": 45000,
             "hops": 4500,
@@ -4536,105 +4511,98 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -39.2362,
-                    "lowDb": -44.4162,
+                    "db": -39.246,
+                    "lowDb": -44.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -15.2362,
-                    "lowDb": -20.4851,
-                    "onset": 0.5837,
-                    "lowOnset": 0.4946
+                    "db": -15.246,
+                    "lowDb": -20.4603,
+                    "onset": 1.7763,
+                    "lowOnset": 1.4703
                 },
                 {
                     "index": 3501,
-                    "db": -15.2557,
-                    "lowDb": -20.2138,
-                    "onset": 0.9642,
-                    "lowOnset": 0.8452
+                    "db": -15.246,
+                    "lowDb": -20.2246,
+                    "onset": 0.4667,
+                    "lowOnset": 0.4315
                 },
                 {
                     "index": 3502,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.253,
-                    "lowOnset": 0.2388
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0119,
+                    "lowOnset": 0.0116
                 },
                 {
                     "index": 3503,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 0.0473,
-                    "lowOnset": 0.0448
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 3504,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
-                    "onset": 0.004,
-                    "lowOnset": 0.0039
-                },
-                {
-                    "index": 3505,
-                    "db": -15.2557,
-                    "lowDb": -20.2113,
-                    "onset": 1.0E-4,
-                    "lowOnset": 1.0E-4
+                    "db": -15.246,
+                    "lowDb": -20.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -15.2362,
-                    "lowDb": -20.2342,
+                    "db": -15.246,
+                    "lowDb": -20.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -15.2457,
+                "bodyDb": -15.246,
                 "gateDb": -60.0,
                 "soundStartMs": 0,
                 "soundEndMs": 45000,
@@ -4650,7 +4618,7 @@
             "song": "endless-intro",
             "part": "head",
             "tagBpm": null,
-            "bodyLevelDb": -15.2457,
+            "bodyLevelDb": -15.246,
             "fromMs": 0,
             "toMs": 45000,
             "hops": 4500,
@@ -4658,105 +4626,105 @@
             "probes": [
                 {
                     "index": 0,
-                    "db": -39.2362,
-                    "lowDb": -44.4162,
+                    "db": -39.246,
+                    "lowDb": -44.3918,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1,
-                    "db": -39.2557,
-                    "lowDb": -44.214,
-                    "onset": 0.1777,
-                    "lowOnset": 0.1608
+                    "db": -39.246,
+                    "lowDb": -44.2248,
+                    "onset": 0.1873,
+                    "lowOnset": 0.1729
                 },
                 {
                     "index": 2,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
-                    "onset": 0.0871,
-                    "lowOnset": 0.0812
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0055,
+                    "lowOnset": 0.0053
                 },
                 {
                     "index": 3,
-                    "db": -39.2557,
-                    "lowDb": -44.2113,
-                    "onset": 0.0226,
-                    "lowOnset": 0.0213
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 4,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
-                    "onset": 0.0021,
-                    "lowOnset": 0.002
+                    "db": -39.246,
+                    "lowDb": -44.2222,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
                 },
                 {
                     "index": 5,
-                    "db": -39.2557,
-                    "lowDb": -44.2113,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 1500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 2500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 3500,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 },
                 {
                     "index": 4000,
-                    "db": -39.2362,
-                    "lowDb": -44.2342,
+                    "db": -39.246,
+                    "lowDb": -44.2222,
                     "onset": 0.0,
                     "lowOnset": 0.0
                 }
             ],
             "features": {
-                "bodyDb": -15.2457,
+                "bodyDb": -15.246,
                 "gateDb": -60.0,
                 "soundStartMs": 0,
                 "soundEndMs": 45000,
@@ -4950,7 +4918,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 192020,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5004,7 +4972,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 209840,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5058,7 +5026,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5112,7 +5080,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5166,7 +5134,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5436,7 +5404,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5598,7 +5566,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5652,7 +5620,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 219750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5706,7 +5674,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5760,7 +5728,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5814,7 +5782,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5868,7 +5836,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5922,7 +5890,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -5976,7 +5944,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6030,7 +5998,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6084,7 +6052,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6138,7 +6106,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6192,7 +6160,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6246,7 +6214,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6300,7 +6268,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6354,7 +6322,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 200000,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6408,7 +6376,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 209840,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6462,7 +6430,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 209840,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6516,7 +6484,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 209840,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         },
         {
@@ -6624,7 +6592,7 @@
                 "holdShare": 0.0,
                 "riseShare": 0.0,
                 "latestEndMs": 199750,
-                "lateMoveBars": 0
+                "lateMoveBars": 2147483647
             }
         }
     ],
