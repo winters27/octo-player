@@ -191,11 +191,9 @@ fn missing_song_fails_at_once() {
 
 #[test]
 fn no_server_is_a_network_failure() {
-    // A port nothing listens on.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    let err = HttpSource::open(&format!("http://127.0.0.1:{port}/x"), quick()).err().unwrap();
+    // A port nothing listens on. Port 1 is below the range a port asked for
+    // as 0 comes from, so no other test's server can be given it.
+    let err = HttpSource::open("http://127.0.0.1:1/x", quick()).err().unwrap();
     assert_eq!(err.kind, ErrorKind::Network);
 }
 
