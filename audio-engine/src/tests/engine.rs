@@ -617,8 +617,8 @@ fn a_stream_waits_for_start_after() {
     let song = flac_bytes(RATE, 2, &noise, &[]);
     // The song arrives as fast as it plays, as on a slow connection.
     let quiet = Behaviour { per_second: Some(song.len() / 4), ..Behaviour::default() };
-    let time_to_start = |start_after: u32| {
-        let server = TestServer::start(song.clone(), quiet.clone());
+    let time_to_start = |start_after: u32, behaviour: &Behaviour| {
+        let server = TestServer::start(song.clone(), behaviour.clone());
         let (engine, events, _) = engine(1.0);
         engine.set_start_after(start_after).unwrap();
         let begun = Instant::now();
@@ -630,9 +630,13 @@ fn a_stream_waits_for_start_after() {
         engine.shutdown();
         took
     };
-    let at_once = time_to_start(0);
-    let waited = time_to_start(2_500);
-    assert!(at_once < Duration::from_millis(2_000), "{at_once:?}");
+    // With no wait it starts on the first second of the song, all the
+    // server sends until it is dropped.
+    let one_second = Behaviour { stall_after: Some(song.len() / 4), ..quiet.clone() };
+    time_to_start(0, &one_second);
+    // With one, it starts only once 2.5 s of the song is in, which takes
+    // that long to arrive.
+    let waited = time_to_start(2_500, &quiet);
     assert!(waited >= Duration::from_millis(2_500), "{waited:?}");
 }
 
