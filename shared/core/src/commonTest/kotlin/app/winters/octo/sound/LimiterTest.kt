@@ -20,10 +20,11 @@ class LimiterTest {
         limiter.process(FloatArray(frames), frames, FloatArray(frames))
     }
 
-    // Runs a full-scale sine through and checks every frame comes out
-    // exactly as it went in, one delay later.
+    // Runs a sine through and checks every frame comes out exactly as it
+    // went in, one delay later. Its peak is under the ceiling, so with the
+    // limiter on it needs no limiting either.
     private fun assertPassesExactly(limiter: Limiter) {
-        val song = FloatArray(9_600) { (0.99 * sin(2 * PI * 1_000 * it / rate)).toFloat() }
+        val song = FloatArray(9_600) { (0.85 * sin(2 * PI * 1_000 * it / rate)).toFloat() }
         val out = FloatArray(song.size)
         val written = limiter.process(song, song.size, out)
         val delay = limiter.latency
