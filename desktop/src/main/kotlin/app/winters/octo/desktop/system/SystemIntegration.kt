@@ -110,10 +110,22 @@ class SystemIntegration(
     // The tray's icon, drawn from the vector at the size the tray asks for.
     val trayIcon: Painter? = OctoIconPainter(FlatShape)
 
-    private val notifier: Notifier? = when {
-        os == DesktopOs.Linux -> LinuxNotifier(null)
-        trayAvailable -> TrayNotifier(trayState)
-        else -> null
+    // On Linux the desktop's tray can go away while Octo runs (GNOME
+    // reloading its AppIndicator extension), and Compose's Tray then throws
+    // as it leaves, so there the icon is made by hand and put back when lost.
+    // Windows puts AWT's tray icons back itself when Explorer restarts and
+    // the macOS menu bar stays, so both keep Compose's Tray, which also
+    // shows their notices.
+    private val keptTray = if (os == DesktopOs.Linux && trayAvailable) AwtTray(::onTray) else null
+    private val trayKeeper = keptTray?.let { tray -> TrayKeeper(tray, onGaveUp = ::trayGaveUp).also { keeper -> tray.listen(keeper::hear) } }
+
+    // Whether Octo's icon is in the tray now, to bring a hidden window back from.
+    val trayShowing: Boolean get() = trayKeeper?.showing ?: trayAvailable
+
+    private val notifier: Notifier? = when (noticeRoute(os, trayAvailable)) {
+        NoticeRoute.Desktop -> LinuxNotifier(null)
+        NoticeRoute.Tray -> TrayNotifier(trayState)
+        null -> null
     }
     private val notices = NowPlayingNotices()
 
@@ -146,8 +158,8 @@ class SystemIntegration(
     var focusWindow: () -> Unit = {}
     var quit: () -> Unit = {}
 
-    // Closing the window keeps Octo in the tray, when there is a tray.
-    val closesToTray: Boolean get() = trayAvailable && app.settings.current.system.closeToTray
+    // Closing the window keeps Octo in the tray, when its icon is there.
+    val closesToTray: Boolean get() = closeKeepsInTray(app.settings.current.system.closeToTray, trayShowing)
 
     // Whether the Mac's Octo menu has a Settings item that Octo answers,
     // which then takes Cmd+comma from the window.
@@ -399,11 +411,16 @@ class SystemIntegration(
     // Hides the window in the tray where there is one, and to the taskbar
     // where there is not, so it can always be found again.
     private fun putWindowAway() {
-        if (trayAvailable) {
+        if (trayShowing) {
             hideWindow()
         } else {
             (mainWindow as? java.awt.Frame)?.let { it.extendedState = it.extendedState or java.awt.Frame.ICONIFIED }
         }
+    }
+
+    // No tray icon could be kept, so a window hidden in the tray comes back.
+    private fun trayGaveUp() {
+        if (!windowVisible && !miniPlayerOpen) raise()
     }
 
     fun onTray(action: TrayAction) {
@@ -448,7 +465,13 @@ class SystemIntegration(
         val icon = trayIcon ?: windowIcon
         if (trayAvailable && icon != null) {
             val read by remember(app.library) { app.library?.progress ?: MutableStateFlow(null) }.collectAsState()
-            OctoTray(icon, trayState, now, miniPlayerOpen, ::onTray, read.takeIf { !windowVisible })
+            val kept = keptTray
+            val keeper = trayKeeper
+            if (kept != null && keeper != null) {
+                KeptTray(kept, keeper, icon, now, miniPlayerOpen, read.takeIf { !windowVisible })
+            } else {
+                OctoTray(icon, trayState, now, miniPlayerOpen, ::onTray, read.takeIf { !windowVisible })
+            }
         }
         if (miniPlayerOpen) {
             val spot = placeMiniPlayer(app.settings.current.system.miniPlayer, screenAreas())

@@ -2,6 +2,7 @@ package app.winters.octo.desktop.system
 
 import androidx.compose.ui.window.Notification
 import androidx.compose.ui.window.TrayState
+import app.winters.octo.desktop.settings.DesktopOs
 
 // Shows a system notification.
 interface Notifier : AutoCloseable {
@@ -13,6 +14,18 @@ interface Notifier : AutoCloseable {
 // Notifications through the tray icon, on Windows (a toast) and macOS.
 class TrayNotifier(private val tray: TrayState) : Notifier {
     override fun show(title: String, text: String) = tray.sendNotification(Notification(title, text, Notification.Type.None))
+}
+
+// Where notices go. Linux's go to the desktop's notification service and
+// never through the tray: its tray is kept by hand, which takes no
+// TrayState, and the notices still arrive while that tray is away. Windows
+// and macOS show theirs from Compose's tray icon.
+enum class NoticeRoute { Desktop, Tray }
+
+fun noticeRoute(os: DesktopOs, trayAvailable: Boolean): NoticeRoute? = when {
+    os == DesktopOs.Linux -> NoticeRoute.Desktop
+    trayAvailable -> NoticeRoute.Tray
+    else -> null
 }
 
 // Decides when a new song earns a "Now playing" notice: once per queue
