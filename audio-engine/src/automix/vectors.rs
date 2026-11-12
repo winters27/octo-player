@@ -348,6 +348,25 @@ fn check(vectors: &Value) -> Vec<String> {
         if flag(e, "late") != plan.late {
             c.fail(format!("{what}: late {}", plan.late));
         }
+        // Checked once the file carries them.
+        if let Some(latest_end) = num_or_none(e, "latestEndMs") {
+            c.near(
+                &format!("{what} latestEndMs"),
+                Some(latest_end),
+                Some(plan.latest_end_ms as f64),
+                t("ms"),
+            );
+        }
+        for (key, actual) in [("holdShare", plan.hold_share), ("riseShare", plan.rise_share)] {
+            if let Some(expected) = num_or_none(e, key) {
+                c.near(&format!("{what} {key}"), Some(expected), Some(actual), t("curve"));
+            }
+        }
+        if let Some(bars) = e.get("lateMoveBars").and_then(Value::as_i64)
+            && bars != plan.late_move_bars as i64
+        {
+            c.fail(format!("{what}: lateMoveBars {}, expected {bars}", plan.late_move_bars));
+        }
         if text(e, "reason") != plan.reason {
             c.fail(format!("{what}: reason \"{}\", expected \"{}\"", plan.reason, text(e, "reason")));
         }

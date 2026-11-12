@@ -302,6 +302,82 @@ fn a_quiet_intro_plays_under_the_end_of_a_hot_song() {
     assert_eq!(plan_with(4_000).overlap_ms, 4_000);
 }
 
+#[test]
+fn every_plan_says_where_it_may_end_at_the_latest() {
+    let pad = |from_ms: f64, to_ms: f64, db: f64, end_db: f64| {
+        vec![
+            SongLayer { end_db, ..tone(from_ms, to_ms, 300.0, db) },
+            SongLayer { end_db: end_db - 3.0, ..tone(from_ms, to_ms, 100.0, db - 3.0) },
+        ]
+    };
+    // A fades out from 180 s and is silent for its last seconds, so its
+    // sound ends well before its length.
+    let mut layers = pad(0.0, 180_000.0, -14.0, -14.0);
+    layers.extend(pad(180_000.0, 196_000.0, -14.0, -74.0));
+    let a = SyntheticSong { rate: 22_050, channels: 1, length_ms: 200_000, layers };
+    let b = SyntheticSong {
+        rate: 22_050,
+        channels: 1,
+        length_ms: 180_000,
+        layers: pad(0.0, 180_000.0, -20.0, -20.0),
+    };
+    let (tail, head) = (a.tail(), b.head());
+    let sound_end = tail.features.sound_end_ms.unwrap();
+    assert!((185_000..196_000).contains(&sound_end), "{sound_end}");
+    let song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
+    let plan =
+        |settings: &PlanSettings, context: &TransitionContext, tail: Option<&SectionAnalysis>, len_b| {
+            plan_transition(&song(200_000), Some(&song(len_b)), tail, Some(&head), settings, context)
+        };
+    let smart = PlanSettings::new(8_000);
+    let start = TransitionContext::default();
+    let near_the_end = TransitionContext { now_ms: 188_000, played_ms: 188_000, ..start.clone() };
+    let opera = TransitionContext { next_genre: Some("Opera".into()), ..start.clone() };
+    let fixed = PlanSettings { smart: false, ..smart.clone() };
+    let len_a = 200_000;
+    let cases = [
+        ("planned", plan(&smart, &start, Some(&tail), 180_000), None, false, sound_end),
+        // No start left: the blend at the end, by the same latest end.
+        ("late", plan(&smart, &near_the_end, Some(&tail), 180_000), None, true, sound_end),
+        // Without the end's analysis the late plan ends short of the length.
+        ("unscouted", plan(&smart, &start, None, 180_000), None, true, len_a - planner::END_MARGIN_MS),
+        ("fixed", plan(&fixed, &start, Some(&tail), 180_000), Some(TransitionKind::Crossfade), false, len_a),
+        ("genre", plan(&smart, &opera, Some(&tail), 180_000), Some(TransitionKind::Crossfade), false, len_a),
+        (
+            "short song",
+            plan(&smart, &start, Some(&tail), 20_000),
+            Some(TransitionKind::Crossfade),
+            false,
+            len_a,
+        ),
+        (
+            "gapless",
+            plan(&PlanSettings::new(0), &start, Some(&tail), 180_000),
+            Some(TransitionKind::Gapless),
+            false,
+            len_a,
+        ),
+    ];
+    for (what, plan, kind, late, latest_end) in cases {
+        if let Some(kind) = kind {
+            assert_eq!(plan.kind, kind, "{what}: {plan:?}");
+        } else {
+            assert!(
+                !matches!(plan.kind, TransitionKind::Gapless | TransitionKind::Crossfade),
+                "{what}: {plan:?}"
+            );
+        }
+        assert_eq!(plan.late, late, "{what}: {plan:?}");
+        assert_eq!(plan.latest_end_ms, latest_end, "{what}: {plan:?}");
+        assert_eq!((plan.hold_share, plan.rise_share, plan.late_move_bars), (0.0, 0.0, 0), "{what}");
+        assert!(plan.start_ms + plan.overlap_ms <= plan.latest_end_ms, "{what}: {plan:?}");
+    }
+    // The engine's own late start keeps the end it may reach.
+    let fixed = TransitionPlan::fixed_crossfade(200_000, 8_000, "test");
+    assert_eq!(fixed.latest_end_ms, 200_000);
+    assert_eq!(fixed.late_from(195_000).unwrap().latest_end_ms, 200_000);
+}
+
 fn whole_song_profile(song: &SyntheticSong) -> TransitionProfile {
     let mono = song.render_mono(0.0, song.length_ms as f64);
     TransitionProfile::analyze(&mono, song.rate, 1)

@@ -25,8 +25,8 @@ pub use features::{
     analyze_tail, body_level_of, fold_tempo_ratio,
 };
 pub use planner::{
-    PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan, is_plain_genre,
-    plan_transition,
+    LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan,
+    is_plain_genre, plan_transition,
 };
 pub use profile::{
     PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,
@@ -116,6 +116,10 @@ impl TransitionPlan {
                 planner::seconds(overlap_ms)
             ),
             curve: FadeCurve::EqualPower,
+            hold_share: 0.0,
+            rise_share: 0.0,
+            latest_end_ms: len_a_ms,
+            late_move_bars: 0,
         }
     }
 

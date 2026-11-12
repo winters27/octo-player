@@ -42,17 +42,21 @@ pub const ENTRY_SNAP_MS: f64 = 300.0;
 /// not clip.
 pub const OVERLAP_HEADROOM_DB: f64 = 1.0;
 
+/// A plan's `late_move_bars` when it may move later by any number of bars.
+pub const LATE_MOVE_UNBOUNDED: i32 = i32::MAX;
+
 /// Songs in genres holding any of these words (in any case) get the plain
 /// crossfade, never a planned one.
 pub const PLAIN_CROSSFADE_GENRES: [&str; 6] =
     ["classical", "opera", "spoken", "audiobook", "podcast", "comedy"];
 
 /// How the two songs meet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TransitionKind {
     /// One song straight after the other, no overlap.
     Gapless,
     /// The fixed crossfade at the end of the song.
+    #[default]
     Crossfade,
     /// A short planned swap.
     Cut,
@@ -60,6 +64,9 @@ pub enum TransitionKind {
     Lift,
     /// A planned blend.
     Blend,
+    /// The next song's quiet intro under the end of this one: this song
+    /// holds its level, then fades out around where the next one is full.
+    Intro,
 }
 
 impl TransitionKind {
@@ -70,6 +77,7 @@ impl TransitionKind {
             TransitionKind::Cut => "cut",
             TransitionKind::Lift => "lift",
             TransitionKind::Blend => "blend",
+            TransitionKind::Intro => "intro",
         }
     }
 }
@@ -166,6 +174,21 @@ pub struct TransitionPlan {
     pub reason: String,
     /// The shape of a fixed crossfade; equal power follows `k`.
     pub curve: FadeCurve,
+    /// For an intro, the share of the overlap through which the outgoing
+    /// song holds its level before it fades, and the share over which the
+    /// incoming song rises to its own level (see `intro_gains`). 0 for
+    /// every other kind.
+    pub hold_share: f64,
+    pub rise_share: f64,
+    /// The latest the blend may end, in the outgoing song's time: where its
+    /// sound ends (short of its end) for a planned blend or a late one, and
+    /// the song's length for the fixed crossfades and the gapless join.
+    pub latest_end_ms: i64,
+    /// The most whole bars of the outgoing song the plan may move later,
+    /// with its shape kept, and still keep the two songs' beats together:
+    /// [`LATE_MOVE_UNBOUNDED`] when that holds wherever the blend sits, 0
+    /// when it may not move at all.
+    pub late_move_bars: i32,
 }
 
 impl TransitionPlan {
@@ -484,6 +507,10 @@ pub fn plan_transition(
         headroom_db: OVERLAP_HEADROOM_DB,
         reason,
         curve: FadeCurve::EqualPower,
+        hold_share: 0.0,
+        rise_share: 0.0,
+        latest_end_ms: latest_end as i64,
+        late_move_bars: 0,
     }
 }
 
@@ -520,6 +547,8 @@ fn curve_of(kind: TransitionKind) -> f64 {
         TransitionKind::Cut => CUT_CURVE,
         TransitionKind::Lift => LIFT_CURVE,
         TransitionKind::Blend => BLEND_CURVE,
+        // An intro's gains come from its hold and rise, not a weight.
+        TransitionKind::Intro => 0.0,
         _ => CROSSFADE_CURVE,
     }
 }
@@ -566,6 +595,10 @@ fn late_plan(
             seconds(entry_ms)
         ),
         curve: FadeCurve::EqualPower,
+        hold_share: 0.0,
+        rise_share: 0.0,
+        latest_end_ms: (latest_end + 0.5).floor() as i64,
+        late_move_bars: 0,
     }
 }
 
@@ -584,6 +617,10 @@ fn gapless_plan(len_a: i64, reason: &str) -> TransitionPlan {
         headroom_db: 0.0,
         reason: format!("gapless: {reason}"),
         curve: FadeCurve::EqualPower,
+        hold_share: 0.0,
+        rise_share: 0.0,
+        latest_end_ms: len_a.max(0),
+        late_move_bars: 0,
     }
 }
 
@@ -602,6 +639,10 @@ fn crossfade_plan(len_a: i64, length: i64, why: &str) -> TransitionPlan {
         headroom_db: OVERLAP_HEADROOM_DB,
         reason: format!("crossfade at {} over {}: {why}", seconds(len_a - length), seconds(length)),
         curve: FadeCurve::EqualPower,
+        hold_share: 0.0,
+        rise_share: 0.0,
+        latest_end_ms: len_a,
+        late_move_bars: 0,
     }
 }
 
