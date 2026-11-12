@@ -8,6 +8,7 @@
 
 - **Big libraries fit.** Copying your server's library takes the same small amount of memory however big it is, and Home, lists, playlists, the phone scan and Android Auto read it a page at a time, so a library of hundreds of thousands of songs no longer closes the app.
 - **A copy shows how far it is**, you can play while it saves, and a long one keeps going with a notification when you leave the app.
+- Covers kept in memory take less room, so a big library leaves more for the rest of the app.
 - When the phone is short of room for a copy or for this update, Octo says how much to free instead of failing.
 - Your likes, favorite albums and artists, and Home pins stay with their songs when the server files them anew.
 - **A heart gets the version you heard.** When you heart a song, your Octo server downloads the best copy of the take you were listening to, checked by its sound, not just its name. A lossless remaster of it counts, but a live take, a cover or an edit doesn't.
