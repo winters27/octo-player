@@ -140,6 +140,7 @@ fn main() {
             duration_ms: None,
             replay_gain: None,
             headers: Vec::new(),
+            secure_headers: Vec::new(),
             genre: None,
             bpm: None,
             live: live && s.contains("://"),
