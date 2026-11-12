@@ -59,8 +59,12 @@ fn device_failure(e: impl std::fmt::Display) -> Failure {
 impl Driver for CpalDriver {
     fn devices(&mut self) -> Vec<OutputDevice> {
         let default_id = self.host.default_output_device().and_then(|d| d.id().ok()).map(|i| i.to_string());
+        let shared = sound_server_running();
         match self.host.output_devices() {
-            Ok(devices) => devices.filter_map(|d| Self::describe(&d, default_id.as_deref())).collect(),
+            Ok(devices) => devices
+                .filter_map(|d| Self::describe(&d, default_id.as_deref()))
+                .filter(|d| listable(&d.id, shared))
+                .collect(),
             Err(e) => {
                 log::warn!("could not list devices: {e}");
                 Vec::new()
@@ -80,6 +84,7 @@ impl Driver for CpalDriver {
         make: &mut dyn FnMut(u32, u16) -> Renderer,
     ) -> Result<OpenedOutput, Failure> {
         self.close();
+        let id = device_to_open(id, sound_server_running());
         let device = match id {
             Some(id) => {
                 self.find(id).ok_or_else(|| Failure::new(ErrorKind::Device, format!("no device {id}")))?
@@ -173,6 +178,79 @@ where
     )
 }
 
+// The ALSA device names that open a sound card itself rather than a sound
+// server. While one is open, even paused, PipeWire or PulseAudio cannot use
+// the card, and no other program on the computer makes a sound.
+const CARD_DEVICES: &[&str] = &[
+    "hw",
+    "plughw",
+    "dmix",
+    "sysdefault",
+    "front",
+    "rear",
+    "center_lfe",
+    "side",
+    "surround21",
+    "surround40",
+    "surround41",
+    "surround50",
+    "surround51",
+    "surround71",
+    "iec958",
+    "hdmi",
+];
+
+// Whether `id` (cpal's "alsa:<device>") opens a sound card itself. A card's
+// device always names the card after a colon ("hw:CARD=PCH,DEV=0"); a bare
+// name such as "default", "pipewire" or "pulse" goes through the server.
+fn takes_the_card(id: &str) -> bool {
+    let device = id.strip_prefix("alsa:").unwrap_or(id);
+    match device.split_once(':') {
+        Some((name, _)) => CARD_DEVICES.contains(&name),
+        None => false,
+    }
+}
+
+// Whether the device `id` is offered while a sound server is running or not.
+fn listable(id: &str, sound_server: bool) -> bool {
+    !(sound_server && takes_the_card(id))
+}
+
+// The device to open for the saved choice `saved`. While a sound server
+// runs, a card's own device gives way to the default output, which the
+// server plays on the same card.
+fn device_to_open(saved: Option<&str>, sound_server: bool) -> Option<&str> {
+    match saved {
+        Some(id) if !listable(id, sound_server) => {
+            log::info!("{id} would take the sound card from the sound server; playing on the default");
+            None
+        }
+        other => other,
+    }
+}
+
+// Whether PipeWire or PulseAudio serves the session whose runtime folder
+// is `runtime`, by the socket each keeps there.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn sound_server_in(runtime: Option<&std::path::Path>, exists: impl Fn(&std::path::Path) -> bool) -> bool {
+    let Some(runtime) = runtime else {
+        return false;
+    };
+    exists(&runtime.join("pipewire-0")) || exists(&runtime.join("pulse").join("native"))
+}
+
+#[cfg(target_os = "linux")]
+fn sound_server_running() -> bool {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from);
+    sound_server_in(runtime.as_deref(), std::path::Path::exists)
+}
+
+// Only Linux shares its cards through a sound server this way.
+#[cfg(not(target_os = "linux"))]
+fn sound_server_running() -> bool {
+    false
+}
+
 // What a stream error means for the device. Only a device or host that is
 // gone, or a stream that must be rebuilt, loses it; anything else is a
 // hiccup the stream carries on through. (The PulseAudio bridge on Linux
@@ -191,6 +269,49 @@ fn device_event(kind: cpal::ErrorKind, why: impl FnOnce() -> String) -> Option<D
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_cards_own_devices_are_told_from_the_servers() {
+        assert!(takes_the_card("alsa:hw:CARD=PCH,DEV=0"));
+        assert!(takes_the_card("alsa:plughw:CARD=USB,DEV=0"));
+        assert!(takes_the_card("alsa:dmix:CARD=PCH,DEV=0"));
+        assert!(takes_the_card("alsa:sysdefault:CARD=PCH"));
+        assert!(takes_the_card("alsa:hdmi:CARD=HDMI,DEV=0"));
+        assert!(takes_the_card("hw:0,0"));
+        assert!(!takes_the_card("alsa:default"));
+        assert!(!takes_the_card("alsa:pipewire"));
+        assert!(!takes_the_card("alsa:pulse"));
+        // A bare name is a configured device of its own, not a card's.
+        assert!(!takes_the_card("alsa:hdmi"));
+        assert!(!takes_the_card("wasapi:{0.0.0.00000000}.{abc}"));
+    }
+
+    #[test]
+    fn with_a_sound_server_a_cards_devices_are_not_listed() {
+        let ids = ["alsa:default", "alsa:pipewire", "alsa:hw:CARD=PCH,DEV=0", "alsa:plughw:CARD=PCH,DEV=0"];
+        let shown = |server| ids.iter().filter(|id| listable(id, server)).count();
+        assert_eq!(shown(true), 2);
+        assert_eq!(shown(false), 4, "without a sound server every device is offered");
+    }
+
+    #[test]
+    fn a_saved_card_device_falls_back_to_the_default_with_a_sound_server() {
+        assert_eq!(device_to_open(Some("alsa:hw:CARD=PCH,DEV=0"), true), None);
+        assert_eq!(device_to_open(Some("alsa:hw:CARD=PCH,DEV=0"), false), Some("alsa:hw:CARD=PCH,DEV=0"));
+        assert_eq!(device_to_open(Some("alsa:pipewire"), true), Some("alsa:pipewire"));
+        assert_eq!(device_to_open(None, true), None);
+    }
+
+    #[test]
+    fn a_sound_server_is_known_by_its_socket() {
+        let runtime = PathBuf::from("/run/user/1000");
+        let only = |socket: &'static str| move |p: &Path| p == Path::new(socket);
+        assert!(sound_server_in(Some(&runtime), only("/run/user/1000/pipewire-0")));
+        assert!(sound_server_in(Some(&runtime), only("/run/user/1000/pulse/native")));
+        assert!(!sound_server_in(Some(&runtime), only("/run/user/1000/other")));
+        assert!(!sound_server_in(None, |_| true), "no runtime folder, no sound server");
+    }
 
     #[test]
     fn only_a_gone_device_is_lost() {
