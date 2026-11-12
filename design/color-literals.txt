@@ -3,6 +3,7 @@ design/src/main/java/app/winters/octo/design/ExplicitMark.kt | Color.Black | mas
 design/src/main/java/app/winters/octo/design/GlassSheet.kt | Color.Black | scrim
 design/src/main/java/app/winters/octo/design/Glaze.kt | Color.Black | mask
 design/src/main/java/app/winters/octo/design/Glaze.kt | Color.Black | mask
+design/src/main/java/app/winters/octo/design/Glaze.kt | Color.Black | mask
 design/src/main/java/app/winters/octo/design/Materials.kt | Color(0xFF282828) | over-art
 design/src/main/java/app/winters/octo/design/Materials.kt | Color(0xFF161618) | over-art
 design/src/main/java/app/winters/octo/design/Materials.kt | Color.Black | shadow
