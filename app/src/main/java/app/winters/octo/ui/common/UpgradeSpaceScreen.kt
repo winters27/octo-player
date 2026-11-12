@@ -34,7 +34,7 @@ fun UpgradeSpaceScreen(neededBytes: Long, checking: Boolean, onTryAgain: () -> U
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    "Free up ${megabytes(neededBytes)} MB on your phone, then try again. Your music, likes and playlists are safe.",
+                    "Free up %,d MB on your phone, then try again. Your music, likes and playlists are safe.".format(megabytes(neededBytes)),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

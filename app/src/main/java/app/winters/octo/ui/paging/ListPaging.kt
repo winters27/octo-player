@@ -56,7 +56,11 @@ data class ListMeta(
 )
 
 // Once a generation shows, the screen keeps `key` where it is: at `index`.
-data class Reanchor(val generation: Long, val key: RowKey, val index: Int)
+// `follow` is false for a read near a position the screen jumped to (a
+// letter on the rail, a fling far past the rows read): its key is only the
+// row Paging touched last, often the one just above the screen, and the
+// screen is already where it belongs.
+data class Reanchor(val generation: Long, val key: RowKey, val index: Int, val follow: Boolean = true)
 
 // How a list's refresh reads one state of the library: every try first
 // runs `prepare` (the waits, the count and the anchor), then `block` (the
@@ -186,7 +190,7 @@ class KeysetPagingSource<T : Any>(
             }
             val itemsAfter = if (count == null) COUNT_UNDEFINED else (count - itemsBefore - rows.size).coerceAtLeast(0)
             publish(ListMeta(generation, count, runs, survey?.start, rows.size))
-            anchor.key?.let { reanchor(Reanchor(generation, it, anchor.at)) }
+            anchor.key?.let { reanchor(Reanchor(generation, it, anchor.at, follow = key is PageKey.At)) }
             loaded(PageRead(generation, rows, reachedTop, reachedEnd))
             return LoadResult.Page(
                 data = rows.map(::item),

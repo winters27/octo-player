@@ -18,6 +18,18 @@ class SpaceWordsTest {
         assertEquals("Not enough space to copy the library. Free up some space, then try again.", NotEnoughSpace(null).userMessage())
     }
 
+    // A big library's ask reads with its thousands mark, as the 200k copy's 1,602 MB.
+    @Test
+    fun aBigAskCarriesItsComma() {
+        val was = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.US)
+        try {
+            assertEquals("Not enough space to copy the library. Free up 1,602 MB, then try again.", NotEnoughSpace(1_601_200_000).userMessage())
+        } finally {
+            java.util.Locale.setDefault(was)
+        }
+    }
+
     // Each surface says what it was doing; a queue is played again.
     @Test
     fun eachSurfaceSaysWhatItWasDoing() {

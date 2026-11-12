@@ -49,7 +49,7 @@ import Testing
         #expect(SettingsSummaries.library(.deniedForever, songs: 0, folders: []) == "Music on this phone not allowed yet")
         #expect(SettingsSummaries.phoneLine(.granted, songs: 2_357) == "2,357 songs on this phone")
         #expect(SettingsSummaries.phoneLine(.granted, songs: 1) == "1 song on this phone")
-        #expect(SettingsSummaries.phoneLine(.notAsked, songs: 0) == "Allow access to the music on this phone")
+        #expect(SettingsSummaries.phoneLine(.notAsked, songs: 0) == "Allow music on this phone")
     }
 
     @Test func howLongAgo() {

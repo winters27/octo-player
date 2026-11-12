@@ -51,7 +51,7 @@ class SettingsSummariesTest {
         assertEquals("1 song", librarySummary(Access.Granted, 1, emptyList()))
         assertEquals("Music on this phone not allowed yet", librarySummary(Access.Denied, 0, folders))
         assertEquals("2,357 songs on this phone", phoneLine(Access.Granted, 2_357))
-        assertEquals("Allow access to the music on this phone", phoneLine(Access.NotAsked, 0))
+        assertEquals("Allow music on this phone", phoneLine(Access.NotAsked, 0))
     }
 
     @Test

@@ -67,9 +67,9 @@ fun librarySummary(access: Access, songs: Int, folders: List<MusicFolder>): Stri
     return line(count(songs, "song", "songs"), count(left, "folder", "folders").plus(" left out").takeIf { left > 0 })
 }
 
-// The phone's part of the account card.
+// The phone's part of the account card, short enough for its one line.
 fun phoneLine(access: Access, songs: Int): String =
-    if (access == Access.Granted) count(songs, "song", "songs") + " on this phone" else "Allow access to the music on this phone"
+    if (access == Access.Granted) count(songs, "song", "songs") + " on this phone" else "Allow music on this phone"
 
 // How long ago something happened, in words: "Just now", "5 min ago".
 fun timeAgo(at: Long, now: Long): String {

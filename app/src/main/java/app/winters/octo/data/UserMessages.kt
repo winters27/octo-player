@@ -33,7 +33,7 @@ fun Throwable.userMessage(): String = when (this) {
 // free when that is known, then what to do again. A queue is played again;
 // everything else is tried again.
 fun spaceWords(doing: SpaceFor, neededBytes: Long?): String {
-    val free = if (neededBytes != null) "Free up ${megabytes(neededBytes)} MB" else "Free up some space"
+    val free = if (neededBytes != null) "Free up %,d MB".format(megabytes(neededBytes)) else "Free up some space"
     val again = if (doing == SpaceFor.Queue) "play it again" else "try again"
     return "Not enough space to ${doing.doing}. $free, then $again."
 }

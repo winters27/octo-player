@@ -54,6 +54,7 @@ import app.winters.octo.ui.common.Artwork
 import app.winters.octo.ui.common.DragHandle
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.asLength
+import app.winters.octo.ui.common.factsLine
 import app.winters.octo.ui.common.isOutsideLibrary
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.common.GlassMenuAction
@@ -423,14 +424,19 @@ private fun PartHeading(title: String) {
     )
 }
 
-// The count and length of the listener's own songs still to come, and how
-// many Autoplay added after them.
-// What is to come: the songs the player holds and, past them, the rest of
-// the queue (`tailCount` songs playing `tailMs`).
-private fun queueSummary(rows: List<QueueEntry>, tailCount: Int = 0, tailMs: Long = 0): String {
+// What is to come: the count and length of the listener's own songs (those
+// the player holds and, past them, the rest of the queue: `tailCount` songs
+// playing `tailMs`), and how many Autoplay added after them. A summary too
+// long for one line breaks only between facts ("40,500 songs ·" over
+// "3,619 hr 38 min"), never inside one.
+internal fun queueSummary(rows: List<QueueEntry>, tailCount: Int = 0, tailMs: Long = 0): String {
     val (auto, own) = rows.partition { it.autoplay }
-    val base = "${songs(own.size + tailCount)} · ${((own.sumOf { it.durationMs } + tailMs) / 1000).toInt().asLength()}"
-    return if (auto.isEmpty()) base else "$base · ${auto.size} from Autoplay"
+    val facts = listOfNotNull(
+        songs(own.size + tailCount),
+        ((own.sumOf { it.durationMs } + tailMs) / 1000).toInt().asLength(),
+        auto.size.takeIf { it > 0 }?.let { "$it from Autoplay" },
+    )
+    return factsLine(facts, " · ")
 }
 
 // What the queue's More menu holds, in order, and whether each can be done.

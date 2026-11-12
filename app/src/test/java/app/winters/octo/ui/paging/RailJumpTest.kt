@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -46,6 +47,8 @@ class RailJumpTest {
             val order = SortOrder(SongSort.Title, down)
             val today = db.todaySongs(SongSort.Title, down, SongScope.All)
             val handle = ListHandle<SortOrder, TrackEntity>(scope, order, { SongLists(db.listsDao()).loader(SongScope.All, it) }, ListReads.Plain, { _, l -> db.tableChanges(l.tables) })
+            val anchors = java.util.concurrent.CopyOnWriteArrayList<Reanchor>()
+            val watch = scope.launch { handle.reanchors.collect { anchors += it } }
             Presented(handle.pages, scope).use { shown ->
                 shown.settle()
                 val runs = handle.shown.value!!.runs!!
@@ -66,6 +69,12 @@ class RailJumpTest {
                     if (at > 0) shown.peek(at - 1)?.let { assertTrue("the row before ${stop.letter} files elsewhere", app.winters.octo.ui.common.indexLetter(it.row.sortKey) != stop.letter) }
                 }
             }
+            watch.cancel()
+            // A jump's read never moves the screen: its key is only the row
+            // Paging touched last (on the phone, the row above the letter's
+            // heading), so the screen keeps the place it jumped to.
+            assertTrue("a jump read near its place", anchors.isNotEmpty())
+            assertTrue("no jump read moves the screen: $anchors", anchors.none { it.follow })
         }
     }
 }

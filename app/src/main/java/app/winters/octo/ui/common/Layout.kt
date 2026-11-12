@@ -85,7 +85,7 @@ fun songs(count: Int) = if (count == 1) "1 song" else "%,d songs".format(count)
 
 fun albums(count: Int) = if (count == 1) "1 album" else "%,d albums".format(count)
 
-fun artists(count: Int) = if (count == 1) "1 artist" else "$count artists"
+fun artists(count: Int) = if (count == 1) "1 artist" else "%,d artists".format(count)
 
 // A fact with each number held to the word beside it ("56 min", "15 songs",
 // "Rated 4.3"), so a line of facts only breaks between facts.

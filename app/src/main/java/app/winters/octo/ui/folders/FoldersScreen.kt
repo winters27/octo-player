@@ -118,6 +118,8 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
                 val problem = if (here is FolderStop.Phone) (phoneSongs as? FolderSongs.Problem)?.message else null
                 val head: LazyListScope.() -> Unit = {
                     item(key = "header") {
+                        // A server folder read and found empty has nothing to play.
+                        val serverCount = serverPage?.handle?.shown?.collectAsStateWithLifecycle()?.value?.count
                         PageHeader(
                             names.last(),
                             onBack = { if (!vm.up()) onBack() },
@@ -135,6 +137,7 @@ fun FoldersScreen(onBack: () -> Unit, vm: FoldersViewModel = hiltViewModel()) {
                                 is FolderStop.Server -> playShuffleItems(
                                     { vm.playServer(here.id, names.last(), shuffle = false) },
                                     { vm.playServer(here.id, names.last(), shuffle = true) },
+                                    enabled = serverCount != 0,
                                     loading = gathering,
                                 )
                             },

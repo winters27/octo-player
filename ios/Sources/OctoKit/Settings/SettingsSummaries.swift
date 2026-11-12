@@ -68,7 +68,7 @@ public enum SettingsSummaries {
 
     /// The phone's part of the account card.
     public static func phoneLine(_ access: PhoneAccess, songs: Int) -> String {
-        access == .granted ? count(songs, one: "song", many: "songs") + " on this phone" : "Allow access to the music on this phone"
+        access == .granted ? count(songs, one: "song", many: "songs") + " on this phone" : "Allow music on this phone"
     }
 
     /// How long ago something happened, in words: "Just now", "5 min ago". Times are in ms.

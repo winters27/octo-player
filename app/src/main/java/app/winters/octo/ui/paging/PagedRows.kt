@@ -52,6 +52,7 @@ fun <T : Any> rememberListRows(
     }
     LaunchedEffect(handle, state) {
         handle.reanchors.collectLatest { reanchor ->
+            if (!reanchor.follow) return@collectLatest
             snapshotFlow { items.itemSnapshotList.items.firstOrNull()?.generation }.first { it == reanchor.generation }
             val index = above + indexOf(reanchor.index, headed)
             if (state.firstVisibleItemIndex != index && state.firstVisibleItemIndex >= above) {
@@ -93,6 +94,7 @@ fun <T : Any, L : Any> rememberLinedRows(
     }
     LaunchedEffect(handle, state) {
         handle.reanchors.collectLatest { reanchor ->
+            if (!reanchor.follow) return@collectLatest
             snapshotFlow { items.itemSnapshotList.items.firstNotNullOfOrNull(row)?.generation }.first { it == reanchor.generation }
             val index = above + lineIndexOf(items.itemSnapshotList, reanchor.index) { row(it) != null }
             if (state.firstVisibleItemIndex != index && state.firstVisibleItemIndex >= above) {
