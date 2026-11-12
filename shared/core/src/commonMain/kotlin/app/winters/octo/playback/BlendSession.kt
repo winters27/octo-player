@@ -650,7 +650,9 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             action(BlendActionKind.B_DISARM, at, ramp)
             endBlend(at, incomingMs(at), ramp)
         } else {
-            endBlend(at, overlapMs + extensionMs, 0)
+            // B consumed nothing while held, so after a hold this is still
+            // the unextended overlap.
+            endBlend(at, incomingMs(at), 0)
         }
     }
 

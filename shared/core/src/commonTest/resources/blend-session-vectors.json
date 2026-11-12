@@ -414,7 +414,7 @@
     },
     {
       "name": "incoming-dry-in-an-intro-hold-rejoins-on-a-bar",
-      "about": "B stalls 3 s into a 14 s intro (hold to 0.75): B is held and A's blend time frozen; the room deadline is three bars on. B is ready at 718080: past the 480-frame horizon the next bar from B's stop is 720000, one bar of extension. The extended blend ends at 196000 and easing starts at the extended overlap.",
+      "about": "B stalls 3 s into a 14 s intro (hold to 0.75): B is held and A's blend time frozen; the room deadline is three bars on. B is ready at 718080: past the 480-frame horizon the next bar from B's stop is 720000, one bar of extension. The extended blend ends at 196000, and easing starts at B's song time since entry over the rate there: 14000, the unextended overlap, since B consumed nothing while held (16000, overlap plus extension, is wrong).",
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
@@ -426,7 +426,7 @@
         {"op": "advance", "to": 718560, "head": 694560, "aSongMs": 184970, "actions": [{"kind": "placeB", "frame": 720000}, {"kind": "unfreezeA", "frame": 720000, "ms": 2000}]},
         {"op": "post", "deck": "A", "input": "endReached", "frame": 1243200, "value": 1248000},
         {"op": "advance", "to": 1248000, "head": 1224000, "aSongMs": 196000, "actions": [{"kind": "aEnd", "frame": 1248000}, {"kind": "limiterOff", "frame": 1248000}], "events": [{"kind": "moved", "gen": 1, "frame": 718080, "ms": 180000, "ms2": 2000}]},
-        {"op": "advance", "to": 1252800, "head": 1248000, "aSongMs": 196100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1248000, "ms": 16000}]},
+        {"op": "advance", "to": 1252800, "head": 1248000, "aSongMs": 196100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1248000, "ms": 14000}]},
         {"op": "stopped", "gen": 1}
       ]
     },
@@ -444,7 +444,7 @@
         {"op": "advance", "to": 718560, "head": 718560, "aSongMs": 184970, "actions": [{"kind": "placeB", "frame": 816000}, {"kind": "unfreezeA", "frame": 816000, "ms": 4000}], "events": [{"kind": "moved", "gen": 1, "frame": 718080, "ms": 180000, "ms2": 4000}]},
         {"op": "post", "deck": "A", "input": "endReached", "frame": 1340160, "value": 1344000},
         {"op": "advance", "to": 1341600, "head": 1341600, "aSongMs": 197950, "actions": [{"kind": "aEnd", "frame": 1344000}, {"kind": "limiterOff", "frame": 1344000}]},
-        {"op": "advance", "to": 1346400, "head": 1346400, "aSongMs": 198050, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1344000, "ms": 18000}]},
+        {"op": "advance", "to": 1346400, "head": 1346400, "aSongMs": 198050, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1344000, "ms": 14000}]},
         {"op": "stopped", "gen": 1}
       ]
     },
@@ -466,7 +466,7 @@
         {"op": "advance", "to": 850560, "head": 826560, "aSongMs": 187720, "actions": [{"kind": "placeB", "frame": 912000}, {"kind": "unfreezeA", "frame": 912000, "ms": 4000}]},
         {"op": "post", "deck": "A", "input": "endReached", "frame": 1339200, "value": 1344000},
         {"op": "advance", "to": 1344000, "head": 1320000, "aSongMs": 198000, "actions": [{"kind": "aEnd", "frame": 1344000}, {"kind": "limiterOff", "frame": 1344000}], "events": [{"kind": "moved", "gen": 1, "frame": 850080, "ms": 180000, "ms2": 4000}]},
-        {"op": "advance", "to": 1348800, "head": 1344000, "aSongMs": 198100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1344000, "ms": 18000}]},
+        {"op": "advance", "to": 1348800, "head": 1344000, "aSongMs": 198100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1344000, "ms": 14000}]},
         {"op": "stopped", "gen": 1}
       ]
     },
@@ -484,7 +484,7 @@
         {"op": "advance", "to": 696480, "head": 672480, "aSongMs": 184510, "actions": [{"kind": "placeB", "frame": 696480}, {"kind": "unfreezeA", "frame": 696480, "ms": 1510}]},
         {"op": "post", "deck": "A", "input": "endReached", "frame": 1123680, "value": 1128480},
         {"op": "advance", "to": 1128480, "head": 1104480, "aSongMs": 193510, "actions": [{"kind": "aEnd", "frame": 1128480}, {"kind": "limiterOff", "frame": 1128480}], "events": [{"kind": "moved", "gen": 1, "frame": 696000, "ms": 180000, "ms2": 1510}]},
-        {"op": "advance", "to": 1133280, "head": 1128480, "aSongMs": 193610, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1128480, "ms": 13510}]},
+        {"op": "advance", "to": 1133280, "head": 1128480, "aSongMs": 193610, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1128480, "ms": 12000}]},
         {"op": "stopped", "gen": 1}
       ]
     },
