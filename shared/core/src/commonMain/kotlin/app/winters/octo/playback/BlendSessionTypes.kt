@@ -166,6 +166,10 @@ const val BLEND_DISARM_RAMP_MS = 250.0
 // lead plus the sink buffer plus this much left, in output time.
 const val BLEND_ROOM_SPARE_MS = 1_000.0
 
+// A plan whose drift bound holds wherever it sits: its start may move any
+// number of bars.
+const val LATE_MOVE_UNBOUNDED = Int.MAX_VALUE
+
 // The numbers that differ between phones and routes, in output frames
 // unless named otherwise. The caller may change them between calls.
 class BlendTiming(
