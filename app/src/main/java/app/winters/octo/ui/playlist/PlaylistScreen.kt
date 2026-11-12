@@ -321,5 +321,5 @@ internal fun phoneOnlyNote(count: Int): String =
     if (count == 1) {
         "1 song only on this phone, not in the server's copy"
     } else {
-        "$count songs only on this phone, not in the server's copy"
+        "%,d songs only on this phone, not in the server's copy".format(count)
     }

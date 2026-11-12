@@ -51,7 +51,7 @@ const val CAR_LIKED = "Liked songs"
 const val CAR_FAVORITE_ALBUMS = "Favorite albums"
 const val CAR_FAVORITE_ARTISTS = "Favorite artists"
 fun carResumeLine(device: String): String = "Pick up where you left off on $device"
-fun albumCountLine(count: Int): String = if (count == 1) "1 album" else "$count albums"
+fun albumCountLine(count: Int): String = if (count == 1) "1 album" else "%,d albums".format(count)
 fun artistCountLine(count: Int): String = if (count == 1) "1 artist" else "$count artists"
 
 // A song's actions in a car that shows them: Start radio and Play next.

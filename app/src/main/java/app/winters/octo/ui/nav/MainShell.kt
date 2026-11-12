@@ -206,7 +206,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         selected = stacks.lastIndex
         stacks.last().add(ServerFormRoute(ServerForm.SignIn, ask.serverId, ask.note))
     }
-    val back: () -> Unit = { stack.removeLastOrNull() }
+    val back: () -> Unit = { stack.backOne() }
     val hasTrack = now.trackId != null
     // The bar's small player, and the full one over everything.
     var barPlayer by rememberSaveable { mutableStateOf(false) }
@@ -314,7 +314,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                     AmbientBackdrop(stack.lastOrNull(), now, pageArtworks, awake = !playerOpen)
                     NavDisplay(
                         entries = tabPages[selected],
-                        onBack = { stack.removeLastOrNull() },
+                        onBack = { stack.backOne() },
                         // Turned sideways, pages keep clear of the camera cutout and
                         // a side navigation bar; the glow still fills the screen.
                         modifier = Modifier.fillMaxSize().windowInsetsPadding(SideInsets),
@@ -419,7 +419,7 @@ private const val ArtKey = "now-playing-art"
 // the tab it belongs to.
 private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> {
     val open: (NavKey) -> Unit = { stack.add(it) }
-    val back: () -> Unit = { stack.removeLastOrNull() }
+    val back: () -> Unit = { stack.backOne() }
     return entryProvider {
         entry<HomeRoute> { HomeScreen(open) }
         entry<SearchRoute> { SearchScreen(open) }
@@ -447,7 +447,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         // Once saved, a new live list's screen takes the editor's place.
         entry<LiveListEditRoute> { route ->
             LiveListEditScreen(route.id, route.start, back, onSaved = { saved ->
-                stack.removeLastOrNull()
+                stack.backOne()
                 if (route.id == null) open(LiveListRoute(saved))
             })
         }

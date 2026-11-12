@@ -71,7 +71,7 @@ fun albumDownloadLabel(songs: Int, held: Int, done: Int, outside: Int = 0): Stri
     else -> "${songCount(songs)} downloaded"
 }
 
-private fun songCount(songs: Int): String = if (songs == 1) "1 song" else "$songs songs"
+private fun songCount(songs: Int): String = if (songs == 1) "1 song" else "%,d songs".format(songs)
 
 // "Download album" in an album's More menu, for an album with songs only
 // on a server: each such song is downloaded to the phone. Nothing when

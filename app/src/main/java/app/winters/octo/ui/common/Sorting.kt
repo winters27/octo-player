@@ -23,15 +23,20 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -64,7 +69,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -72,7 +79,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.design.FloatingGlaze
@@ -420,18 +429,45 @@ const val RAIL_MIN_ITEMS = 60
 // and long enough.
 fun railShows(byName: Boolean, count: Int): Boolean = byName && count >= RAIL_MIN_ITEMS
 
-// How wide the letter rail is. A list that shows it keeps this much room
+// How wide the letter rail is. A list that shows it keeps letterRailRoom()
 // at its end, so the rail never sits over a row's length or a cover.
-val LetterRailWidth = 24.dp
+private val LetterRailWidth = 24.dp
 private val RailWidth = LetterRailWidth
 private val BubbleSize = 64.dp
 
-// The letters of a long list ordered by name, down its right edge. Touching
-// or dragging along it jumps the list to a letter, with that letter shown
-// large beside the finger. Place it over the list, the size of the list;
-// only the rail itself takes touches.
+// The strip along the list's end edge where the phone's back gesture starts:
+// a touch there goes to the gesture, never to the app. It is as wide as the
+// phone sets it (often 30dp with gesture navigation) and nothing with
+// navigation buttons. The letter rail sits just inside it. Pages already
+// keep clear of the cutout and a side navigation bar (sideways), so only
+// the part of the strip past those counts.
+@Composable
+fun backGestureEdge(): Dp {
+    val density = LocalDensity.current
+    val layout = LocalLayoutDirection.current
+    val gestures = WindowInsets.systemGestures
+    val sides = WindowInsets.displayCutout.union(WindowInsets.navigationBars)
+    val px = if (layout == LayoutDirection.Ltr) {
+        gestures.getRight(density, layout) - sides.getRight(density, layout)
+    } else {
+        gestures.getLeft(density, layout) - sides.getLeft(density, layout)
+    }
+    return with(density) { px.coerceAtLeast(0).toDp() }
+}
+
+// The room a letter rail takes at the end of a list: the rail itself and the
+// back gesture's strip beyond it.
+@Composable
+fun letterRailRoom(): Dp = LetterRailWidth + backGestureEdge()
+
+// The letters of a long list ordered by name, down its end edge, just inside
+// the phone's back gesture strip so a drag along it reaches the rail.
+// Touching or dragging along it jumps the list to a letter, with that letter
+// shown large beside the finger. Place it over the list, the size of the
+// list; only the rail itself takes touches.
 @Composable
 fun LetterRail(stops: List<RailStop>, onJump: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val edge = backGestureEdge()
     val haptics = LocalHapticFeedback.current
     val latestStops by rememberUpdatedState(stops)
     val jump by rememberUpdatedState(onJump)
@@ -445,6 +481,7 @@ fun LetterRail(stops: List<RailStop>, onJump: (Int) -> Unit, modifier: Modifier 
         Column(
             Modifier
                 .align(Alignment.CenterEnd)
+                .padding(end = edge)
                 .fillMaxHeight()
                 .width(RailWidth)
                 .onSizeChanged { railHeight = it.height }
@@ -492,7 +529,7 @@ fun LetterRail(stops: List<RailStop>, onJump: (Int) -> Unit, modifier: Modifier 
                 .align(Alignment.TopEnd)
                 .offset {
                     val y = slot * (shown + 0.5f) - BubbleSize.toPx() / 2
-                    IntOffset(-(RailWidth + 16.dp).roundToPx(), y.toInt())
+                    IntOffset(-(RailWidth + edge + 16.dp).roundToPx(), y.toInt())
                 },
         ) {
             FloatingGlaze(LocalHaze.current, Modifier.size(BubbleSize)) {

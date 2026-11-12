@@ -32,7 +32,7 @@ internal const val STATIONS_STALE_MS = 10 * 60 * 1000L
 internal fun stationGoneLine(name: String): String = "$name isn't on the server any more"
 
 // The line under a Made for you list's name.
-internal fun songCountLine(count: Int): String = if (count == 1) "1 song" else "$count songs"
+internal fun songCountLine(count: Int): String = if (count == 1) "1 song" else "%,d songs".format(count)
 
 // Whether Home should ask for the stations again: never while a load is
 // running, always after one failed, otherwise once the list is stale.

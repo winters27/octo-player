@@ -91,7 +91,7 @@ import app.winters.octo.ui.common.GlassIconButton
 import app.winters.octo.ui.common.LetterRail
 import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.Pickable
-import app.winters.octo.ui.common.LetterRailWidth
+import app.winters.octo.ui.common.letterRailRoom
 import app.winters.octo.ui.common.railShows
 import app.winters.octo.ui.common.Refreshable
 import app.winters.octo.ui.common.SectionTitle
@@ -402,9 +402,12 @@ internal fun filteredCount(shown: Int, all: Int): String = "%,d of %,d %s".forma
 // Grids keep side margins; lists of rows run edge to edge. Both leave room
 // at the bottom for the floating bar, and at the end for the letter rail
 // while it shows: the grid its own margin past the rail, the rows the
-// rail's width.
-private fun listPadding(rail: Boolean) = PaddingValues(start = 20.dp, end = if (rail) LetterRailWidth + 8.dp else 20.dp, top = 4.dp, bottom = 140.dp)
-private fun rowsPadding(rail: Boolean) = PaddingValues(end = if (rail) LetterRailWidth else 0.dp, top = 4.dp, bottom = 140.dp)
+// rail's room (the rail and the back gesture's strip beyond it).
+@Composable
+private fun listPadding(rail: Boolean) = PaddingValues(start = 20.dp, end = if (rail) letterRailRoom() + 8.dp else 20.dp, top = 4.dp, bottom = 140.dp)
+
+@Composable
+private fun rowsPadding(rail: Boolean) = PaddingValues(end = if (rail) letterRailRoom() else 0.dp, top = 4.dp, bottom = 140.dp)
 
 // The letter rail runs beside the rows, clear of the floating bar.
 private val RailPadding = PaddingValues(top = 8.dp, bottom = 132.dp)

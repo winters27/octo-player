@@ -24,7 +24,7 @@ fun shareDetails(share: Share, now: Long): String = listOf(
     when (val count = share.entry.size) {
         0 -> null
         1 -> "1 song"
-        else -> "$count songs"
+        else -> "%,d songs".format(count)
     },
     expiryLabel(serverTime(share.expires), now),
     when (share.visitCount) {

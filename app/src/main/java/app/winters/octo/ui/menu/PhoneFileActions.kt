@@ -269,7 +269,7 @@ fun rememberPhoneFiles(vm: PhoneFilesViewModel = hiltViewModel()): PhoneFileActi
                     val songs = ask.plan.trackIds.size
                     sheet.show(
                         ChoiceRequest(
-                            title = if (songs == 1) "Delete this song from the phone?" else "Delete $songs songs from the phone?",
+                            title = if (songs == 1) "Delete this song from the phone?" else "Delete %,d songs from the phone?".format(songs),
                             choices = listOf(
                                 Choice("Delete", if (songs == 1) "Its file is removed for good" else "Their files are removed for good"),
                                 Choice("Cancel"),

@@ -2,6 +2,7 @@ package app.winters.octo.ui.common
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -25,9 +27,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import app.winters.octo.design.GlazedIconButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
@@ -53,10 +59,14 @@ private val Gap = 10.dp
 private val LineHalf = 24.dp
 
 // Where the title's line puts the title, in pixels: after the back button
-// (`back` wide, 0 without one) and its gap, at the title's own one-line
-// width, whatever the line's width. The title is never shortened, broken
-// or wrapped, and nothing else shares its line.
+// (`back` wide, 0 without one) and its gap, at the title's own width. The
+// title is always one whole line: never shortened, cut or wrapped.
 internal fun titlePlace(back: Int, title: Int, gap: Int): Pair<Int, Int> = (if (back > 0) back + gap else 0) to title
+
+// How much the title's type shrinks so the whole title fits on its one line
+// after the back button, in pixels: not at all when it fits at full size,
+// and just enough when it is wider than the room.
+internal fun titleScale(title: Int, room: Int): Float = if (title <= 0 || room <= 0 || title <= room) 1f else room.toFloat() / title
 
 // Whether a page's count ("120 songs") fits whole at the end of the title's
 // line, in pixels: where the title ends, the count's width, the room
@@ -109,17 +119,43 @@ fun PageHeader(
 // The room between the title and its count.
 private val CountGap = 10.dp
 
+// The title's line: the back button and the title on one line, the button
+// on the middle of the title's capitals. A title wider than the room after
+// the button is set just small enough to fit whole.
 @Composable
 private fun TitleLine(title: String, onBack: (() -> Unit)?, count: String?, trailing: (@Composable () -> Unit)?, modifier: Modifier) {
-    val capHeight = rememberCapHeightPx(HeaderTitle)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val room = constraints.maxWidth - if (onBack != null) with(density) { (HeaderButtonSize + Gap).roundToPx() } else 0
+        val style = remember(title, room, measurer) {
+            val full = measurer.measure(title, HeaderTitle, maxLines = 1, softWrap = false).size.width
+            // A hair under the exact fit, so rounding never pushes the last letter past the edge.
+            val scale = titleScale(full, room).let { if (it < 1f) it * 0.99f else it }
+            if (scale >= 1f) {
+                HeaderTitle
+            } else {
+                HeaderTitle.copy(
+                    fontSize = HeaderTitle.fontSize * scale,
+                    lineHeight = if (HeaderTitle.lineHeight.isSpecified) HeaderTitle.lineHeight * scale else HeaderTitle.lineHeight,
+                )
+            }
+        }
+        TitleLineLayout(title, style, onBack, count, trailing)
+    }
+}
+
+@Composable
+private fun TitleLineLayout(title: String, style: TextStyle, onBack: (() -> Unit)?, count: String?, trailing: (@Composable () -> Unit)?) {
+    val capHeight = rememberCapHeightPx(style)
     Layout(
         content = {
             if (onBack != null) HeaderButton(OctoIcons.Back, "Back", onBack)
-            Text(title, style = HeaderTitle, color = OctoColors.TextPrimary, maxLines = 1, softWrap = false)
+            Text(title, style = style, color = OctoColors.TextPrimary, maxLines = 1, softWrap = false)
             if (count != null) Text(count, style = OctoType.bodySmall, color = OctoColors.TextMuted, maxLines = 1, softWrap = false)
             if (trailing != null) Box { trailing() }
         },
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
     ) { measurables, constraints ->
         val width = constraints.maxWidth
         var next = 0
