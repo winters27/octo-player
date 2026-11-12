@@ -128,6 +128,33 @@ class AutomixTest {
     }
 
     @Test
+    fun aHeadMeasuredAgainstTheWholeSongSeesALongQuietIntro() {
+        val song = AutomixCases.songs.getValue("long-intro")
+        val scouted = AutomixCases.head("long-intro")
+        assertEquals(AUTOMIX_HEAD_MS, scouted.envelope.endMs)
+        // Against its own body, which is mostly the quiet pad, the start
+        // sounds full at once.
+        assertEquals(0L, scouted.features.introEndMs)
+        // Against the whole song's body the intro ends where the full level
+        // comes in.
+        val body = song.wholeBodyDb()!!
+        val head = song.profileHead(body).features
+        assertEquals(body, head.bodyDb, 0.0)
+        assertEquals(34_750.0, head.introEndMs!!.toDouble(), 30.0)
+    }
+
+    @Test
+    fun aHeadThatNeverReachesTheBodyEndsItsIntroAtTheHeadsEnd() {
+        val head = AutomixCases.songs.getValue("endless-intro").profileHead().features
+        assertEquals(0L, head.soundStartMs)
+        assertEquals(AUTOMIX_HEAD_MS, head.introEndMs)
+        // A silent head has no intro to end.
+        assertNull(analyzeHead(envelopeOf(FloatArray(22_050 * 5), 22_050), bodyLevelDb = -14.0).features.introEndMs)
+        // A tail keeps the rule it had.
+        assertNull(analyzeTail(AutomixCases.songs.getValue("endless-intro").envelope(0.0, 45_000.0), bodyLevelDb = -14.0).features.introEndMs)
+    }
+
+    @Test
     fun everyPlanNamesTheLatestItMayEnd() {
         // A planned blend: where the outgoing song's sound ends, at most
         // END_MARGIN_MS before its end.

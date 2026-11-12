@@ -96,8 +96,18 @@ data class SyntheticSong(val rate: Int, val channels: Int, val lengthMs: Long, v
         return builder.build()
     }
 
-    // The last 60 s and the first 30 s, as the player scouts them.
+    // The last 60 s and the first 45 s, as the player scouts them.
     fun tail(): SectionAnalysis = analyzeTail(envelope(max(0.0, lengthMs - 60_000.0), lengthMs.toDouble()))
 
-    fun head(): SectionAnalysis = analyzeHead(envelope(0.0, min(30_000.0, lengthMs.toDouble())))
+    fun head(): SectionAnalysis = analyzeHead(headEnvelope())
+
+    // The whole song's body level, as a profile made from the whole file
+    // measures it.
+    fun wholeBodyDb(): Double? = bodyLevelOf(envelope(0.0, lengthMs.toDouble()))
+
+    // The first 45 s measured against the whole song's body, as a profile
+    // holds them; `bodyDb` when given stands in for that body.
+    fun profileHead(bodyDb: Double? = wholeBodyDb()): SectionAnalysis = analyzeHead(headEnvelope(), bodyLevelDb = bodyDb)
+
+    private fun headEnvelope(): SectionEnvelope = envelope(0.0, min(AUTOMIX_HEAD_MS.toDouble(), lengthMs.toDouble()))
 }

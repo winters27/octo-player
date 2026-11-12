@@ -97,6 +97,25 @@ class AutomixProfileTest {
     }
 
     @Test
+    fun aProfileOfAnyRevisionReadsTheSame() {
+        // The server says which pass of its analysis made a profile; a
+        // profile with or without it, and with fields this player does not
+        // know, reads the same.
+        val text = javaClass.classLoader!!.getResource("transition-profile.json")!!.readText()
+        val plain = assertNotNull(TransitionProfile.of(fixture()))
+        for (extra in listOf("\"revision\": 2, ", "\"revision\": 1, ", "\"later\": {\"parts\": [1, 2]}, ")) {
+            val answer = TransitionProfileAnswer.parse(text.replaceFirst("{", "{$extra")).copy(id = "nd-1", ready = true)
+            assertEquals(PROFILE_VERSION, answer.version)
+            val profile = assertNotNull(TransitionProfile.of(answer), extra)
+            assertEquals(plain.durationMs, profile.durationMs)
+            assertTrue(plain.head.levels.contentEquals(profile.head.levels), extra)
+            assertTrue(plain.tail.levels.contentEquals(profile.tail.levels), extra)
+            assertEquals(plain.head.features, profile.head.features, extra)
+            assertEquals(plain.tail.features, profile.tail.features, extra)
+        }
+    }
+
+    @Test
     fun aProfileThePlayerCannotReadIsNone() {
         val ready = fixture()
         assertNull(TransitionProfile.of(ready.copy(ready = false)))
