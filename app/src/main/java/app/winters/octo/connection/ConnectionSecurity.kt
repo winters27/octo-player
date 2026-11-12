@@ -73,7 +73,9 @@ class ConnectionSecurity @Inject constructor(
     private val pins: () -> Map<String, String> = { current?.identity?.pins.orEmpty() }
     private val remember: (String, X509Certificate) -> Unit = { host, leaf -> rejected[pinKey(host)] = leaf }
 
-    private val trustManager = PinningTrustManager(platformTrustManager(), pins, remember)
+    // Distrusted authorities are turned down before a pin is looked at.
+    private val platform = platformTrustManager()
+    private val trustManager = DistrustingTrustManager(PinningTrustManager(platform, pins, remember), phoneBuiltChain(platform))
     private val keyManager = ClientCertKeyManager(context) {
         current?.let { now -> now.identity.clientCert?.let { ClientCertChoice(it, now.hosts) } }
     }

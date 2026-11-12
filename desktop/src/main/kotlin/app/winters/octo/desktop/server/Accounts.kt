@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.server
 
+import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.LEGACY_UNSAFE_MESSAGE
@@ -9,6 +10,7 @@ import app.winters.octo.connection.ServerHeader
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.gatewayAllowed
 import app.winters.octo.connection.isHeaderName
+import app.winters.octo.connection.isDistrusted
 import app.winters.octo.connection.isHeaderValue
 import app.winters.octo.connection.legacyRetry
 import app.winters.octo.connection.mask
@@ -1002,15 +1004,17 @@ private val headersJson = Json { ignoreUnknownKeys = true }
 private val headerList = ListSerializer(ServerHeader.serializer())
 
 // A hint for an https address on the home network that could not be
-// reached: servers at home often speak only plain http.
+// reached: servers at home often speak only plain http. A certificate from
+// a distrusted authority did reach the server, so it gets no hint.
 fun homeHttpsHint(url: HttpUrl, e: Throwable): String =
-    if (e is SubsonicException.Unreachable && url.isHttps && isPrivateHost(url)) " Home servers often use http://. Switch to http:// and try again." else ""
+    if (e is SubsonicException.Unreachable && url.isHttps && isPrivateHost(url) && !e.isDistrusted()) " Home servers often use http://. Switch to http:// and try again." else ""
 
 // What to tell someone when a request fails, in the phone app's words. A
 // sign-in page in front of the server is named, with how to get through.
 fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.Unreachable ->
-        "Couldn't reach the server. Check the address, and that you're on the right network."
+        if (isDistrusted()) DISTRUSTED_MESSAGE
+        else "Couldn't reach the server. Check the address, and that you're on the right network."
     is SubsonicException.NotSubsonic ->
         GatewayWords.failureFor(this)
             ?: if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."

@@ -1,6 +1,8 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.isDistrusted
 import app.winters.octo.subsonic.FamilyWeb
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.gateway.Gateway
@@ -95,7 +97,12 @@ private suspend fun joining(address: HttpUrl, refused: String, join: suspend () 
 } catch (e: SubsonicException.WrongCredentials) {
     JoinOutcome.Failed(e.message ?: refused)
 } catch (e: SubsonicException.Unreachable) {
-    if (e.cause is SSLException) JoinOutcome.Untrusted(address.host) else JoinOutcome.Failed("Octo can't reach that address. Check it and try again.", unreachable = true)
+    when {
+        // Like a certificate question, the home address may still work.
+        e.isDistrusted() -> JoinOutcome.Failed(DISTRUSTED_MESSAGE, unreachable = true)
+        e.cause is SSLException -> JoinOutcome.Untrusted(address.host)
+        else -> JoinOutcome.Failed("Octo can't reach that address. Check it and try again.", unreachable = true)
+    }
 } catch (e: SubsonicException.NotSubsonic) {
     val gateway = e.gateway
     if (gateway != null) {

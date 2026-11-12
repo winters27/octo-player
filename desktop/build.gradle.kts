@@ -1,4 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.security.MessageDigest
+import java.security.cert.CertificateFactory
+import java.util.Properties
 
 // The desktop app for Windows, macOS and Linux: a client of any Subsonic,
 // Navidrome or Octo server, on the shared core and the desktop design.
@@ -464,6 +467,10 @@ val providerModules = mapOf(
     "SunPKCS11" to "jdk.crypto.cryptoki",
 )
 
+// Certificates the packaged runtime refuses wherever they appear in a
+// chain, its own roots included.
+val distrustedCertificates = layout.projectDirectory.file("security/distrusted-certificates.pem")
+
 // A class data sharing (CDS) archive in the packaged runtime: the Java
 // classes every start loads, parsed once here into a file the JVM maps at
 // start, as a full JDK ships one (jlink leaves it out of a trimmed runtime).
@@ -472,8 +479,21 @@ val providerModules = mapOf(
 // its launcher for the dump and takes it back. A JVM that cannot use the
 // archive starts without it, as before.
 tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask>().configureEach {
+    inputs.file(distrustedCertificates)
     doLast {
         val runtime = destinationDir.get().asFile
+        // The JDK's own blocklist: one SHA-256 per certificate, in uppercase
+        // hex, which it never matches in lowercase.
+        val blockList = File(runtime, "lib/security/blocked.certs")
+        val refused = distrustedCertificates.asFile.inputStream().use { CertificateFactory.getInstance("X.509").generateCertificates(it) }
+            .map { cert -> MessageDigest.getInstance("SHA-256").digest(cert.encoded).joinToString("") { "%02X".format(it) } }
+        fun blocked() = Properties().apply { blockList.inputStream().use { load(it) } }
+        if (refused.isEmpty() || blocked().getProperty("Algorithm") != "SHA-256") throw GradleException("The runtime's blocked.certs is not a SHA-256 list, or there is nothing to add to it.")
+        val adding = refused.filterNot(blocked()::containsKey)
+        if (adding.isNotEmpty()) blockList.appendText(adding.joinToString("\n", prefix = "\n", postfix = "\n"))
+        val taken = blocked()
+        val missing = refused.filterNot { fingerprint -> taken.containsKey(fingerprint) }
+        if (missing.isNotEmpty()) throw GradleException("The runtime's blocked.certs did not take ${missing.joinToString()}.")
         // The security providers the runtime lists, cut to those it carries.
         // Asked for one that is missing, the JVM looks through every
         // provider on the class path instead, which starts the updater's

@@ -71,6 +71,8 @@ class PinningTrustManager(
         try {
             platformCheck()
         } catch (e: CertificateException) {
+            // A distrusted authority is never a question for the user.
+            if (e is DistrustedCertificateException) throw e
             val leaf = chain.firstOrNull() ?: throw e
             if (pinAllows(pins(), host, leaf.fingerprint())) return
             if (host != null) onRejected(host, leaf)

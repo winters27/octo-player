@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.server
 
+import app.winters.octo.connection.DISTRUSTED_MESSAGE
+import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.connection.pinKey
@@ -7,6 +9,7 @@ import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.server.Reach
+import app.winters.octo.subsonic.gateway.GatewayKind
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -18,6 +21,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.security.KeyStore
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
@@ -82,6 +86,44 @@ class ServerSecurityTest {
         security.trust("elsewhere.test", cert.fingerprint())
         asked()
         assertEquals(setOf("elsewhere.test"), settings.current.trustedCertificates.keys)
+    }
+
+    // The same certificate, sent with a distrusted eMudhra intermediate, is
+    // refused even with the leaf trusted, with no sign-in page, a password
+    // one (a proxy's, Authentik's or Authelia's) or a Cloudflare Access
+    // token. Red when ServerSecurity's trust is not distrusting.
+    @Test
+    fun aChainThroughADistrustedKeyIsRefusedEvenWhenItsLeafIsTrusted() = runTest {
+        val distrusted = ServerSecurityTest::class.java.getResourceAsStream("/certs/distrusted-chains/dv-g3b-emudhra.we-have-a-problem.com.pem")!!.use {
+            CertificateFactory.getInstance("X.509").generateCertificates(it).map { c -> c as X509Certificate }[1]
+        }
+        val sending = KeyStore.getInstance("JKS").apply {
+            load(null, null)
+            setKeyEntry("music", keys.getKey("music", PASSWORD), PASSWORD, arrayOf(cert, distrusted))
+        }
+        FakeServer(
+            SSLContext.getInstance("TLS").apply {
+                val factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(sending, PASSWORD) }
+                init(factory.keyManagers, null, null)
+            }.socketFactory,
+        ).use { other ->
+            other.answer("ping")
+            val otherHost = other.address.toHttpUrl().host
+            security.trust(otherHost, cert.fingerprint())
+            val signIns = mapOf(
+                "none" to GatewayDraft(),
+                "password" to GatewayDraft(GatewayKind.Password, "alice", "pw"),
+                "cloudflare" to GatewayDraft(GatewayKind.CloudflareToken, "id.access", "secret"),
+            )
+            for ((kind, gateway) in signIns) {
+                val outcome = accounts.test(SignInRequest(other.address, "winters", "pw", gateway = gateway))
+                assertTrue("$kind not refused: $outcome", outcome is TestOutcome.Failed)
+                // The distrust alone, with no hint to try plain http.
+                assertEquals(kind, DISTRUSTED_MESSAGE, (outcome as TestOutcome.Failed).message)
+                assertEquals(kind, null, security.takeRejected(otherHost))
+            }
+            assertTrue("nothing reached the server", other.calls.isEmpty())
+        }
     }
 
     @Test

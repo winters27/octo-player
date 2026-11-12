@@ -71,6 +71,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -316,7 +317,8 @@ private fun SignInForm(vm: SignInViewModel) {
                 vm.error?.let {
                     Text(
                         it,
-                        style = OctoType.bodySmall,
+                        // Even lines when a message wraps, not a full line and a stub.
+                        style = OctoType.bodySmall.copy(lineBreak = LineBreak.Heading),
                         color = OctoColors.Error,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 12.dp),
@@ -423,7 +425,7 @@ private fun JoinButtons(vm: SignInViewModel) {
         )
     }
     vm.error?.let {
-        Text(it, style = OctoType.bodySmall, color = OctoColors.Error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+        Text(it, style = OctoType.bodySmall.copy(lineBreak = LineBreak.Heading), color = OctoColors.Error, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
     }
     if (vm.handOver == null) {
         GlazeButton(

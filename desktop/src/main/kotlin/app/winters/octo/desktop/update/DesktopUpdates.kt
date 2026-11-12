@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.connection.distrustingTls
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.separateProfile
@@ -308,11 +309,12 @@ class DesktopUpdates(
             val availability = updaterAvailability(installed = program != null)
             val folder = updatesFolder(cache, program, os)
             val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null, program = program)
-            // A client of its own: the system's certificates only, never a
-            // server's trusted ones or its headers.
+            // A client of its own: the system's certificates less the
+            // distrusted ones, never a server's trusted ones or its headers.
             val client = OkHttpClient.Builder()
                 .connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
+                .distrustingTls()
                 .build()
             val api = System.getProperty(API_PROPERTY)?.toHttpUrlOrNull() ?: GITHUB_API
             val linuxKind = if (os == DesktopOs.Linux) {

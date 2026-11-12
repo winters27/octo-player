@@ -1,12 +1,15 @@
 package app.winters.octo.data
 
+import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.isDistrusted
 import app.winters.octo.subsonic.SubsonicException
 
 // What to tell someone when a request fails.
 fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.Unreachable ->
-        "Couldn't reach the server. Check the address, and that you're on the right network."
+        if (isDistrusted()) DISTRUSTED_MESSAGE
+        else "Couldn't reach the server. Check the address, and that you're on the right network."
     // A sign-in page in front of the server is named, with how to get through.
     is SubsonicException.NotSubsonic -> GatewayWords.failureFor(this)
         ?: if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."

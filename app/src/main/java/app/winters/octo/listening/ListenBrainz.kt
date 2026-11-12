@@ -1,7 +1,7 @@
 package app.winters.octo.listening
 
 import app.winters.octo.catalog.isFind
-import app.winters.octo.connection.platformTrustManager
+import app.winters.octo.connection.phoneTls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -28,7 +28,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.internal.tls.OkHostnameVerifier
 import java.io.IOException
-import javax.net.ssl.SSLContext
 
 // Where plays go. The token is only ever sent here, over HTTPS.
 val LISTENBRAINZ_API: HttpUrl = "https://api.listenbrainz.org/".toHttpUrl()
@@ -328,21 +327,18 @@ fun looksLikeToken(token: String): Boolean = token.length in 8..128 && token.all
 // server: its extra headers, its trusted certificates and its client
 // certificate. It only ever talks to `allowed`, and never follows a
 // redirect anywhere else.
-fun listenBrainzClient(shared: OkHttpClient, userAgent: String, allowed: HttpUrl = LISTENBRAINZ_API): OkHttpClient {
-    val trust = platformTrustManager()
-    val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-    return shared.newBuilder()
+fun listenBrainzClient(shared: OkHttpClient, userAgent: String, allowed: HttpUrl = LISTENBRAINZ_API): OkHttpClient =
+    shared.newBuilder()
         .apply {
             interceptors().clear()
             networkInterceptors().clear()
         }
         .addInterceptor(OnlyListenBrainz(allowed, userAgent))
-        .sslSocketFactory(tls.socketFactory, trust)
+        .phoneTls()
         .hostnameVerifier(OkHostnameVerifier)
         .followRedirects(false)
         .followSslRedirects(false)
         .build()
-}
 
 // Refuses any request that is not for ListenBrainz, so the token cannot go
 // anywhere else.

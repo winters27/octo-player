@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.server
 
+import app.winters.octo.connection.DistrustingTrustManager
 import app.winters.octo.connection.PinningHostnameVerifier
 import app.winters.octo.connection.PinningTrustManager
 import app.winters.octo.connection.isConnectionError
@@ -66,7 +67,8 @@ class ServerSecurity(
     val pins: () -> Map<String, String> = { settings.current.trustedCertificates }
     private val remember: (String, X509Certificate) -> Unit = { host, leaf -> rejected[pinKey(host)] = leaf }
 
-    private val trustManager by lazy { PinningTrustManager(platformTrustManager(), pins, remember) }
+    // Distrusted authorities are turned down before a pin is looked at.
+    private val trustManager by lazy { DistrustingTrustManager(PinningTrustManager(platformTrustManager(), pins, remember)) }
 
     // This computer's id and name as headers, for the audio engine, which
     // fetches songs from the server by itself.

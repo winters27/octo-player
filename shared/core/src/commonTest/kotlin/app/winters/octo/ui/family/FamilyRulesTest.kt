@@ -1,5 +1,7 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.connection.DISTRUSTED_MESSAGE
+import app.winters.octo.connection.DistrustedCertificateException
 import app.winters.octo.subsonic.DeviceQualityMode
 import app.winters.octo.subsonic.StreamQuality
 import app.winters.octo.subsonic.FamilyQuality
@@ -23,6 +25,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import javax.net.ssl.SSLHandshakeException
 
 // Outside song actions, offline copies, the request sheet, notices, the
 // abilities in plain words and joining with a code.
@@ -252,6 +255,15 @@ class FamilyRulesTest {
             val refused = joinWithInvite(server.url, "tok_1", "Alex", "long enough", OkHttpClient())
             assertTrue(refused is JoinOutcome.Failed)
         }
+    }
+
+    @Test
+    fun aDistrustedAuthoritySaysSoInsteadOfAskingAboutTheCertificate() = runBlocking {
+        val refusing = OkHttpClient.Builder().addInterceptor {
+            throw SSLHandshakeException("handshake failed").apply { initCause(DistrustedCertificateException()) }
+        }.build()
+        val refused = joinWithInvite("https://music.test/".toHttpUrl(), "tok_1", "Alex", "long enough", refusing)
+        assertEquals(DISTRUSTED_MESSAGE, (refused as JoinOutcome.Failed).message)
     }
 
     @Test

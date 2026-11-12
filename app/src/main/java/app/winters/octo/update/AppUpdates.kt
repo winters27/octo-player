@@ -11,6 +11,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import app.winters.octo.BuildConfig
+import app.winters.octo.connection.phoneTls
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,11 +77,12 @@ class AppUpdates @Inject constructor(
     val state: StateFlow<UpdateState> = _state
 
     private val updater: PlayerUpdater? = running?.takeIf { off == null }?.let { version ->
-        // A client of its own: the system's certificates only, never a
-        // server's trusted ones or its headers.
+        // A client of its own: the system's certificates less the
+        // distrusted ones, never a server's trusted ones or its headers.
         val client = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .phoneTls()
             .build()
         val api = BuildConfig.UPDATES_API.toHttpUrlOrNull() ?: GITHUB_API
         PlayerUpdater(

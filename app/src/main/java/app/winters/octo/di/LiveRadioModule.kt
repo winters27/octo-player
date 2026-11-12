@@ -1,6 +1,7 @@
 package app.winters.octo.di
 
 import app.winters.octo.BuildConfig
+import app.winters.octo.connection.phoneTls
 import app.winters.octo.liveradio.RadioBrowser
 import dagger.Module
 import dagger.Provides
@@ -25,6 +26,7 @@ object LiveRadioModule {
             .dispatcher(http.dispatcher)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            .phoneTls()
             .build(),
         "Octo/${BuildConfig.VERSION_NAME} (Android)",
     )

@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.discord
 
 import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.connection.distrustingTls
 import app.winters.octo.desktop.system.NowPlaying
 import app.winters.octo.discovery.sameArtist
 import app.winters.octo.subsonic.Song
@@ -227,7 +228,7 @@ fun deezerArtistPhoto(body: String, artist: String): String? =
     }.getOrNull()
 
 private val http by lazy {
-    OkHttpClient.Builder().callTimeout(4, TimeUnit.SECONDS).build()
+    OkHttpClient.Builder().callTimeout(4, TimeUnit.SECONDS).distrustingTls().build()
 }
 
 private fun httpGet(url: String): String? = runCatching {
