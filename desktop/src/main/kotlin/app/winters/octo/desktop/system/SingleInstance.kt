@@ -21,6 +21,7 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.system.exitProcess
 
 // One Octo at a time. The first to start holds a lock file in the settings
 // folder and listens on a port of this machine's own loopback address,
@@ -316,5 +317,16 @@ class SingleInstance private constructor(
 
         private fun String.fromHex(): ByteArray? =
             if (length % 2 != 0) null else runCatching { chunked(2).map { it.toInt(16).toByte() }.toByteArray() }.getOrNull()
+    }
+}
+
+// Makes a failure nothing caught on `thread` end the whole process with
+// `exit(1)`. When the window's composition fails, the main thread ends but
+// the player's threads keep the process, and the instance lock with it, so
+// every later launch would hand over to an Octo with no window.
+fun endProcessOnFailure(thread: Thread, exit: (Int) -> Unit = { exitProcess(it) }) {
+    thread.setUncaughtExceptionHandler { _, failure ->
+        runCatching { failure.printStackTrace() }
+        exit(1)
     }
 }

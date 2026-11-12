@@ -67,6 +67,7 @@ import app.winters.octo.desktop.system.logFolder
 import app.winters.octo.desktop.system.SOAK_RUN
 import app.winters.octo.desktop.system.SingleInstance
 import app.winters.octo.desktop.system.SystemIntegration
+import app.winters.octo.desktop.system.endProcessOnFailure
 import app.winters.octo.desktop.system.letRunningOctoComeForward
 import app.winters.octo.desktop.system.preloadStartClasses
 import app.winters.octo.desktop.system.rendererText
@@ -180,6 +181,9 @@ fun main(args: Array<String>) {
     val inTray = startsInTray(args.toList())
     // The opening comes in quietly when the listener asked for calm motion.
     val calmStart = settings.current.appearance.calmMotion
+    // A failure that ends the window ends Octo, so the next launch starts
+    // afresh instead of handing over to an Octo with no window.
+    endProcessOnFailure(Thread.currentThread())
 
     application {
         // The app, once made; until then the window shows its first frame.

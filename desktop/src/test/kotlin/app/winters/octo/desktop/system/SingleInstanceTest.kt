@@ -186,6 +186,16 @@ class SingleInstanceTest {
     }
 
     @Test
+    fun aFailureNothingCaughtEndsTheProcess() {
+        val exits = LinkedBlockingQueue<Int>()
+        val main = Thread { throw IllegalStateException("the window's composition failed") }
+        endProcessOnFailure(main) { exits.add(it) }
+        main.start()
+        main.join()
+        assertEquals(listOf(1), exits.toList())
+    }
+
+    @Test
     fun strayConnectionsAreIgnored() {
         assertNull(SingleInstance.readMessage(DataInputStream(ByteArrayInputStream("GET / HTTP/1.1\r\n\r\n".toByteArray())), secret))
         assertNull(SingleInstance.readMessage(DataInputStream(ByteArrayInputStream(ByteArray(0))), secret))
