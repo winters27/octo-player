@@ -147,8 +147,11 @@ fn a_quiet_connection_lets_go_of_the_stream_once_replaced() {
     let body = data(1_000_000);
     let server =
         TestServer::start(body.clone(), Behaviour { stall_after: Some(200_000), ..Default::default() });
+    // The idle limit also bounds the wait for each answer, so it is well
+    // past the time a busy machine takes to answer, and short of the wait
+    // below for the fetch threads to end.
     let opts = HttpOptions {
-        agent: agent_with_idle_limit(Arc::new(Trust::default()), Duration::from_millis(800)),
+        agent: agent_with_idle_limit(Arc::new(Trust::default()), Duration::from_secs(3)),
         stall_timeout: Duration::from_millis(400),
         max_retries: 1_000,
         ..quick()
@@ -405,7 +408,13 @@ fn a_live_server_answering_200_after_a_stall_is_read_from_its_first_byte() {
             ..Default::default()
         },
     );
-    let opts = HttpOptions { stall_timeout: Duration::from_millis(500), ..live() };
+    // A stall is judged by time. A busy machine can take longer than a short
+    // stall timeout to answer a new connection, which then counts as a
+    // stall too and is dropped for another; and a live stream asked again
+    // starts over, so the bytes would no longer follow on. The first
+    // connection stays quiet until the server is dropped, so any timeout
+    // finds it; this one is well past a busy machine's pause.
+    let opts = HttpOptions { stall_timeout: Duration::from_secs(2), ..live() };
     let mut source = HttpSource::open(&server.url(), opts).unwrap();
     let slot = TitleSlot::default();
     let (audio, _) = read_live(&mut source, &slot, 400_000);
