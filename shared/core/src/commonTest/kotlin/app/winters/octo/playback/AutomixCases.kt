@@ -32,9 +32,9 @@ object AutomixCases {
         // 6 s of a quiet pad 24 dB under the body, then full level.
         "quiet-intro" to SyntheticSong(44_100, 2, 180_000, pad(0.0, 6_000.0, -38.0) + pad(6_000.0, 180_000.0, -14.0)),
         // 35 s of the quiet pad, then full level: most of a head is intro.
-        "long-intro" to SyntheticSong(22_050, 1, 180_000, pad(0.0, 35_000.0, -38.0) + pad(35_000.0, 180_000.0, -14.0)),
+        "long-intro" to SyntheticSong(44_100, 1, 180_000, pad(0.0, 35_000.0, -38.0) + pad(35_000.0, 180_000.0, -14.0)),
         // A minute of the quiet pad, past the end of any head.
-        "endless-intro" to SyntheticSong(22_050, 1, 200_000, pad(0.0, 60_000.0, -38.0) + pad(60_000.0, 200_000.0, -14.0)),
+        "endless-intro" to SyntheticSong(44_100, 1, 200_000, pad(0.0, 60_000.0, -38.0) + pad(60_000.0, 200_000.0, -14.0)),
     )
 
     data class Pair(
