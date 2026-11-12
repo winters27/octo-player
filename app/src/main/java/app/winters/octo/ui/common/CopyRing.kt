@@ -66,7 +66,7 @@ internal fun CopyRing(run: CopyRunState?, size: Dp, modifier: Modifier = Modifie
         else -> Modifier.progressSemantics(fraction)
     }
     Box(modifier.size(size).then(semantics), contentAlignment = Alignment.Center) {
-        CopyCover(run?.artwork, size - (stroke + gap) * 2)
+        CopyCover(copyCoverOf(run), size - (stroke + gap) * 2, stopped)
         Canvas(Modifier.fillMaxSize()) {
             val width = stroke.toPx()
             val track = (if (stopped) muted else accent).copy(alpha = PausedTrackAlpha)
@@ -116,16 +116,23 @@ private fun DrawScope.ringArc(color: Color, start: Float, sweep: Float, width: F
 private const val TURNING_SWEEP = 80f
 private const val TURN_MS = 1_400
 
+// The cover the ring shows: an album's once albums are being built, none
+// before, so the ring starts on its accent note rather than whatever color
+// the first song read happens to have.
+internal fun copyCoverOf(run: CopyRunState?): String? = run?.takeIf { it.step >= CopyStep.Build }?.artwork
+
 // The cover inside the ring, fading from one album to the next; a quiet
-// note until the first one comes.
+// note in the accent until the first one comes, muted once the copy stopped.
 @Composable
-private fun CopyCover(ref: String?, size: Dp) {
+private fun CopyCover(ref: String?, size: Dp, stopped: Boolean) {
     Crossfade(ref, animationSpec = tween(OctoDuration.Neutral), label = "copy cover") { art ->
         if (art != null) {
             Artwork(art, size, shape = CircleShape, rim = false)
         } else {
-            Box(Modifier.size(size).clip(CircleShape).background(OctoColors.BackgroundTertiary), contentAlignment = Alignment.Center) {
-                Icon(painterResource(OctoIcons.Songs), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(size * 0.36f))
+            val ground = if (stopped) OctoColors.BackgroundTertiary else OctoColors.AccentTonal
+            val mark = if (stopped) OctoColors.TextMuted else OctoColors.Accent
+            Box(Modifier.size(size).clip(CircleShape).background(ground), contentAlignment = Alignment.Center) {
+                Icon(painterResource(OctoIcons.Songs), contentDescription = null, tint = mark, modifier = Modifier.size(size * 0.36f))
             }
         }
     }

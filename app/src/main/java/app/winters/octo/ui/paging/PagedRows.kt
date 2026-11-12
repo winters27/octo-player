@@ -1,8 +1,25 @@
 package app.winters.octo.ui.paging
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import app.winters.octo.design.OctoColors
+import app.winters.octo.ui.common.ListRowSide
+import app.winters.octo.ui.common.SongRowCover
+import app.winters.octo.ui.common.SongRowCoverCorner
+import app.winters.octo.ui.common.SongRowGap
+import app.winters.octo.ui.common.SongRowMinHeight
+import app.winters.octo.ui.common.SongRowNumberWidth
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -25,7 +42,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 
 // How tall a song row is, for a row not read yet.
-val SongRowHeight = 64.dp
+val SongRowHeight = SongRowMinHeight
 
 // The rows of a handle's list for a screen. The screen's first visible row
 // goes back to the handle (a refresh reads around it), and after a refresh
@@ -145,9 +162,10 @@ fun positionOf(index: Int, runs: List<LetterRun>?): Int {
     return index - headings
 }
 
-// The list's rows, each `row` (null for a row not read yet), under a sticky
-// heading per letter run when `runs` is given; keys are the rows' keys, so
-// two rows never share one even while a row moves.
+// The list's rows, each `row` (null for a row not read yet), under a
+// heading per letter run when `runs` is given, each heading one item of the
+// list; keys are the rows' keys, so two rows never share one even while a
+// row moves.
 fun <T : Any> LazyListScope.listRows(
     items: LazyPagingItems<ListItem<T>>,
     runs: List<LetterRun>?,
@@ -162,16 +180,44 @@ fun <T : Any> LazyListScope.listRows(
     }
     runs.forEachIndexed { r, run ->
         if (run.start >= count) return@forEachIndexed
-        stickyHeader(key = "letter:$r:${run.letter}") { heading(run.letter) }
+        item(key = "letter:$r:${run.letter}") { heading(run.letter) }
         items(minOf(run.count, count - run.start), key = { key(run.start + it) }) { row(items[run.start + it]) }
     }
 }
 
-// The space a song row not read yet keeps.
+// A song row not read yet: its faint shape at the real row's place and
+// size, still, so it never reads as content. A dim cover square, or the
+// number's room with `numbered`, then a title bar and a shorter subtitle bar.
 @Composable
-fun RowPlaceholder() {
-    Box(Modifier.fillMaxWidth().height(SongRowHeight))
+fun RowPlaceholder(numbered: Boolean = false) {
+    val fill = OctoColors.BackgroundTertiary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(SongRowHeight)
+            .padding(horizontal = ListRowSide, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SongRowGap),
+    ) {
+        if (numbered) {
+            Spacer(Modifier.width(SongRowNumberWidth))
+        } else {
+            Box(Modifier.size(SongRowCover).background(fill, RoundedCornerShape(SongRowCoverCorner)))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PlaceholderBarGap)) {
+            Box(Modifier.fillMaxWidth(PlaceholderTitleWidth).height(PlaceholderTitleBar).background(fill, PlaceholderBarShape))
+            Box(Modifier.fillMaxWidth(PlaceholderSubtitleWidth).height(PlaceholderSubtitleBar).background(fill, PlaceholderBarShape))
+        }
+    }
 }
+
+// The placeholder's bars sit where a row's title and subtitle lines do.
+val PlaceholderTitleBar = 12.dp
+val PlaceholderSubtitleBar = 10.dp
+val PlaceholderBarGap = 4.dp
+const val PlaceholderTitleWidth = 0.6f
+const val PlaceholderSubtitleWidth = 0.38f
+private val PlaceholderBarShape = RoundedCornerShape(50)
 
 // Lets a paged list's rows be picked. A tapped row is found among the rows
 // read (`pickOf`); picks are kept to the rows the list still holds, asked

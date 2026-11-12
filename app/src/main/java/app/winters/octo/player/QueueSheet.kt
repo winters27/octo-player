@@ -8,9 +8,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.FirstBaseline
+import app.winters.octo.design.Spinner
+import kotlin.math.roundToInt
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -399,15 +404,21 @@ private fun TailLine(left: Int) {
 // "1 more song", "240 more songs".
 fun tailWords(left: Int): String = if (left == 1) "1 more song" else "$left more songs"
 
-// The quiet row of a list still being added to the queue.
+// The quiet row of a list still being added to the queue: a small spinner
+// on the words' cap-height middle, as the Home copy card's sync line has.
 @Composable
 private fun BuildingLine(play: Boolean) {
-    Text(
-        buildingWords(play),
-        style = OctoType.caption,
-        color = OctoColors.TextMuted,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-    )
+    val captionCap = rememberCapHeightPx(OctoType.caption)
+    Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+        Spinner(Modifier.alignBy { it.measuredHeight / 2 }, size = 12.dp, color = OctoColors.TextMuted)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            buildingWords(play),
+            style = OctoType.caption,
+            color = OctoColors.TextMuted,
+            modifier = Modifier.alignBy { capMiddle(it[FirstBaseline].toFloat(), captionCap).roundToInt() },
+        )
+    }
 }
 
 // What a list still being added says: a played list's rest, or a big add.

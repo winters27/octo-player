@@ -28,14 +28,10 @@ fun screenPadding(extraTop: Dp = 0.dp): PaddingValues {
     return PaddingValues(top = top + 8.dp + extraTop, bottom = bottom + 120.dp)
 }
 
+// A tab's big title, on the same line and baseline as every page header's.
 @Composable
 fun ScreenTitle(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = OctoType.display,
-        color = OctoColors.TextPrimary,
-        modifier = modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
-    )
+    PageHeader(text, onBack = null, modifier = modifier)
 }
 
 @Composable

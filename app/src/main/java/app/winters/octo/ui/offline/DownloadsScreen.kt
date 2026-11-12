@@ -55,6 +55,12 @@ import app.winters.octo.sort.SortSettings
 import app.winters.octo.sort.Sorted
 import app.winters.octo.sort.sortDownloads
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.ListRowSide
+import app.winters.octo.ui.common.SongRowCover
+import app.winters.octo.ui.common.SongRowCoverCorner
+import app.winters.octo.ui.common.SongRowGap
+import app.winters.octo.ui.common.SongRowMinHeight
+import androidx.compose.foundation.layout.heightIn
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.RemoveBackground
 import app.winters.octo.ui.common.LocalHaze
@@ -319,7 +325,9 @@ private fun DownloadLine(
     ) {
         // Solid only while swiped, to hide the red behind; clear at rest.
         val swiping = swipe.dismissDirection == SwipeToDismissBoxValue.EndToStart
-        Column(
+        // At a song row's size and insets, so the covers line up with
+        // every other song list's.
+        Box(
             Modifier
                 .background(if (swiping) OctoColors.Background else Color.Transparent, RowShape)
                 .combinedClickable(
@@ -335,11 +343,11 @@ private fun DownloadLine(
                 ),
         ) {
             Row(
-                Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 20.dp),
+                Modifier.fillMaxWidth().heightIn(min = SongRowMinHeight).padding(horizontal = ListRowSide, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(SongRowGap),
             ) {
-                Artwork(row.artwork, 44.dp, shape = RoundedCornerShape(6.dp))
+                Artwork(row.artwork, SongRowCover, shape = RoundedCornerShape(SongRowCoverCorner))
                 Column(Modifier.weight(1f)) {
                     SongTitle(row.title, explicit = row.explicit == true, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
                     Text(
@@ -351,9 +359,17 @@ private fun DownloadLine(
                     )
                 }
             }
-            // A hairline of progress under a download on its way.
+            // A hairline of progress at the foot of a download on its way,
+            // under its words, inside the row so the row keeps its height.
             if (row.state == DownloadStatus.Downloading) {
-                Box(Modifier.padding(start = 76.dp, end = 20.dp).fillMaxWidth().height(2.dp).background(OctoColors.TextPrimary.copy(alpha = 0.08f))) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = ListRowSide + SongRowCover + SongRowGap, end = ListRowSide)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(OctoColors.TextPrimary.copy(alpha = 0.08f)),
+                ) {
                     Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).fillMaxHeight().background(OctoColors.Accent))
                 }
             }

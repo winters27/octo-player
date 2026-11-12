@@ -103,6 +103,8 @@ import app.winters.octo.ui.common.TopOnNewOrder
 import app.winters.octo.ui.common.letterRuns
 import app.winters.octo.ui.common.letteredRows
 import app.winters.octo.ui.common.railStops
+import app.winters.octo.ui.common.railLetterAt
+import androidx.compose.runtime.derivedStateOf
 import app.winters.octo.ui.common.screenPadding
 import app.winters.octo.ui.common.sortedRows
 import app.winters.octo.ui.nav.AlbumRoute
@@ -132,10 +134,10 @@ private val sections = listOf(
     Section(OctoIcons.Songs, "Songs", SongsRoute),
     Section(OctoIcons.Genres, "Genres", GenresRoute),
     Section(OctoIcons.Folder, "Folders", FoldersRoute),
-    Section(OctoIcons.Downloaded, "Downloads", DownloadsRoute),
+    Section(OctoIcons.Download, "Downloads", DownloadsRoute),
     // Stands in until the history symbol joins the icon set.
     Section(OctoIcons.History, "History", HistoryRoute()),
-    Section(OctoIcons.Check, "Library health", LibraryHealthRoute),
+    Section(OctoIcons.Select, "Library health", LibraryHealthRoute),
 )
 
 // The library's front page: a menu of ways in, then the newest albums,
@@ -257,7 +259,8 @@ fun AlbumsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: LibraryViewMo
                 }
                 if (rail && names != null) {
                     val stops = remember(names) { railStops(letterRuns(names), headed = false) }
-                    LetterRail(stops, onJump = { grid.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
+                    val current by remember(stops, grid) { derivedStateOf { railLetterAt(stops, grid.firstVisibleItemIndex) } }
+                    LetterRail(stops, current, onJump = { grid.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
                 }
             }
         }
@@ -390,7 +393,8 @@ private fun PagedSongs(handle: ListHandle<SongsQuestion, TrackEntity>, order: So
             }
             if (rail && runs != null) {
                 val stops = remember(runs) { railStops(runs, headed = true) }
-                LetterRail(stops, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
+                val current by remember(stops, state) { derivedStateOf { railLetterAt(stops, state.firstVisibleItemIndex) } }
+                LetterRail(stops, current, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
             }
         }
     }
@@ -431,7 +435,8 @@ private fun <T> SortedList(sorted: Sorted<T>, key: (T) -> Any, row: @Composable 
         }
         if (rail && runs != null) {
             val stops = remember(runs) { railStops(runs, headed = true) }
-            LetterRail(stops, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
+            val current by remember(stops, state) { derivedStateOf { railLetterAt(stops, state.firstVisibleItemIndex) } }
+            LetterRail(stops, current, onJump = { state.requestScrollToItem(it) }, modifier = Modifier.fillMaxSize().padding(RailPadding))
         }
     }
 }

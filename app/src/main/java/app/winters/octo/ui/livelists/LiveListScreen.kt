@@ -167,14 +167,16 @@ fun LiveListScreen(
             LiveShown.Loading -> null
         }
         val problem = (shown as? LiveShown.Problem)?.words
-        if (list != null && (now != null || problem != null)) {
+        // The header shows as soon as the list is read, its size and length
+        // joining once the first walk has them; the rows fill in under it.
+        if (list != null) {
             PagedPicks(vm.rows, items, pickOf = { key, item -> if (item.row.id == key) Pickable(key, item.row, item.key).picked() else null }, base = vm.spec()) {
                 LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = screenPadding(extraTop = DetailTopGap)) {
                     item(key = "header") {
                         Column {
                             ListHeader(
                                 title = list.name,
-                                songCount = now?.count ?: 0,
+                                songCount = now?.count,
                                 durationMs = now?.durationMs ?: 0,
                                 onPlay = { vm.play(null) },
                                 onShuffle = vm::shuffle,

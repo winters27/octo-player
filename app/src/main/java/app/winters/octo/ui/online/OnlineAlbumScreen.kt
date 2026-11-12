@@ -219,7 +219,7 @@ fun OnlineAlbumScreen(
                 items(items.itemCount, key = { at -> items.peek(at)?.key?.token ?: "row:$at" }) { index ->
                     val item = items[index]
                     if (item == null) {
-                        RowPlaceholder()
+                        RowPlaceholder(numbered = true)
                     } else {
                         // Only say who is singing when it is not the album's artist.
                         SongRow(

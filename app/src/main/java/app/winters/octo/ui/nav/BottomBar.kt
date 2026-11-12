@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import app.winters.octo.ui.common.SongTitle
+import app.winters.octo.ui.common.fadingMarquee
+import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.R
 import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlazeSelected
@@ -377,12 +379,16 @@ private fun PlayerCapsule(
                 Artwork(now.artwork, 36.dp, artModifier, shape = artShape, outside = isOutsideLibrary(now.trackId))
                 ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize().padding(1.dp), whole = now.live != null)
             }
+            // A title too long for the bar scrolls through and fades softly
+            // at its edges, as the full player's does, rather than being cut.
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 SongTitle(
                     now.title.orEmpty(),
                     explicit = now.explicit,
                     style = OctoType.label,
                     color = OctoColors.TextPrimary,
+                    titleModifier = Modifier.fadingMarquee(now.trackId, scroll = !LocalReduceMotion.current),
+                    overflow = TextOverflow.Clip,
                 )
                 Text(
                     // While a play starts, the words say so in the artist's place.
@@ -390,7 +396,9 @@ private fun PlayerCapsule(
                     style = OctoType.caption.copy(fontSize = 11.sp),
                     color = OctoColors.TextMuted,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    modifier = Modifier.fadingMarquee(now.trackId, scroll = false),
                 )
             }
             val live = now.live

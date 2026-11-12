@@ -24,6 +24,8 @@ class PlaylistsLeadTest {
         assertEquals(listOf("12 songs", "45 min", "3 of 12 downloaded"), listHeaderFacts(12, 45 * 60_000L, listOf("3 of 12 downloaded")))
         // An empty list has no length to give.
         assertEquals(listOf("0 songs"), listHeaderFacts(0, 0, emptyList()))
+        // Before the count is known, only what else the page says shows.
+        assertEquals(listOf("With “live”"), listHeaderFacts(null, 0, listOf("With “live”")))
     }
 
     @Test

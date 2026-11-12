@@ -306,8 +306,10 @@ fun ArtistScreen(
             // The heart leads the control line; the radio, Play and Shuffle
             // sit at its end once there are songs. A radio needs the server,
             // to find songs like these.
+            // Across the whole screen, so the control line keeps the album
+            // page's insets.
             artist?.let { a ->
-                item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
+                wide("header") {
                     ArtistHeader(
                         a.artwork,
                         a.name,
@@ -321,7 +323,9 @@ fun ArtistScreen(
                 }
             }
             if (ownSongs.isNotEmpty()) {
-                wide("songs") {
+                // With every song shown, the rows follow the title at once,
+                // as the first few do.
+                wide("songs", gap = !allSongs) {
                     Column {
                         val more = ownSongs.size > ARTIST_SONGS
                         Row(Modifier.fillMaxWidth().padding(end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -342,7 +346,10 @@ fun ArtistScreen(
                         span = { GridItemSpan(maxLineSpan) },
                     ) { at ->
                         val song = everySong[at]
-                        Box(Modifier.bleed(GridSideMargin)) {
+                        // Rows sit edge to edge, as the first few do; the
+                        // last keeps the grid's gap below it.
+                        val gap = if (at == everySong.itemCount - 1) ArtistRowGap else 0.dp
+                        Box(Modifier.bleed(GridSideMargin).padding(bottom = gap)) {
                             if (song == null) {
                                 RowPlaceholder()
                             } else {
@@ -387,7 +394,7 @@ fun ArtistScreen(
                     wide(key) { SectionTitle(title, Modifier.padding(top = 8.dp)) }
                 }
                 items(albums, key = { it.id }) { album ->
-                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem(), width = null)
+                    AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem().padding(bottom = ArtistRowGap), width = null)
                 }
             }
             about?.let { text ->
@@ -433,6 +440,11 @@ private fun SimilarRow(similar: List<SimilarArtist>, onOpen: (NavKey) -> Unit) {
 // How far the grid keeps its columns from the screen's sides.
 private val GridSideMargin = 20.dp
 
+// The room below each line of an artist page's grid. Lines keep it
+// themselves rather than the grid, so the songs' rows, each a line of the
+// grid, sit together as one list.
+private val ArtistRowGap = 18.dp
+
 // An artist page's grid: the header across the top, then albums in columns.
 @Composable
 fun ArtistGrid(state: LazyGridState = rememberLazyGridState(), content: LazyGridScope.() -> Unit) {
@@ -448,16 +460,16 @@ fun ArtistGrid(state: LazyGridState = rememberLazyGridState(), content: LazyGrid
             bottom = padding.calculateBottomPadding(),
         ),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
         content = content,
     )
 }
 
-// A row across the whole grid. It reaches past the grid's side margins,
-// since lists and section titles keep their own.
-private fun LazyGridScope.wide(key: String, content: @Composable () -> Unit) {
+// A row across the whole grid, with the grid's gap below it unless `gap` is
+// off. It reaches past the grid's side margins, since lists and section
+// titles keep their own.
+private fun LazyGridScope.wide(key: String, gap: Boolean = true, content: @Composable () -> Unit) {
     item(key = key, span = { GridItemSpan(maxLineSpan) }) {
-        Box(Modifier.bleed(GridSideMargin)) { content() }
+        Box(Modifier.bleed(GridSideMargin).padding(bottom = if (gap) ArtistRowGap else 0.dp)) { content() }
     }
 }
 

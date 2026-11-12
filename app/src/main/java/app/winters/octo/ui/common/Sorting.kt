@@ -379,8 +379,8 @@ fun TopOnNewOrder(order: SortOrder, state: LazyGridState, top: Int = 0) {
 // The order last shown. Not state: changing it must not recompose.
 private class ShownOrder(var order: SortOrder)
 
-// Rows under sticky letter headings, a heading for each run. Rows move
-// lightly into place when the order changes.
+// Rows under letter headings, a heading for each run, each heading one item
+// of the list. Rows move lightly into place when the order changes.
 fun <T> LazyListScope.letteredRows(
     items: List<T>,
     runs: List<LetterRun>,
@@ -388,7 +388,7 @@ fun <T> LazyListScope.letteredRows(
     row: @Composable LazyItemScope.(T) -> Unit,
 ) {
     runs.forEachIndexed { runIndex, run ->
-        stickyHeader(key = "letter:$runIndex:${run.letter}") { LetterHeading(run.letter) }
+        item(key = "letter:$runIndex:${run.letter}") { LetterHeading(run.letter) }
         items(items.subList(run.start, run.start + run.count), key = key) { item ->
             Box(Modifier.animateItem()) { row(item) }
         }
@@ -402,12 +402,12 @@ fun <T> LazyListScope.sortedRows(items: List<T>, key: (T) -> Any, row: @Composab
     }
 }
 
-// The letter a run of rows starts with. It stays at the top while its rows
-// scroll, as a small dark pill rather than a full-width band, so the page's
-// glow still shows around it.
+// The letter a run of rows starts with, scrolling with its rows: a small dark
+// pill rather than a full-width band, so the page's glow still shows around
+// it. Its left edge lines up with the rows' covers.
 @Composable
 fun LetterHeading(letter: Char) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+    Box(Modifier.fillMaxWidth().padding(start = ListRowSide, end = ListRowSide, top = 16.dp, bottom = 4.dp)) {
         Text(
             letter.toString(),
             style = OctoType.caption.copy(fontWeight = FontWeight.Bold),
@@ -421,6 +421,11 @@ fun LetterHeading(letter: Char) {
         )
     }
 }
+
+// The letter the list shows at its top: the last rail stop at or above the
+// first visible item `firstVisible`, null above the first stop.
+fun railLetterAt(stops: List<RailStop>, firstVisible: Int): Char? =
+    stops.lastOrNull { it.index <= firstVisible }?.letter
 
 // A list this long, ordered by name, gets the letter rail.
 const val RAIL_MIN_ITEMS = 60
@@ -463,10 +468,12 @@ fun letterRailRoom(): Dp = LetterRailWidth + backGestureEdge()
 // The letters of a long list ordered by name, down its end edge, just inside
 // the phone's back gesture strip so a drag along it reaches the rail.
 // Touching or dragging along it jumps the list to a letter, with that letter
-// shown large beside the finger. Place it over the list, the size of the
+// shown large beside the finger. `current` is the letter the list shows at
+// its top (see railLetterAt), lit while the list scrolls; the touched letter
+// wins while the rail is held. Place it over the list, the size of the
 // list; only the rail itself takes touches.
 @Composable
-fun LetterRail(stops: List<RailStop>, onJump: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun LetterRail(stops: List<RailStop>, current: Char?, onJump: (Int) -> Unit, modifier: Modifier = Modifier) {
     val edge = backGestureEdge()
     val haptics = LocalHapticFeedback.current
     val latestStops by rememberUpdatedState(stops)
@@ -509,12 +516,13 @@ fun LetterRail(stops: List<RailStop>, onJump: (Int) -> Unit, modifier: Modifier 
                 }
                 .semantics { contentDescription = "Letters. Drag to jump through the list." },
         ) {
+            val lit = if (active >= 0) active else stops.indexOfFirst { it.letter == current }
             stops.forEachIndexed { index, stop ->
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(
                         stop.letter.toString(),
                         style = OctoType.caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                        color = if (index == active) OctoColors.TextPrimary else OctoColors.TextMuted,
+                        color = if (index == lit) OctoColors.TextPrimary else OctoColors.TextMuted,
                     )
                 }
             }

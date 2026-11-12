@@ -1,5 +1,8 @@
 package app.winters.octo.ui.common
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -90,19 +93,45 @@ fun PlaylistArtwork(
     var shown by remember { mutableStateOf<ImageBitmap?>(null) }
     val ready = key?.let(art::known)
     LaunchedEffect(key) {
+        if (spec != null && ready != null) art.shown(spec, ready)
         if (spec != null && ready == null) shown = art.art(spec, side)
+    }
+    // Until its own is drawn, the list's picture as last shown anywhere (its
+    // thumbnail), so a page opens on the same art as its row.
+    val standIn = remember(id, name, line) { art.standIn(id, name, line) }
+    val picture = ready ?: shown
+    // A picture that arrives after the cover is up fades in over what was
+    // there; one ready at once shows at once.
+    val still = LocalReduceMotion.current
+    val fade = remember { Animatable(if (picture != null) 1f else 0f) }
+    LaunchedEffect(picture != null) {
+        if (picture != null && fade.value < 1f) {
+            if (still) fade.snapTo(1f) else fade.animateTo(1f, tween(ArtFadeMs))
+        }
     }
     val fallback = OctoColors.BackgroundTertiary
     val ground = remember(spec?.id, palette, fallback) {
         spec?.let { s -> Color(backgroundColour(chooseBackground(s.id, s.palette))) } ?: fallback
     }
     Box(modifier.size(size).clip(shape).background(ground)) {
-        (ready ?: shown)?.let {
-            Image(it, contentDescription = null, modifier = Modifier.matchParentSize(), contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.High)
+        if (standIn != null && standIn !== picture) {
+            Image(standIn, contentDescription = null, modifier = Modifier.matchParentSize(), contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.High)
+        }
+        picture?.let {
+            Image(
+                it,
+                contentDescription = null,
+                modifier = Modifier.matchParentSize().graphicsLayer { alpha = fade.value },
+                contentScale = ContentScale.FillBounds,
+                filterQuality = FilterQuality.High,
+            )
         }
         if (size >= RimFrom) Box(Modifier.matchParentSize().artworkRim(shape))
     }
 }
+
+// How long a cover's art takes to fade in over its stand-in.
+const val ArtFadeMs = 200
 
 // The foot line for one of the phone's own playlists: how many songs.
 fun phonePlaylistFooter(songCount: Int): String? = playlistCoverFooter(songCount, null, null)

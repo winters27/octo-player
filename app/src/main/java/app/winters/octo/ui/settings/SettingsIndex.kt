@@ -337,7 +337,7 @@ object SettingsIndex {
         listOf("speed", "ping", "latency", "slow"), section = "Server",
     )
     val ServerScan = add(
-        "server_scan", SettingsPage.Server, "Its folders", "When the server last looked for new music",
+        "server_scan", SettingsPage.Server, "Folders", "When the server last looked for new music",
         listOf("scan", "last scan", "new music"), section = "Server",
     )
     val OctoAdmin = add(

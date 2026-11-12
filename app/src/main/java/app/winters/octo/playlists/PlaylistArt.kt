@@ -81,6 +81,15 @@ class PlaylistArt @Inject constructor(
 
     fun known(key: String): ImageBitmap? = pictures.get(key)
 
+    // The last picture drawn or read for a list with these words, at any
+    // size and colours: what a bigger cover of the same list (its page's)
+    // shows until its own is drawn, so it opens on the art its thumbnail has.
+    private val latest = LruCache<String, ImageBitmap>(64)
+
+    fun standIn(id: String, name: String, line: String?): ImageBitmap? = latest.get(standInKey(id, name, line))
+
+    private fun standInKey(id: String, name: String, line: String?) = "$id\n$name\n${line.orEmpty()}"
+
     // A list's colours, from its covers (artwork references); the list's own
     // when it has none, or none could be read.
     suspend fun palette(id: String, covers: List<String>, key: String): CoverPalette {
@@ -96,18 +105,25 @@ class PlaylistArt @Inject constructor(
     // The cover drawn `side` pixels square: kept, or drawn now off the main thread.
     suspend fun art(spec: CoverSpec, side: Int): ImageBitmap {
         val key = coverArtKey(spec, side)
-        known(key)?.let { return it }
+        val standIn = standInKey(spec.id, spec.name, spec.line)
+        known(key)?.let { return it.also { latest.put(standIn, it) } }
         val file = File(folder, coverFileName(key, "png"))
         val stored = withContext(Dispatchers.IO) {
             if (file.isFile) runCatching { android.graphics.BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull() else null
         }
-        if (stored != null) return stored.also { pictures.put(key, it) }
+        if (stored != null) return stored.also { pictures.put(key, it); latest.put(standIn, it) }
         val drawn = drawing.withPermit {
             withContext(Dispatchers.Default) { designCover(spec, side, coverMeasurer(fonts), CoverFontFamily, ::backgroundPixels, ::pictureOf) }
         }
         withContext(Dispatchers.IO) { save(file, drawn) }
         pictures.put(key, drawn)
+        latest.put(standIn, drawn)
         return drawn
+    }
+
+    // Notes a picture shown straight from memory as the list's latest.
+    fun shown(spec: CoverSpec, picture: ImageBitmap) {
+        latest.put(standInKey(spec.id, spec.name, spec.line), picture)
     }
 
     // The library's backgrounds as pixels (WebP, which Android reads), the

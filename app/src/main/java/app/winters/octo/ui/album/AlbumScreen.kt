@@ -677,7 +677,7 @@ private fun BigAlbumSongs(id: String, handle: ListHandle<Boolean, TrackEntity>, 
             }
             items(items.itemCount, key = { at -> items.peek(at)?.key() ?: "row:$at" }) { at ->
                 when (val line = items[at]) {
-                    null -> RowPlaceholder()
+                    null -> RowPlaceholder(numbered = true)
                     is AlbumLine.Disc -> DiscHeading(line.disc)
                     is AlbumLine.Song -> {
                         val item = line.item

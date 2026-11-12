@@ -281,8 +281,16 @@ fun LiveListEditScreen(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 )
             }
+            // The words rule reads as a sentence, "Songs with ...", so it
+            // never passes for a second name field.
             item(key = "words") {
-                GlassInput(query.text, { vm.change(query.copy(text = it)) }, placeholder = "With these words", modifier = Modifier.padding(horizontal = 20.dp))
+                GlassInput(
+                    query.text,
+                    { vm.change(query.copy(text = it)) },
+                    placeholder = WORDS_PLACEHOLDER,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    leading = { Text(WORDS_LEAD, style = OctoType.body, color = OctoColors.TextMuted, modifier = Modifier.padding(end = 8.dp)) },
+                )
             }
             item(key = "rules") {
                 FlowRow(
@@ -375,5 +383,9 @@ fun LiveListEditScreen(
 }
 
 const val DISCARD_CHANGES = "Discard changes?"
+
+// The words rule's sentence: "Songs with" before what is typed.
+const val WORDS_LEAD = "Songs with"
+const val WORDS_PLACEHOLDER = "these words"
 
 const val NO_RULE_MATCHES = "No songs match these rules yet. Take a rule off, or pick Any of these so a song needs to match only one."

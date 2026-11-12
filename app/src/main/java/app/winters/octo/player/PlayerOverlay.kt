@@ -1037,6 +1037,9 @@ private fun CoverFill(ref: String?) {
     }
 }
 
+// How strong the artist line under the full player's title is.
+private const val ArtistLineAlpha = 0.72f
+
 // The song's name and artist, close together so they read as one. A name
 // too long for its room scrolls through (unless motion is `calm`), and
 // either line too long fades out at its end. The name also carries Close
@@ -1064,7 +1067,9 @@ private fun TitleBlock(now: NowPlaying, calm: Boolean, onOpenArtist: (String) ->
                 // While a play starts, the words say so in the artist's place.
                 song.starting ?: song.artist.orEmpty(),
                 style = OctoType.body,
-                color = accentInk,
+                // The title's white a step back, which reads at 4.5:1 or
+                // better on the player's colors, where the accent ink did not.
+                color = LocalContentColor.current.copy(alpha = ArtistLineAlpha),
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Clip,

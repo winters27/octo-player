@@ -142,7 +142,7 @@ fun SettingsScreen(onOpen: (NavKey) -> Unit, vm: SettingsViewModel = hiltViewMod
             .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding()),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        ScreenTitle("Settings", Modifier.padding(bottom = 0.dp))
+        ScreenTitle("Settings")
         AccountCard(onOpen, vm)
         SearchField(query, onChange = { query = it })
         if (query.isNotBlank()) {

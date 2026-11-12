@@ -83,6 +83,14 @@ private val RowShape = RoundedCornerShape(12.dp)
 val ListRowSide = 12.dp
 val ListRowPickInset = 4.dp
 
+// A song row's geometry: at least this tall, its cover this big with these
+// corners, a number lead this wide, and this far between its parts.
+val SongRowMinHeight = 56.dp
+val SongRowCover = 44.dp
+val SongRowCoverCorner = 6.dp
+val SongRowNumberWidth = 28.dp
+val SongRowGap = 12.dp
+
 // Opens the menu on a long press, with a little buzz, floating beside
 // what was held. Held down, it gives a little and springs back.
 private fun Modifier.pressOrHold(haptics: HapticFeedback, spot: PressSpot, onClick: () -> Unit, onLongClick: (() -> Unit)?): Modifier = composed {
@@ -376,7 +384,7 @@ private fun SongLine(
                     )
                 }
                 // At least a row tall; taller when large text needs it.
-                .heightIn(min = 56.dp)
+                .heightIn(min = SongRowMinHeight)
                 .padding(horizontal = ListRowSide, vertical = 4.dp)
                 // With no connection, a song that cannot play is drawn faint.
                 .alpha(if (faint) OutOfReachAlpha else 1f),
@@ -424,11 +432,11 @@ private fun SongFace(
     Row(
         Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(SongRowGap),
     ) {
         val artwork: @Composable () -> Unit = {
             Box(contentAlignment = Alignment.Center) {
-                Artwork(track.artwork, 44.dp, shape = RoundedCornerShape(6.dp), outside = sign == AddSign.Mark)
+                Artwork(track.artwork, SongRowCover, shape = RoundedCornerShape(SongRowCoverCorner), outside = sign == AddSign.Mark)
                 when {
                     picked -> LeadMark { PickedMark() }
                     isNow -> LeadMark { NowPlayingBars(playing, Modifier.size(16.dp)) }
@@ -447,7 +455,7 @@ private fun SongFace(
                 )
                 artwork()
             }
-            is SongLead.Number -> Box(Modifier.width(28.dp), contentAlignment = Alignment.CenterEnd) {
+            is SongLead.Number -> Box(Modifier.width(SongRowNumberWidth), contentAlignment = Alignment.CenterEnd) {
                 when {
                     picked -> PickedMark()
                     isNow -> NowPlayingBars(playing, Modifier.size(14.dp))
@@ -500,7 +508,7 @@ private val LeadShade = Color.Black.copy(alpha = 0.5f)
 
 @Composable
 private fun LeadMark(mark: @Composable () -> Unit) {
-    Box(Modifier.size(44.dp).background(LeadShade, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { OverArt { mark() } }
+    Box(Modifier.size(SongRowCover).background(LeadShade, RoundedCornerShape(SongRowCoverCorner)), contentAlignment = Alignment.Center) { OverArt { mark() } }
 }
 
 @Composable

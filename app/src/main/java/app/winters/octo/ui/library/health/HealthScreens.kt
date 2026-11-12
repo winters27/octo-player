@@ -54,6 +54,8 @@ import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.ui.common.songs
+import androidx.compose.ui.text.style.TextAlign
 import app.winters.octo.health.DuplicateGroup
 import app.winters.octo.health.FixStep
 import app.winters.octo.health.HEALTH_ALL_CLEAR
@@ -234,6 +236,10 @@ class HealthViewModel @Inject constructor(
     val source: StateFlow<String?> = files.source
 
     val progress = files.progress
+
+    // How many songs the library holds, for the wait before the first report.
+    val songTotal: StateFlow<Int> = db.dao().libraryTrackCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
     val lastUndo: StateFlow<FixUndo?> = files.lastUndo
     val canUpgrade: StateFlow<Boolean> = upgrades.canUpgrade
 
@@ -459,7 +465,8 @@ fun LibraryHealthScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: Health
             val report = shown.report()
             val problem = (shown as? HealthShown.Problem)?.words
             if (report == null && problem == null) {
-                Loading()
+                val songTotal by vm.songTotal.collectAsStateWithLifecycle()
+                Loading(healthCheckingWords(songTotal))
             } else {
                 val findings = report?.let { r -> HealthCheck.entries.filter { r.count(it) > 0 } }.orEmpty()
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = ListPadding) {
@@ -671,9 +678,24 @@ internal fun Hairline() {
     Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(OctoColors.TextPrimary.copy(alpha = 0.08f)))
 }
 
+// The spinner while a page is read, with a quiet line under it when there
+// is something to say about the wait.
 @Composable
-internal fun Loading() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+internal fun Loading(words: String? = null) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         CircularProgressIndicator(color = OctoColors.Accent, modifier = Modifier.size(28.dp))
+        if (words != null) {
+            Text(
+                words,
+                style = OctoType.caption,
+                color = OctoColors.TextMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 14.dp),
+            )
+        }
     }
 }
+
+// What the front says while the report is first worked out: how many songs
+// it is going through, once that is known.
+fun healthCheckingWords(count: Int): String? = if (count <= 0) null else "Checking your ${songs(count)}"
