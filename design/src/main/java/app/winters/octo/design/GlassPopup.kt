@@ -148,7 +148,9 @@ private class PopupPlacing {
 // `onBack`, which answers true when it went back a page instead. It is at
 // most `maxWidth` wide and `heightShare` of the screen tall; the content
 // scrolls itself within that. While the keyboard is up it keeps above it,
-// moving over the control when there is no room under it any more.
+// moving over the control when there is no room under it any more. It keeps
+// the look and the `backdrop` it opened with until it has shrunk away, so a
+// menu opened over the player still frosts the player as both go.
 @Composable
 fun GlassPopup(
     visible: Boolean,
@@ -162,7 +164,8 @@ fun GlassPopup(
     onBack: () -> Boolean = { false },
     content: @Composable BoxScope.() -> Unit,
 ) {
-    HoldLook(visible) { PopupBody(visible, anchor, onDismiss, backdrop, modifier, title, maxWidth, heightShare, onBack, content) }
+    val frosts = rememberHeld(visible, backdrop)
+    HoldLook(visible) { PopupBody(visible, anchor, onDismiss, frosts, modifier, title, maxWidth, heightShare, onBack, content) }
 }
 
 @Composable

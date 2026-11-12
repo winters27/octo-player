@@ -78,4 +78,62 @@ class HoldLookTest {
             }
         }
     }
+
+    // The song menu over the full player, then "Go to album": the menu
+    // closes and the player goes in the same frame, and the backdrop the
+    // shell hands the menu turns from the player's to the page's. All
+    // through the menu's exit it still frosts the player, in the dark look.
+    @Test
+    fun aMenuOverThePlayerFrostsThePlayerAllThroughItsExit() {
+        var player by mutableStateOf(true)
+        var open by mutableStateOf(false)
+        var frosts: String? = null
+        var seen: OctoSurfaces? = null
+        SwingUtilities.invokeAndWait {
+            val scene = ImageComposeScene(40, 40, Density(1f)) {
+                ProvideOctoTheme(palette(ThemeChoice.Daylight)) {
+                    OverArt(enabled = player) {
+                        // As GlassPopup holds what the shell passes it.
+                        val held = rememberHeld(open, if (player) "player" else "page")
+                        HoldLook(open) {
+                            frosts = held
+                            seen = LocalOctoSurfaces.current
+                        }
+                    }
+                }
+            }
+            var frame = 0L
+            fun step() {
+                Snapshot.sendApplyNotifications()
+                frame += 16_000_000L
+                scene.render(frame)
+            }
+            try {
+                val dark = surfacesOf(OctoDefaultPalette)
+                step()
+                open = true
+                step()
+                assertEquals("opened over the player", "player", frosts)
+                assertEquals("opened over the player, its look", dark, seen)
+                // Go to album: the menu and the player close together.
+                Snapshot.withMutableSnapshot {
+                    open = false
+                    player = false
+                }
+                step()
+                assertEquals("closing", "player", frosts)
+                assertEquals("closing, its look", dark, seen)
+                step()
+                assertEquals("still closing", "player", frosts)
+                assertEquals("still closing, its look", dark, seen)
+                // Opened again over the page: the page's backdrop and look.
+                open = true
+                step()
+                assertEquals("opened over the page", "page", frosts)
+                assertEquals("opened over the page, its look", surfacesOf(palette(ThemeChoice.Daylight)), seen)
+            } finally {
+                scene.close()
+            }
+        }
+    }
 }

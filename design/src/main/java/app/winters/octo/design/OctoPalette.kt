@@ -151,8 +151,19 @@ fun SelectedFill(selected: Boolean = true, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalOctoSurfaces provides surfaces, content = content)
 }
 
-// Whether a sheet or menu draws over art, as it was when it last opened.
-private class HeldOverArt(var open: Boolean, var overArt: Boolean)
+// What a sheet or menu holds, as it was when it last opened.
+private class Held<T>(var open: Boolean, var value: T)
+
+// `value` as it was when `open` last became true, kept while it stays open
+// and all through its closing, so what changes behind a sheet or menu (the
+// player closing as it goes) changes nothing in it.
+@Composable
+fun <T> rememberHeld(open: Boolean, value: T): T {
+    val held = remember { Held(open, value) }
+    if (open && !held.open) held.value = value
+    held.open = open
+    return held.value
+}
 
 // Draws a sheet or menu over art or in the theme as it was when `open` last
 // became true, kept through its closing, so the player closing behind it
@@ -160,11 +171,7 @@ private class HeldOverArt(var open: Boolean, var overArt: Boolean)
 // while it is open draws in the new theme.
 @Composable
 fun HoldLook(open: Boolean, content: @Composable () -> Unit) {
-    val overArt = LocalOverArtOn.current
-    val held = remember { HeldOverArt(open, overArt) }
-    if (open && !held.open) held.overArt = overArt
-    held.open = open
-    OverArt(enabled = held.overArt, content = content)
+    OverArt(enabled = rememberHeld(open, LocalOverArtOn.current), content = content)
 }
 
 // A dark film's color in this theme: as it is on a dark theme; on a light
