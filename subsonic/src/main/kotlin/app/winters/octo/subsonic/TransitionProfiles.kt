@@ -43,13 +43,16 @@ data class ProfileSection(
 
 // The server's answer for one song. When `ready`, the profile follows: its
 // analysis `version`, the song's length, the whole song's level and tempo,
-// and its first 30 s and last 60 s. When not, `version` is the one the
-// server makes now, when it says.
+// and its first and last seconds. When not, `version` is the one the
+// server makes now, when it says. `revision` counts changes within a
+// version that every player still reads: a profile without one is the
+// first.
 @Serializable
 data class TransitionProfileAnswer(
     val id: String = "",
     val ready: Boolean = false,
     val version: Int = 0,
+    val revision: Int = 1,
     val durationMs: Long = 0,
     val bodyDb: Double? = null,
     val tempo: ProfileTempo? = null,

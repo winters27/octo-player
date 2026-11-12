@@ -54,6 +54,24 @@ class TransitionProfilesTest {
         assertEquals("AAEC", profile.tail!!.levels)
     }
 
+    // A profile names its revision; one from a server that names none is the
+    // first, and still reads whole.
+    @Test
+    fun aProfileWithoutARevisionIsTheFirst() {
+        val without = """{"id":"nd-1","ready":true,"version":1,"durationMs":241330,"bodyDb":-11.52,
+            "head":{"startMs":0,"hopMs":100,"levels":"AAEC","bodyDb":-12.5,"gateDb":-57.5}}"""
+        val first = TransitionProfileAnswer.parse(without)
+        assertEquals(1, first.revision)
+        assertTrue(first.ready)
+        assertEquals(1, first.version)
+        assertEquals(241_330L, first.durationMs)
+        assertEquals("AAEC", first.head!!.levels)
+        val second = TransitionProfileAnswer.parse(without.replace("\"version\":1,", "\"version\":1,\"revision\":2,"))
+        assertEquals(2, second.revision)
+        assertEquals(1, second.version)
+        assertEquals(first.copy(revision = 2), second)
+    }
+
     @Test
     fun readsANotReadyAnswer() = runTest {
         answer(ok(""""transitionProfile":{"id":"nd-2","ready":false,"version":1}"""))
