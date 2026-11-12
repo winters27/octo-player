@@ -20,12 +20,22 @@ const val LIMITER_RELEASE_MS = 100f
 //
 // The delay holds back the first moment of each stream and hands it out at
 // the end, so nothing is lost or added between songs.
+//
+// Coming back up, the level lands exactly on unity once the remaining step
+// is lost in float rounding, so sound that needs no limiting after a peak
+// passes through bit for bit.
+//
+// With `rampedAttack` the level goes down in a straight line across the
+// lookahead, reaching each frame's need just as that frame comes out,
+// instead of dropping at once when the peak comes into view. The sum of two
+// songs is limited this way, so the limiter never steps the level.
 class Limiter(
     val channels: Int,
     sampleRate: Int,
     ceilingDb: Float = LIMITER_CEILING_DB,
     lookaheadMs: Float = LIMITER_LOOKAHEAD_MS,
     releaseMs: Float = LIMITER_RELEASE_MS,
+    val rampedAttack: Boolean = false,
 ) {
     // Frames of delay.
     val latency: Int = max(1, (sampleRate * lookaheadMs / 1_000f).roundToInt())
@@ -49,12 +59,20 @@ class Limiter(
     private var needFront = 0
     private var needSize = 0
 
+    // With the ramped attack: every frame's need, by frame number, for the
+    // frames in view (a nearer need that is not the lowest can still set
+    // the slope).
+    private val needOf = if (rampedAttack) FloatArray(latency + 1) { 1f } else FloatArray(0)
+
     // Counts frames in and out, to know which needs are still in view.
     private var inCount = 0L
     private var outCount = 0L
 
     // The level applied now.
     private var gain = 1f
+
+    // The level applied to the last frame out, for checks and snapshots.
+    val level: Float get() = gain
 
     // Takes `frames` frames from `input` and writes the frames that come
     // out of the delay to `output`. Returns how many frames came out: fewer
@@ -66,7 +84,9 @@ class Limiter(
         for (frame in 0 until frames) {
             var peak = 0f
             for (ch in 0 until channels) peak = max(peak, abs(input[inIndex + ch]))
-            pushNeed(if (enabled && peak > ceiling) ceiling / peak else 1f)
+            val wanted = if (enabled && peak > ceiling) ceiling / peak else 1f
+            pushNeed(wanted)
+            if (rampedAttack) needOf[(inCount % needOf.size).toInt()] = wanted
             inCount++
 
             val slot = ((head + heldFrames) % latency) * channels
@@ -101,7 +121,8 @@ class Limiter(
         return count
     }
 
-    // Forgets the audio in the delay, after a jump to another place.
+    // Forgets the audio in the delay, after a jump to another place. The
+    // level is kept.
     fun clear() {
         head = 0
         heldFrames = 0
@@ -109,14 +130,49 @@ class Limiter(
         needSize = 0
         inCount = 0
         outCount = 0
+        needOf.fill(1f)
+    }
+
+    // Forgets the audio in the delay and puts the level back at unity, for
+    // a stream that starts over from a fresh place.
+    fun reset() {
+        clear()
+        gain = 1f
+    }
+
+    // Takes over everything `other` holds (delayed frames, needs in view
+    // and level), so a stretch can be run again from the same state. Both
+    // must be built alike.
+    fun copyFrom(other: Limiter) {
+        require(other.channels == channels && other.latency == latency && other.rampedAttack == rampedAttack) { "limiters built differently" }
+        other.held.copyInto(held)
+        head = other.head
+        heldFrames = other.heldFrames
+        other.need.copyInto(need)
+        other.needAt.copyInto(needAt)
+        needFront = other.needFront
+        needSize = other.needSize
+        other.needOf.copyInto(needOf)
+        inCount = other.inCount
+        outCount = other.outCount
+        gain = other.gain
+        enabled = other.enabled
     }
 
     // Writes the oldest held frame, turned down as far as any frame in view
-    // needs. Down is instant; back up is slow.
+    // needs. Down is instant (or a straight line across the lookahead with
+    // the ramped attack); back up is slow.
     private fun emit(output: FloatArray, at: Int) {
         while (needSize > 0 && needAt[needFront] < outCount) popFront()
-        val target = if (needSize > 0) need[needFront] else 1f
-        gain = if (target < gain) target else gain + (target - gain) * release
+        val target = if (rampedAttack) rampTarget() else if (needSize > 0) need[needFront] else 1f
+        gain = if (target < gain) {
+            target
+        } else {
+            val next = gain + (target - gain) * release
+            // The step lost in rounding would leave the level just short
+            // of its target for good (0.99986 for unity at 48 kHz).
+            if (next == gain) target else next
+        }
         val from = head * channels
         for (ch in 0 until channels) {
             var y = held[from + ch] * gain
@@ -124,6 +180,22 @@ class Limiter(
             output[at + ch] = y
         }
         outCount++
+    }
+
+    // The lowest of the straight lines from unity, as each frame in view
+    // comes into view, down to its need as it comes out.
+    private fun rampTarget(): Float {
+        var target = 1f
+        var frame = outCount
+        while (frame < inCount) {
+            val wanted = needOf[(frame % needOf.size).toInt()]
+            if (wanted < 1f) {
+                val ahead = (frame - outCount).toFloat()
+                target = minOf(target, wanted + (1f - wanted) * ahead / latency)
+            }
+            frame++
+        }
+        return target
     }
 
     private fun pushNeed(level: Float) {
