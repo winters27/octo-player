@@ -374,7 +374,7 @@ fn a_live_stream_that_drops_reconnects_and_skips_nothing() {
     let air = Arc::new(AtomicU64::new(0));
     let clock = air.clone();
     let server = ScriptServer::start(move |_, conn, _| {
-        let head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 999999999\r\n\r\n";
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 999999999\r\nConnection: close\r\n\r\n";
         if conn.write_all(head.as_bytes()).is_err() {
             return;
         }
@@ -509,9 +509,11 @@ fn gateway_headers() -> Vec<(String, String)> {
     pairs.into_iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
 }
 
-// Sends the request on to `to`.
+// Sends the request on to `to`. Like every scripted answer with a length it
+// says `Connection: close` (see `ScriptServer`).
 fn redirect(conn: &mut std::net::TcpStream, to: &str) {
-    let head = format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\n\r\n");
+    let head =
+        format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
     let _ = conn.write_all(head.as_bytes());
 }
 
@@ -522,7 +524,7 @@ fn song(conn: &mut std::net::TcpStream, asked: &crate::testing::http_server::Ask
     let from = range.and_then(|r| r.parse::<usize>().ok()).unwrap_or(0).min(body.len());
     let (len, last, sent) = (body.len(), body.len() - 1, body.len() - from);
     let _ = write!(conn, "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{last}/{len}\r\n");
-    let _ = write!(conn, "Content-Length: {sent}\r\n\r\n");
+    let _ = write!(conn, "Content-Length: {sent}\r\nConnection: close\r\n\r\n");
     let _ = conn.write_all(&body[from..]);
 }
 
@@ -530,7 +532,9 @@ fn song(conn: &mut std::net::TcpStream, asked: &crate::testing::http_server::Ask
 fn login_page(conn: &mut std::net::TcpStream, content_type: &str) {
     let body = "<!doctype html><title>Sign in</title><form method=post></form>";
     let len = body.len();
-    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\n\r\n");
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"
+    );
     let _ = conn.write_all(head.as_bytes());
     let _ = conn.write_all(body.as_bytes());
 }
@@ -558,7 +562,8 @@ fn a_redirect_on_the_same_server_keeps_every_header_and_a_seek_starts_at_the_son
         "/rest/stream?id=1" => redirect(conn, "/files/song.flac"),
         "/files/song.flac" => song(conn, asked, &file),
         _ => {
-            let _ = conn.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+            let _ =
+                conn.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         }
     });
     let opts = HttpOptions { headers: gateway_headers(), ..quick() };
@@ -650,7 +655,8 @@ fn a_redirect_to_nowhere_or_away_from_http_is_refused() {
         let server = ScriptServer::start(move |_, conn, _| match location {
             Some(to) => redirect(conn, to),
             None => {
-                let _ = conn.write_all(b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n");
+                let _ =
+                    conn.write_all(b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }
         });
         let err = HttpSource::open(&server.url("/rest/stream"), quick()).err().unwrap();
@@ -708,7 +714,7 @@ fn a_sign_in_page_met_on_a_later_request_ends_the_song() {
     let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let server = ScriptServer::start(move |_, conn, _| {
         if answers.fetch_add(1, Ordering::SeqCst) == 0 {
-            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\n");
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\nConnection: close\r\n\r\n");
             let _ = conn.write_all(&first);
         } else {
             login_page(conn, "text/html; charset=utf-8");
@@ -827,7 +833,7 @@ fn refused_with(conn: &mut std::net::TcpStream, status: u16, lines: &[&str], bod
     for line in lines {
         let _ = write!(conn, "{line}\r\n");
     }
-    let _ = write!(conn, "Content-Length: {}\r\n\r\n{body}", body.len());
+    let _ = write!(conn, "Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
 }
 
 // A refusal with this status, content type and body.
@@ -1175,7 +1181,8 @@ fn a_sign_in_page_refusing_a_later_request_ends_the_song() {
         let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let server = ScriptServer::start(move |_, conn, _| {
             if answers.fetch_add(1, Ordering::SeqCst) == 0 {
-                let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\n");
+                let _ =
+                    conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\nConnection: close\r\n\r\n");
                 let _ = conn.write_all(&first);
             } else {
                 refuse(conn);

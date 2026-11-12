@@ -301,6 +301,12 @@ type Script = dyn Fn(&Asked, &mut TcpStream, &AtomicBool) + Send + Sync;
 /// endless streams, playlists that change and servers that misbehave. The
 /// script is handed a flag that is set once the server is dropped, so an
 /// endless answer can stop.
+///
+/// It answers one request a connection and then hangs up, so an answer with
+/// a length says `Connection: close`. Without it the client keeps the
+/// connection for its next request, and when that request reaches the
+/// socket as the server closes it, the client is sent a reset in place of
+/// an answer.
 pub struct ScriptServer {
     port: u16,
     asked: Arc<Mutex<Vec<Asked>>>,
