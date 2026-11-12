@@ -217,7 +217,8 @@ fn main() {
             SectionAnalysis::of(envelope.clone(), hint, None, automix::features::HEAD_BODY_PERCENTILE)
                 .features
                 .tempo;
-        let head_tempo = analyze_head(slice(&envelope, 0, hops(automix::HEAD_SECS)), hint).features.tempo;
+        let head_tempo =
+            analyze_head(slice(&envelope, 0, hops(automix::HEAD_SECS)), hint, None).features.tempo;
         let tail_from = size - hops(automix::TAIL_SECS);
         let tail_tempo = analyze_tail(slice(&envelope, tail_from, size), hint, None).features.tempo;
         let tag_text = tag.map_or("-".to_string(), |t| format!("{t:.1}"));

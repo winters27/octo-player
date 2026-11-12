@@ -139,7 +139,7 @@ fn analyze(song: &SyntheticSong, section: &Value) -> SectionAnalysis {
     if text(section, "part") == "tail" {
         analyze_tail(envelope, tag, None)
     } else {
-        analyze_head(envelope, tag)
+        analyze_head(envelope, tag, None)
     }
 }
 

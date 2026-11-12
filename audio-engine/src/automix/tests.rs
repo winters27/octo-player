@@ -325,7 +325,7 @@ fn a_profile_plans_the_blend_a_scout_would() {
     assert_eq!((pa.duration_ms, pb.duration_ms), (220_000, 180_000));
     assert_eq!(pa.tail.start_ms, 160_000);
     assert_eq!((pa.tail.hop_ms, pa.tail.levels.len()), (100, 600));
-    assert_eq!((pb.head.start_ms, pb.head.levels.len()), (0, 300));
+    assert_eq!((pb.head.start_ms, pb.head.levels.len()), (0, 450));
     let body = pa.body_db.unwrap();
     assert!((body - a.tail().with_body_level(body).features.body_db).abs() < 1e-9);
 
@@ -363,6 +363,75 @@ fn a_profile_carries_the_whole_songs_tempo() {
         SyntheticSong { rate: 22_050, channels: 1, length_ms: 20_000, layers: click(20_000.0, 120.0) };
     let short = whole_song_profile(&short);
     assert_eq!((short.head.start_ms, short.tail.start_ms, short.tail.levels.len()), (0, 0, 200));
+}
+
+// A song whose first `intro_ms` are a quiet pad 20 dB under the rest.
+fn quiet_start(intro_ms: f64, length_ms: i64) -> SyntheticSong {
+    let pad = |from_ms: f64, to_ms: f64, db: f64| {
+        vec![tone(from_ms, to_ms, 300.0, db), tone(from_ms, to_ms, 100.0, db - 3.0)]
+    };
+    let mut layers = pad(0.0, intro_ms, -34.0);
+    layers.extend(pad(intro_ms, length_ms as f64, -14.0));
+    SyntheticSong { rate: 22_050, channels: 1, length_ms, layers }
+}
+
+#[test]
+fn heads_cover_45_s() {
+    assert_eq!(HEAD_SECS, 45.0);
+    assert_eq!(profile::PROFILE_HEAD_MS, 45_000);
+    let song = quiet_start(6_000.0, 180_000);
+    let head = song.head();
+    assert_eq!((head.envelope.start_ms, head.envelope.end_ms()), (0, 45_000));
+    let profile = whole_song_profile(&song);
+    assert_eq!((profile.head.start_ms, profile.head.levels.len()), (0, 450));
+}
+
+#[test]
+fn a_profiles_start_is_measured_against_the_whole_song() {
+    // 30 s of quiet pad: on its own the start would read the pad as its
+    // body and call the intro over at once.
+    let song = quiet_start(30_000.0, 180_000);
+    let profile = whole_song_profile(&song);
+    let body = profile.body_db.unwrap();
+    assert!((profile.head.features.body_db - body).abs() < 1e-9, "{:?}", profile.head.features);
+    let intro = profile.head.features.intro_end_ms.unwrap();
+    assert!((intro - 29_750).abs() <= 300, "{intro}");
+    // The planner reads the same from the profile.
+    assert_eq!(profile.head_analysis().features.intro_end_ms, Some(intro));
+}
+
+#[test]
+fn a_quiet_start_longer_than_the_head_ends_at_the_heads_end() {
+    let song = quiet_start(50_000.0, 180_000);
+    let profile = whole_song_profile(&song);
+    assert_eq!(profile.head.features.sound_start_ms, Some(0));
+    assert_eq!(profile.head.features.intro_end_ms, Some(45_000));
+    // Measured against its own quiet level, the scouted start is loud at once.
+    assert_eq!(song.head().features.intro_end_ms, Some(0));
+    // The same section against the song's body, as the planner gets it.
+    let quiet = song.envelope(0.0, 45_000.0, 4_093);
+    let against = analyze_head(quiet.clone(), None, profile.body_db);
+    assert_eq!(against.features.intro_end_ms, Some(quiet.end_ms()));
+    // A silent start has no intro at all.
+    let silent = SyntheticSong { rate: 22_050, channels: 1, length_ms: 45_000, layers: Vec::new() };
+    let silent = analyze_head(silent.envelope(0.0, 45_000.0, 4_093), None, Some(-14.0));
+    assert_eq!((silent.features.sound_start_ms, silent.features.intro_end_ms), (None, None));
+}
+
+#[test]
+fn a_profile_says_which_analysis_pass_made_it() {
+    let profile = whole_song_profile(&quiet_start(6_000.0, 60_000));
+    assert_eq!((profile.version, profile.revision), (PROFILE_VERSION, PROFILE_REVISION));
+    assert_eq!((PROFILE_VERSION, PROFILE_REVISION), (1, 2));
+    let handed = SongProfile::from(&profile);
+    assert_eq!(handed.revision, 2);
+    assert_eq!(handed.to_profile().unwrap().revision, 2);
+    // A profile from before revisions, which an app hands over as 1, reads
+    // the same way.
+    let older = SongProfile { revision: 1, ..handed };
+    let read = older.to_profile().expect("a revision 1 profile is read");
+    assert_eq!((read.version, read.revision), (1, 1));
+    assert_eq!(read.head, profile.head);
 }
 
 #[test]

@@ -1076,7 +1076,7 @@ fn profile_of(duration_ms: i64, tail_from_ms: i64) -> crate::automix::SongProfil
         boundaries_ms: Vec::new(),
         tempo: None,
     };
-    let head_hops = (duration_ms.min(30_000) / 100) as usize;
+    let head_hops = (duration_ms.min(crate::automix::profile::PROFILE_HEAD_MS) / 100) as usize;
     let tail_hops = ((duration_ms - tail_from_ms) / 100) as usize;
     crate::automix::SongProfile {
         duration_ms,
@@ -1084,6 +1084,7 @@ fn profile_of(duration_ms: i64, tail_from_ms: i64) -> crate::automix::SongProfil
         tempo: Some(tempo),
         head: section(0, head_hops),
         tail: section(tail_from_ms, tail_hops),
+        revision: crate::automix::PROFILE_REVISION,
     }
 }
 

@@ -41,8 +41,10 @@ pub struct SongProfileSection {
     pub tempo: Option<SongProfileTempo>,
 }
 
-/// What the planner needs about one song: its first 30 s and last 60 s, and
-/// the whole song's level and tempo.
+/// What the planner needs about one song: its first 45 s (30 s before
+/// revision 2) and last 60 s, and the whole song's level and tempo.
+/// `revision` is the analysis pass the profile comes from, 1 when the
+/// profile does not say; every revision is read the same way.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct SongProfile {
     pub duration_ms: i64,
@@ -52,6 +54,8 @@ pub struct SongProfile {
     pub tempo: Option<SongProfileTempo>,
     pub head: SongProfileSection,
     pub tail: SongProfileSection,
+    #[uniffi(default = 1)]
+    pub revision: u32,
 }
 
 impl SongProfile {
@@ -63,6 +67,7 @@ impl SongProfile {
         }
         Some(TransitionProfile {
             version: PROFILE_VERSION,
+            revision: self.revision,
             duration_ms: self.duration_ms,
             body_db: self.body_db.filter(|b| b.is_finite()),
             tempo: self.tempo.as_ref().and_then(tempo_of),
@@ -143,6 +148,7 @@ impl From<&TransitionProfile> for SongProfile {
             tempo: p.tempo.as_ref().map(tempo),
             head: section(&p.head),
             tail: section(&p.tail),
+            revision: p.revision,
         }
     }
 }

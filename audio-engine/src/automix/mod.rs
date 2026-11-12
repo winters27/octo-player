@@ -28,7 +28,9 @@ pub use planner::{
     PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan, is_plain_genre,
     plan_transition,
 };
-pub use profile::{PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code};
+pub use profile::{
+    PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,
+};
 pub use song_profile::{SongProfile, SongProfileSection, SongProfileTempo};
 
 use crate::crossfade::{FadeSong, SHORTEST_FADE_MS};
@@ -38,7 +40,7 @@ use crate::scout::PcmSink;
 pub const TAIL_SECS: f64 = 60.0;
 
 /// How much of the incoming song's start the scout decodes, in seconds.
-pub const HEAD_SECS: f64 = 30.0;
+pub const HEAD_SECS: f64 = 45.0;
 
 /// How far before the end of the outgoing song a planned blend may start.
 pub const LATEST_EXIT_SECS: f64 = planner::LONGEST_EARLY_EXIT_MS as f64 / 1_000.0;
@@ -199,7 +201,7 @@ impl SectionAnalyzer {
             return None;
         }
         Some(match self.kind {
-            SectionKind::Head => analyze_head(envelope, self.tag_bpm),
+            SectionKind::Head => analyze_head(envelope, self.tag_bpm, None),
             SectionKind::Tail => analyze_tail(envelope, self.tag_bpm, None),
         })
     }

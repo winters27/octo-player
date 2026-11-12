@@ -311,9 +311,22 @@ impl SectionAnalysis {
     }
 }
 
-/// The features of the start of a song.
-pub fn analyze_head(envelope: SectionEnvelope, tag_bpm: Option<f64>) -> SectionAnalysis {
-    SectionAnalysis::of(envelope, tag_bpm, None, HEAD_BODY_PERCENTILE)
+/// The features of the start of a song. `body_level_db`, the whole song's
+/// body level when it is known (a profile made from the whole song), stands
+/// in for the start's own; a scouted start measures its own. When the sound
+/// starts but never comes within `OUTRO_BELOW_BODY_DB` of the body inside
+/// the section, the quiet intro lasts at least that long, so it ends at the
+/// section's end.
+pub fn analyze_head(
+    envelope: SectionEnvelope,
+    tag_bpm: Option<f64>,
+    body_level_db: Option<f64>,
+) -> SectionAnalysis {
+    let mut head = SectionAnalysis::of(envelope, tag_bpm, body_level_db, HEAD_BODY_PERCENTILE);
+    if head.features.sound_start_ms.is_some() && head.features.intro_end_ms.is_none() {
+        head.features.intro_end_ms = Some(head.envelope.end_ms());
+    }
+    head
 }
 
 /// The features of the end of a song. Without a body level from the whole
