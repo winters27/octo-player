@@ -317,6 +317,9 @@ fn render_pair(a: &str, b: &str, out: &Path, opts: &Options) -> Result<Outcome, 
     let overlap = plan.overlap_secs();
     let frames = (overlap * RATE as f64) as u64;
     let shape = FadeShape {
+        kind: plan.kind,
+        hold_share: plan.hold_share,
+        rise_share: plan.rise_share,
         k: plan.k,
         curve: plan.curve,
         filter_strength: plan.filter_strength,

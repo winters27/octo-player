@@ -422,6 +422,25 @@ fn blend_into_silence(shape: FadeShape, sound: usize) -> Vec<f32> {
 }
 
 #[test]
+fn an_intro_holds_the_outgoing_song_and_brings_the_next_one_up() {
+    use crate::automix::{TransitionKind, intro_in_gain, intro_out_gain};
+    let fade = 48_000u64;
+    let shape =
+        FadeShape { kind: TransitionKind::Intro, hold_share: 0.6, rise_share: 0.25, ..Default::default() };
+    let out = blend_into_silence(shape, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    for i in (0..fade as usize).step_by(499) {
+        let t = i as f64 / fade as f64;
+        let (a, b) = (out[(fade_start + i) * 2] as f64, out[(fade_start + i) * 2 + 1] as f64);
+        assert!((a - 0.25 * intro_out_gain(t, 0.6)).abs() < 1e-6, "A {a} at {i}");
+        assert!((b - 0.25 * intro_in_gain(t, 0.25)).abs() < 1e-6, "B {b} at {i}");
+    }
+    // A at its own level through the hold, B at its own from the rise on.
+    let held = fade_start + fade as usize / 2;
+    assert_eq!((out[held * 2], out[held * 2 + 1]), (0.25, 0.25));
+}
+
+#[test]
 fn a_blend_finishes_early_once_the_outgoing_song_falls_silent() {
     let k = 0.4;
     let gated = FadeShape { k, silence_gate_db: Some(-60.0), ..Default::default() };

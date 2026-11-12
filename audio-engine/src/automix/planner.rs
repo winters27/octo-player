@@ -2,7 +2,7 @@
 
 use super::curves::{
     BLEND_CURVE, CROSSFADE_CURVE, CUT_CURVE, FILTER_STRENGTH, FadeCurve, LIFT_CURVE, beat_match_rate_at,
-    blend_gains, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
+    blend_gains, incoming_high_pass_hz, intro_gains, outgoing_high_pass_hz, outgoing_low_pass_hz,
     stepped_outgoing_low_pass_hz,
 };
 use super::features::{
@@ -176,7 +176,7 @@ pub struct TransitionPlan {
     pub curve: FadeCurve,
     /// For an intro, the share of the overlap through which the outgoing
     /// song holds its level before it fades, and the share over which the
-    /// incoming song rises to its own level (see `intro_gains`). 0 for
+    /// incoming song rises to its own level (see [`intro_gains`]). 0 for
     /// every other kind.
     pub hold_share: f64,
     pub rise_share: f64,
@@ -204,12 +204,18 @@ impl TransitionPlan {
         }
     }
 
+    /// Both volumes at `t` through the blend: outgoing, then incoming.
+    pub fn gains(&self, t: f64) -> (f64, f64) {
+        let (kind, curve, k) = (self.kind, self.curve, self.k);
+        transition_gains(kind, curve, k, self.hold_share, self.rise_share, t, self.overlap_ms as f64)
+    }
+
     pub fn out_gain(&self, t: f64) -> f64 {
-        blend_gains(self.curve, self.k, t, self.overlap_ms as f64).0
+        self.gains(t).0
     }
 
     pub fn in_gain(&self, t: f64) -> f64 {
-        blend_gains(self.curve, self.k, t, self.overlap_ms as f64).1
+        self.gains(t).1
     }
 
     /// The outgoing song's beats inside the blend as places through it (0
@@ -511,6 +517,25 @@ pub fn plan_transition(
         rise_share: 0.0,
         latest_end_ms: latest_end as i64,
         late_move_bars: 0,
+    }
+}
+
+/// The outgoing and incoming volumes at `t` (0 to 1) through a blend of
+/// `kind` lasting `overlap_ms`: an intro's hold and rise over its shares
+/// ([`intro_gains`]), any other kind the curve with weight `k` or the fixed
+/// crossfade's `curve` ([`blend_gains`]).
+pub fn transition_gains(
+    kind: TransitionKind,
+    curve: FadeCurve,
+    k: f64,
+    hold_share: f64,
+    rise_share: f64,
+    t: f64,
+    overlap_ms: f64,
+) -> (f64, f64) {
+    match kind {
+        TransitionKind::Intro => intro_gains(t, hold_share, rise_share),
+        _ => blend_gains(curve, k, t, overlap_ms),
     }
 }
 

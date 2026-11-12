@@ -26,7 +26,7 @@ pub use features::{
 };
 pub use planner::{
     LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings, TransitionContext, TransitionKind, TransitionPlan,
-    is_plain_genre, plan_transition,
+    is_plain_genre, plan_transition, transition_gains,
 };
 pub use profile::{
     PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,

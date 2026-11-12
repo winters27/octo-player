@@ -68,6 +68,93 @@ fn the_out_gain_only_falls() {
     }
 }
 
+// A 14 s intro at 120 BPM: B is at its full level 12 s in, and A fades over
+// the two bars around that point.
+const INTRO_OVERLAP_MS: f64 = 14_000.0;
+const INTRO_FULL_AT_MS: f64 = 12_000.0;
+
+fn intro_plan() -> TransitionPlan {
+    let (fade, rise) = (4_000.0, 2_000.0);
+    TransitionPlan {
+        kind: TransitionKind::Intro,
+        k: 0.0,
+        hold_share: (INTRO_FULL_AT_MS - fade / 2.0) / INTRO_OVERLAP_MS,
+        rise_share: rise / INTRO_OVERLAP_MS,
+        headroom_db: planner::OVERLAP_HEADROOM_DB,
+        ..TransitionPlan::fixed_crossfade(200_000, INTRO_OVERLAP_MS as i64, "intro")
+    }
+}
+
+#[test]
+fn an_intro_holds_then_fades_and_rises_then_holds() {
+    let plan = intro_plan();
+    let (hold, rise) = (plan.hold_share, plan.rise_share);
+    // A at its own level until the hold ends, then an equal-power fade whose
+    // middle is B's full point.
+    assert_eq!(plan.out_gain(0.0), 1.0);
+    assert_eq!(plan.out_gain(hold), 1.0);
+    let middle = plan.out_gain(INTRO_FULL_AT_MS / INTRO_OVERLAP_MS);
+    assert!((middle - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12, "{middle}");
+    assert!(plan.out_gain(1.0) < 1e-12);
+    // B up on a quarter sine over the rise, then at its own level.
+    assert_eq!(plan.in_gain(0.0), 0.0);
+    assert!((plan.in_gain(rise / 2.0) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+    assert_eq!((plan.in_gain(rise), plan.in_gain(hold), plan.in_gain(1.0)), (1.0, 1.0, 1.0));
+    let (mut last_out, mut last_in) = (1.0, 0.0);
+    for i in 0..=1_000 {
+        let (out, gain_in) = plan.gains(i as f64 / 1_000.0);
+        assert!(out <= last_out + 1e-12 && gain_in >= last_in - 1e-12, "at {i}");
+        assert!((0.0..=1.0).contains(&out) && (0.0..=1.0).contains(&gain_in), "at {i}");
+        (last_out, last_in) = (out, gain_in);
+    }
+    assert_eq!(intro_gains(0.3, hold, rise), plan.gains(0.3));
+    // Shares at their edges: no hold fades from the start, no rise is full at once.
+    assert_eq!((intro_out_gain(0.0, 0.0), intro_in_gain(0.0, 0.0)), (1.0, 1.0));
+    assert!((intro_out_gain(0.5, 0.0) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+    assert_eq!(intro_out_gain(1.0, 1.0), 1.0);
+    // Every other kind keeps its curve, whatever the shares say.
+    let blend = TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, ..plan.clone() };
+    assert_eq!(blend.gains(0.5), gains(0.5, BLEND_CURVE));
+}
+
+// The mixer's headroom at `p`: `db` lower through the blend, coming and
+// going over its first and last tenth.
+fn mixer_headroom(db: f64, p: f64) -> f64 {
+    let w = (p / 0.1).min((1.0 - p) / 0.1).clamp(0.0, 1.0);
+    10f64.powf(-db * w / 20.0)
+}
+
+// The level of the two songs summed through `plan`, in dB against their
+// bodies (both at the same level), every 10 ms: A at its body throughout;
+// B's quiet intro rising from 24 dB to 6 dB under its body by its full
+// point (where the intro rule has the intro end), at its body from there.
+fn summed_levels(plan: &TransitionPlan) -> Vec<(f64, f64)> {
+    let b_db = |ms: f64| if ms < INTRO_FULL_AT_MS { -24.0 + 18.0 * ms / INTRO_FULL_AT_MS } else { 0.0 };
+    (0..=1_400)
+        .map(|i| {
+            let ms = i as f64 * 10.0;
+            let t = ms / INTRO_OVERLAP_MS;
+            let (a, b) = plan.gains(t);
+            let h = mixer_headroom(plan.headroom_db, t);
+            let power = (a * h).powi(2) + (b * h).powi(2) * 10f64.powf(b_db(ms) / 10.0);
+            (ms, 10.0 * power.log10())
+        })
+        .collect()
+}
+
+#[test]
+fn an_intro_keeps_the_level_across_the_next_songs_full_point() {
+    let plan = intro_plan();
+    for (ms, db) in summed_levels(&plan) {
+        assert!(db.abs() <= 3.0, "{db:.2} dB at {ms} ms");
+    }
+    // A blend's curve over the same overlap lets the level fall into B's
+    // quiet intro.
+    let blend = TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, ..plan };
+    let lowest = summed_levels(&blend).into_iter().map(|(_, db)| db).fold(f64::INFINITY, f64::min);
+    assert!(lowest < -6.0, "{lowest:.2} dB");
+}
+
 #[test]
 fn sweeps_follow_their_paths() {
     let s = FILTER_STRENGTH;

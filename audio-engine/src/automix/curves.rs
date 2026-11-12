@@ -57,6 +57,31 @@ pub fn automix_in_gain(t: f64, k: f64) -> f64 {
     (1.0 - out * out).max(0.0).sqrt()
 }
 
+/// The outgoing song's volume at `t` (0 to 1) through an intro: its own
+/// level until `hold_share`, then an equal-power fade to nothing at the end,
+/// so the fade's middle falls halfway between the two.
+pub fn intro_out_gain(t: f64, hold_share: f64) -> f64 {
+    let p = t.clamp(0.0, 1.0);
+    let hold = hold_share.clamp(0.0, 1.0);
+    if p <= hold || hold >= 1.0 {
+        return 1.0;
+    }
+    ((p - hold) / (1.0 - hold) * PI / 2.0).cos().clamp(0.0, 1.0)
+}
+
+/// The incoming song's volume at `t` through an intro: up from nothing on a
+/// quarter sine over `rise_share`, then its own level to the end.
+pub fn intro_in_gain(t: f64, rise_share: f64) -> f64 {
+    let p = t.clamp(0.0, 1.0);
+    let rise = rise_share.clamp(0.0, 1.0);
+    if p >= rise { 1.0 } else { (PI / 2.0 * p / rise).sin() }
+}
+
+/// Both volumes of an intro at once: outgoing, then incoming.
+pub fn intro_gains(t: f64, hold_share: f64, rise_share: f64) -> (f64, f64) {
+    (intro_out_gain(t, hold_share), intro_in_gain(t, rise_share))
+}
+
 // Moves from `from` to `to` on a log scale as u goes from 0 to 1.
 fn log_between(from: f64, to: f64, u: f64) -> f64 {
     from * (to / from).powf(u.clamp(0.0, 1.0))

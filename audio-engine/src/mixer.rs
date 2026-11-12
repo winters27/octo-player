@@ -9,9 +9,9 @@
 use std::collections::VecDeque;
 
 use crate::automix::{
-    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_RANGE, beat_match_rate_at,
-    blend_gains, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
-    stepped_outgoing_low_pass_hz,
+    BEAT_MATCH_SETTLE_MS, Biquad, FadeCurve, LiveAnalysis, LiveAnalyzer, RATE_RANGE, TransitionKind,
+    beat_match_rate_at, incoming_high_pass_hz, outgoing_high_pass_hz, outgoing_low_pass_hz,
+    stepped_outgoing_low_pass_hz, transition_gains,
 };
 use crate::deck::Deck;
 use crate::error::Failure;
@@ -100,6 +100,12 @@ pub struct LowPassSteps {
 /// How a crossfade sounds. The default is the plain equal-power crossfade.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FadeShape {
+    /// The kind of blend. An intro's gains follow `hold_share` and
+    /// `rise_share` in place of `k` and `curve` (see
+    /// `automix::transition_gains`).
+    pub kind: TransitionKind,
+    pub hold_share: f64,
+    pub rise_share: f64,
     /// Gain curve weight: 0 is equal power (see `automix::gains`).
     pub k: f64,
     /// The fixed crossfade's shape; equal power follows `k` (see
@@ -145,6 +151,9 @@ struct Fade {
     frames: u64,
     done: u64,
     clock: FadeClock,
+    kind: TransitionKind,
+    hold_share: f64,
+    rise_share: f64,
     k: f64,
     curve: FadeCurve,
     // The blend's length in milliseconds of output, for curves with edges
@@ -869,7 +878,15 @@ impl Mixer {
         if let Some(fade) = &mut self.fade {
             for i in 0..frames {
                 let p = fade.clock.progress(fade.done + i as u64);
-                let (mut gout, mut gin) = blend_gains(fade.curve, fade.k, p, fade.overlap_ms);
+                let (mut gout, mut gin) = transition_gains(
+                    fade.kind,
+                    fade.curve,
+                    fade.k,
+                    fade.hold_share,
+                    fade.rise_share,
+                    p,
+                    fade.overlap_ms,
+                );
                 if fade.headroom_db > 0.0 {
                     let h = headroom(fade.headroom_db, p);
                     gout *= h;
@@ -946,6 +963,9 @@ impl Mixer {
             frames: plan.frames,
             done: 0,
             clock: FadeClock { frames: plan.frames, rush: None },
+            kind: shape.kind,
+            hold_share: shape.hold_share,
+            rise_share: shape.rise_share,
             k: shape.k,
             curve: shape.curve,
             overlap_ms: plan.frames as f64 * 1_000.0 / self.rate as f64,

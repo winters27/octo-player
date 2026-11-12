@@ -1374,6 +1374,9 @@ impl Player {
             body_db.map_or(SILENCE_FLOOR_DB, |body| SILENCE_FLOOR_DB.max(body - SILENCE_BELOW_BODY_DB));
         let equal_power = plan.k == 0.0;
         FadeShape {
+            kind: plan.kind,
+            hold_share: plan.hold_share,
+            rise_share: plan.rise_share,
             k: plan.k,
             curve: plan.curve,
             filter_strength: plan.filter_strength,
