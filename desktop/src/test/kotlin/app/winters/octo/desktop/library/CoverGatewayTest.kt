@@ -3,7 +3,11 @@ package app.winters.octo.desktop.library
 import app.winters.octo.covers.coverBucket
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SignInPages
+import app.winters.octo.desktop.appCoverLoader
+import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.server.FakeSecrets
 import app.winters.octo.desktop.server.ServerSecurity
+import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.SubsonicClient
@@ -11,6 +15,7 @@ import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.SignInPageAnswer
 import coil3.ImageLoader
 import coil3.PlatformContext
+import coil3.request.ErrorResult
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -107,5 +112,27 @@ class CoverGatewayTest {
         editor.commit()
         assertArrayEquals(png, coverBytes(loader, client, "c1", 100))
         assertEquals(1, server.calls.count { it.url.pathSegments.last() == "getCoverArt" })
+    }
+
+    // The app's own loader, over the accounts as the app makes them, turns
+    // a sign-in page away at its client: the cover fails as a sign-in page,
+    // and nothing is written to the disk for a later read to catch. Red when
+    // coverLoader leaves `refuse` out, or the app's loader is given none.
+    @Test
+    fun theAppsLoaderRefusesASignInPageAtItsClient() = runBlocking {
+        server.answer("ping")
+        server.respond("getCoverArt") { SignInPages.redirect("/if/flow/login") }
+        server.respond("login") { SignInPages.page() }
+        val settings = SettingsStore(File(folder.root, "settings.json"))
+        val security = ServerSecurity(settings)
+        val http = security.install(OkHttpClient.Builder()).build()
+        val accounts = Accounts(settings, FakeSecrets(), http, security)
+        val client = (accounts.signIn(server.address, "winters", "pw") as SignInOutcome.Done).connection.client
+        val loader = appCoverLoader(PlatformContext.INSTANCE, http, File(folder.root, "cache"), accounts)
+        val bucket = coverBucket(100)
+        val result = loader.execute(coverRequest(PlatformContext.INSTANCE, client, "c1", bucket).size(bucket).build())
+        val refused = (result as? ErrorResult)?.throwable
+        assertTrue("The cover came back as $result", generateSequence(refused) { it.cause }.any { it is SignInPageAnswer })
+        assertNull(loader.diskCache!!.openSnapshot(coverKey(client.primaryUrl.host, "c1", bucket)))
     }
 }

@@ -49,6 +49,7 @@ import app.winters.octo.desktop.library.coverLoader
 import app.winters.octo.desktop.library.followCoversAhead
 import app.winters.octo.desktop.nav.KeyPress
 import app.winters.octo.desktop.nav.shortcutFor
+import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -104,11 +105,13 @@ import app.winters.octo.design.TextLook
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
 import app.winters.octo.subsonic.OCTO_TRANSITIONS
+import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import java.awt.Dimension
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -143,6 +146,11 @@ private const val FIRST_FRAME_WAIT_MS = 500L
 // The most the app waits for the opening's octopus to come in before it is
 // made in any case (it lands in about 0.4 s).
 private const val OPENING_WAIT_MS = 700L
+
+// The app's image loader: covers through the app's client, and a sign-in
+// page answering in a cover's place refused by the accounts' security.
+internal fun appCoverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File, accounts: Accounts): ImageLoader =
+    coverLoader(context, http, cacheDir, accounts.security.refuseHtml())
 
 @OptIn(FlowPreview::class)
 fun main(args: Array<String>) {
@@ -288,7 +296,7 @@ fun main(args: Array<String>) {
             }
         }
         // Covers load only once the app is made, so the client is ready.
-        setSingletonImageLoaderFactory { context -> coverLoader(context, startup.now().http, places.cache, startup.now().accounts.security.refuseHtml()) }
+        setSingletonImageLoaderFactory { context -> appCoverLoader(context, startup.now().http, places.cache, startup.now().accounts) }
 
         Window(
             onCloseRequest = ::closeWindow,

@@ -157,6 +157,33 @@ class ConnectionOrderTest {
         assertEquals(setOf("work"), work.calls.map { it.headers["X-Token"] }.toSet())
     }
 
+    // Whether `what` comes true within a second and a half.
+    private fun soon(what: () -> Boolean): Boolean {
+        val until = System.currentTimeMillis() + 1_500
+        while (!what() && System.currentTimeMillis() < until) Thread.sleep(20)
+        return what()
+    }
+
+    // T16: a switch asked for while an edit holds the accounts waits its
+    // turn. Work is not asked anything until the edit is done, then the
+    // switch goes ahead and work is the one in use. Red when switchTo skips
+    // the writer lock.
+    @Test
+    fun aSwitchWaitsForAnEditThatHoldsTheAccounts() {
+        app()
+        val edit = startEdit()
+        val asked = work.calls.size
+        val switched = elsewhere.async { accounts.switchTo(workId) }
+        // A switch that went ahead would ask work within moments.
+        assertFalse("The switch asked work while the edit held the accounts", soon { work.calls.size > asked })
+        assertFalse(switched.isCompleted)
+        release.countDown()
+        assertTrue(runBlocking { edit.await() } is SignInOutcome.Done)
+        assertTrue(runBlocking { switched.await() } is SwitchOutcome.Done)
+        assertTrue(work.calls.size > asked)
+        assertEquals(workId, accounts.active!!.id)
+    }
+
     // An edit finishing after a sign-out stays signed out: saved, not made
     // the one in use, and still signed out. Red when Accounts.keep makes it
     // the one in use after a newer stop ticket, or clears a sign-out asked
