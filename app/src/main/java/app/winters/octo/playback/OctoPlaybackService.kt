@@ -113,6 +113,10 @@ internal val PLAY_FROM_SEARCH = SessionCommand("app.winters.octo.PLAY_FROM_SEARC
 private const val ARG_QUERY = "query"
 private const val ARG_EXTRAS = "extras"
 
+// Whether the decks are set up for blending when the service starts, so
+// the first song already feeds its live tap: whenever songs may blend.
+internal fun blendsAtStart(prefs: PlayerPrefs): Boolean = prefs.crossfadeMs > 0
+
 internal fun playFromSearchArgs(query: String, extras: Bundle?) = Bundle().apply {
     putString(ARG_QUERY, query)
     extras?.let { putBundle(ARG_EXTRAS, Bundle(it)) }
@@ -301,9 +305,9 @@ class OctoPlaybackService : MediaLibraryService() {
 
         scope.launch {
             try {
-                // Whether crossfade is on decides how the decks' sound path
-                // is set up, so it is known before anything is loaded.
-                crossfadeOn.set(playerSettings.prefs.first().crossfade)
+                // Whether songs blend decides how the decks' sound path is
+                // set up, so it is known before anything is loaded.
+                crossfadeOn.set(blendsAtStart(playerSettings.prefs.first()))
                 restoreQueue()
             } finally {
                 restored.complete(Unit)
