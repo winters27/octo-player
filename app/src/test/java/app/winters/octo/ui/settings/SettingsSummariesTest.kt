@@ -10,6 +10,7 @@ import app.winters.octo.device.MusicFolder
 import app.winters.octo.listening.ListenBrainzPrefs
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
@@ -24,16 +25,20 @@ class SettingsSummariesTest {
 
     @Test
     fun playback() {
-        assertEquals("Gapless · Autoplay", playbackSummary(PlayerPrefs()))
-        assertEquals("Crossfade 8 s · Autoplay", playbackSummary(PlayerPrefs(crossfade = true)))
+        // A new install, which never chose, shows Automix.
+        assertEquals("Automix · Autoplay", playbackSummary(PlayerPrefs()))
+        assertEquals("Gapless · Autoplay", playbackSummary(PlayerPrefs(betweenSongs = BetweenSongs.Gapless)))
+        assertEquals("Crossfade 8 s · Autoplay", playbackSummary(PlayerPrefs(betweenSongs = BetweenSongs.Crossfade)))
         assertEquals(
             "Crossfade 4 s · 1.25x · Skip silence",
-            playbackSummary(PlayerPrefs(crossfade = true, crossfadeSeconds = 4, speed = 1.25f, autoplay = false, skipSilence = true)),
+            playbackSummary(PlayerPrefs(betweenSongs = BetweenSongs.Crossfade, crossfadeSeconds = 4, speed = 1.25f, autoplay = false, skipSilence = true)),
         )
+        // Automix picks its own lengths, so it names none.
+        assertEquals("Automix", betweenSongsSummary(PlayerPrefs(betweenSongs = BetweenSongs.Automix, crossfadeSeconds = 12)))
         // Never more than three parts.
         assertEquals(
             "Gapless · 2x · Autoplay",
-            playbackSummary(PlayerPrefs(speed = 2f, skipSilence = true)),
+            playbackSummary(PlayerPrefs(betweenSongs = BetweenSongs.Gapless, speed = 2f, skipSilence = true)),
         )
     }
 
@@ -108,7 +113,7 @@ class SettingsSummariesTest {
     @Test
     fun linesUseTheMiddleDotAndNoDashes() {
         val lines = listOf(
-            playbackSummary(PlayerPrefs(crossfade = true, speed = 1.5f)),
+            playbackSummary(PlayerPrefs(betweenSongs = BetweenSongs.Crossfade, speed = 1.5f)),
             streamingSummary(StreamPrefs(), OfflinePrefs()),
             serverStatus(false, Place.Home, now, now),
         )

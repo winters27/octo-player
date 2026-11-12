@@ -7,6 +7,7 @@ import app.winters.octo.liveradio.KeptStations
 import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
@@ -43,7 +44,7 @@ class BackupTest {
     private val full = Backup(
         createdAt = 1_758_000_000_000,
         player = PlayerBackup(
-            PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
+            PlayerPrefs(betweenSongs = BetweenSongs.Crossfade, betweenSongsStored = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
             theme = "Dusk", themeLight = "Paper", themeDark = "Dusk", themeMatch = true,
         ),
         streaming = StreamPrefs(CopyPreference.BestQuality, StreamQuality.Kbps320, StreamQuality.Kbps128),
@@ -76,7 +77,7 @@ class BackupTest {
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
-            "accent", "glassTint", "swipeAction",
+            "settingsVersion", "accent", "glassTint", "swipeAction",
             "animatedArt",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
@@ -162,7 +163,7 @@ class BackupTest {
         assertEquals(ThemeSettings(), old.backup.player!!.themes())
         assertEquals(ThemeChoice.Octo, old.backup.player!!.themes().theme)
         assertEquals(false, old.backup.player!!.themes().match)
-        assertEquals(PlayerPrefs(crossfade = true), old.backup.player!!.prefs)
+        assertEquals(PlayerPrefs(betweenSongs = BetweenSongs.Automix, betweenSongsStored = true), old.backup.player!!.prefs)
         // A backup made with no theme set writes none of the four names.
         val written = encodeBackup(Backup(player = PlayerPrefs()))
         assertFalse(written.contains("themeLight"))
@@ -225,7 +226,7 @@ class BackupTest {
     fun anOlderOrSmallerBackupStillReads() {
         val read = decodeBackup(BYTE_ORDER_MARK + "{\"kind\": \"octo-settings\", \"version\": 1, \"player\": {\"crossfade\": true}, \"extra\": 5}")
         val backup = (read as BackupRead.Read).backup
-        assertEquals(PlayerBackup(PlayerPrefs(crossfade = true)), backup.player)
+        assertEquals(PlayerBackup(PlayerPrefs(betweenSongs = BetweenSongs.Automix, betweenSongsStored = true)), backup.player)
         assertEquals(null, backup.sound)
         assertTrue(backup.playlists.isEmpty())
     }

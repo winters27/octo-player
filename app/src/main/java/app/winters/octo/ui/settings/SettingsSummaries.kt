@@ -8,6 +8,7 @@ import app.winters.octo.device.MusicFolder
 import app.winters.octo.listening.ListenBrainzPrefs
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.playback.speedLabel
 import app.winters.octo.player.PlayerPrefs
@@ -38,8 +39,16 @@ internal val StreamQuality.label: String get() = kbps?.let { "$it kbps" } ?: "Or
 // A cache size as the settings show it.
 internal val CacheSize.label: String get() = if (this == CacheSize.Off) "Off" else "${bytes shr 30} GB"
 
+// What plays between songs, as the front page says it: "Automix",
+// "Crossfade 8 s" or "Gapless".
+fun betweenSongsSummary(prefs: PlayerPrefs): String = when (prefs.betweenSongs) {
+    BetweenSongs.Gapless -> "Gapless"
+    BetweenSongs.Crossfade -> "Crossfade ${prefs.crossfadeSeconds} s"
+    BetweenSongs.Automix -> "Automix"
+}
+
 fun playbackSummary(prefs: PlayerPrefs): String = line(
-    if (prefs.crossfade) "Crossfade ${prefs.crossfadeSeconds} s" else "Gapless",
+    betweenSongsSummary(prefs),
     speedLabel(prefs.speed).takeIf { !prefs.paceIsDefault },
     "Autoplay".takeIf { prefs.autoplay },
     "Skip silence".takeIf { prefs.skipSilence },

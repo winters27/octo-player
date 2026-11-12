@@ -58,22 +58,19 @@ object SettingsIndex {
         section: String? = null,
     ): SettingEntry = SettingEntry(id, page, title, summary, keywords, section).also { registered += it }
 
-    // Playback
-    val Crossfade = add(
-        "crossfade", SettingsPage.Playback, "Crossfade", "Each song fades into the next",
-        listOf("fade", "blend", "gapless", "transition", "mix"),
+    // Playback. Between songs keeps the id the Crossfade switch had, and the
+    // rows under it keep theirs.
+    val BetweenSongs = add(
+        "crossfade", SettingsPage.Playback, "Between songs", "Gapless, Crossfade or Automix",
+        listOf("crossfade", "gapless", "automix", "blend", "mix", "transition", "dj", "smart transitions", "between songs", "fade"),
     )
     val CrossfadeLength = add(
-        "crossfade_length", SettingsPage.Playback, "Longest blend", "The most seconds two songs blend for",
-        listOf("fade", "seconds", "duration", "crossfade length"),
+        "crossfade_length", SettingsPage.Playback, "Length", "How many seconds a crossfade lasts",
+        listOf("fade", "seconds", "duration", "crossfade length", "longest blend"),
     )
     val CrossfadeCurve = add(
         "crossfade_curve", SettingsPage.Playback, "Crossfade curve", "How one song fades into the next",
         listOf("fade", "curve", "shape", "linear", "equal power", "s-curve", "logarithmic", "mix", "dj", "transition"),
-    )
-    val SmartTransitions = add(
-        "smart_transitions", SettingsPage.Playback, "Smart transitions", "Each blend starts where the songs meet best",
-        listOf("automix", "dj", "mix", "transition", "beat", "outro"),
     )
     val FilterSweeps = add(
         "filter_sweeps", SettingsPage.Playback, "Filter sweeps", "Songs thin out as they cross",

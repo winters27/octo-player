@@ -1,6 +1,8 @@
 package app.winters.octo.player
 
 import android.content.Context
+import androidx.datastore.core.DataMigration
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -14,13 +16,28 @@ import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.ambient.AmbientPrefs
 import app.winters.octo.ambient.AmbientStrength
 import app.winters.octo.playback.AutomixSettings
+import app.winters.octo.playback.BETWEEN_SONGS_SETTINGS_VERSION
+import app.winters.octo.playback.BetweenSongs
+import app.winters.octo.playback.BetweenSongsKeys
+import app.winters.octo.playback.BetweenSongsWrite
 import app.winters.octo.playback.CopyPreference
+import app.winters.octo.playback.DEFAULT_CROSSFADE_SECONDS
 import app.winters.octo.playback.FadeCurve
+import app.winters.octo.playback.LONGEST_CROSSFADE_SECONDS
 import app.winters.octo.playback.PITCH_RANGE_SEMITONES
 import app.winters.octo.playback.Pace
+import app.winters.octo.playback.RestoredBetweenSongs
+import app.winters.octo.playback.SHORTEST_CROSSFADE_SECONDS
 import app.winters.octo.playback.StartAfter
+import app.winters.octo.playback.StoredBetweenSongs
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.playback.automixSettingsOf
+import app.winters.octo.playback.betweenSongsEdit
+import app.winters.octo.playback.crossfadeMsOf
+import app.winters.octo.playback.firstReadBetweenSongsWrite
 import app.winters.octo.playback.paceOf
+import app.winters.octo.playback.readBetweenSongs
+import app.winters.octo.playback.restoredBetweenSongs
 import app.winters.octo.playback.snapSpeed
 import app.winters.octo.player.immersive.BackgroundPrefs
 import app.winters.octo.radio.RadioAdventure
@@ -34,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
@@ -50,17 +68,18 @@ data class PlayerPrefs(
     val liveBackground: Boolean = true,
     // What the player's background is, and how it is drawn.
     val background: BackgroundPrefs = BackgroundPrefs(),
-    // Songs blending into each other, and over how many seconds at most.
-    // Smart transitions pick where and how each pair of songs meets (off
-    // blends at the end of each song), filter sweeps thin the songs out as
-    // they cross, and matching the tempo nudges the next song's speed.
-    val crossfade: Boolean = false,
-    val crossfadeSeconds: Int = 8,
-    val smartTransitions: Boolean = true,
+    // What plays between two songs (Gapless, Crossfade or Automix), and
+    // whether that choice is stored: a device that never chose shows
+    // Automix without storing it. A backup writes these itself.
+    @Transient val betweenSongs: BetweenSongs = BetweenSongs.Automix,
+    @Transient val betweenSongsStored: Boolean = false,
+    // Crossfade's length in seconds and its curve. Automix picks its own
+    // lengths and curves.
+    val crossfadeSeconds: Int = DEFAULT_CROSSFADE_SECONDS,
+    // Automix's own two: filter sweeps thin the songs out as they cross,
+    // and matching the tempo nudges the next song's speed.
     val filterSweeps: Boolean = true,
-    val matchTempo: Boolean = false,
-    // The shape of the crossfade with smart transitions off; smart
-    // transitions pick their own.
+    val matchTempo: Boolean = true,
     val crossfadeCurve: FadeCurve = FadeCurve.EqualPower,
     // Looking lyrics up online when the server and the song's files have none.
     val lyricsOnline: Boolean = true,
@@ -110,17 +129,11 @@ data class PlayerPrefs(
     @Serializable(with = AnimatedArtByKey::class) val animatedArt: AnimatedArtSetting = AnimatedArtSetting.Default,
 ) {
     // What the player uses: the longest blend, or 0 for none.
-    val crossfadeMs: Long get() = if (crossfade) crossfadeSeconds * 1_000L else 0
+    val crossfadeMs: Long get() = crossfadeMsOf(betweenSongs, crossfadeSeconds)
 
     // How the player plans the blends.
     val automix: AutomixSettings
-        get() = AutomixSettings(
-            maxOverlapMs = crossfadeMs,
-            smart = smartTransitions,
-            filterSweeps = filterSweeps,
-            beatMatch = matchTempo,
-            fadeCurve = crossfadeCurve,
-        )
+        get() = automixSettingsOf(betweenSongs, crossfadeSeconds, crossfadeCurve, filterSweeps, matchTempo)
 
     // The speed and pitch the player is set to.
     val pace: Pace get() = paceOf(speed, keepPitch, pitchSemitones)
@@ -154,17 +167,41 @@ object AnimatedArtByKey : KSerializer<AnimatedArtSetting> {
     override fun deserialize(decoder: Decoder): AnimatedArtSetting = AnimatedArtSetting.fromKey(decoder.decodeString())
 }
 
-// The range the longest blend can be set to.
-val CrossfadeSecondsRange = 2..16
+// The range Crossfade's length can be set to.
+val CrossfadeSecondsRange = SHORTEST_CROSSFADE_SECONDS..LONGEST_CROSSFADE_SECONDS
 
-private val Context.playerPrefs by preferencesDataStore("player")
+// A change to one Between songs setting. Every write of these settings is
+// one of them, made through PlayerSettings.editBetweenSongs.
+sealed interface BetweenSongsChange {
+    data class Choose(val choice: BetweenSongs) : BetweenSongsChange
+
+    data class Length(val seconds: Int) : BetweenSongsChange
+
+    data class Curve(val curve: FadeCurve) : BetweenSongsChange
+
+    data class FilterSweeps(val on: Boolean) : BetweenSongsChange
+
+    data class MatchTempo(val on: Boolean) : BetweenSongsChange
+}
+
+// What the player's settings need done when they are first read.
+internal val playerMigrations: List<DataMigration<Preferences>> = listOf(BetweenSongsFirstRead)
+
+private val Context.playerPrefs by preferencesDataStore("player", produceMigrations = { playerMigrations })
 private val LIVE_BACKGROUND = booleanPreferencesKey("live_background")
-private val CROSSFADE = booleanPreferencesKey("crossfade")
-private val CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
-private val SMART_TRANSITIONS = booleanPreferencesKey("smart_transitions")
-private val FILTER_SWEEPS = booleanPreferencesKey("filter_sweeps")
-private val MATCH_TEMPO = booleanPreferencesKey("match_tempo")
-private val CROSSFADE_CURVE = stringPreferencesKey("crossfade_curve")
+
+// The Between songs keys. `crossfade` and `smart_transitions` are what
+// older apps read in place of `between_songs`: they are only read to tell
+// an untouched device, and written beside every write of the choice.
+private val BETWEEN_SONGS = stringPreferencesKey(BetweenSongsKeys.BETWEEN_SONGS)
+private val CROSSFADE = booleanPreferencesKey(BetweenSongsKeys.CROSSFADE)
+private val CROSSFADE_SECONDS = intPreferencesKey(BetweenSongsKeys.CROSSFADE_SECONDS)
+private val SMART_TRANSITIONS = booleanPreferencesKey(BetweenSongsKeys.SMART_TRANSITIONS)
+private val FILTER_SWEEPS = booleanPreferencesKey(BetweenSongsKeys.FILTER_SWEEPS)
+private val MATCH_TEMPO = booleanPreferencesKey(BetweenSongsKeys.MATCH_TEMPO)
+private val CROSSFADE_CURVE = stringPreferencesKey(BetweenSongsKeys.CROSSFADE_CURVE)
+private val betweenSongsKeyNamed: Map<String, Preferences.Key<*>> =
+    listOf(BETWEEN_SONGS, CROSSFADE, CROSSFADE_SECONDS, SMART_TRANSITIONS, FILTER_SWEEPS, MATCH_TEMPO, CROSSFADE_CURVE).associateBy { it.name }
 private val LYRICS_ONLINE = booleanPreferencesKey("lyrics_online")
 private val SPEED = floatPreferencesKey("speed")
 private val KEEP_PITCH = booleanPreferencesKey("keep_pitch")
@@ -224,10 +261,52 @@ internal fun streamPrefsOf(stored: Preferences): StreamPrefs {
     )
 }
 
+// The Between songs keys as stored, each null when it is not.
+internal fun storedBetweenSongs(stored: Preferences): StoredBetweenSongs {
+    val byName = stored.asMap().mapKeys { it.key.name }
+    return StoredBetweenSongs.read(byName::get)
+}
+
+// Writes the choice with the mirrors older apps read, and Match tempo when
+// the write turns it on.
+private fun MutablePreferences.putBetweenSongs(write: BetweenSongsWrite) {
+    this[BETWEEN_SONGS] = write.choice.stored
+    this[CROSSFADE] = write.crossfade
+    this[SMART_TRANSITIONS] = write.smartTransitions
+    write.matchTempo?.let { this[MATCH_TEMPO] = it }
+}
+
+// What restoring these settings does to the Between songs keys: a stored
+// choice is written again with its mirrors, and without one the device is
+// untouched again.
+private fun restoredOf(player: PlayerPrefs): RestoredBetweenSongs = restoredBetweenSongs(
+    BETWEEN_SONGS_SETTINGS_VERSION,
+    StoredBetweenSongs(betweenSongs = player.betweenSongs.stored.takeIf { player.betweenSongsStored }),
+)
+
+// At the first read of the player's settings, a device that chose before
+// the Between songs choice existed (a crossfade setting of its own) stores
+// the choice its settings come to, once, so its backups carry it. An
+// untouched device, and one whose choice is stored, are left as they are.
+internal object BetweenSongsFirstRead : DataMigration<Preferences> {
+    override suspend fun shouldMigrate(currentData: Preferences): Boolean =
+        firstReadBetweenSongsWrite(storedBetweenSongs(currentData)) != null
+
+    override suspend fun migrate(currentData: Preferences): Preferences {
+        val write = firstReadBetweenSongsWrite(storedBetweenSongs(currentData)) ?: return currentData
+        return currentData.toMutablePreferences().apply { putBetweenSongs(write) }.toPreferences()
+    }
+
+    override suspend fun cleanUp() = Unit
+}
+
 @Singleton
-class PlayerSettings @Inject constructor(@ApplicationContext private val context: Context) {
-    val prefs: Flow<PlayerPrefs> = context.playerPrefs.data.map { stored ->
+class PlayerSettings internal constructor(private val store: DataStore<Preferences>) {
+    @Inject constructor(@ApplicationContext context: Context) : this(context.playerPrefs)
+
+    val prefs: Flow<PlayerPrefs> = store.data.map { stored ->
         val defaults = PlayerPrefs()
+        val between = readBetweenSongs(storedBetweenSongs(stored))
         PlayerPrefs(
             liveBackground = stored[LIVE_BACKGROUND] ?: defaults.liveBackground,
             background = BackgroundPrefs(
@@ -239,11 +318,11 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
                 fps = stored[BACKGROUND_FPS] ?: defaults.background.fps,
                 speed = stored[BACKGROUND_SPEED] ?: defaults.background.speed,
             ).sane(),
-            crossfade = stored[CROSSFADE] ?: defaults.crossfade,
+            betweenSongs = between.choice,
+            betweenSongsStored = between.stored,
             crossfadeSeconds = (stored[CROSSFADE_SECONDS] ?: defaults.crossfadeSeconds).coerceIn(CrossfadeSecondsRange),
-            smartTransitions = stored[SMART_TRANSITIONS] ?: defaults.smartTransitions,
             filterSweeps = stored[FILTER_SWEEPS] ?: defaults.filterSweeps,
-            matchTempo = stored[MATCH_TEMPO] ?: defaults.matchTempo,
+            matchTempo = between.matchTempo,
             crossfadeCurve = choice(stored[CROSSFADE_CURVE], defaults.crossfadeCurve),
             lyricsOnline = stored[LYRICS_ONLINE] ?: defaults.lyricsOnline,
             speed = snapSpeed(stored[SPEED] ?: defaults.speed),
@@ -279,60 +358,54 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
         )
     }
 
-    val streamPrefs: Flow<StreamPrefs> = context.playerPrefs.data.map(::streamPrefsOf)
+    val streamPrefs: Flow<StreamPrefs> = store.data.map(::streamPrefsOf)
 
     suspend fun setLiveBackground(on: Boolean) {
-        context.playerPrefs.edit { it[LIVE_BACKGROUND] = on }
+        store.edit { it[LIVE_BACKGROUND] = on }
     }
 
     // The player's background settings, all at once.
     suspend fun setBackground(prefs: BackgroundPrefs) {
-        context.playerPrefs.edit { it.putBackground(prefs.sane()) }
+        store.edit { it.putBackground(prefs.sane()) }
     }
 
-    suspend fun setCrossfade(on: Boolean) {
-        context.playerPrefs.edit { it[CROSSFADE] = on }
-    }
-
-    suspend fun setCrossfadeSeconds(seconds: Int) {
-        context.playerPrefs.edit { it[CROSSFADE_SECONDS] = seconds.coerceIn(CrossfadeSecondsRange) }
-    }
-
-    suspend fun setSmartTransitions(on: Boolean) {
-        context.playerPrefs.edit { it[SMART_TRANSITIONS] = on }
-    }
-
-    suspend fun setFilterSweeps(on: Boolean) {
-        context.playerPrefs.edit { it[FILTER_SWEEPS] = on }
-    }
-
-    suspend fun setMatchTempo(on: Boolean) {
-        context.playerPrefs.edit { it[MATCH_TEMPO] = on }
-    }
-
-    suspend fun setCrossfadeCurve(curve: FadeCurve) {
-        context.playerPrefs.edit { it[CROSSFADE_CURVE] = curve.name }
+    // Every change to a Between songs setting comes here. While the choice
+    // is not stored, the same edit first stores what the device shows (the
+    // choice, Match tempo, the mirrors), so the change keeps the rest as
+    // it was; then the change itself.
+    suspend fun editBetweenSongs(change: BetweenSongsChange) {
+        store.edit { prefs ->
+            val choice = (change as? BetweenSongsChange.Choose)?.choice
+            betweenSongsEdit(storedBetweenSongs(prefs), choice).forEach { prefs.putBetweenSongs(it) }
+            when (change) {
+                is BetweenSongsChange.Choose -> Unit
+                is BetweenSongsChange.Length -> prefs[CROSSFADE_SECONDS] = change.seconds.coerceIn(CrossfadeSecondsRange)
+                is BetweenSongsChange.Curve -> prefs[CROSSFADE_CURVE] = change.curve.name
+                is BetweenSongsChange.FilterSweeps -> prefs[FILTER_SWEEPS] = change.on
+                is BetweenSongsChange.MatchTempo -> prefs[MATCH_TEMPO] = change.on
+            }
+        }
     }
 
     suspend fun setLyricsOnline(on: Boolean) {
-        context.playerPrefs.edit { it[LYRICS_ONLINE] = on }
+        store.edit { it[LYRICS_ONLINE] = on }
     }
 
     suspend fun setSpeed(speed: Float) {
-        context.playerPrefs.edit { it[SPEED] = snapSpeed(speed) }
+        store.edit { it[SPEED] = snapSpeed(speed) }
     }
 
     suspend fun setKeepPitch(on: Boolean) {
-        context.playerPrefs.edit { it[KEEP_PITCH] = on }
+        store.edit { it[KEEP_PITCH] = on }
     }
 
     suspend fun setPitchSemitones(semitones: Int) {
-        context.playerPrefs.edit { it[PITCH_SEMITONES] = semitones.coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES) }
+        store.edit { it[PITCH_SEMITONES] = semitones.coerceIn(-PITCH_RANGE_SEMITONES, PITCH_RANGE_SEMITONES) }
     }
 
     // Normal speed and pitch again.
     suspend fun resetPace() {
-        context.playerPrefs.edit {
+        store.edit {
             it.remove(SPEED)
             it.remove(KEEP_PITCH)
             it.remove(PITCH_SEMITONES)
@@ -340,43 +413,43 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
     }
 
     suspend fun setSkipSilence(on: Boolean) {
-        context.playerPrefs.edit { it[SKIP_SILENCE] = on }
+        store.edit { it[SKIP_SILENCE] = on }
     }
 
     suspend fun setAutoplay(on: Boolean) {
-        context.playerPrefs.edit { it[AUTOPLAY] = on }
+        store.edit { it[AUTOPLAY] = on }
     }
 
     suspend fun setRadioDiscovery(discovery: RadioDiscovery) {
-        context.playerPrefs.edit { it[RADIO_DISCOVERY] = discovery.name }
+        store.edit { it[RADIO_DISCOVERY] = discovery.name }
     }
 
     suspend fun setRadioAdventure(adventure: RadioAdventure) {
-        context.playerPrefs.edit { it[RADIO_ADVENTURE] = adventure.name }
+        store.edit { it[RADIO_ADVENTURE] = adventure.name }
     }
 
     suspend fun setRadioVariety(variety: RadioVariety) {
-        context.playerPrefs.edit { it[RADIO_VARIETY] = variety.name }
+        store.edit { it[RADIO_VARIETY] = variety.name }
     }
 
     suspend fun setRadioFavorites(on: Boolean) {
-        context.playerPrefs.edit { it[RADIO_FAVORITES] = on }
+        store.edit { it[RADIO_FAVORITES] = on }
     }
 
     suspend fun setResumeWired(on: Boolean) {
-        context.playerPrefs.edit { it[RESUME_WIRED] = on }
+        store.edit { it[RESUME_WIRED] = on }
     }
 
     suspend fun setResumeBluetooth(on: Boolean) {
-        context.playerPrefs.edit { it[RESUME_BLUETOOTH] = on }
+        store.edit { it[RESUME_BLUETOOTH] = on }
     }
 
     suspend fun setResumeAlways(on: Boolean) {
-        context.playerPrefs.edit { it[RESUME_ALWAYS] = on }
+        store.edit { it[RESUME_ALWAYS] = on }
     }
 
     suspend fun setAmbientStrength(strength: AmbientStrength) {
-        context.playerPrefs.edit { it[AMBIENT_STRENGTH] = strength.name }
+        store.edit { it[AMBIENT_STRENGTH] = strength.name }
     }
 
     suspend fun setAmbientArea(area: AmbientArea, on: Boolean) {
@@ -386,60 +459,59 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             AmbientArea.Search -> AMBIENT_SEARCH
             AmbientArea.Settings -> AMBIENT_SETTINGS
         }
-        context.playerPrefs.edit { it[key] = on }
+        store.edit { it[key] = on }
     }
 
     suspend fun setAmbientBar(on: Boolean) {
-        context.playerPrefs.edit { it[AMBIENT_BAR] = on }
+        store.edit { it[AMBIENT_BAR] = on }
     }
 
     suspend fun setAmbientPageArtwork(on: Boolean) {
-        context.playerPrefs.edit { it[AMBIENT_PAGE_ARTWORK] = on }
+        store.edit { it[AMBIENT_PAGE_ARTWORK] = on }
     }
 
     suspend fun setReduceMotion(on: Boolean) {
-        context.playerPrefs.edit { it[REDUCE_MOTION] = on }
+        store.edit { it[REDUCE_MOTION] = on }
     }
 
     suspend fun setCastRenderers(on: Boolean) {
-        context.playerPrefs.edit { it[CAST_RENDERERS] = on }
+        store.edit { it[CAST_RENDERERS] = on }
     }
 
     suspend fun setCastKeepPlaying(on: Boolean) {
-        context.playerPrefs.edit { it[CAST_KEEP_PLAYING] = on }
+        store.edit { it[CAST_KEEP_PLAYING] = on }
     }
 
     suspend fun setLibraryOnly(on: Boolean) {
-        context.playerPrefs.edit { it[LIBRARY_ONLY] = on }
+        store.edit { it[LIBRARY_ONLY] = on }
     }
 
     suspend fun setSwipeAction(action: SwipeAction) {
-        context.playerPrefs.edit { it[SWIPE_ACTION] = action.name }
+        store.edit { it[SWIPE_ACTION] = action.name }
     }
 
     suspend fun setAccent(accent: AccentChoice) {
-        context.playerPrefs.edit { it[ACCENT] = accent.name }
+        store.edit { it[ACCENT] = accent.name }
     }
 
     suspend fun setGlassTint(on: Boolean) {
-        context.playerPrefs.edit { it[GLASS_TINT] = on }
+        store.edit { it[GLASS_TINT] = on }
     }
 
     suspend fun setAnimatedArt(setting: AnimatedArtSetting) {
-        context.playerPrefs.edit { it[ANIMATED_ART] = setting.key }
+        store.edit { it[ANIMATED_ART] = setting.key }
     }
 
     // Everything at once, for a backup.
     suspend fun snapshot(): Pair<PlayerPrefs, StreamPrefs> = prefs.first() to streamPrefs.first()
 
-    // Puts back every setting from a backup in one go.
+    // Puts back every setting from a backup in one go. The Between songs
+    // choice comes last, in the same edit, so nothing is read in between.
     suspend fun restore(player: PlayerPrefs, stream: StreamPrefs) {
-        context.playerPrefs.edit {
+        store.edit {
             it[LIVE_BACKGROUND] = player.liveBackground
             it.putBackground(player.background.sane())
-            it[CROSSFADE] = player.crossfade
             it[CROSSFADE_SECONDS] = player.crossfadeSeconds.coerceIn(CrossfadeSecondsRange)
-            it[SMART_TRANSITIONS] = player.smartTransitions
             it[FILTER_SWEEPS] = player.filterSweeps
             it[MATCH_TEMPO] = player.matchTempo
             it[CROSSFADE_CURVE] = player.crossfadeCurve.name
@@ -475,23 +547,27 @@ class PlayerSettings @Inject constructor(@ApplicationContext private val context
             it[STREAM_WIFI] = stream.wifi.name
             it[STREAM_MOBILE] = stream.mobile.name
             it[START_AFTER] = stream.startAfter.name
+            when (val between = restoredOf(player)) {
+                RestoredBetweenSongs.Untouched -> BetweenSongsKeys.UNTOUCHED_RESTORE_REMOVES.forEach { name -> it -= betweenSongsKeyNamed.getValue(name) }
+                is RestoredBetweenSongs.Chosen -> it.putBetweenSongs(between.write)
+            }
         }
     }
 
     suspend fun setCopies(preference: CopyPreference) {
-        context.playerPrefs.edit { it[COPIES] = preference.name }
+        store.edit { it[COPIES] = preference.name }
     }
 
     suspend fun setStreamWifi(quality: StreamQuality) {
-        context.playerPrefs.edit { it[STREAM_WIFI] = quality.name }
+        store.edit { it[STREAM_WIFI] = quality.name }
     }
 
     suspend fun setStreamMobile(quality: StreamQuality) {
-        context.playerPrefs.edit { it[STREAM_MOBILE] = quality.name }
+        store.edit { it[STREAM_MOBILE] = quality.name }
     }
 
     suspend fun setStartAfter(startAfter: StartAfter) {
-        context.playerPrefs.edit { it[START_AFTER] = startAfter.name }
+        store.edit { it[START_AFTER] = startAfter.name }
     }
 }
 

@@ -11,7 +11,13 @@ import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.lyrics.LyricsLook
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
+import app.winters.octo.playback.BETWEEN_SONGS_SETTINGS_VERSION
+import app.winters.octo.playback.BetweenSongs
+import app.winters.octo.playback.BetweenSongsWrite
+import app.winters.octo.playback.RestoredBetweenSongs
+import app.winters.octo.playback.StoredBetweenSongs
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.playback.restoredBetweenSongs
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -30,6 +36,7 @@ import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import java.net.URI
 import kotlin.math.abs
@@ -162,6 +169,13 @@ data class ServerBackup(val address: String, val username: String)
 // player's fields as they always were, then `theme`, `themeLight`,
 // `themeDark` and `themeMatch`. A backup from before themes has none of the
 // four and reads as Octo's.
+//
+// The Between songs choice: `settingsVersion` says the backup has it,
+// `betweenSongs` is there only when the device stored a choice, and
+// `crossfade` and `smartTransitions` say the same to older apps. Read
+// back, `prefs` holds what a restore leaves the device showing: a backup
+// from before the choice goes through the untouched rule on its old
+// fields, and a newer one without a choice is untouched.
 @Serializable(with = PlayerBackupSerializer::class)
 data class PlayerBackup(
     val prefs: PlayerPrefs = PlayerPrefs(),
@@ -176,11 +190,21 @@ data class PlayerBackup(
 }
 
 object PlayerBackupSerializer : KSerializer<PlayerBackup> {
+    private const val SETTINGS_VERSION = "settingsVersion"
+    private const val BETWEEN_SONGS = "betweenSongs"
+    private const val CROSSFADE = "crossfade"
+    private const val SMART_TRANSITIONS = "smartTransitions"
+
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("PlayerBackup")
 
     override fun serialize(encoder: Encoder, value: PlayerBackup) {
         val json = encoder as JsonEncoder
         val fields = json.json.encodeToJsonElement(PlayerPrefs.serializer(), value.prefs).jsonObject.toMutableMap()
+        val mirrors = BetweenSongsWrite(value.prefs.betweenSongs)
+        fields[CROSSFADE] = JsonPrimitive(mirrors.crossfade)
+        fields[SMART_TRANSITIONS] = JsonPrimitive(mirrors.smartTransitions)
+        fields[SETTINGS_VERSION] = JsonPrimitive(BETWEEN_SONGS_SETTINGS_VERSION)
+        if (value.prefs.betweenSongsStored) fields[BETWEEN_SONGS] = JsonPrimitive(value.prefs.betweenSongs.stored)
         value.theme?.let { fields["theme"] = JsonPrimitive(it) }
         value.themeLight?.let { fields["themeLight"] = JsonPrimitive(it) }
         value.themeDark?.let { fields["themeDark"] = JsonPrimitive(it) }
@@ -192,8 +216,28 @@ object PlayerBackupSerializer : KSerializer<PlayerBackup> {
         val json = decoder as JsonDecoder
         val fields = json.decodeJsonElement().jsonObject
         fun text(key: String) = (fields[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        fun flag(key: String) = (fields[key] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+        fun number(key: String) = (fields[key] as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull
+        val prefs = json.json.decodeFromJsonElement(PlayerPrefs.serializer(), fields)
+        val saved = StoredBetweenSongs(
+            betweenSongs = text(BETWEEN_SONGS),
+            crossfade = flag(CROSSFADE),
+            crossfadeSeconds = number("crossfadeSeconds"),
+            smartTransitions = flag(SMART_TRANSITIONS),
+            filterSweeps = flag("filterSweeps"),
+            matchTempo = flag("matchTempo"),
+            crossfadeCurve = text("crossfadeCurve"),
+        )
+        val restored = when (val between = restoredBetweenSongs(number(SETTINGS_VERSION), saved)) {
+            RestoredBetweenSongs.Untouched -> prefs.copy(betweenSongs = BetweenSongs.Automix, betweenSongsStored = false, matchTempo = true)
+            is RestoredBetweenSongs.Chosen -> prefs.copy(
+                betweenSongs = between.write.choice,
+                betweenSongsStored = true,
+                matchTempo = between.write.matchTempo ?: prefs.matchTempo,
+            )
+        }
         return PlayerBackup(
-            prefs = json.json.decodeFromJsonElement(PlayerPrefs.serializer(), fields),
+            prefs = restored,
             theme = text("theme"),
             themeLight = text("themeLight"),
             themeDark = text("themeDark"),

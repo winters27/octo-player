@@ -15,7 +15,7 @@ class SettingsIndexTest {
         val ids = SettingsIndex.all.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
         assertTrue(SettingsIndex.all.all { it.title.isNotBlank() })
-        assertEquals(SettingsIndex.Crossfade, SettingsIndex.byId("crossfade"))
+        assertEquals(SettingsIndex.BetweenSongs, SettingsIndex.byId("crossfade"))
     }
 
     @Test
@@ -38,13 +38,31 @@ class SettingsIndexTest {
 
     @Test
     fun theTitleComesFirst() {
-        assertEquals(listOf("Crossfade", "Crossfade curve", "Longest blend"), titles("crossfade").take(3))
-        assertEquals("Crossfade", titles("CROSS").first())
+        assertEquals(listOf("Crossfade curve", "Between songs", "Length"), titles("crossfade").take(3))
+        assertEquals("Crossfade curve", titles("CROSS").first())
+    }
+
+    // Between songs answers every word for what plays between two songs,
+    // Smart transitions' among them, and its rows keep their ids.
+    @Test
+    fun betweenSongsAnswersEveryWordForIt() {
+        listOf("smart transitions", "gapless", "automix", "blend", "between songs").forEach { word ->
+            assertEquals(word, "Between songs", titles(word).first())
+        }
+        listOf("crossfade", "mix", "transition", "dj", "smart", "fade").forEach { word ->
+            assertTrue(word, "Between songs" in titles(word))
+        }
+        assertEquals("crossfade", SettingsIndex.BetweenSongs.id)
+        assertTrue(SettingsIndex.all.none { it.id == "smart_transitions" || it.title == "Smart transitions" })
+        assertEquals("Length", SettingsIndex.CrossfadeLength.title)
+        assertEquals(SettingsIndex.CrossfadeLength, SettingsIndex.byId("crossfade_length"))
+        assertTrue("Length" in titles("longest blend"))
+        listOf("crossfade_curve", "filter_sweeps", "match_tempo").forEach { id -> assertTrue(id, SettingsIndex.byId(id) != null) }
     }
 
     @Test
     fun otherWordsFindASetting() {
-        assertEquals("Crossfade", titles("gapless").first())
+        assertEquals("Between songs", titles("gapless").first())
         assertEquals("Speed", titles("semitones").first())
         assertTrue("Speed" in titles("tempo"))
         assertTrue("Loudness" in titles("replaygain"))

@@ -1,0 +1,55 @@
+{
+  "about": "Backups' player sections as each app writes them, and the Between songs settings a restore of each leaves the device showing. untouched means the restore takes between_songs, crossfade, smart_transitions and match_tempo off the device.",
+  "cases": [
+    {
+      "name": "1.12, never touched",
+      "player": {"crossfade": false, "crossfadeSeconds": 8, "smartTransitions": true, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "EqualPower"},
+      "choice": "Automix", "stored": false, "matchTempo": true, "crossfadeSeconds": 8
+    },
+    {
+      "name": "1.12, crossfade turned on and off again",
+      "player": {"crossfade": false},
+      "choice": "Automix", "stored": false, "matchTempo": true, "crossfadeSeconds": 8
+    },
+    {
+      "name": "1.12, Gapless with a length of its own",
+      "player": {"crossfade": false, "crossfadeSeconds": 4, "smartTransitions": true, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "EqualPower"},
+      "choice": "Gapless", "stored": true, "matchTempo": false, "crossfadeSeconds": 4
+    },
+    {
+      "name": "1.12, crossfade with smart transitions off",
+      "player": {"crossfade": true, "crossfadeSeconds": 6, "smartTransitions": false, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "SCurve"},
+      "choice": "Crossfade", "stored": true, "matchTempo": false, "crossfadeSeconds": 6
+    },
+    {
+      "name": "1.12, smart transitions with Match tempo off",
+      "player": {"crossfade": true, "crossfadeSeconds": 10, "smartTransitions": true, "filterSweeps": false, "matchTempo": false, "crossfadeCurve": "EqualPower"},
+      "choice": "Automix", "stored": true, "matchTempo": true, "crossfadeSeconds": 10
+    },
+    {
+      "name": "settings version 2, never chose",
+      "player": {"settingsVersion": 2, "crossfade": true, "smartTransitions": true, "crossfadeSeconds": 8, "filterSweeps": true, "matchTempo": true, "crossfadeCurve": "EqualPower"},
+      "choice": "Automix", "stored": false, "matchTempo": true, "crossfadeSeconds": 8
+    },
+    {
+      "name": "settings version 2, Crossfade",
+      "player": {"settingsVersion": 2, "betweenSongs": "Crossfade", "crossfade": true, "smartTransitions": false, "crossfadeSeconds": 12, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "Linear"},
+      "choice": "Crossfade", "stored": true, "matchTempo": false, "crossfadeSeconds": 12
+    },
+    {
+      "name": "settings version 2, Automix with Match tempo off",
+      "player": {"settingsVersion": 2, "betweenSongs": "Automix", "crossfade": true, "smartTransitions": true, "crossfadeSeconds": 8, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "EqualPower"},
+      "choice": "Automix", "stored": true, "matchTempo": false, "crossfadeSeconds": 8
+    },
+    {
+      "name": "settings version 2, Gapless",
+      "player": {"settingsVersion": 2, "betweenSongs": "Gapless", "crossfade": false, "smartTransitions": false, "crossfadeSeconds": 8, "filterSweeps": true, "matchTempo": true, "crossfadeCurve": "EqualPower"},
+      "choice": "Gapless", "stored": true, "matchTempo": true, "crossfadeSeconds": 8
+    },
+    {
+      "name": "settings version 2, a choice from a newer app",
+      "player": {"settingsVersion": 2, "betweenSongs": "Later", "crossfade": true, "smartTransitions": false, "crossfadeSeconds": 8, "filterSweeps": true, "matchTempo": false, "crossfadeCurve": "EqualPower"},
+      "choice": "Automix", "stored": false, "matchTempo": true, "crossfadeSeconds": 8
+    }
+  ]
+}
