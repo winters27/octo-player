@@ -291,7 +291,7 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
                 highPass.setCutoff(transition.highPassAt(t!!))
             }
             if (transition != null && t != null && !transition.incoming && transition.gateDb != null) {
-                watchSilence(samples, frame, count, t, transition.gateDb)
+                watchSilence(samples, frame, count, t, transition.gateDb, transition.plan.holdShare)
             }
             if (faded) target = 0.0
             val wetTarget = if (filtersOn) 1.0 else 0.0
@@ -358,9 +358,17 @@ class TransitionShaper(val sampleRate: Int, val channels: Int) {
 
     // Measures the outgoing song in 10 ms steps through the blend, before
     // any volume change, and fades it out once it has stayed below its gate
-    // for EARLY_FADE_MS.
-    private fun watchSilence(samples: FloatArray, from: Int, count: Int, t: Double, gateDb: Double) {
+    // for EARLY_FADE_MS. Through a hold (an intro's, or the incoming song's
+    // silent lead-in) the outgoing song plays at its own level, so the gate
+    // listens only from the hold's end, counting from nothing there.
+    private fun watchSilence(samples: FloatArray, from: Int, count: Int, t: Double, gateDb: Double, holdShare: Double) {
         if (faded || t < 0 || t >= 1) return
+        if (holdShare > 0 && t < holdShare) {
+            quietMs = 0.0
+            levelSquares = 0.0
+            levelCount = 0
+            return
+        }
         for (i in 0 until count) {
             val base = (from + i) * channels
             var sum = 0.0

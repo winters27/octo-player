@@ -417,4 +417,52 @@ class TransitionShaperTest {
         for (i in ramp * 2 until after.size) assertEquals("sample $i", plain[i], after[i], 0f)
         assertEquals(1.0, s.level, 0.0)
     }
+
+    // The outgoing song's volume every 10 ms of its song from 0 to `endMs`,
+    // a steady half-scale sound with nothing in `quiet`, under a -50 dB
+    // silence gate. The plan starts at song time 0.
+    private fun levelsThrough(p: TransitionPlan, quiet: ClosedFloatingPointRange<Double>, endMs: Double): Map<Int, Double> {
+        val s = TransitionShaper(rate, 2)
+        s.arm(DeckTransition("a", p, incoming = false, gateDb = -50.0), 0.0)
+        val block = rate / 100
+        val buffer = FloatArray(block * 2)
+        val levels = HashMap<Int, Double>()
+        var ms = 0
+        while (ms < endMs) {
+            buffer.fill(if (ms.toDouble() in quiet) 0f else 0.5f)
+            s.process(buffer, block, ms.toDouble(), 1_000.0 / rate)
+            levels[ms] = s.level
+            ms += 10
+        }
+        return levels
+    }
+
+    private fun heldPlan(kind: TransitionKind, overlap: Long, holdShare: Double) =
+        TransitionPlan(0, 0, overlap, kind, 0.4, 0.0, null, null, null, false, 0.0, "test", holdShare = holdShare, riseShare = 0.1, lateMoveBars = LATE_MOVE_UNBOUNDED)
+
+    @Test
+    fun theSilenceGateListensOnlyFromTheHoldsEnd() {
+        // A 14 s intro holding A for its first half, and a cut whose
+        // incoming song enters 1.2 s before its first sound.
+        val intro = heldPlan(TransitionKind.INTRO, 14_000, 0.5)
+        val cut = heldPlan(TransitionKind.CUT, 4_000, 0.3)
+        for ((p, holdEnd) in listOf(intro to 7_000, cut to 1_200)) {
+            // Half a second of silence at 40% of the hold: A stays at its
+            // own level through the hold and is never marked faded.
+            val silentAt = holdEnd * 0.4
+            val held = levelsThrough(p, silentAt..silentAt + 500, holdEnd + 500.0)
+            for ((ms, level) in held) if (ms < holdEnd) assertEquals("${p.kind} at $ms ms", 1.0, level, 0.0)
+            val after = holdEnd + 200
+            val want = DeckTransition("a", p, incoming = false).gainAt(after / p.overlapMs.toDouble())
+            assertEquals("${p.kind} after the hold follows its curve", want, held.getValue(after), 0.01)
+
+            // The same silence after the hold: the gate acts once it has
+            // lasted its 300 ms, and the song stays faded after it.
+            val late = (holdEnd + 300).toDouble()
+            val gated = levelsThrough(p, late..late + 500, late + 800)
+            assertTrue("${p.kind} before the gate", gated.getValue((late - 10).toInt()) > 0.5)
+            assertEquals("${p.kind} faded inside the silence", 0.0, gated.getValue((late + 450).toInt()), 0.0)
+            assertEquals("${p.kind} still faded after it", 0.0, gated.getValue((late + 700).toInt()), 0.0)
+        }
+    }
 }
