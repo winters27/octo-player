@@ -85,6 +85,31 @@ class UpkeepEndToEndTest {
     }
 
     @Test
+    fun aSongPutNextWhileAStationsRefillWaitsIsNotAddedAgainByIt() {
+        val rig = PlayerRig(songs())
+        val station = QueueSource.Station("st", "St")
+        val answer = CompletableDeferred<Unit>()
+        val refill = StationRefill({ true }, { _, _ -> answer.await(); listOf("c") }, { ids -> ids.map { rig.song(it).item() } })
+        refill.attach(OutputSwitch(rig.player) { null }, scope)
+        rig.player.automix = crossfade
+        rig.player.setMediaItems(listOf(rig.song("a").item().withSource(station), rig.song("b").item().withSource(station)))
+        rig.player.prepare()
+        rig.player.play()
+        rig.runFor(20)
+        refill.check()
+        rig.runFor(5)
+        assertTrue(rig.runUntil(4_000) { rig.decks[1].playbackState != Player.STATE_IDLE })
+        // The server's answer, "c", waits for the blend.
+        answer.complete(Unit)
+        rig.runFor(20)
+        assertEquals("the add waits", 2, rig.player.mediaItemCount)
+        // The person puts "c" next meanwhile; the queue still ends with "b".
+        rig.player.addMediaItem(rig.player.currentMediaItemIndex + 1, rig.song("c").item())
+        assertTrue(rig.runUntil(15_000) { rig.player.playbackState == Player.STATE_ENDED })
+        assertEquals(listOf("a", "c", "b"), List(rig.player.mediaItemCount) { rig.player.getMediaItemAt(it).mediaId })
+    }
+
+    @Test
     fun anAutoplayAddForAShortLastSongLandsInItsBlendWaitsAndAddsOnceAfter() {
         val rig = PlayerRig(songs())
         val asked = ArrayList<String>()

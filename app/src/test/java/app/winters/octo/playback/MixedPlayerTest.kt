@@ -29,6 +29,14 @@ class MixedPlayerTest {
 
     private fun twoSongs() = listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1))
 
+    // Every plan starts 300 ms inside the mixer's proposal lead and may not
+    // move: the mixer refuses it as late.
+    private val tooLate: Planner = { a, b, t, h, s, c -> planTransition(a, b, t, h, s, c).let { it.copy(startMs = c.nowMs - 300, lateMoveBars = 0) } }
+
+    // The most frames of the old place a move may still play: what the
+    // output already took (its pause cycles and latency).
+    private val moveFrames = 9_600
+
     @After
     fun close() = PlayerRig.closeAll()
 
@@ -389,6 +397,100 @@ class MixedPlayerTest {
         assertEquals(after, rig.heardCount)
         assertTrue(rig.decks.all { it.playbackState == Player.STATE_IDLE })
         assertFalse(rig.player.isBlending)
+    }
+
+    // A blend the mixer ended on its own before the handover leaves the
+    // playing song a lone deck again: a seek plays the new place at once,
+    // and, switched to Gapless, so does a Next, nothing of the old place
+    // heard after either past what the output had already taken.
+    private fun movesAfterTheBlendEnded(rig: PlayerRig) {
+        val target = 500 * 48 % SAW
+        val seekAt = rig.heardCount
+        rig.player.seekTo(500)
+        assertTrue("the new place: ${rig.notes}", rig.runUntil(2_000) { rig.framesOf(1, from = seekAt).any { near(it, target) } })
+        val s = rig.heardSongs()
+        val landed = (seekAt until rig.heardCount).first { s[it].first == 1 && near(s[it].second, target) }
+        val oldAfterSeek = (seekAt until landed).count { s[it].first == 1 }
+        assertTrue("old place after the seek: $oldAfterSeek frames, ${rig.told()}, ${rig.notes}", oldAfterSeek <= moveFrames)
+        rig.player.automix = AutomixSettings(maxOverlapMs = 0)
+        rig.runFor(300)
+        val nextAt = rig.heardCount
+        rig.player.seekToNextMediaItem()
+        rig.runFor(1_000)
+        // The old song's frames after the Next (the next song, if it plays,
+        // is told apart by its sign).
+        val oldAfterNext = rig.framesOf(1, from = nextAt).size
+        assertTrue("old song after Next: $oldAfterNext frames, ${rig.notes}", oldAfterNext <= moveFrames)
+    }
+
+    // Main acks a start this long after hearing it.
+    private fun lateAcks(rig: PlayerRig, ms: Long) {
+        rig.mix.onEvent = { e ->
+            if (e.kind == BlendEventKind.PROPOSED) {
+                rig.mix.sched.at(rig.mix.sched.now + ms * 1_000_000) { rig.player.mixListener.onBlendEvent(e) }
+            } else {
+                rig.player.mixListener.onBlendEvent(e)
+            }
+        }
+    }
+
+    private fun until(rig: PlayerRig, kind: BlendEventKind, cause: BlendCause, maxMs: Long = 8_000) =
+        assertTrue("$kind $cause: ${rig.events.map { "${it.kind}/${it.cause}" }}", rig.runUntil(maxMs) { rig.events.any { it.kind == kind && it.cause == cause } })
+
+    @Test
+    fun afterANotReadyStartASeekAndANextPlayTheNewPlaceAtOnce() {
+        val rig = PlayerRig(twoSongs(), stalled = setOf("b"))
+        rig.play("a", "b", settings = crossfade)
+        until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.NOT_READY)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterTheOldSongMovedOnBeforeTheStartASeekAndANextPlayTheNewPlaceAtOnce() {
+        val rig = PlayerRig(listOf(PcmSong("a", 5_000, realMs = 3_000), PcmSong("b", 2_500, sign = -1)))
+        rig.play("a", "b", settings = crossfade)
+        until(rig, BlendEventKind.CANCELLED, BlendCause.A_MOVED_ON)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterAFloorCancelASeekAndANextPlayTheNewPlaceAtOnce() {
+        val rig = PlayerRig(twoSongs(), latencyCycles = 10)
+        rig.play("a", "b", settings = crossfade)
+        lateAcks(rig, 500)
+        until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.FLOOR)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterALateRefusalASeekAndANextPlayTheNewPlaceAtOnce() {
+        val rig = PlayerRig(twoSongs(), planner = tooLate)
+        rig.play("a", "b", settings = crossfade)
+        until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.LATE)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterAnUnplugInTheRunUpASeekAndANextPlayTheNewPlaceAtOnce() {
+        val rig = PlayerRig(twoSongs())
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(rig.runUntil(6_000) { rig.decks[1].playWhenReady })
+        rig.context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        until(rig, BlendEventKind.CANCELLED, BlendCause.PAUSED, maxMs = 300)
+        rig.player.play()
+        rig.runFor(100)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterTheNextSongFailedInTheSpareASeekAndANextPlayTheNewPlaceAtOnce() {
+        // Its decoder fails once at 2 s of it: past what the parked spare
+        // decodes, before the start.
+        val rig = PlayerRig(listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1, failAtMs = 2_000, failOnce = true)))
+        rig.play("a", "b", settings = crossfade)
+        assertTrue("armed and failed: ${rig.told()}", rig.runUntil(6_000) { rig.mix.mixer.commitWord.stateOf(1) == CommitState.CANCELLED })
+        rig.runFor(50)
+        movesAfterTheBlendEnded(rig)
     }
 
     @Test

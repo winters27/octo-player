@@ -111,7 +111,7 @@ class MixRowsTest {
             val upTo = minOf(firstB, firstMixed)
             assertTrue("$afterMs ms in: the next song first heard at $firstB, mixed from $firstMixed", firstB > 0)
             assertEquals("$afterMs ms in: ${rig.notes}", emptyList<String>(), rig.breaksOf(1, to = upTo))
-            assertEquals("$afterMs ms in", emptyList<String>(), atOwnLevel(rig, 1, 0, upTo))
+            assertEquals("$afterMs ms in, up to $upTo: ${rig.events.map { "${it.kind}/${it.generation}/${it.cause}@${it.frame}" }}", emptyList<String>(), atOwnLevel(rig, 1, 0, upTo))
             assertEquals("$afterMs ms in", listOf("q:a", "q:b", "q:c"), rig.transitions)
             rig.close()
         }

@@ -131,15 +131,24 @@ class StationRefill internal constructor(
                 Log.i("Octo", "station top-up: nothing added, the queue changed")
                 return@upkeep
             }
-            val first = player.mediaItemCount
+            // A song queued meanwhile (Play next, say) is not added again: the
+            // queue's end is in the player, so its own songs are read here as
+            // the add goes.
             val window = window
-            if (window != null) window.addAtEnd(items, autoplay = false, source = station.encoded()) else player.addMediaItems(first, items)
+            val queuedNow = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }.toHashSet()
+            val adding = items.filterNot { it.mediaId in queuedNow }
+            if (adding.isEmpty()) {
+                Log.i("Octo", "station top-up: nothing added, all queued meanwhile")
+                return@upkeep
+            }
+            val first = player.mediaItemCount
+            if (window != null) window.addAtEnd(adding, autoplay = false, source = station.encoded()) else player.addMediaItems(first, adding)
             // The last song already ended while the server answered: carry on.
             if (player.playbackState == Player.STATE_ENDED) {
                 player.seekTo(first, 0)
                 player.play()
             }
-            Log.i("Octo", "station top-up: added ${items.size}")
+            Log.i("Octo", "station top-up: added ${adding.size}")
         }
     }
 }

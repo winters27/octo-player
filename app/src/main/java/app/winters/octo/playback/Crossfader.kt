@@ -130,10 +130,11 @@ internal class Crossfader(
     // into its own next song with no blend planned.
     private var endedEarly: String? = null
 
-    // A plan the mixer refused as too late to start: planned again exactly
-    // the same (a fixed crossfade has no later place), the song plays on
-    // into its next with no blend instead of being armed again.
-    private var refused: TransitionPlan? = null
+    // The transition the mixer refused as too late to start, by what its
+    // plan was made from and the playing song: until either changes, the
+    // song plays on into its next with no blend instead of being armed
+    // again with a plan made a moment later.
+    private var refused: Pair<PlanKey, String?>? = null
 
     // The plan for the coming transition, and what it was made from.
     private var plan: TransitionPlan? = null
@@ -383,7 +384,7 @@ internal class Crossfader(
             BlendEventKind.PROPOSED -> proposed(g)
             BlendEventKind.INCOMING_NOT_READY -> if (g == registered) {
                 Log.i("Octo", "automix: the next song was not ready at the start (${event.cause.name.lowercase()})")
-                if (event.cause == BlendCause.LATE) refused = registeredPlan
+                if (event.cause == BlendCause.LATE) refused = planKey?.let { it.core to registeredFrom }
                 forgetRegistration()
                 // The spare stays parked; the rest of the song is planned
                 // again from where the output is now.
@@ -572,6 +573,9 @@ internal class Crossfader(
             return
         }
         val position = deck.currentPosition
+        // Where the mixer decides a start: the song at the output's head,
+        // ahead of what is heard by the route's latency.
+        val atHead = headPositionOf(deck, current) ?: position
         val pace = player.listenerPace
         val speed = pace.speed
         if (jumped(position, speed) && registered < 0) dropPlan()
@@ -615,7 +619,7 @@ internal class Crossfader(
             scoutAhead(deck, current, nextItem, position, currentSong.durationMs)
             val fresh = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, deck.skipSilenceEnabled)
             if (fresh != planKey && readyToPlan(fresh, remaining)) {
-                makePlan(deck, fresh, currentSong, nextSong, position, repeatOne, stopAtEnd, pace, nextItem)
+                makePlan(deck, fresh, currentSong, nextSong, position, atHead, repeatOne, stopAtEnd, pace, nextItem)
             }
         }
         val p = plan
@@ -624,7 +628,7 @@ internal class Crossfader(
             schedule(if (remaining > fadeMs + times.planLoadLeadMs * 2) times.farCheckMs else times.nearCheckMs)
             return
         }
-        if (p.kind == TransitionKind.GAPLESS || p == refused) {
+        if (p.kind == TransitionKind.GAPLESS || (refused != null && refused == planKey?.let { it.core to (current.entryId ?: current.mediaId) })) {
             unloadSpare()
             schedule(times.farCheckMs)
             return
@@ -634,9 +638,20 @@ internal class Crossfader(
         if (registered < 0 && loadedFor == next && loadedPlan !== p) repark(p)
         if (registered < 0 && loadedFor == next && spare.playbackState != Player.STATE_IDLE) {
             val proposalLeadMs = mixer?.proposalLeadMs ?: 0.0
-            if (position >= p.armAtMs(proposalLeadMs, speed.toDouble()) - times.nearCheckMs) arm(p, deck, nextItem)
+            if (atHead >= p.armAtMs(proposalLeadMs, speed.toDouble()) - times.nearCheckMs) arm(p, deck, nextItem)
         }
         schedule(if (registered >= 0 || toStart <= times.planLoadLeadMs + times.farCheckMs) times.nearCheckMs else times.farCheckMs)
+    }
+
+    // The playing song's time at the mixer's output head, run on to this
+    // moment at the listener's speed, once the head is in this song; null
+    // with no mixer or before then.
+    private fun headPositionOf(deck: ExoPlayer, item: MediaItem): Long? {
+        val mixer = mixer ?: return null
+        val head = mixer.headSong(slotOf(deck)) ?: return null
+        if (head.entry == null || head.entry != item.entryId) return null
+        val sinceMs = (mixer.nanoTime() - head.nanos).coerceAtLeast(0) / 1e6
+        return (head.ms + sinceMs * player.listenerPace.speed).toLong()
     }
 
     // Whether the next song may go into the spare: not one whose spare
@@ -826,6 +841,7 @@ internal class Crossfader(
         currentSong: FadeSong,
         nextSong: FadeSong,
         position: Long,
+        atHead: Long,
         repeatOne: Boolean,
         stopAtEnd: Boolean,
         pace: PlaybackParameters,
@@ -835,9 +851,16 @@ internal class Crossfader(
         val heard = reading?.takeIf { it.entryId == key.current }?.value
         val served = tail?.takeIf { it.entryId == key.current }?.profile
         val (level, tempoPrior) = heardFor(served, heard?.takeIf { it.heardMs >= LEVEL_HEARD_MS }?.bodyLevelDb, heard?.tempoPrior)
-        // "Now" is where the output will be once a start could still be
-        // decided: the song's position plus the mixer's proposal lead.
-        val now = position + ((mixer?.proposalLeadMs ?: 0.0) * speed).toLong()
+        // "Now" is where a start could still be decided: the song at the
+        // output's head plus the mixer's proposal lead, and one check's
+        // interval more for the head moving on while the arm reaches the
+        // mixer.
+        val mixer = mixer
+        val now = if (mixer != null) {
+            (blendReplanNowMs(atHead.toDouble(), mixer.proposalLead, mixer.mixRate, speed.toDouble()) + times.nearCheckMs * speed).toLong()
+        } else {
+            position
+        }
         val context = TransitionContext(
             nowMs = now,
             playedMs = heard?.let { (it.heardMs * speed).toLong() } ?: position,

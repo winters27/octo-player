@@ -17,6 +17,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import kotlin.math.max
+import kotlin.math.min
 
 // The Crossfader's side of a blend in the one mixer: the handover on the
 // mixer's proposal, the phase rule for edits, each deck's failures, the
@@ -330,10 +332,12 @@ class CrossfaderMixTest {
 
     @Test
     fun aFixedCrossfadeRefusedAsLateIsNotArmedAgainAndTheSongPlaysOnIntoItsNext() {
-        val rig = PlayerRig(twoSongs())
+        // Every plan starts 300 ms inside the mixer's proposal lead and may
+        // not move: too late to start, and planned a moment later it is the
+        // same transition again.
+        val tooLate: Planner = { a, b, t, h, s, c -> planTransition(a, b, t, h, s, c).let { it.copy(startMs = c.nowMs - 300, lateMoveBars = 0) } }
+        val rig = PlayerRig(twoSongs(), planner = tooLate)
         rig.play("a", settings = crossfade)
-        // The next song comes 250 ms before its fixed crossfade would start:
-        // too late to start it, and no room to move it before A's end.
         assertTrue(rig.runUntil(5_000) { rig.player.currentPosition >= 3_500 })
         rig.player.addMediaItems(listOf(rig.song("b").item()))
         assertTrue(rig.runUntil(2_000) { rig.events.any { it.kind == BlendEventKind.INCOMING_NOT_READY } })
@@ -344,6 +348,30 @@ class CrossfaderMixTest {
         // The song plays on into its next, gapless.
         assertTrue(rig.runUntil(4_000) { rig.transitions.lastOrNull() == "q:b" })
         assertEquals(0, rig.mixedCount())
+    }
+
+    @Test
+    fun withHalfASecondOfOutputLatencyANextSongAddedLateIsPlannedFromTheHeadAndBlends() {
+        // The fake presents each cycle 13 cycles (520 ms) after it takes it.
+        // A planner that starts no earlier than the now it is given, the
+        // blend shortened to end by the latest end.
+        val made = ArrayList<String>()
+        val fromNow: Planner = { a, b, t, h, s, c ->
+            val p = planTransition(a, b, t, h, s, c)
+            val start = max(p.startMs, c.nowMs)
+            p.copy(startMs = start, overlapMs = min(p.overlapMs, p.latestEndMs - start)).also { made += "now ${c.nowMs} start ${it.startMs} for ${it.overlapMs}" }
+        }
+        val rig = PlayerRig(twoSongs(), latencyCycles = 13, planner = fromNow)
+        rig.play("a", settings = crossfade)
+        // Heard 2.5 s in, the output's head is half a second further on: a
+        // start planned from the heard position would already be late there.
+        assertTrue(rig.runUntil(5_000) { rig.player.currentPosition >= 2_500 })
+        rig.player.addMediaItems(listOf(rig.song("b").item()))
+        assertTrue("${rig.told()} ${rig.notes}", rig.runUntil(4_000) { rig.transitions.lastOrNull() == "q:b" })
+        assertTrue("none refused as late: ${rig.events.map { "${it.kind}/${it.cause}@${it.frame}" }}, plans $made", rig.events.none { it.cause == BlendCause.LATE })
+        // Heard half a second after the head: the blend itself.
+        rig.runFor(2_000)
+        assertTrue("blended: ${rig.told()}", rig.mixedCount() > 0)
     }
 
     @Test
