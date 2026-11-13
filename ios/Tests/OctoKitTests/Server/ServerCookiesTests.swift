@@ -174,6 +174,23 @@ import Testing
         #expect(!isKeptServerCookie(domain: "other.net", hosts: hosts))
         #expect(!isKeptServerCookie(domain: "home.music.example.com", hosts: hosts))
     }
+
+    /// The purge run on a cookie store of the system's own kind: the kept hosts' cookies go, a
+    /// sign-in page's and Octo's own alike, and another host's stays. Red when it deletes nothing,
+    /// or more than the kept hosts' cookies.
+    @Test func theFirstLaunchPurgeDeletesTheKeptHostsCookiesFromAStore() throws {
+        let store = HTTPCookieStorage.sharedCookieStorage(forGroupContainerIdentifier: "octo-tests-first-launch-purge")
+        store.cookieAcceptPolicy = .always
+        for left in store.cookies ?? [] { store.deleteCookie(left) }
+        defer { for left in store.cookies ?? [] { store.deleteCookie(left) } }
+        for (name, domain) in [("authentik_proxy_a", "music.example.com"), ("authelia_session", ".example.com"),
+                               ("octo_admin", "192.168.1.20"), ("elsewhere", "other.net")] {
+            store.setCookie(try #require(HTTPCookie(properties: [.name: name, .value: "1", .domain: domain, .path: "/"])))
+        }
+        #expect(store.cookies?.count == 4)
+        forgetKeptServerCookies(in: store, hosts: ["music.example.com", "192.168.1.20"])
+        #expect(store.cookies?.map(\.name) == ["elsewhere"])
+    }
 }
 
 /// One redirect hop, tested directly (Linux cannot follow one through URLProtocol): the hop's

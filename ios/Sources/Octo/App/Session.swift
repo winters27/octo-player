@@ -789,10 +789,7 @@ final class Session {
     private func forgetSharedCookies() {
         guard !prefs.bool(forKey: Self.sharedCookiesKey) else { return }
         let hosts = Set(servers.flatMap { [$0.address.host, $0.homeAddress?.host] }.compactMap { $0?.lowercased() })
-        let store = HTTPCookieStorage.shared
-        for cookie in store.cookies ?? [] where isKeptServerCookie(domain: cookie.domain, hosts: hosts) {
-            store.deleteCookie(cookie)
-        }
+        forgetKeptServerCookies(in: HTTPCookieStorage.shared, hosts: hosts)
         prefs.set(true, forKey: Self.sharedCookiesKey)
     }
 

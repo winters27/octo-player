@@ -186,3 +186,11 @@ public func isKeptServerCookie(domain: String, hosts: Set<String>) -> Bool {
         return lower == name || lower.hasSuffix("." + name)
     }
 }
+
+/// Deletes every cookie in `store` that would go to one of `hosts`: the first launch's purge of the
+/// phone's shared cookie store.
+public func forgetKeptServerCookies(in store: HTTPCookieStorage, hosts: Set<String>) {
+    for cookie in store.cookies ?? [] where isKeptServerCookie(domain: cookie.domain, hosts: hosts) {
+        store.deleteCookie(cookie)
+    }
+}

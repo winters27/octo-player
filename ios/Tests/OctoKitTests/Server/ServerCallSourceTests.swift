@@ -159,12 +159,26 @@ import Testing
         }
     }
 
-    /// Red when the download requeue watches `ObjectIdentifier` of the store again.
+    /// The watch that requeues the running download reads the connection's own cookie store id,
+    /// which every client made from one connection shares (ServerCookiesTests). Red when that
+    /// watch reads anything else (a constant, the client itself), or `ObjectIdentifier` of the
+    /// store again.
     @Test func theDownloadRequeueWatchesTheStoresOwnId() throws {
         let sources = try Self.sources()
         let code = Self.code(try #require(sources.first { $0.path == "Octo/Data/OfflineDownloads.swift" }))
-        #expect(code.contains("cookies.id"))
+        let requeue = try #require(code.components(separatedBy: "watches.append(").first { $0.contains("connectionReplaced()") })
+        #expect(requeue.hasPrefix("Watch({ [weak self] in self?.session.client.map { $0.cookies.id } })"))
         #expect(!code.contains("ObjectIdentifier("))
+    }
+
+    /// The first launch's purge of the shared cookie store goes through `forgetKeptServerCookies`,
+    /// which ServerCookiesTests runs on a store. Red when the app's purge does anything else.
+    @Test func theFirstLaunchPurgeGoesThroughTheSharedOne() throws {
+        let sources = try Self.sources()
+        let code = Self.code(try #require(sources.first { $0.path == "Octo/App/Session.swift" }))
+        let start = try #require(code.range(of: "private func forgetSharedCookies()"))
+        let purge = try #require(code[start.upperBound...].components(separatedBy: "\n    }\n").first)
+        #expect(purge.contains("forgetKeptServerCookies(in: HTTPCookieStorage.shared, hosts: hosts)"))
     }
 
     /// Red when a file shows a picture with `AsyncImage` and does not first send the server's own
