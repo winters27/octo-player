@@ -52,6 +52,18 @@ fun shouldResumeOnConnect(
     return lostOutputAt != null && now - lostOutputAt in 0..RESUME_WINDOW_MS
 }
 
+// When the music was paused by the output going away, after a change to
+// `playWhenReady` for `reason` (`wasPlaying` what it was before): noted
+// only when the music was playing just before it, since the player gives
+// that reason even for an output that went away while already paused, and
+// reconnecting must not start what the person paused. Any other pause, or
+// playing again, forgets it.
+fun lostOutputAfter(wasPlaying: Boolean, playWhenReady: Boolean, reason: Int, lostOutputAt: Long?, now: Long): Long? = when {
+    playWhenReady -> null
+    reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> if (wasPlaying) now else lostOutputAt
+    else -> null
+}
+
 // Android needs a moment to move the sound to newly connected headphones;
 // Bluetooth takes longer than a cable. Playing sooner would start on the
 // speaker.
@@ -99,6 +111,7 @@ class HeadsetResume(
 
     fun start() {
         audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapTo(known) { it.id }
+        wasPlaying = player.playWhenReady
         player.addListener(this)
         audio.registerAudioDeviceCallback(callback, handler)
     }
@@ -110,14 +123,12 @@ class HeadsetResume(
         pending = null
     }
 
-    // Notes a pause caused by the output going away. Any other pause, or
-    // playing again, forgets it.
+    // Whether the music was meant to play before the latest change.
+    private var wasPlaying = false
+
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-        lostOutputAt = if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
-            SystemClock.elapsedRealtime()
-        } else {
-            null
-        }
+        lostOutputAt = lostOutputAfter(wasPlaying, playWhenReady, reason, lostOutputAt, SystemClock.elapsedRealtime())
+        wasPlaying = playWhenReady
     }
 
     private fun connected(kind: HeadsetKind) {

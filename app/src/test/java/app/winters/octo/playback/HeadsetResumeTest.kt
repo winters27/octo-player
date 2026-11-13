@@ -66,6 +66,20 @@ class HeadsetResumeTest {
     }
 
     @Test
+    fun anOutputThatGoesAwayWhileThePersonHadPausedIsNotNoted() {
+        val noisy = androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY
+        val asked = androidx.media3.common.Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
+        // Playing, then unplugged: noted, so reconnecting resumes.
+        assertEquals(now, lostOutputAfter(wasPlaying = true, playWhenReady = false, reason = noisy, lostOutputAt = null, now = now))
+        // Paused by the person, then unplugged: the player still says why,
+        // and reconnecting must not start the music.
+        assertNull(lostOutputAfter(wasPlaying = false, playWhenReady = false, reason = noisy, lostOutputAt = null, now = now))
+        // A pause the person makes, or playing again, forgets it.
+        assertNull(lostOutputAfter(wasPlaying = true, playWhenReady = false, reason = asked, lostOutputAt = now, now = now))
+        assertNull(lostOutputAfter(wasPlaying = false, playWhenReady = true, reason = asked, lostOutputAt = now, now = now))
+    }
+
+    @Test
     fun aClockGoingBackDoesNotCount() {
         assertFalse(decide(lostOutputAt = now + 1_000))
     }
