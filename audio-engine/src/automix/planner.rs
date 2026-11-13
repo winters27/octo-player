@@ -365,11 +365,13 @@ impl TransitionPlan {
 /// [`BEAT_MATCH_LARGEST_GAP`] apart. Without a rate, wherever both songs are
 /// clearly heard their beats stay within [`DRIFT_LIMIT_MS`] times the pace
 /// of each other: a blend starts later or becomes a short cut until they
-/// do, or the songs join gaplessly. With both tempos confident but no lock,
-/// a blend where both songs are clearly heard cannot be kept on the beat at
-/// all, so only one where they never are is planned. A plan with a rate
-/// whose next song is too short to ease back to its own speed is planned
-/// again without the rate.
+/// do, or the songs join gaplessly. A place that would cut over
+/// [`KEPT_MUSIC_LIMIT_MS`] of the outgoing song's full-level music is never
+/// planned; with none left the songs join gaplessly too. With both tempos
+/// confident but no lock, a blend where both songs are clearly heard cannot
+/// be kept on the beat at all, so only one where they never are is planned.
+/// A plan with a rate whose next song is too short to ease back to its own
+/// speed is planned again without the rate.
 pub fn plan_transition(
     current: &FadeSong,
     next: Option<&FadeSong>,
@@ -688,7 +690,9 @@ impl PlanPass<'_> {
         if allowed.is_empty() {
             return gapless_plan(self.len_a, self.unheard_reason());
         }
-        let best = self.best(&allowed, |s| self.blend_score(s));
+        let Some(best) = self.best(&allowed, |s| self.blend_score(s)) else {
+            return gapless_plan(self.len_a, "every blend left would cut the song short");
+        };
         self.blend_plan(&best, lengthened)
     }
 
@@ -840,23 +844,22 @@ impl PlanPass<'_> {
         heard
     }
 
-    // The best scoring shape; the later one wins a tie. Shapes that keep
-    // over KEPT_MUSIC_LIMIT_MS of full-level music are left out while any
-    // other is left.
-    fn best(&self, shapes: &[Shape], score: impl Fn(&Shape) -> f64) -> Shape {
-        let kept: Vec<Shape> =
+    // The best scoring shape; the later one wins a tie. Shapes that cut over
+    // KEPT_MUSIC_LIMIT_MS of the outgoing song's full-level music are left
+    // out; `None` when no other is left.
+    fn best(&self, shapes: &[Shape], score: impl Fn(&Shape) -> f64) -> Option<Shape> {
+        let pool: Vec<Shape> =
             shapes.iter().filter(|s| self.kept(s) <= KEPT_MUSIC_LIMIT_MS as f64).copied().collect();
-        let pool = if kept.is_empty() { shapes } else { &kept[..] };
-        let mut best = *pool.last().expect("a shape to choose from");
+        let mut best = *pool.last()?;
         let mut best_score = f64::NEG_INFINITY;
-        for s in pool {
+        for s in &pool {
             let value = score(s);
             if value >= best_score {
                 best_score = value;
                 best = *s;
             }
         }
-        best
+        Some(best)
     }
 
     // The terms every shape shares: ending early, music cut, a section
@@ -946,8 +949,8 @@ impl PlanPass<'_> {
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
     // next song rises over a bar (INTRO_RISE_MS unlocked). `None` when no
-    // start is left or the beats allow none, and the lengthened blend is
-    // planned instead.
+    // start is left, the beats allow none or every one left would cut the
+    // outgoing song short, and the lengthened blend is planned instead.
     fn plan_intro(&self, quiet: f64) -> Option<TransitionPlan> {
         let bar = self.lock_a.map(|a| a.bar_ms());
         let rise = bar.unwrap_or(INTRO_RISE_MS as f64);
@@ -1021,7 +1024,7 @@ impl PlanPass<'_> {
                 score -= 0.15 * (s.start_ms + hold - self.outro_start).abs() / 1000.0;
             }
             score
-        });
+        })?;
         let start_ms = round_half_up(best.start_ms) as i64;
         let overlap_ms = round_half_up(best.end_ms()) as i64 - start_ms;
         let entry_ms = round_half_up(self.entry) as i64;
