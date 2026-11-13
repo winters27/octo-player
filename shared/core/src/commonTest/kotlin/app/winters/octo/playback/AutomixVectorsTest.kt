@@ -232,7 +232,22 @@ class AutomixVectorsTest {
                 put("value", beatMatchRateAt(1.03, since, 8_000.0))
             }
         }
+        putJsonArray("dropCuts") {
+            for (c in DROP_CASES) addJsonObject {
+                put("bothHeardStartMs", c.startMs)
+                put("bothHeardEndMs", c.endMs)
+                put("lockMs", c.lockMs)
+                put("driftGap", c.gap)
+                put("speed", c.speed)
+                put("fromMs", c.fromMs)
+                put("cutAtMs", dropCutAtMs(dropPlan(c), c.speed, c.fromMs))
+            }
+        }
     }
+
+    // A both-heard stretch, where the beats meet, how fast they part, the
+    // speed lowered to and how far along the blend is.
+    private data class DropCase(val startMs: Long, val endMs: Long, val lockMs: Double, val gap: Double, val speed: Double, val fromMs: Double)
 
     // One section the file holds: a song's tail or head, with the song's
     // tag tempo when it has one, and for a head the whole song's body level
@@ -331,9 +346,18 @@ class AutomixVectorsTest {
         put("riseShare", plan.riseShare)
         put("latestEndMs", plan.latestEndMs)
         put("lateMoveBars", plan.lateMoveBars)
+        put("bothHeardStartMs", plan.bothHeardStartMs)
         put("bothHeardEndMs", plan.bothHeardEndMs)
+        put("lockMs", round(plan.lockMs))
+        put("driftGap", round(plan.driftGap, 6))
         put("driftAtEndMs", round(plan.driftAtEndMs))
+        put("dropCutAtHalfSpeedMs", dropCutAtMs(plan, 0.5, 0.0)?.let { round(it) })
     }
+
+    // A plan carrying only what dropCutAtMs reads.
+    private fun dropPlan(c: DropCase) = fixedCrossfadePlan(200_000, 8_000, "test").copy(
+        bothHeardStartMs = c.startMs, bothHeardEndMs = c.endMs, lockMs = c.lockMs, driftGap = c.gap,
+    )
 
     // Checking
 
@@ -454,8 +478,12 @@ class AutomixVectorsTest {
             near("$what latestEndMs", e.num("latestEndMs"), plan.latestEndMs.toDouble(), t("ms"))
             val bars = e.getValue("lateMoveBars").jsonPrimitive.int
             if (bars != plan.lateMoveBars) failures += "$what: lateMoveBars ${plan.lateMoveBars}, expected $bars"
+            near("$what bothHeardStartMs", e.num("bothHeardStartMs"), plan.bothHeardStartMs.toDouble(), t("ms"))
             near("$what bothHeardEndMs", e.num("bothHeardEndMs"), plan.bothHeardEndMs.toDouble(), t("ms"))
+            near("$what lockMs", e.num("lockMs"), plan.lockMs, t("ms") / 10)
+            near("$what driftGap", e.num("driftGap"), plan.driftGap, t("rate"))
             near("$what driftAtEndMs", e.num("driftAtEndMs"), plan.driftAtEndMs, t("ms") / 10)
+            near("$what dropCutAtHalfSpeedMs", e.numOrNull("dropCutAtHalfSpeedMs"), dropCutAtMs(plan, 0.5, 0.0), t("ms"))
             if (e.str("reason") != plan.reason) failures += "$what: reason \"${plan.reason}\", expected \"${e.str("reason")}\""
         }
 
@@ -502,6 +530,13 @@ class AutomixVectorsTest {
         for (r in vectors.getValue("rates").jsonArray.map { it.jsonObject }) {
             val actual = beatMatchRateAt(r.num("rate"), r.num("sinceEntryMs"), r.num("overlapMs"))
             near("rate at ${r.num("sinceEntryMs")}", r.num("value"), actual, t("curve"))
+        }
+        for (d in vectors.getValue("dropCuts").jsonArray.map { it.jsonObject }) {
+            val c = DropCase(
+                d.getValue("bothHeardStartMs").jsonPrimitive.long, d.getValue("bothHeardEndMs").jsonPrimitive.long,
+                d.num("lockMs"), d.num("driftGap"), d.num("speed"), d.num("fromMs"),
+            )
+            near("drop cut for $c", d.numOrNull("cutAtMs"), dropCutAtMs(dropPlan(c), c.speed, c.fromMs), t("curve"))
         }
         return failures
     }
@@ -569,6 +604,24 @@ class AutomixVectorsTest {
             13_000.0 / 16_000 to 1_000.0 / 16_000,
         )
 
+        // Lowered speeds against both-heard stretches: a cut later in an
+        // intro's stretch, none within the limit, at once past the moment,
+        // before the lock point, after it, at once past it, past the
+        // stretch, a stretch ending where the limit is reached, with no
+        // stretch and with no drift.
+        val DROP_CASES = listOf(
+            DropCase(1_900, 3_500, 0.0, 0.01, 0.5, 500.0),
+            DropCase(1_900, 3_500, 0.0, 0.01, 1.0, 500.0),
+            DropCase(1_900, 3_500, 0.0, 0.01, 0.5, 2_500.0),
+            DropCase(100, 650, 400.0, 0.1, 0.5, 0.0),
+            DropCase(100, 650, 400.0, 0.1, 0.5, 300.0),
+            DropCase(100, 650, 400.0, 0.1, 0.5, 620.0),
+            DropCase(100, 650, 400.0, 0.1, 0.5, 700.0),
+            DropCase(0, 2_000, 0.0, 0.02, 1.0, 0.0),
+            DropCase(0, 0, 0.0, 0.02, 0.5, 0.0),
+            DropCase(500, 3_000, 200.0, 0.0, 0.5, 0.0),
+        )
+
         // Period scores on and either side of the threshold a tempo must
         // reach to be trusted, steady or not.
         val TRUST_CASES = listOf(
@@ -591,7 +644,8 @@ class AutomixVectorsTest {
                 "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 45 s); tagBpm, when set, is the song's tag tempo.",
                 "bodyLevelDb, when set on a head, is the whole song's body level (the 75th percentile body of the whole song, as a profile measures it); the head is measured against it instead of its own body. A head whose sound starts but never comes within 6 dB of its body has introEndMs at the head's end.",
                 "plans: run the planner with the tail section of song a and the head section of song b that have neither tagBpm nor bodyLevelDb (null when tailMissing / headMissing; when headBodyLevelDb is set, the head section of song b measured against that body instead) and the given context; settings.longestIntroMs is the longest intro; context.lockAtPace says the beats stay locked at any pace (the player changes the speed of both songs together after mixing them).",
-                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap (0 for every other kind); latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number); bothHeardEndMs is where, from startMs, both songs stop being within 10 dB of their bodies (with their gains and the 1 dB headroom, walked in 10 ms steps; 0 when they never are); driftAtEndMs is how far apart the beats are in song time by then (0 with a rate, equal tempos or no lock).",
+                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap; any other kind holds until holdShare (the outgoing song at 1, the incoming one at 0, while the incoming song's lead-in is silent), then follows its curve over the rest; both 0 otherwise. latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number). From startMs: bothHeardStartMs and bothHeardEndMs are where both songs are within 10 dB of their bodies (with their gains and the 1 dB headroom, walked in 10 ms steps; both 0 when they never are), lockMs where the beats meet; driftGap is the share the tempos are apart (0 with a rate, equal tempos or no lock), driftAtEndMs the largest beat offset in song time while both are heard, dropCutAtHalfSpeedMs what dropCuts gives for a drop to speed 0.5 from the start.",
+                "dropCuts: the first moment t >= fromMs in [bothHeardStartMs, bothHeardEndMs] where driftGap * |t - lockMs| > 40 * speed (the moment the offset passes that, lockMs + 40 * speed / driftGap when it comes after the lock point), or null; null when driftGap is 0 or bothHeardEndMs is 0.",
                 "introGains: the outgoing song's gain is 1 up to holdShare, then cos(pi/2 * (t - holdShare) / (1 - holdShare)); the incoming song's is sin(pi/2 * t / riseShare) up to riseShare, then 1; t is clamped to 0..1.",
                 "tempoTrust: whether a beat grid whose period scores this (confidence: the onsets' autocorrelation at one, two, four and eight beat periods plus half of it at half a period) and whose two halves agree on the beat (steady) is trusted for bar lock.",
                 "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",

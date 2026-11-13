@@ -62,6 +62,17 @@ fun automixInGain(t: Double, k: Double): Double {
     return sqrt(max(0.0, 1 - out * out))
 }
 
+// Where a blend whose start is held is along its curve at `t` (0 to 1): the
+// outgoing song alone at its own level until `holdShare`, while the
+// incoming one's first sound is still to come, then the curve over the
+// rest of the overlap. Below 0 while held, where every curve gives the
+// outgoing song 1 and the incoming one 0.
+fun pastHold(t: Double, holdShare: Double): Double = when {
+    holdShare <= 0 -> t
+    holdShare >= 1 -> -1.0
+    else -> (t - holdShare) / (1 - holdShare)
+}
+
 // The outgoing song's volume at `t` through an intro (0 to 1): full until
 // `holdShare`, then an equal-power fade to nothing at the end.
 fun introOutGain(t: Double, holdShare: Double): Double {

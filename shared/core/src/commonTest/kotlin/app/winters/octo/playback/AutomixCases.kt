@@ -26,9 +26,10 @@ object AutomixCases {
             SongLayer("pulse", fromMs, toMs, hz = 2_000.0, db = padDb - 4, bpm = bpm, firstMs = beatMs, every = 1, decayMs = 10.0),
         )
 
-    // A steady beat whose first `quietMs` are 24 dB under the rest.
-    private fun quietStart(lengthMs: Double, bpm: Double, quietMs: Double) =
-        steady(0.0, quietMs, bpm, 0.0, padDb = -38.0) + steady(quietMs, lengthMs, bpm, 0.0)
+    // A steady beat from `beatMs` whose first `quietMs` are 24 dB under the
+    // rest.
+    private fun quietStart(lengthMs: Double, bpm: Double, quietMs: Double, beatMs: Double = 0.0) =
+        steady(0.0, quietMs, bpm, beatMs, padDb = -38.0) + steady(quietMs, lengthMs, bpm, beatMs)
 
     val songs: Map<String, SyntheticSong> = linkedMapOf(
         // 8 s of silence after the music stops.
@@ -95,6 +96,14 @@ object AutomixCases {
         "steady-91" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.1, 0.0)),
         "steady-83" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.2, 0.0)),
         "steady-71" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.4, 0.0)),
+        // 10% slower than 100 BPM at full level from the first sample, its
+        // beats from 600 ms: B is heard well before its beats meet A's.
+        "steady-91-lead" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.1, 600.0)),
+        // 100 BPM with a quiet start of about 10.75 s, its beats from 100 ms.
+        "quiet-100-lead" to SyntheticSong(44_100, 1, 180_000, quietStart(180_000.0, 100.0, 11_000.0, beatMs = 100.0)),
+        // 100 BPM from 0.5 s, its beats at 300 + 600 n and its bars at
+        // 900 + 2400 n: with a rate it enters at 0, silent until 0.5 s.
+        "steady-100-lead" to SyntheticSong(44_100, 1, 180_000, steady(500.0, 180_000.0, 100.0, 300.0, barMs = 900.0)),
         // 35 s at 95.24 BPM (beats every 630 ms from 15.9 s, bars from 15.27
         // s): silent for 16 s, quiet until 27 s, then full level. Too short
         // to ease back from a 5% rate after a long intro.
@@ -194,6 +203,12 @@ object AutomixCases {
         Pair("drift-late-cut", "steady-100", "steady-97", eight, context = TransitionContext(nowMs = 200_500)),
         Pair("drift-short-window", "steady-100", "steady-100", eight, context = TransitionContext(nowMs = 191_450)),
         Pair("late-move-count", "steady-100-steps", "steady-97", eight),
+        // The next song heard before the lock point decides the bound.
+        Pair("drift-before-lock", "steady-100", "steady-91-lead", eight),
+        // A lead-in: an intro's fade still centered on a bar line, and a
+        // matched cut held until the next song's first sound.
+        Pair("intro-lead", "steady-100", "quiet-100-lead", eight, aLengthMs = 199_950),
+        Pair("lead-held-cut", "steady-101", "steady-100-lead", AutomixSettings(maxOverlapMs = 2_400, beatMatch = true)),
         // Rate room: a 5% rate the next song is too short to ease back from.
         Pair("rate-room", "steady-100", "short-quiet", matched),
         // Intros.
