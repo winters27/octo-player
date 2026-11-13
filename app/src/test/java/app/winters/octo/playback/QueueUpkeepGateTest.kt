@@ -60,6 +60,30 @@ class QueueUpkeepGateTest {
     }
 
     @Test
+    fun fourHundredBlendedSongsOfAShuffledTwoThousandNeverReachTheWindowsEdge() {
+        rig.db.songs(2_000)
+        rig.play(PlayRequest(ListSpec.Songs(SongScope.All, titles), null, shuffle = true, shownOverWindow = true))
+        rig.joined()
+        // The songs the player holds after the one on, in the order they play.
+        fun upNext() = upcoming(rig.player).size
+        rig.until("the window filled", { upNext() }) { upNext() >= rig.sizes.topUpAt }
+        val heard = HashSet<String>()
+        heard += rig.current()!!
+        for (i in 1..400) {
+            // Each song change is a blend: the upkeep waits through it, and
+            // the song that ends on its own always has a next one held.
+            rig.gate.busy = true
+            assertTrue("song $i: a next song held", upNext() >= 1)
+            rig.next()
+            heard += rig.current()!!
+            rig.gate.free()
+            rig.until("ahead after song $i", { upNext() }) { upNext() >= rig.sizes.topUpAt }
+            assertTrue(rig.held().size <= rig.sizes.window)
+        }
+        assertEquals("every song a new one", 401, heard.size)
+    }
+
+    @Test
     fun everySongBlendedTheWindowStillMovesOnAndNextNeverWaits() {
         playFromTop(120)
         for (i in 1 until 100) {

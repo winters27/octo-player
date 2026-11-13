@@ -2,6 +2,7 @@ package app.winters.octo.playback
 
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.catalog.CatalogDatabase
@@ -24,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -75,13 +77,26 @@ fun autoplayDue(enabled: Boolean, repeatMode: Int, hasNext: Boolean, remainingMs
 // adds nothing, and their words show, as for a radio started then.
 @OptIn(UnstableApi::class)
 @Singleton
-class Autoplay @Inject constructor(
-    private val settings: PlayerSettings,
-    private val picker: AutoplayPicker,
-    private val playable: PlayableSongs,
+class Autoplay internal constructor(
+    // Whether the setting is on, as it changes.
+    private val turnedOn: Flow<Boolean>,
+    // The songs to add after a seed: the queue's last songs, the listener's
+    // own among them, and every song the queue holds.
+    private val picksAfter: suspend (String, List<String>, List<String>, Set<String>) -> List<String>,
+    // The songs the player can play, for ids.
+    private val playable: suspend (List<String>) -> List<MediaItem>,
     private val stations: StationRefill,
-    private val feedback: Feedback,
+    // Words for the listener.
+    private val show: (String) -> Unit,
 ) {
+    @Inject constructor(settings: PlayerSettings, picker: AutoplayPicker, playable: PlayableSongs, stations: StationRefill, feedback: Feedback) : this(
+        settings.prefs.map { it.autoplay },
+        picker::picksAfter,
+        playable::items,
+        stations,
+        { words -> feedback.show(words) },
+    )
+
     private var player: OutputSwitch? = null
     private var window: QueueWindow? = null
     private var scope: CoroutineScope? = null
@@ -100,7 +115,7 @@ class Autoplay @Inject constructor(
         this.window = window
         this.scope = scope
         settingsJob = scope.launch {
-            settings.prefs.map { it.autoplay }.distinctUntilChanged().collect { on ->
+            turnedOn.distinctUntilChanged().collect { on ->
                 enabled = on
                 check()
             }
@@ -153,14 +168,14 @@ class Autoplay @Inject constructor(
         val tail = entries.takeLast(30)
         val anchors = tail.filterNot { it.isAutoplay }.map { it.mediaId }.filter { it != seedId }.takeLast(10).reversed()
         val picked = try {
-            picker.picksAfter(seedId, tail.map { it.mediaId }, anchors, entries.mapTo(HashSet()) { it.mediaId })
+            picksAfter(seedId, tail.map { it.mediaId }, anchors, entries.mapTo(HashSet()) { it.mediaId })
         } catch (e: TotalsFailed) {
             doneFor = key
             Log.i("Octo", "autoplay: play counts failed")
-            feedback.show(e.words)
+            show(e.words)
             return
         }
-        val items = playable.items(picked).map { it.markedAutoplay() }
+        val items = playable(picked).map { it.markedAutoplay() }
         // Tried once for this song, whatever came of it.
         doneFor = key
         if (items.isEmpty()) {
