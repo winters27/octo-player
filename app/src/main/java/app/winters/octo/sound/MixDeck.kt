@@ -117,6 +117,9 @@ internal class DeckState(val slot: Int) {
         endDrop = false
         endPosted = false
         readyState = -1
+        // A leave left from an earlier blend never ramps this one out.
+        leaveLeft = 0
+        leaveTotal = 0
     }
 
     // The slot's part in a blend is over: from here on its own sound, at
@@ -138,11 +141,32 @@ internal class DeckState(val slot: Int) {
     fun leave(frames: Int) {
         if (!on) return
         if (frames <= 0) {
-            on = false
+            stop()
             return
         }
         leaveTotal = frames
         leaveLeft = frames
+    }
+
+    // Stops the deck where it is: a leave not yet ramped out ends here.
+    fun stop() {
+        on = false
+        leaveLeft = 0
+        leaveTotal = 0
+    }
+
+    // No leave, dry-out fade or ramp of an earlier part carries over: the
+    // deck's own level, its share where the volumes put it.
+    fun clearLevel() {
+        leaveLeft = 0
+        leaveTotal = 0
+        fadeLeft = 0
+        fadeTotal = 0
+        rampLeft = 0
+        dry = 0
+        share = shareTo
+        shareFrom = shareTo
+        shareLeft = 0
     }
 
     // The pass before this one, and the mix frame this one began at: a

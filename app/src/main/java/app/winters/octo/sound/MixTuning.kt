@@ -70,6 +70,9 @@ class MixTuning(
     // A Sonic restart joins over this long, aligned within `alignMs`.
     val joinMs: Double = 5.0,
     val alignMs: Double = 15.0,
+    // With no deck output for this long (a stop, the queue's end), the
+    // outputs kept for a resume go; a seek's new output comes well inside it.
+    val idleReleaseMs: Long = 1_000,
 )
 
 // Media3's PCM buffer target for float stereo at `rate`, in frames.

@@ -41,6 +41,36 @@ class FallbackAndGateTest {
     }
 
     @Test
+    fun aVolumeChangeWhileTheFallbackPlaysItsHeldFramesWaitsUntilTheyHavePlayed() {
+        val rig = MixRig()
+        val d = rig.deck(0)
+        d.signal = ::counting
+        d.play()
+        feedTo(rig, d, 48_000L * 6)
+        rig.runFor(1_000.0)
+        val p = rig.track(0)
+        rig.builder.failing = Int.MAX_VALUE
+        rig.mixer.pause(hold = false)
+        d.pause()
+        shadowOf(Looper.getMainLooper()).idle()
+        rig.runFor(600.0)
+        val heldEnd = p.written
+        rig.mixer.wantPlaying(true)
+        d.play()
+        var waited = 0
+        while (p.plays < 2 && waited++ < 1_000) rig.runFor(1.0)
+        assertEquals("the paused output played again", 2, p.plays)
+        // A duck lifts while its held frames still play at 0.
+        rig.mixer.setVolume(0.6f)
+        rig.runFor(2_000.0)
+        val replay = p.playTimes[1]
+        val pastHeld = p.steps.first { it[0] > replay && it[1] >= heldEnd }[0]
+        val early = p.volumeCalls.filter { it.first in replay until pastHeld && it.second > 0f }
+        assertEquals("up before the held frames had played", emptyList<Pair<Long, Float>>(), early)
+        assertEquals("back at the level set", 0.6f, p.volumeCalls.last().second, 0f)
+    }
+
+    @Test
     fun withEveryBuildFailingTheResumePlaysThePausedOutputSilentForItsSpanAndLosesNothing() {
         val rig = MixRig()
         val d = rig.deck(0)

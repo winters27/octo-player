@@ -73,6 +73,27 @@ class RefillTest {
     }
 
     @Test
+    fun aDeckWhoseSourceStallsBesideAPlayingOneDriesWithItsFadeAndTheOutputNeverRunsLowOnLateWakes() {
+        val rig = rig()
+        val a = rig.deck(0)
+        a.signal = { 0.25f }
+        a.play()
+        a.feed()
+        val b = rig.deck(1)
+        b.signal = { 0.25f }
+        b.play()
+        b.feed()
+        rig.runFor(1_000.0)
+        // The second deck's source stops; from here every wake runs 45 ms late.
+        rig.stalled[1] = rig.sched.now
+        rig.mixLoop.lateNanos = 45 * ms
+        rig.runFor(3_000.0)
+        assertTrue("the stalled deck dried: ${rig.tap.notes}", rig.tap.notes.any { it.startsWith("dry 1@") })
+        for (t in rig.builder.built) assertEquals("track ${t.id} underruns", 0, t.underrunCount)
+        assertEquals("one output", 1, rig.builder.built.size)
+    }
+
+    @Test
     fun aFirstStartFedNoFasterThanItPlaysWaitsInsteadOfDipping() {
         val rig = rig()
         val d = rig.deck(0)

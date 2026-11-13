@@ -2,6 +2,7 @@ package app.winters.octo.sound
 
 import android.os.Looper
 import androidx.media3.common.util.UnstableApi
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,6 +53,26 @@ class ReleaseRuleTest {
         }
         assertTrue("released ${(p.releasedAt - pausedAt) / 1e6} ms after the pause", p.released && p.releasedAt - pausedAt <= 300 * ms)
         assertTrue("at most two alive: $most", most <= 2)
+    }
+
+    @Test
+    fun aStopAfterAPauseLeavesNoOutputAlive() {
+        val rig = MixRig()
+        val d = rig.deck(0)
+        d.signal = { 0.3f }
+        d.play()
+        d.feed()
+        rig.runFor(1_000.0)
+        pause(rig, d)
+        rig.runFor(400.0)
+        // The player stops, as OctoPlayer does it: nothing continues on the
+        // slot, the move is announced, the deck output goes and nothing
+        // comes after it.
+        rig.mixer.resetContinuation(0)
+        rig.mixer.announce(0)
+        d.output.release()
+        rig.runFor(1_500.0)
+        assertEquals("alive: ${rig.builder.built.filter { !it.released }.map { it.id }}", 0, alive(rig))
     }
 
     @Test

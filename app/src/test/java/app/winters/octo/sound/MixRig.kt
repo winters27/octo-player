@@ -67,11 +67,14 @@ class Sched {
 class TestLoop(private val sched: Sched, val name: String) : MixLoop {
     override fun nanoTime(): Long = sched.now
 
+    // How late every timed wake runs (a busy phone's late wakes).
+    var lateNanos = 0L
+
     override fun post(task: Runnable) = sched.add(sched.now, this, task)
 
     override fun postAt(nanos: Long, task: Runnable) {
         sched.remove(this, task)
-        sched.add(nanos, this, task)
+        sched.add(nanos + lateNanos, this, task)
     }
 
     override fun remove(task: Runnable) = sched.remove(this, task)
@@ -319,7 +322,17 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
         }
     }
 
-    override fun head(): Long = head and 0xFFFFFFFFL
+    // Reads of 0 still to come (Android 10's read after a failed Bluetooth
+    // connect).
+    var zeroReads = 0
+
+    override fun head(): Long {
+        if (zeroReads > 0) {
+            zeroReads--
+            return 0
+        }
+        return head and 0xFFFFFFFFL
+    }
 
     override fun timestamp(into: RealTimestamp): Boolean {
         val now = mixer.sched.now
