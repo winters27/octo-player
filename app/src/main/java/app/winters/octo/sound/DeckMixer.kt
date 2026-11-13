@@ -227,11 +227,7 @@ class DeckMixer(
         var cap = Long.MAX_VALUE
     }
 
-    // A session action with the slots of the blend that made it, so one
-    // still waiting for its frame after the blend retires finds its decks.
-    private class Act(val kind: BlendActionKind, var frame: Long, val value: Long, val ms: Double, val gen: Long, val aSlot: Int, val bSlot: Int) {
-        fun at(frame: Long) = Act(kind, frame, value, ms, gen, aSlot, bSlot)
-    }
+    private class Act(val kind: BlendActionKind, var frame: Long, val value: Long, val ms: Double, val gen: Long)
 
     // A real output and what the mixer knows of it.
     private inner class Real(val out: RealOutput, val id: Int) {
@@ -690,8 +686,7 @@ class DeckMixer(
         if (a.role == ROLE_A) a.role = ROLE_NONE
         if (bd.role == ROLE_B) {
             bd.role = ROLE_NONE
-            val startComing = pending.any { it.bSlot == bd.slot && (it.kind == BlendActionKind.CUT || it.kind == BlendActionKind.START_B) }
-            if (bd.startAt < 0 && !bd.started && !startComing) {
+            if (bd.startAt < 0 && !bd.started) {
                 bd.parked = true
                 bd.on = false
             }
@@ -712,7 +707,7 @@ class DeckMixer(
         val taken = ArrayList<Act>()
         var remix: Act? = null
         while (session.takeAction(action)) {
-            val a = Act(action.kind, action.frame, action.value, action.ms, blendGen, blend?.outgoingSlot ?: lastA, blend?.incomingSlot ?: -1)
+            val a = Act(action.kind, action.frame, action.value, action.ms, blendGen)
             taken += a
             if (a.kind == BlendActionKind.REMIX) remix = a
             if (a.frame < mixPoint && (a.kind == BlendActionKind.UNDO_START || fromMain)) rerun = min(rerun, a.frame)
@@ -731,7 +726,7 @@ class DeckMixer(
                     schedule(a)
                     if (a.kind == BlendActionKind.CUT || a.kind == BlendActionKind.A_LEAVE) through = max(through, a.frame + a.value)
                 }
-                keptA = remix.aSlot
+                keptA = blend?.outgoingSlot ?: lastA
                 premix(through + blockFrames)
             }
             rerun != Long.MAX_VALUE -> rerunFrom(max(rerun, firstRerunnable()), taken)
@@ -836,8 +831,11 @@ class DeckMixer(
 
     private fun apply(a: Act) {
         log += a
-        val ad = if (a.aSlot >= 0) decks[a.aSlot] else null
-        val bd = if (a.bSlot >= 0) decks[a.bSlot] else null
+        val b = blend
+        val aSlot = b?.outgoingSlot ?: lastA
+        val bSlot = b?.incomingSlot ?: -1
+        val ad = if (aSlot >= 0) decks[aSlot] else null
+        val bd = if (bSlot >= 0) decks[bSlot] else null
         when (a.kind) {
             BlendActionKind.START_B -> if (bd != null) {
                 bd.startAt = a.frame
@@ -952,9 +950,9 @@ class DeckMixer(
         val undone = extra.any { it.kind == BlendActionKind.UNDO_START }
         for (a in again) {
             if (undone && (a.kind == BlendActionKind.START_B || a.kind == BlendActionKind.LIMITER_ON || a.kind == BlendActionKind.COMMIT_B)) continue
-            schedule(a.at(a.frame))
+            schedule(Act(a.kind, a.frame, a.value, a.ms, a.gen))
         }
-        for (a in extra) schedule(a.at(max(a.frame, start)))
+        for (a in extra) schedule(Act(a.kind, max(a.frame, start), a.value, a.ms, a.gen))
         session.cleared(start)
         probe?.note("remix", start)
     }
