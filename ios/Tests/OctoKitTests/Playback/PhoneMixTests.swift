@@ -384,6 +384,7 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
 
     @Test func anEditThatLeavesTheSongOnNowAndTheNextSongAsTheyWereKeepsTheBlend() {
         let next = (entryId: Optional("b"), uri: "octo://b")
+        // Songs added, moved or taken out beyond the next song.
         #expect(editKeepsBlend(currentBefore: "a", currentAfter: "a", registeredNext: next, nextAfter: next))
         // Play next X: the next song changed.
         #expect(!editKeepsBlend(currentBefore: "a", currentAfter: "a", registeredNext: next, nextAfter: (entryId: "x", uri: "octo://x")))
@@ -391,6 +392,25 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
         #expect(!editKeepsBlend(currentBefore: "a", currentAfter: "a", registeredNext: next, nextAfter: (entryId: "b", uri: "octo://b2")))
         #expect(!editKeepsBlend(currentBefore: "a", currentAfter: "c", registeredNext: next, nextAfter: next))
         #expect(!editKeepsBlend(currentBefore: "a", currentAfter: "a", registeredNext: nil, nextAfter: next))
+    }
+
+    @Test func pauseAtTheEndOfTheSongSetInTheRunUpUndoesTheStartBeforeItIsWritten() {
+        // Registered and not yet handed over: undone first, then written, then followed up.
+        #expect(endOfSongWrite(old: false, new: true, registered: true) == .disarmThenWrite)
+        #expect(endOfSongWrite(old: true, new: false, registered: true) == .disarmThenWrite)
+        // No start registered (or handed over already): only the write.
+        #expect(endOfSongWrite(old: false, new: true, registered: false) == .write)
+        // The same value again touches nothing.
+        #expect(endOfSongWrite(old: true, new: true, registered: true) == .skip)
+    }
+
+    @Test func onlyAnEditThatLetsGoOfTheSongOnNowDropsTheKeptFrames() {
+        // Songs added, moved or taken out around the song on now: the kept frames stay.
+        #expect(!editReleases(currentBefore: "a", currentAfter: "a"))
+        // Another song on now, the song on now taken out, the queue emptied.
+        #expect(editReleases(currentBefore: "a", currentAfter: "b"))
+        #expect(editReleases(currentBefore: nil, currentAfter: "b"))
+        #expect(editReleases(currentBefore: "a", currentAfter: nil))
     }
 
     @Test func theSpareIsParkedJustBeforeItsEntryAndArmedAheadOfItsLead() {
@@ -584,18 +604,26 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
         #expect(a.atSongEnd(followerSerial: 7) == .moveOn)
     }
 
+    /// Runs `ramp` on one channel `x`, its first frame at bus frame `firstBus`.
+    func run(_ ramp: DeckGainRamp, _ x: inout [Float], firstBus: Int64) {
+        x.withUnsafeMutableBufferPointer { p in
+            var channel = p.baseAddress!
+            withUnsafeMutablePointer(to: &channel) { ramp.process($0, count: 1, frames: p.count, firstBus: firstBus) }
+        }
+    }
+
     @Test func theLevelAfterTheTimePitchLeavesOnItsExactBusFrame() {
         let ramp = DeckGainRamp()
         ramp.leave(atBus: 1_000, frames: 960)
         var x = [Float](repeating: 1, count: 4_096)
-        x.withUnsafeMutableBufferPointer { p in ramp.process([p.baseAddress!], frames: 4_096, firstBus: 0) }
+        run(ramp, &x, firstBus: 0)
         #expect(x[999] == 1)
         #expect(x[1_000] < 1)
         #expect(x[1_000 + 959] == 0)
         #expect(ramp.silent)
         ramp.open()
         var y = [Float](repeating: 1, count: 16)
-        y.withUnsafeMutableBufferPointer { p in ramp.process([p.baseAddress!], frames: 16, firstBus: 5_000) }
+        run(ramp, &y, firstBus: 5_000)
         #expect(y.allSatisfy { $0 == 1 })
     }
 }
@@ -768,6 +796,10 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
             right.deallocate()
         }
         let buffers = [left, right]
+        let table = UnsafeMutablePointer<UnsafeMutablePointer<Float>>.allocate(capacity: 2)
+        table[0] = left
+        table[1] = right
+        defer { table.deallocate() }
         let stages = [a, b]
         let arm = BlendArm(generation: 1, startMs: 10_000, overlapMs: 8_000, latestEndMs: 22_000, outgoingEndMs: 30_000,
                            lateMoveBars: lateMoveUnbounded, holdShare: 0.3)
@@ -806,7 +838,7 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
                     stage.clock.pulled(step)
                     n -= step
                 }
-                stage.gain.process(buffers, frames: 1_024, firstBus: head)
+                stage.gain.process(table, count: 2, frames: 1_024, firstBus: head)
             }
             mark(0)
             session.advance(to: min(a.clock.renderedBus, b.clock.renderedBus), head: head, outgoingMs: Double(head) / 48)

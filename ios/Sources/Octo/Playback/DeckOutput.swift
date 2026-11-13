@@ -7,11 +7,16 @@ import OctoKit
 ///
 /// Each deck plays through its time-pitch stage and its level unit into the main mixer; the
 /// limiter on the sum sits between the main mixer and the output, and runs the blend's rules each
-/// cycle (`MixRender`), so it is reconnected at the output's format whenever that changes.
+/// cycle (OctoKit's `PhoneMix`), so it is reconnected at the output's format whenever that
+/// changes.
 @MainActor
 final class DeckOutput {
     let engine = AVAudioEngine()
-    let mix: MixRender
+    let mix: PhoneMix
+    #if DEBUG
+    /// The debug build's tap on the mix, held here (the mix only points at it).
+    let tap = MixTap()
+    #endif
     private let decks: [Deck]
     private let limiter: AVAudioUnitEffect?
     /// Whether the engine should be running: music plays, or it waits silent a while after a pause.
@@ -31,9 +36,12 @@ final class DeckOutput {
 
     init(decks: [Deck]) {
         self.decks = decks
-        let mix = MixRender(decks: decks.map(\.render))
+        let mix = PhoneMix(decks: decks.map(\.render))
         self.mix = mix
         limiter = OctoEffectUnit.node(OctoEffectUnit.mixLimiter, name: "mix limiter", renderer: MixLimiterRender(mix))
+        #if DEBUG
+        mix.observer = tap
+        #endif
         for deck in decks { connect(deck) }
         if let limiter { engine.attach(limiter) }
         connectOutput()
@@ -142,15 +150,13 @@ final class DeckOutput {
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
         let limiterDelay = rate > 0 ? Double(mix.limiterLatencyFrames) / rate : 0
         let device = session.outputLatency + session.ioBufferDuration + limiterDelay
-        var latency = 0.0
         for deck in decks {
             deck.refreshLatency()
             let stage = deck.timePitch.bypass ? 0 : deck.timePitch.latency
-            latency = max(latency, deck.latencyFrames)
             deck.outputDelayMs = (device + stage) * 1000
         }
         mix.outputDelayMs = device * 1000
-        mix.latencyFrames.store(Int64(latency.rounded(.up)), ordering: .relaxed)
+        mix.noteLatency()
     }
 
     private func listen() {

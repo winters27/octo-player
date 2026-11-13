@@ -13,16 +13,24 @@ import Synchronization
 /// decided, the incoming song's first click and the outgoing song's click near S, each against
 /// where the plan puts it, from a click track with a click every `periodMs` from 0. It also
 /// writes the last seconds of both decks, aligned on bus frames, to Documents/MixTap.
-final class MixTap: @unchecked Sendable {
+///
+/// The render thread only copies values: each entry carries the session's own kinds, and main
+/// turns them into numbers. Its buffers are made on main before it is switched on.
+final class MixTap: PhoneMixObserver, @unchecked Sendable {
     let enabled = Atomic<Bool>(false)
 
     struct Entry: Sendable, Equatable {
         var code: Int32
-        var kind: Int32
+        /// The deck of an onset, or 1 when the limiter came on.
+        var flag: Int32 = 0
+        var input: BlendMainKind = .restarted
+        var action: BlendActionKind = .startB
+        var event: BlendEventKind = .proposed
+        var cause: BlendCause = .none
         var bus: Int64
-        var a: Int64
-        var b: Int64
-        var x: Double
+        var a: Int64 = 0
+        var b: Int64 = 0
+        var x: Double = 0
     }
 
     static let input: Int32 = 1
@@ -30,25 +38,39 @@ final class MixTap: @unchecked Sendable {
     static let event: Int32 = 3
     static let onset: Int32 = 4
     static let limiting: Int32 = 5
+    static let restart: Int32 = 6
 
-    let log = BlendRing<Entry>(capacity: 8_192, filler: Entry(code: 0, kind: 0, bus: 0, a: 0, b: 0, x: 0))
+    let log = BlendRing<Entry>(capacity: 8_192, filler: Entry(code: 0, bus: 0))
 
-    /// Each deck's sound, mono, at the slot of its bus frame, for the last `seconds`.
+    /// Each deck's sound, mono, at the slot of its bus frame, for the last `seconds`: deck 0's
+    /// slots first, then deck 1's.
     static let seconds = 20
     static let capacity = 48_000 * seconds
-    private var audio: [UnsafeMutablePointer<Float>] = []
-    private var armed = [true, true]
-    private var quiet = [0, 0]
+    private var audio: UnsafeMutablePointer<Float>?
+    /// Per deck: whether the next loud frame is a click's onset, and the quiet frames since one.
+    private let armed: UnsafeMutablePointer<Bool>
+    private let quiet: UnsafeMutablePointer<Int>
     private var wasLimiting = false
+
+    init() {
+        armed = .allocate(capacity: 2)
+        armed.initialize(repeating: true, count: 2)
+        quiet = .allocate(capacity: 2)
+        quiet.initialize(repeating: 0, count: 2)
+    }
+
+    deinit {
+        armed.deallocate()
+        quiet.deallocate()
+        audio?.deallocate()
+    }
 
     /// Main thread: makes the capture buffers and starts.
     func start() {
-        if audio.isEmpty {
-            audio = (0..<2).map { _ in
-                let buffer = UnsafeMutablePointer<Float>.allocate(capacity: Self.capacity)
-                buffer.initialize(repeating: 0, count: Self.capacity)
-                return buffer
-            }
+        if audio == nil {
+            let buffer = UnsafeMutablePointer<Float>.allocate(capacity: Self.capacity * 2)
+            buffer.initialize(repeating: 0, count: Self.capacity * 2)
+            audio = buffer
         }
         enabled.store(true, ordering: .releasing)
     }
@@ -59,51 +81,46 @@ final class MixTap: @unchecked Sendable {
 
     func note(input: BlendMainInput, bus: Int64) {
         guard enabled.load(ordering: .acquiring) else { return }
-        let kind: Int32 = switch input.kind {
-        case .arm: 0
-        case .disarm: 1
-        case .failed: 2
-        case .followUp: 3
-        case .paceChanged: 4
-        case .outgoingStopped: 5
-        case .restarted: 6
-        }
-        log.push(Entry(code: Self.input, kind: kind, bus: bus, a: input.generation, b: Int64(input.entryMs), x: input.kind == .paceChanged ? input.pace : input.arm.startMs))
+        log.push(Entry(code: Self.input, input: input.kind, bus: bus, a: input.generation, b: Int64(input.entryMs),
+                       x: input.kind == .paceChanged ? input.pace : input.arm.startMs))
     }
 
     func note(action: BlendAction, bus: Int64) {
         guard enabled.load(ordering: .acquiring) else { return }
-        log.push(Entry(code: Self.action, kind: Int32(BlendActionKind.allCases.firstIndex(of: action.kind) ?? 0), bus: bus,
-                       a: action.frame, b: action.value, x: action.ms))
+        log.push(Entry(code: Self.action, action: action.kind, bus: bus, a: action.frame, b: action.value, x: action.ms))
     }
 
     func note(event: BlendEvent) {
         guard enabled.load(ordering: .acquiring) else { return }
-        log.push(Entry(code: Self.event, kind: Int32(BlendEventKind.allCases.firstIndex(of: event.kind) ?? 0), bus: event.frame,
-                       a: event.generation, b: Int64(BlendCause.allCases.firstIndex(of: event.cause) ?? 0), x: event.ms))
+        log.push(Entry(code: Self.event, event: event.kind, cause: event.cause, bus: event.frame, a: event.generation, x: event.ms))
+    }
+
+    func note(restartAt bus: Int64, replayBus: Double) {
+        guard enabled.load(ordering: .acquiring) else { return }
+        log.push(Entry(code: Self.restart, bus: bus, x: replayBus))
     }
 
     func cycle(bus: Int64, limiterLevel: Float, limiting: Bool) {
         guard enabled.load(ordering: .acquiring), limiting != wasLimiting else { return }
         wasLimiting = limiting
-        log.push(Entry(code: Self.limiting, kind: limiting ? 1 : 0, bus: bus, a: 0, b: 0, x: Double(limiterLevel)))
+        log.push(Entry(code: Self.limiting, flag: limiting ? 1 : 0, bus: bus, x: Double(limiterLevel)))
     }
 
     /// A deck's frames after its level unit, the first at bus frame `firstBus`.
-    func deck(_ index: Int, _ channels: [UnsafeMutablePointer<Float>], frames: Int, firstBus: Int64) {
-        guard enabled.load(ordering: .acquiring), index >= 0, index < 2, audio.count == 2, !channels.isEmpty else { return }
-        let into = audio[index]
+    func deck(_ index: Int, _ channels: UnsafeMutablePointer<UnsafeMutablePointer<Float>>, count: Int, frames: Int, firstBus: Int64) {
+        guard enabled.load(ordering: .acquiring), index >= 0, index < 2, count > 0, let audio else { return }
+        let into = audio + index * Self.capacity
         for i in 0..<frames {
             var sum: Float = 0
-            for ch in 0..<channels.count { sum += channels[ch][i] }
-            let x = sum / Float(channels.count)
+            for ch in 0..<count { sum += channels[ch][i] }
+            let x = sum / Float(count)
             let bus = firstBus + Int64(i)
             into[Int(bus % Int64(Self.capacity))] = x
             let level = abs(x)
             if armed[index] && level > 0.25 {
                 armed[index] = false
                 quiet[index] = 0
-                log.push(Entry(code: Self.onset, kind: Int32(index), bus: bus, a: Int64(index), b: 0, x: Double(level)))
+                log.push(Entry(code: Self.onset, flag: Int32(index), bus: bus, a: Int64(index), x: Double(level)))
             } else if level < 0.02 {
                 quiet[index] += 1
                 // 50 ms of quiet before the next click counts.
@@ -118,12 +135,12 @@ final class MixTap: @unchecked Sendable {
 
     /// Copies the last seconds of both decks from bus frame `from`, interleaved, A's deck first.
     func capture(from: Int64, frames: Int) -> [Float] {
-        guard audio.count == 2 else { return [] }
+        guard let audio else { return [] }
         var out = [Float](repeating: 0, count: frames * 2)
         for i in 0..<frames {
             let slot = Int((from + Int64(i)) % Int64(Self.capacity))
-            out[i * 2] = audio[0][slot]
-            out[i * 2 + 1] = audio[1][slot]
+            out[i * 2] = audio[slot]
+            out[i * 2 + 1] = audio[Self.capacity + slot]
         }
         return out
     }
@@ -139,27 +156,35 @@ final class MixTapReport {
     var periodMs = 500.0
     /// The plans registered: generation, start, entry, rate and pace, and which deck played out.
     private var plans: [Int64: (startMs: Double, entryMs: Double, rate: Double, pace: Double, outgoing: Int)] = [:]
+    /// Each kind's number in the written log, by its place among the kinds.
+    private let actionCodes = Dictionary(uniqueKeysWithValues: BlendActionKind.allCases.enumerated().map { ($1, $0) })
+    private let eventCodes = Dictionary(uniqueKeysWithValues: BlendEventKind.allCases.enumerated().map { ($1, $0) })
+    private let causeCodes = Dictionary(uniqueKeysWithValues: BlendCause.allCases.enumerated().map { ($1, $0) })
 
     func planned(generation: Int64, startMs: Double, entryMs: Double, rate: Double, pace: Double, outgoing: Int) {
         plans[generation] = (startMs, entryMs, rate, pace, outgoing)
     }
 
     /// Every tick: takes what the render logged, and reports each blend once it ended.
-    func poll(_ mix: MixRender) {
-        guard mix.tap.enabled.load(ordering: .acquiring) else { return }
-        while let entry = mix.tap.log.pop() {
+    func poll(_ output: DeckOutput) {
+        let tap = output.tap
+        guard tap.enabled.load(ordering: .acquiring) else { return }
+        while let entry = tap.log.pop() {
             entries.append(entry)
-            if entry.code == MixTap.event {
-                let kind = BlendEventKind.allCases[Int(entry.kind)]
-                logger.info("mixtap: event \(kind.rawValue, privacy: .public) gen \(entry.a) frame \(entry.bus) ms \(entry.x)")
-                if kind == .blendEnd || kind == .incomingNotReady || kind == .cancelled { report(entry.a, mix) }
-            } else if entry.code == MixTap.action {
-                let kind = BlendActionKind.allCases[Int(entry.kind)]
-                logger.info("mixtap: action \(kind.rawValue, privacy: .public) at \(entry.a) value \(entry.b) ms \(entry.x) (render at \(entry.bus))")
-            } else if entry.code == MixTap.input {
-                logger.info("mixtap: from main \(entry.kind) gen \(entry.a) at \(entry.bus)")
-            } else if entry.code == MixTap.limiting {
-                logger.info("mixtap: limiter \(entry.kind == 1 ? "on" : "off", privacy: .public) at \(entry.bus) level \(entry.x)")
+            switch entry.code {
+            case MixTap.event:
+                logger.info("mixtap: event \(entry.event.rawValue, privacy: .public) gen \(entry.a) frame \(entry.bus) ms \(entry.x)")
+                if entry.event == .blendEnd || entry.event == .incomingNotReady || entry.event == .cancelled { report(entry.a, output) }
+            case MixTap.action:
+                logger.info("mixtap: action \(entry.action.rawValue, privacy: .public) at \(entry.a) value \(entry.b) ms \(entry.x) (render at \(entry.bus))")
+            case MixTap.input:
+                logger.info("mixtap: from main \(Self.inputCode(entry.input)) gen \(entry.a) at \(entry.bus)")
+            case MixTap.limiting:
+                logger.info("mixtap: limiter \(entry.flag == 1 ? "on" : "off", privacy: .public) at \(entry.bus) level \(entry.x)")
+            case MixTap.restart:
+                logger.info("mixtap: restart at \(entry.bus) replay \(entry.x)")
+            default:
+                break
             }
         }
         if entries.count > 20_000 { entries.removeFirst(entries.count - 10_000) }
@@ -167,10 +192,9 @@ final class MixTapReport {
 
     /// One line for a blend: S, the incoming song's first click after it and the outgoing song's
     /// first click at or after it, each against the plan, in ms (positive: late).
-    private func report(_ generation: Int64, _ mix: MixRender) {
-        let startB = Int32(BlendActionKind.allCases.firstIndex(of: .startB) ?? 0)
+    private func report(_ generation: Int64, _ output: DeckOutput) {
         guard let plan = plans[generation],
-              let s = entries.last(where: { $0.code == MixTap.action && $0.kind == startB })?.a else {
+              let s = entries.last(where: { $0.code == MixTap.action && $0.action == .startB })?.a else {
             logger.info("mixtap: gen \(generation) ended with no start")
             return
         }
@@ -189,27 +213,52 @@ final class MixTapReport {
             + "B to A \(firstA.flatMap { a in firstB.map { b in String(format: "%.2f", (Double(b - a) - (planB - planA)) / 48) } } ?? "-") ms, "
             + "rate \(plan.rate) pace \(plan.pace)"
         logger.info("\(line, privacy: .public)")
-        write(generation, line, from: s - 96_000, mix)
+        write(generation, line, from: s - 96_000, output)
+    }
+
+    private static func inputCode(_ kind: BlendMainKind) -> Int {
+        switch kind {
+        case .arm: 0
+        case .disarm: 1
+        case .failed: 2
+        case .followUp: 3
+        case .paceChanged: 4
+        case .outgoingStopped: 5
+        case .restarted: 6
+        }
+    }
+
+    /// The number an entry's kind is written as: its place among its kinds.
+    private func kindCode(_ entry: MixTap.Entry) -> Int {
+        switch entry.code {
+        case MixTap.input: Self.inputCode(entry.input)
+        case MixTap.action: actionCodes[entry.action] ?? 0
+        case MixTap.event: eventCodes[entry.event] ?? 0
+        default: Int(entry.flag)
+        }
     }
 
     /// Writes both decks from 2 s before S for up to 12 s, and the lines, to Documents/MixTap.
-    func write(_ generation: Int64, _ line: String, from: Int64, _ mix: MixRender) {
+    func write(_ generation: Int64, _ line: String, from: Int64, _ output: DeckOutput) {
         let frames = min(MixTap.capacity, 48_000 * 12)
-        let samples = mix.tap.capture(from: max(0, from), frames: frames)
+        let samples = output.tap.capture(from: max(0, from), frames: frames)
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let folder = documents.appendingPathComponent("MixTap", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let stamp = Int(Date().timeIntervalSince1970)
         let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
         try? data.write(to: folder.appendingPathComponent("gen\(generation)-\(stamp)-from\(max(0, from))-48k-2ch-f32.raw"))
-        let lines = entries.map { "\($0.code) \($0.kind) bus \($0.bus) a \($0.a) b \($0.b) x \($0.x)" }.joined(separator: "\n")
+        let lines = entries.map { entry in
+            let b = entry.code == MixTap.event ? Int64(causeCodes[entry.cause] ?? 0) : entry.b
+            return "\(entry.code) \(kindCode(entry)) bus \(entry.bus) a \(entry.a) b \(b) x \(entry.x)"
+        }.joined(separator: "\n")
         try? (line + "\n" + lines).write(to: folder.appendingPathComponent("gen\(generation)-\(stamp).txt"), atomically: true, encoding: .utf8)
     }
 
     /// Writes what the tap holds now.
-    func dump(_ mix: MixRender) {
-        let now = mix.nowBus
-        write(-1, "mixtap: dump at \(now)", from: max(0, now - Int64(MixTap.capacity) + 4_800), mix)
+    func dump(_ output: DeckOutput) {
+        let now = output.mix.nowBus
+        write(-1, "mixtap: dump at \(now)", from: max(0, now - Int64(MixTap.capacity) + 4_800), output)
     }
 }
 #endif

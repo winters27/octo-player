@@ -20,8 +20,9 @@ public final class DeckBlendStage: @unchecked Sendable {
     /// follows its end.
     public private(set) var wasOutgoing = false
     private var session: BlendSession?
-    /// The other deck's stage, for a start that waits for the outgoing song's kept frames.
-    public weak var partner: DeckBlendStage?
+    /// The other deck's stage, for a start that waits for the outgoing song's kept frames. Both
+    /// live as long as the engine; no reference is counted on the render thread.
+    public unowned(unsafe) var partner: DeckBlendStage?
 
     // The incoming song.
     /// Loaded and waiting for its start: silent, consuming nothing.
@@ -211,12 +212,22 @@ public final class DeckBlendStage: @unchecked Sendable {
         case (.placeB, .incoming):
             queue(at, .placeB, DeckFlow.rampFrames(rate: rate))
         case (.cut, .outgoing):
-            if remixing { cutAtStart = true } else { gain.leave(atBus: action.frame, frames: action.value) }
-        case (.cut, .incoming):
-            if remixing {
-                startsAfterPartner = true
+            if !remixing {
+                gain.leave(atBus: action.frame, frames: action.value)
+            } else if partner?.started == true {
+                // Paused past the handover with the incoming song already under way: it plays on
+                // alone, and nothing more of this song is heard.
+                queue(clock.source, .aEnd)
             } else {
+                cutAtStart = true
+            }
+        case (.cut, .incoming):
+            if !remixing {
                 queue(at, .cut, max(1, frames))
+            } else if started {
+                queue(clock.source, .bDisarm, DeckFlow.rampFrames(ms: blendDisarmRampMs, rate: rate))
+            } else {
+                startsAfterPartner = true
             }
         case (.freezeA, .outgoing):
             queue(at, .freezeA)
@@ -235,6 +246,14 @@ public final class DeckBlendStage: @unchecked Sendable {
 
     /// The session's actions of one call are all in.
     public func endOfActions() { remixing = false }
+
+    /// `frames` frames already handed out are handed out again (an engine restart's replay): what
+    /// waits on a later frame of the song moves by as much.
+    public func shift(by frames: Int64) {
+        guard frames > 0 else { return }
+        for i in 0..<pendingCount where pending[i].index >= clock.source { pending[i].index += frames }
+        if startIndex >= clock.source { startIndex += frames }
+    }
 
     private func queue(_ index: Int64, _ kind: BlendActionKind, _ frames: Int = 0, ms: Double = 0) {
         if pendingCount == Self.slots {

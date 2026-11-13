@@ -60,9 +60,31 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
     /// Transitions can be shaped once the deck's audio runs through this step.
     public var shapesTransitions: Bool { true }
 
+    /// Main thread: arms `transition` (or none). The one it replaces is kept here until the render
+    /// can no longer hold it (the last two replaced, and whichever the render reports holding), so
+    /// the render thread is never the one to free a transition.
     public func arm(_ transition: DeckTransition?) {
-        armed.withLock { $0 = transition }
+        let old = armed.withLock { slot -> DeckTransition? in
+            let was = slot
+            slot = transition
+            return was
+        }
+        if let old { retired.append(old) }
+        let holds = renderHolds.load(ordering: .acquiring)
+        var kept: [DeckTransition] = []
+        for i in retired.indices where i >= retired.count - 2 || Self.address(retired[i]) == holds { kept.append(retired[i]) }
+        retired = kept
     }
+
+    /// Main thread only: transitions replaced that the render may still hold.
+    private var retired: [DeckTransition] = []
+    /// The transition the render's shaping holds now, by address (0 for none).
+    private let renderHolds = Atomic<UInt>(0)
+
+    /// How many replaced transitions are kept, for checks.
+    public var retiredCount: Int { retired.count }
+
+    static func address(_ transition: DeckTransition) -> UInt { UInt(bitPattern: Unmanaged.passUnretained(transition).toOpaque()) }
 
     public func reading(_ entryId: String?, tagBpm: Double?) -> TapReading? { tap?.reading(entryId, tagBpm: tagBpm) }
 
@@ -116,7 +138,8 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
         if let stage {
             written = stage.process(input, frames: frames, output: output)
         } else {
-            for (from, to) in zip(input, output) where from != to { to.update(from: from, count: frames) }
+            // An index loop: an array's own iterator allocates in an unoptimized build.
+            for ch in 0..<channels where input[ch] != output[ch] { output[ch].update(from: input[ch], count: frames) }
             written = frames
         }
         shapeTransition(output, written)
@@ -169,13 +192,15 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
         if dropped { transition = nil }
         let blendMs = frozenMs ?? songMs - startShiftMs - extensionMs
         shaping.arm(transition, songMs: blendMs)
+        renderHolds.store(shaping.holdingAddress, ordering: .releasing)
         shaping.process(buffers, frames: frames, songMs: blendMs, msPerFrame: frozenMs == nil ? msPerFrame : 0)
     }
 
     // MARK: The blend's rules, on the render thread
 
-    /// The transition the blend time below belongs to, and whether the blend's rules disarmed it.
-    private var blendFor: DeckTransition?
+    /// The transition the blend time below belongs to (compared by identity only, never owned
+    /// here), and whether the blend's rules disarmed it.
+    private unowned(unsafe) var blendFor: DeckTransition?
     private var dropped = false
     private var startShiftMs = 0.0
     private var extensionMs = 0.0

@@ -139,10 +139,12 @@ public final class SweptFilter {
     public init(_ kind: FilterKind, sampleRate: Int, channels: Int) {
         self.kind = kind
         self.sampleRate = sampleRate
+        // Each its own storage: arrays that share one are copied at their first write, which is
+        // on the render thread.
         x1 = [Double](repeating: 0, count: channels)
-        x2 = x1
-        y1 = x1
-        y2 = x1
+        x2 = [Double](repeating: 0, count: channels)
+        y1 = [Double](repeating: 0, count: channels)
+        y2 = [Double](repeating: 0, count: channels)
     }
 
     /// Moves the cutoff; a change under a thousandth is not worth working out.
@@ -209,6 +211,12 @@ public final class TransitionShaper {
 
     /// Whether a transition or what is left of one still changes the sound.
     public var shaping: Bool { current != nil || gain != 1 || wet != 0 }
+
+    /// The transition held now, by address (0 for none), so its owner can keep it alive.
+    public var holdingAddress: UInt {
+        guard let current else { return 0 }
+        return UInt(bitPattern: Unmanaged.passUnretained(current).toOpaque())
+    }
 
     public init(sampleRate: Int, channels: Int) {
         self.sampleRate = sampleRate

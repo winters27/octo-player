@@ -156,13 +156,15 @@ public let airPlayAckLeadMs = 1_000.0
 
 /// Whether a blend on a route `outputDelayMs` late commits its start at its deadline without
 /// waiting for main: only on a route over `airPlayAckLeadMs` late, and only when, over the
-/// exposure window (the output delay less that lead, in output time at `speed`), the incoming
-/// song's gain stays under -40 dB and the outgoing song's within 0.5 dB of its own level, so an
-/// interrupt before the acknowledgement leaves only frames nobody hears. A short crossfade, where
+/// exposure window, the incoming song's gain stays under -40 dB and the outgoing song's within
+/// 0.5 dB of its own level, so an interrupt before the acknowledgement leaves only frames nobody
+/// hears. The window, in output time at `speed`, is everything an interrupt can find rendered: the
+/// output delay less that lead, plus `lateMs` (how late main can be told: the commit deadline, the
+/// ticker's period and main's lag), plus the 250 ms fade that follows it. A short crossfade, where
 /// the incoming song is loud at once, waits for the acknowledgement.
-public func commitsBeforeAck(_ plan: TransitionPlan, outputDelayMs: Double, speed: Double = 1) -> Bool {
+public func commitsBeforeAck(_ plan: TransitionPlan, outputDelayMs: Double, speed: Double = 1, lateMs: Double = 0) -> Bool {
     guard outputDelayMs > airPlayAckLeadMs, plan.overlapMs > 0 else { return false }
-    let windowMs = (outputDelayMs - airPlayAckLeadMs) * max(speed, 0.01)
+    let windowMs = (outputDelayMs - airPlayAckLeadMs + max(0, lateMs) + blendDisarmRampMs) * max(speed, 0.01)
     let incoming = DeckTransition(entryId: nil, plan: plan, incoming: true)
     let outgoing = DeckTransition(entryId: nil, plan: plan, incoming: false)
     let rate = plan.beatMatchRate ?? 1

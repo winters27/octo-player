@@ -260,3 +260,11 @@ final class DeckSource: @unchecked Sendable {
         }
     }
 }
+
+/// What a deck's render reads of a song (OctoKit's `DeckFeed`).
+extension DeckSource: DeckFeed {
+    var entryId: String? { item.entryId }
+    var isDecodedToEnd: Bool { decodedToEnd.load(ordering: .relaxed) }
+    var hasFailed: Bool { failure != nil }
+    var jumpedToMs: Int { jumpMs.load(ordering: .relaxed) }
+}

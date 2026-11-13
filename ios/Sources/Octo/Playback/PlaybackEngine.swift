@@ -109,9 +109,11 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         didSet { applyVolume() }
     }
 
+    /// A change while a blend's start is registered undoes it first (the song on now ends where it
+    /// stops); the same value again changes nothing.
     var pauseAtEndOfSong: Bool {
         get { deck.pauseAtEndOfSong }
-        set { deck.pauseAtEndOfSong = newValue }
+        set { crossfader.endOfSongChanged(to: newValue) { deck.pauseAtEndOfSong = newValue } }
     }
 
     var currentKey: String? { queue.currentItem?.entryId }
@@ -244,6 +246,8 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
                 // The song failed to load before: it is tried again from where it was.
                 loadCurrent(atMs: deck.positionMs)
             } else {
+                // The old song's frames kept through a pause past a handover play first.
+                crossfader.resumed()
                 deck.playWhenReady = true
             }
         }
@@ -255,7 +259,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         resumeWhenFocusReturns = false
         guard playWhenReady else { return }
         playWhenReady = false
-        crossfader.interrupt(.pause)
+        crossfader.interrupt(.pause, releasing: false)
         deck.playWhenReady = false
         dropLiveStream()
         crossfader.followUp()
@@ -538,7 +542,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             resumeWhenFocusReturns = wantsMusic || resumeWhenFocusReturns
             guard playWhenReady else { return }
             playWhenReady = false
-            crossfader.interrupt(.pause)
+            crossfader.interrupt(.pause, releasing: false)
             deck.playWhenReady = false
             dropLiveStream()
             crossfader.followUp()

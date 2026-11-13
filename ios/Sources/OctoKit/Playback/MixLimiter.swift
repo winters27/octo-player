@@ -105,8 +105,9 @@ public final class DeckGainRamp: @unchecked Sendable {
         rampFrames = 0
     }
 
-    /// Applies the level to `frames` frames in place, the first at bus frame `firstBus`.
-    public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int, firstBus: Int64) {
+    /// Applies the level to `frames` frames of `count` channel buffers in place, the first at bus
+    /// frame `firstBus`.
+    public func process(_ buffers: UnsafeMutablePointer<UnsafeMutablePointer<Float>>, count: Int, frames: Int, firstBus: Int64) {
         if gain == 1 && (rampAt == Int64.max || rampAt >= firstBus + Int64(frames)) { return }
         for i in 0..<frames {
             let bus = firstBus + Int64(i)
@@ -119,8 +120,7 @@ public final class DeckGainRamp: @unchecked Sendable {
                     gain = from * (1 - Float(into + 1) / Float(rampFrames))
                 }
             }
-            // An index loop: an array's own iterator allocates in an unoptimized build.
-            for ch in 0..<buffers.count { buffers[ch][i] *= gain }
+            for ch in 0..<count { buffers[ch][i] *= gain }
         }
     }
 }

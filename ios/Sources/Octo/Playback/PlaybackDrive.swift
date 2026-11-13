@@ -133,13 +133,13 @@ enum PlaybackDrive {
             router.show("\(saved) of the next \(servers) server songs saved whole")
         case "mixtap":
             let parts = value.split(separator: ":").map(String.init)
-            let mix = player.engine.output.mix
+            let output = player.engine.output
             switch parts.first {
             case "on":
                 if parts.count > 1, let period = Double(parts[1]) { MixTapReport.shared.periodMs = period }
-                mix.tap.start()
-            case "off": mix.tap.stop()
-            case "dump": MixTapReport.shared.dump(mix)
+                output.tap.start()
+            case "off": output.tap.stop()
+            case "dump": MixTapReport.shared.dump(output)
             case "holdmain": holdMain(ms: Double(parts.last ?? "") ?? 300)
             case "stall":
                 let ms = parts.count > 2 ? Int(parts[2]) ?? 4_000 : 4_000

@@ -104,6 +104,31 @@ extension TransitionPlan {
     }
 }
 
+/// How a write of "pause at the end of this song" lands.
+public enum EndOfSongWrite: Sendable, Equatable {
+    /// The same value again: nothing changes, and no blend is touched.
+    case skip
+    case write
+    /// A start registered and not yet handed over is undone first (the song on now ends where it
+    /// stops), then the flag is written, then the undone start hears what follows the song.
+    case disarmThenWrite
+}
+
+/// The rule for "pause at the end of this song" changing to `new` from `old`. A blend already
+/// handed over plays on: the flag lands on the song on screen.
+public func endOfSongWrite(old: Bool, new: Bool, registered: Bool) -> EndOfSongWrite {
+    if old == new { return .skip }
+    return registered ? .disarmThenWrite : .write
+}
+
+/// Whether an edit of the queue lets go of what plays: one that leaves another song on now, or
+/// none. Only such an edit, like a seek, a skip, new items and a stop, drops the outgoing song's
+/// frames kept through a pause past the handover; a pause and an edit that keeps the song on now
+/// keep them for the resume.
+public func editReleases(currentBefore: String?, currentAfter: String?) -> Bool {
+    currentAfter == nil || currentBefore != currentAfter
+}
+
 /// Whether an edit of the queue keeps a registered blend: on the iPhone the spare holds no copy
 /// of the queue, so an edit that leaves the song on now and the next song (entry and file) as
 /// they were, compared after the edit, changes nothing the blend depends on.
