@@ -87,6 +87,11 @@ class A11yScene(
     // Signed in the usual way, so the server is kept in Settings' list and
     // its checks are asked of it, rather than handed to the app as it is.
     saved: Boolean = false,
+    // The settings the window runs on, when a test brings its own (a
+    // session that saves nothing, say); else a file in `folder`.
+    store: SettingsStore? = null,
+    // No server: the window shows the sign-in page.
+    signedOut: Boolean = false,
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -117,12 +122,16 @@ class A11yScene(
             server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[${extensions.joinToString(",") { """{"name":"${it.substringBefore(':')}","versions":[${it.substringAfter(':')}]}""" }}]""")
         }
         serve(server)
-        val settings = SettingsStore(File(folder, "settings.json"), 0)
+        val settings = store ?: SettingsStore(File(folder, "settings.json"), 0)
         settings.update { look(it.copy(lyrics = it.lyrics.copy(online = false))) }
         val http = OkHttpClient()
         val updater = updates?.invoke(settings)
         val accounts = Accounts(settings, SessionOnlySecrets(), http)
-        val restored = if (saved) (runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done).connection else server.connection(extensions)
+        val restored = when {
+            signedOut -> null
+            saved -> (runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done).connection
+            else -> server.connection(extensions)
+        }
         SwingUtilities.invokeAndWait {
             app = AppState(
                 settings,
@@ -140,7 +149,7 @@ class A11yScene(
                 system = SystemIntegration(app, AppPlaces(File(folder, "config").apply { mkdirs() }, File(folder, "cache").apply { mkdirs() }), os, null, hotkeys = FakeHotkeys())
             }
         }
-        waitFor { app.library?.index != null }
+        if (!signedOut) waitFor { app.library?.index != null }
         scene = ImageComposeScene(width, height, Density(1f)) {
             val palette by app.palette.collectAsState()
             ProvideOctoTheme(palette) {

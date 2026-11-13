@@ -250,7 +250,9 @@ private fun BetweenSongsChoice(choice: BetweenSongs, onPick: (BetweenSongs) -> U
             .fillMaxWidth()
             .heightIn(min = RowHeight.Roomy)
             .padding(horizontal = RowInset, vertical = Space.L),
-        verticalArrangement = Arrangement.spacedBy(Space.M),
+        // The line under the segments sits closer to them than to the row
+        // under it, so it reads as theirs.
+        verticalArrangement = Arrangement.spacedBy(Space.Xs),
     ) {
         FitOrElse(
             { GlazeSegments(choices, choice, { it.name }, onPick) },
