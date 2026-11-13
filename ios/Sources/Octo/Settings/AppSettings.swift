@@ -49,7 +49,11 @@ final class AppSettings {
     @ObservationIgnored private var familyAppPicks: @MainActor () -> Bool = { true }
 
     private init() {
-        player = Self.readPlayer(playerStore)
+        // A device that chose before the Between songs choice existed stores the choice its
+        // settings come to, once, before the first read, so its backups carry it.
+        let playerKeys = playerStore
+        Self.apply(betweenSongsFirstReadWrites(playerKeys.object(forKey:)), to: playerKeys)
+        player = Self.readPlayer(playerKeys)
         stream = Self.readStream(playerStore)
         offline = Self.readOffline(offlineStore)
         keepScreenOn = lyricsStore.object(forKey: Keys.keepScreenOn) as? Bool ?? true
@@ -122,7 +126,8 @@ final class AppSettings {
 
     // MARK: Player
 
-    /// Changes the player settings, writing only what changed.
+    /// Changes the player settings, writing only what changed. The Between songs settings are
+    /// changed through `editBetweenSongs` alone.
     func update(_ change: (inout PlayerPrefs) -> Void) {
         var next = player
         change(&next)
@@ -132,12 +137,17 @@ final class AppSettings {
         player = next
     }
 
-    func setCrossfade(_ on: Bool) { update { $0.crossfade = on } }
-    func setCrossfadeSeconds(_ seconds: Int) { update { $0.crossfadeSeconds = seconds } }
-    func setCrossfadeCurve(_ curve: FadeCurve) { update { $0.crossfadeCurve = curve } }
-    func setSmartTransitions(_ on: Bool) { update { $0.smartTransitions = on } }
-    func setFilterSweeps(_ on: Bool) { update { $0.filterSweeps = on } }
-    func setMatchTempo(_ on: Bool) { update { $0.matchTempo = on } }
+    /// Changes one Between songs setting: the choice, Crossfade's length or curve, Filter sweeps
+    /// or Match tempo. Every write of them comes here. While the choice is not stored, the choice
+    /// the device shows is stored with the change, in the same edit, so the change keeps
+    /// everything else as it was shown.
+    func editBetweenSongs(_ change: BetweenSongsChange) {
+        let s = playerStore
+        Self.apply(betweenSongsEditWrites(s.object(forKey:), change), to: s)
+        let next = player.withStoredBetweenSongs(s.object(forKey:)).sane()
+        if next != player { player = next }
+    }
+
     func setLyricsOnline(_ on: Bool) { update { $0.lyricsOnline = on } }
     func setSpeed(_ speed: Float) { update { $0.speed = Pace.snapSpeed(speed) } }
     func setKeepPitch(_ on: Bool) { update { $0.keepPitch = on } }
@@ -292,11 +302,17 @@ final class AppSettings {
         offlineStore.set(offline.keptPlaylists, forKey: Keys.keptPlaylists)
     }
 
-    /// Puts back every player and streaming setting from a backup in one go.
-    func restore(player restored: PlayerPrefs, stream restoredStream: StreamPrefs) {
-        let next = restored.sane()
-        writePlayer(from: nil, to: next)
-        player = next
+    /// Puts back every player and streaming setting from a backup in one go; the player's only
+    /// when the backup has them. The backup's own keys are written first, then the Between songs
+    /// writes its fields come to, so the settings shown and the keys stored agree.
+    func restore(player backup: PlayerBackup?, stream restoredStream: StreamPrefs) {
+        if let backup {
+            let restored = restoredPlayer(backup)
+            writePlayer(from: nil, to: restored.player)
+            writeBetweenSongs(backup.prefs.sane())
+            Self.apply(restored.writes, to: playerStore)
+            player = restored.player
+        }
         setCopies(restoredStream.copies)
         setStreamWifi(restoredStream.wifi)
         setStreamMobile(restoredStream.mobile)
@@ -452,12 +468,6 @@ final class AppSettings {
 
     enum Keys {
         static let liveBackground = "live_background"
-        static let crossfade = "crossfade"
-        static let crossfadeSeconds = "crossfade_seconds"
-        static let crossfadeCurve = "crossfade_curve"
-        static let smartTransitions = "smart_transitions"
-        static let filterSweeps = "filter_sweeps"
-        static let matchTempo = "match_tempo"
         static let lyricsOnline = "lyrics_online"
         static let speed = "speed"
         static let keepPitch = "keep_pitch"
@@ -544,12 +554,6 @@ final class AppSettings {
         p.background.useBpm = bool(Keys.backgroundUseBpm, d.background.useBpm)
         p.background.fps = int(Keys.backgroundFps, d.background.fps)
         p.background.speed = int(Keys.backgroundSpeed, d.background.speed)
-        p.crossfade = bool(Keys.crossfade, d.crossfade)
-        p.crossfadeSeconds = int(Keys.crossfadeSeconds, d.crossfadeSeconds)
-        p.crossfadeCurve = FadeCurve.stored(s.string(forKey: Keys.crossfadeCurve), or: d.crossfadeCurve)
-        p.smartTransitions = bool(Keys.smartTransitions, d.smartTransitions)
-        p.filterSweeps = bool(Keys.filterSweeps, d.filterSweeps)
-        p.matchTempo = bool(Keys.matchTempo, d.matchTempo)
         p.lyricsOnline = bool(Keys.lyricsOnline, d.lyricsOnline)
         p.speed = (s.object(forKey: Keys.speed) as? NSNumber)?.floatValue ?? d.speed
         p.keepPitch = bool(Keys.keepPitch, d.keepPitch)
@@ -580,10 +584,32 @@ final class AppSettings {
         p.animatedArt = AnimatedArtSetting.from(key: s.string(forKey: AnimatedArtSetting.prefKey))
         p.themes = themeSettings(s.string(forKey: Keys.theme), s.string(forKey: Keys.themeLight), s.string(forKey: Keys.themeDark),
                                  bool(Keys.themeMatch, d.themeMatch))
-        return p.sane()
+        return p.withStoredBetweenSongs(s.object(forKey:)).sane()
     }
 
-    /// Writes the player settings that differ from `old`, or every one when `old` is nil.
+    /// Applies key writes to a store, in order.
+    private static func apply(_ writes: [StoredKeyWrite], to s: UserDefaults) {
+        for write in writes {
+            switch write {
+            case .set(let key, let value): s.set(value.plain, forKey: key)
+            case .remove(let key): s.removeObject(forKey: key)
+            }
+        }
+    }
+
+    /// Writes the Between songs settings a backup holds as they are: Crossfade's length and
+    /// curve, Filter sweeps and Match tempo. The choice and its mirrors come from
+    /// `restoredPlayer`'s writes.
+    private func writeBetweenSongs(_ p: PlayerPrefs) {
+        let s = playerStore
+        s.set(p.crossfadeSeconds, forKey: BetweenSongsKeys.crossfadeSeconds)
+        s.set(p.crossfadeCurve.storedName, forKey: BetweenSongsKeys.crossfadeCurve)
+        s.set(p.filterSweeps, forKey: BetweenSongsKeys.filterSweeps)
+        s.set(p.matchTempo, forKey: BetweenSongsKeys.matchTempo)
+    }
+
+    /// Writes the player settings that differ from `old`, or every one when `old` is nil. The
+    /// Between songs settings are written by `editBetweenSongs` and `restore`, never here.
     private func writePlayer(from old: PlayerPrefs?, to new: PlayerPrefs) {
         let s = playerStore
         func put<T: Equatable>(_ path: KeyPath<PlayerPrefs, T>, _ key: String, _ value: (T) -> Any = { $0 }) {
@@ -591,12 +617,6 @@ final class AppSettings {
         }
         put(\.liveBackground, Keys.liveBackground)
         if old == nil || old!.background != new.background { writeBackground(new.background) }
-        put(\.crossfade, Keys.crossfade)
-        put(\.crossfadeSeconds, Keys.crossfadeSeconds)
-        put(\.crossfadeCurve, Keys.crossfadeCurve) { $0.storedName }
-        put(\.smartTransitions, Keys.smartTransitions)
-        put(\.filterSweeps, Keys.filterSweeps)
-        put(\.matchTempo, Keys.matchTempo)
         put(\.lyricsOnline, Keys.lyricsOnline)
         put(\.speed, Keys.speed)
         put(\.keepPitch, Keys.keepPitch)

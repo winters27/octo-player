@@ -92,8 +92,8 @@ final class SettingsNavigator {
     ///   kept, so sending marks it as needing a new one); `scrobbling-attention` shows the token
     ///   needing replacing; Disconnect on the page clears either
     /// - `updates-on` shows the update controls in a test build, and `updates-check` checks now
-    /// - `crossfade-fixed` turns crossfade on and smart transitions off, so the crossfade curve
-    ///   can be picked; `crossfade-smart` turns smart transitions back on
+    /// - `crossfade-fixed` picks Crossfade, so its length and curve show; `crossfade-smart` picks
+    ///   Automix
     private func driveState(_ state: String) async {
         let session = SettingsNavigator.session
         switch state {
@@ -113,10 +113,8 @@ final class SettingsNavigator {
             AppSettings.shared.refreshListenBrainz()
         case "updates-on": AppUpdates.shared.showControls()
         case "updates-check": AppUpdates.shared.checkNow()
-        case "crossfade-fixed":
-            AppSettings.shared.setCrossfade(true)
-            AppSettings.shared.setSmartTransitions(false)
-        case "crossfade-smart": AppSettings.shared.setSmartTransitions(true)
+        case "crossfade-fixed": AppSettings.shared.editBetweenSongs(.choose(.crossfade))
+        case "crossfade-smart": AppSettings.shared.editBetweenSongs(.choose(.automix))
         default: break
         }
     }

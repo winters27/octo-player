@@ -1,9 +1,9 @@
 import OctoKit
 import SwiftUI
 
-/// How songs play: blending, speed and skipping silence; the queue, what a swipe on a song adds
-/// to it and Autoplay when it ends; music coming back when headphones connect, and what happens
-/// when casting ends. Radio has a page of its own.
+/// How songs play: what plays between them, speed and skipping silence; the queue, what a swipe
+/// on a song adds to it and Autoplay when it ends; music coming back when headphones connect,
+/// and what happens when casting ends. Radio has a page of its own.
 struct PlaybackSettingsPage: View {
     var highlight: String?
     @State private var settings = AppSettings.shared
@@ -13,27 +13,29 @@ struct PlaybackSettingsPage: View {
 
     var body: some View {
         let prefs = settings.player
-        SettingsPageFrame(title: SettingsPage.playback.title, highlight: highlight) {
+        // A search hit on a row the current choice hides lights Between songs instead.
+        SettingsPageFrame(title: SettingsPage.playback.title, highlight: playbackHighlight(highlight, prefs.betweenSongs)) {
             SettingsGroup {
-                ToggleRow(SettingsIndex.crossfade, isOn: prefs.crossfade, helper: "Albums played in order stay gapless.", onChange: settings.setCrossfade)
-                if prefs.crossfade {
-                    crossfadeLength(prefs.crossfadeSeconds)
-                    // With Smart transitions on they pick the curve; the row says so and names
-                    // the switch under it that frees the choice.
-                    let curve = curveRowLook(prefs.crossfadeCurve, smartTransitions: prefs.smartTransitions)
-                    PopoverRow(SettingsIndex.crossfadeCurve, value: curve.value, answers: FadeCurve.allCases.map(\.label), helpers: curve.choosable ? FadeCurve.allCases.map(\.detail) : [], helper: curve.helper, enabled: curve.choosable,
-                               isPresented: $curveOpen) {
-                        FadeCurveCard { curveOpen = false }.frame(width: 340)
-                    }
-                    ToggleRow(SettingsIndex.smartTransitions, isOn: prefs.smartTransitions,
-                              helper: "Each blend starts where the two songs meet best, on the beat when it can. Off blends at the end of each song.",
-                              onChange: settings.setSmartTransitions)
-                    if prefs.smartTransitions {
+                betweenSongs(prefs.betweenSongs)
+                ForEach(rowsUnder(prefs.betweenSongs), id: \.self) { row in
+                    switch row {
+                    case .length:
+                        crossfadeLength(prefs.crossfadeSeconds)
+                    case .curve:
+                        PopoverRow(SettingsIndex.crossfadeCurve, value: prefs.crossfadeCurve.label, answers: FadeCurve.allCases.map(\.label),
+                                   helpers: FadeCurve.allCases.map(\.detail), helper: prefs.crossfadeCurve.detail, isPresented: $curveOpen) {
+                            FadeCurveCard { curveOpen = false }.frame(width: 340)
+                        }
+                    case .filterSweeps:
                         ToggleRow(SettingsIndex.filterSweeps, isOn: prefs.filterSweeps,
-                                  helper: "The song ending loses its highs and bass as the next one comes in.", onChange: settings.setFilterSweeps)
+                                  helper: "The song ending loses its highs and bass as the next one comes in.") {
+                            settings.editBetweenSongs(.filterSweeps($0))
+                        }
+                    case .matchTempo:
                         ToggleRow(SettingsIndex.matchTempo, isOn: prefs.matchTempo,
-                                  helper: "Songs with a close tempo blend in step. The next song settles back to its own speed after.",
-                                  onChange: settings.setMatchTempo)
+                                  helper: "Songs with a close tempo blend in step. The next song settles back to its own speed after.") {
+                            settings.editBetweenSongs(.matchTempo($0))
+                        }
                     }
                 }
                 PopoverRow(SettingsIndex.speed, value: SettingsWords.paceLabel(prefs), isPresented: $speedOpen) {
@@ -70,21 +72,30 @@ struct PlaybackSettingsPage: View {
             if popup == SettingsIndex.speed.id {
                 navigator.popup = nil
                 speedOpen = true
-            } else if popup == SettingsIndex.crossfadeCurve.id, settings.player.crossfade, !settings.player.smartTransitions {
+            } else if popup == SettingsIndex.crossfadeCurve.id, settings.player.betweenSongs == .crossfade {
                 navigator.popup = nil
                 curveOpen = true
             }
         }
     }
 
-    /// The longest a blend may be, from 2 to 16 seconds, saved as it changes.
+    /// What plays between two songs, picked from a menu that says what each does. Albums played
+    /// in order stay gapless whatever is picked.
+    private func betweenSongs(_ choice: BetweenSongs) -> some View {
+        ChoiceRow(SettingsIndex.betweenSongs, value: choice.label, helper: "Albums played in order stay gapless.",
+                  question: SettingsQuestion(
+                      SettingsIndex.betweenSongs.title, BetweenSongs.allCases, current: choice,
+                      answer: { SettingsAnswer($0.label, $0.detail) }, pick: { settings.editBetweenSongs(.choose($0)) }))
+    }
+
+    /// Crossfade's length, from 2 to 16 seconds, saved as it changes.
     private func crossfadeLength(_ seconds: Int) -> some View {
         let range = PlayerPrefs.crossfadeSecondsRange
         let span = Double(range.upperBound - range.lowerBound)
         return SliderRow(SettingsIndex.crossfadeLength, value: "\(seconds) s",
                          fraction: Double(seconds - range.lowerBound) / span) { fraction in
             let picked = range.lowerBound + Int((fraction * span + 0.5).rounded(.down))
-            if picked != seconds { settings.setCrossfadeSeconds(picked) }
+            if picked != seconds { settings.editBetweenSongs(.length(picked)) }
         }
     }
 }
@@ -241,7 +252,7 @@ struct FadeCurveCard: View {
             ForEach(FadeCurve.allCases, id: \.self) { curve in
                 let chosen = curve == current
                 Button {
-                    settings.setCrossfadeCurve(curve)
+                    settings.editBetweenSongs(.curve(curve))
                     picked()
                 } label: {
                     HStack(spacing: 12) {

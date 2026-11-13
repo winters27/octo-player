@@ -5,8 +5,9 @@ import SwiftUI
 
 /// Drive steps for the player's states (see `Drive`):
 ///
-/// - `crossfade:on`, `crossfade:off`, `crossfade:SECONDS` turns crossfade on at that length
-/// - `automix:on`, `automix:off` turns crossfade on with smart transitions on or off;
+/// - `crossfade:on` picks Crossfade, `crossfade:SECONDS` Crossfade at that length,
+///   `crossfade:off` Gapless
+/// - `automix:on` picks Automix; `automix:off` picks Crossfade, or keeps Gapless;
 ///   `filters:on|off`, `matchtempo:on|off`
 /// - `blend` jumps to 30 s before the end of the song, to hear the next one come in
 /// - `radio` starts radio from the song on now; `radio:TEXT` from the first song a search finds
@@ -36,16 +37,19 @@ enum PlaybackDrive {
         switch name {
         case "crossfade":
             if value == "off" {
-                settings.setCrossfade(false)
+                settings.editBetweenSongs(.choose(.gapless))
             } else {
-                settings.setCrossfade(true)
-                if let seconds = Int(value) { settings.setCrossfadeSeconds(seconds) }
+                settings.editBetweenSongs(.choose(.crossfade))
+                if let seconds = Int(value) { settings.editBetweenSongs(.length(seconds)) }
             }
         case "automix":
-            settings.setCrossfade(value != "off" || settings.player.crossfade)
-            settings.setSmartTransitions(value != "off")
-        case "filters": settings.setFilterSweeps(value != "off")
-        case "matchtempo": settings.setMatchTempo(value != "off")
+            if value != "off" {
+                settings.editBetweenSongs(.choose(.automix))
+            } else if settings.player.betweenSongs != .gapless {
+                settings.editBetweenSongs(.choose(.crossfade))
+            }
+        case "filters": settings.editBetweenSongs(.filterSweeps(value != "off"))
+        case "matchtempo": settings.editBetweenSongs(.matchTempo(value != "off"))
         case "blend":
             if player.duration > 40 { player.seek(to: player.duration - 30) }
         case "radio":
@@ -119,8 +123,9 @@ enum PlaybackDrive {
             router.show("\(saved) of the next \(servers) server songs saved whole")
         case "playstate":
             let quality = player.quality.map { "\($0.label) \($0.full)" } ?? "no badge"
-            let fade = settings.player.crossfade ? "crossfade \(settings.player.crossfadeSeconds) s" : "no crossfade"
-            router.show("\(player.isPlaying ? "Playing" : "Paused") \(player.index + 1) of \(player.queue.count), \(fade), \(sleepSummary(player.sleepState)), \(quality)")
+            // "automix", "crossfade 8 s" or "gapless".
+            let between = SettingsSummaries.betweenSongs(settings.player).lowercased()
+            router.show("\(player.isPlaying ? "Playing" : "Paused") \(player.index + 1) of \(player.queue.count), \(between), \(sleepSummary(player.sleepState)), \(quality)")
         default:
             return false
         }

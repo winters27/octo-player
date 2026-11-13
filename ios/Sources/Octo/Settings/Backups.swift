@@ -60,7 +60,7 @@ final class Backups {
         let settings = AppSettings.shared
         var b = Backup()
         b.createdAt = Int64(now.timeIntervalSince1970 * 1000)
-        b.player = settings.player
+        b.player = PlayerBackup(settings.player)
         b.streaming = settings.stream
         if let sound = SoundStore.live {
             b.sound = SoundBackup(perOutput: sound.backup.perOutput, profiles: sound.backup.profiles)
@@ -138,7 +138,7 @@ final class Backups {
     func restore(_ backup: Backup, plan: RestorePlan, lyricsStore: LyricsStore?) async {
         let settings = AppSettings.shared
         if backup.player != nil || backup.streaming != nil {
-            settings.restore(player: backup.player ?? settings.player, stream: backup.streaming ?? settings.stream)
+            settings.restore(player: backup.player, stream: backup.streaming ?? settings.stream)
             lyricsStore?.online = settings.player.lyricsOnline
         }
         if let sound = backup.sound { SoundStore.live?.restore(perOutput: sound.perOutput, profiles: sound.profiles) }
