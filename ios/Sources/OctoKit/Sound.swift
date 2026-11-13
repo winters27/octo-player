@@ -533,10 +533,18 @@ public final class AlbumRun: @unchecked Sendable {
 ///
 /// The delay holds back the first moment of each stream and hands it out at the end, so nothing
 /// is lost or added between songs.
+///
+/// Coming back up, the level lands exactly on unity once the remaining step is lost in float
+/// rounding, so sound that needs no limiting after a peak passes through bit for bit.
+///
+/// With `rampedAttack` the level goes down in a straight line across the lookahead, reaching each
+/// frame's need just as that frame comes out, instead of dropping at once when the peak comes into
+/// view. The sum of two songs is limited this way, so the limiter never steps the level.
 public final class Limiter: @unchecked Sendable {
     public let channels: Int
     /// Frames of delay.
     public let latency: Int
+    public let rampedAttack: Bool
     /// Off, the level returns to unity and the sound only passes through the delay.
     public var enabled = true
     private let ceiling: Float
@@ -551,6 +559,9 @@ public final class Limiter: @unchecked Sendable {
     private var needAt: [Int]
     private var needFront = 0
     private var needSize = 0
+    /// With the ramped attack: every frame's need, by frame number, for the frames in view (a
+    /// nearer need that is not the lowest can still set the slope).
+    private var needOf: [Float]
     /// Frames in and out, to know which needs are still in view.
     private var inCount = 0
     private var outCount = 0
@@ -559,18 +570,24 @@ public final class Limiter: @unchecked Sendable {
     /// One incoming frame, read before anything is written over it.
     private var incoming: [Float]
 
-    public init(channels: Int, sampleRate: Double, ceilingDb: Double = -1, lookaheadMs: Double = 1.5, releaseMs: Double = 100) {
+    public init(channels: Int, sampleRate: Double, ceilingDb: Double = -1, lookaheadMs: Double = 1.5, releaseMs: Double = 100,
+                rampedAttack: Bool = false) {
         self.channels = channels
+        self.rampedAttack = rampedAttack
         latency = max(1, Int((sampleRate * lookaheadMs / 1_000).rounded()))
         ceiling = Float(pow(10, ceilingDb / 20))
         release = Float(1 - exp(-1 / (sampleRate * releaseMs / 1_000)))
         held = Array(repeating: 0, count: latency * channels)
         need = Array(repeating: 1, count: latency + 2)
         needAt = Array(repeating: 0, count: latency + 2)
+        needOf = Array(repeating: 1, count: rampedAttack ? latency + 1 : 0)
         incoming = Array(repeating: 0, count: channels)
     }
 
     public var ceilingLevel: Float { ceiling }
+
+    /// The level applied to the last frame out, for checks and snapshots.
+    public var level: Float { gain }
 
     /// Takes `frames` frames from `input` and writes the frames that come out of the delay to
     /// `output`, which may be the same buffers. Returns how many frames came out: fewer than
@@ -585,7 +602,9 @@ public final class Limiter: @unchecked Sendable {
                 incoming[ch] = sample
                 peak = max(peak, abs(sample))
             }
-            pushNeed(enabled && peak > ceiling ? ceiling / peak : 1)
+            let wanted: Float = enabled && peak > ceiling ? ceiling / peak : 1
+            pushNeed(wanted)
+            if rampedAttack { needOf[inCount % needOf.count] = wanted }
             inCount += 1
             if heldFrames < latency {
                 let slot = ((head + heldFrames) % latency) * channels
@@ -633,14 +652,48 @@ public final class Limiter: @unchecked Sendable {
         needSize = 0
         inCount = 0
         outCount = 0
+        for i in needOf.indices { needOf[i] = 1 }
+    }
+
+    /// Forgets the sound in the delay and puts the level back at unity, for a stream that starts
+    /// over from a fresh place.
+    public func reset() {
+        clear()
+        gain = 1
+    }
+
+    /// Takes over everything `other` holds (delayed frames, needs in view and level), so a stretch
+    /// can be run again from the same state. Both must be built alike. Copies element by element,
+    /// so neither limiter's storage is shared or allocated.
+    public func copyFrom(_ other: Limiter) {
+        precondition(other.channels == channels && other.latency == latency && other.rampedAttack == rampedAttack, "limiters built differently")
+        for i in held.indices { held[i] = other.held[i] }
+        head = other.head
+        heldFrames = other.heldFrames
+        for i in need.indices { need[i] = other.need[i] }
+        for i in needAt.indices { needAt[i] = other.needAt[i] }
+        needFront = other.needFront
+        needSize = other.needSize
+        for i in needOf.indices { needOf[i] = other.needOf[i] }
+        inCount = other.inCount
+        outCount = other.outCount
+        gain = other.gain
+        enabled = other.enabled
     }
 
     /// Writes the oldest held frame, turned down as far as any frame in view needs. Down is
-    /// instant; back up is slow.
+    /// instant (or a straight line across the lookahead with the ramped attack); back up is slow.
     private func emit(_ output: [UnsafeMutablePointer<Float>], at index: Int) {
         while needSize > 0 && needAt[needFront] < outCount { popFront() }
-        let target = needSize > 0 ? need[needFront] : 1
-        gain = target < gain ? target : gain + (target - gain) * release
+        let target = rampedAttack ? rampTarget() : (needSize > 0 ? need[needFront] : 1)
+        if target < gain {
+            gain = target
+        } else {
+            let next = gain + (target - gain) * release
+            // The step lost in rounding would leave the level just short of its target for good
+            // (0.99986 for unity at 48 kHz).
+            gain = next == gain ? target : next
+        }
         let from = head * channels
         for ch in 0..<channels {
             var y = held[from + ch] * gain
@@ -648,6 +701,22 @@ public final class Limiter: @unchecked Sendable {
             output[ch][index] = y
         }
         outCount += 1
+    }
+
+    /// The lowest of the straight lines from unity, as each frame in view comes into view, down to
+    /// its need as it comes out.
+    private func rampTarget() -> Float {
+        var target: Float = 1
+        var frame = outCount
+        while frame < inCount {
+            let wanted = needOf[frame % needOf.count]
+            if wanted < 1 {
+                let ahead = Float(frame - outCount)
+                target = min(target, wanted + (1 - wanted) * ahead / Float(latency))
+            }
+            frame += 1
+        }
+        return target
     }
 
     /// Anything asking for more level than this one can never be the lowest while this one is
