@@ -1,0 +1,284 @@
+package app.winters.octo.playback
+
+import android.media.AudioManager
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import app.winters.octo.sound.MixEvent
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+
+// The Crossfader's side of a blend in the one mixer: the handover on the
+// mixer's proposal, the phase rule for edits, each deck's failures, the
+// app's own queue upkeep waiting, writes that change nothing, the
+// controller's volume and the listener's pace.
+@UnstableApi
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class CrossfaderMixTest {
+    private val crossfade = AutomixSettings(maxOverlapMs = 1_500, smart = false)
+
+    private fun twoSongs() = listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1), PcmSong("c", 2_500))
+
+    @After
+    fun close() = PlayerRig.closeAll()
+
+    private fun handedOver(rig: PlayerRig, entry: String = "q:b", maxMs: Long = 10_000): Boolean =
+        rig.runUntil(maxMs) { rig.transitions.lastOrNull() == entry }
+
+    // Registered and the spare playing, not yet handed over.
+    private fun armed(rig: PlayerRig): Boolean = rig.runUntil(6_000) { rig.decks[1].playWhenReady }
+
+    private fun event(kind: app.winters.octo.playback.BlendEventKind, gen: Long) =
+        MixEvent(kind, gen, 0, 0.0, 0.0, BlendCause.NONE)
+
+    @Test
+    fun theHandoverRunsOnceAndASleepTimerWritingInsideItTouchesOnlyTheNewSong() {
+        val rig = PlayerRig(twoSongs())
+        // The sleep timer's "after this song" for the new song, set as the
+        // new song comes on screen.
+        rig.player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem?.entryId == "q:b") rig.player.pauseAtEndOfSong = true
+            }
+        })
+        rig.play("a", "b", "c", settings = crossfade)
+        assertTrue(handedOver(rig))
+        assertTrue(rig.decks[1].pauseAtEndOfMediaItems)
+        assertFalse(rig.decks[0].pauseAtEndOfMediaItems)
+        // A second proposal for the generation handed over does nothing.
+        rig.player.mixListener.onBlendEvent(event(BlendEventKind.PROPOSED, 1))
+        assertTrue(rig.runUntil(6_000) { !rig.player.isBlending })
+        assertEquals(listOf("q:a", "q:b"), rig.transitions)
+        // The blend ran to its end: nothing cut or cancelled it.
+        val end = rig.events.first { it.kind == BlendEventKind.BLEND_END && it.generation == 1L }
+        assertTrue("ended ${end.ms} ms in", end.ms > 1_000)
+        assertFalse(rig.events.any { it.kind == BlendEventKind.CANCELLED })
+        assertTrue(rig.runUntil(6_000) { !rig.player.playWhenReady })
+        assertEquals("paused at the new song's end", Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM, rig.playReason)
+    }
+
+    @Test
+    fun aProposalOfAGenerationAnEditUndidHandsNothingOver() {
+        val rig = PlayerRig(twoSongs())
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(armed(rig))
+        rig.player.addMediaItems(listOf(rig.song("c").item()))
+        assertEquals(CommitState.CANCELLED, rig.mix.mixer.commitWord.stateOf(1))
+        assertEquals("the spare let go", Player.STATE_IDLE, rig.decks[1].playbackState)
+        // A proposal already on its way to main.
+        rig.player.mixListener.onBlendEvent(event(BlendEventKind.PROPOSED, 1))
+        assertSame(rig.decks[0], rig.player.deck)
+        assertEquals(listOf("q:a"), rig.transitions)
+        // The edit landed on the song on screen.
+        assertEquals(3, rig.decks[0].mediaItemCount)
+    }
+
+    @Test
+    fun anEditInTheTurnBeforeTheProposalLandsOnTheOldSongAndAfterItOnTheNew() {
+        // Before: the edit is handled first, so the start is undone.
+        val before = PlayerRig(twoSongs())
+        var edited = false
+        before.mix.onEvent = { e ->
+            if (e.kind == BlendEventKind.PROPOSED && !edited) {
+                edited = true
+                before.player.addMediaItems(listOf(before.song("c").item()))
+            }
+            before.player.mixListener.onBlendEvent(e)
+        }
+        before.play("a", "b", settings = crossfade)
+        before.runUntil(6_000) { edited }
+        before.runFor(20)
+        assertEquals(3, before.decks[0].mediaItemCount)
+        assertSame(before.decks[0], before.player.deck)
+        assertFalse(before.events.any { it.kind == BlendEventKind.BLEND_END && it.generation == 1L })
+        // After: the edit right after the handover lands on the new song.
+        val after = PlayerRig(twoSongs())
+        after.play("a", "b", settings = crossfade)
+        assertTrue(handedOver(after))
+        after.player.addMediaItems(listOf(after.song("c").item()))
+        assertEquals(3, after.decks[1].mediaItemCount)
+        assertSame(after.decks[1], after.player.deck)
+    }
+
+    @Test
+    fun aNextSongThatFailsInTheSpareIsLoadedOnceAndReachedByThePlayingSongsOwnAdvance() {
+        // The next song cannot be decoded (as an expired link fails).
+        val rig = PlayerRig(listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1, failAtMs = 0)))
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(rig.runUntil(9_000) { rig.decks[0].playerError != null })
+        // Made once for the playing deck's queue and once for the spare's
+        // one load: never loaded into the spare again.
+        assertEquals(2, rig.sources.made["b"])
+        assertFalse(rig.events.any { it.kind == BlendEventKind.PROPOSED })
+        assertEquals(emptyList<String>(), rig.breaksOf(1))
+        assertFalse(rig.anyOf(-1))
+    }
+
+    @Test
+    fun thePlayingSongFailingBeforeTheHandoverUndoesTheStartAndNothingOfTheNextIsHeard() {
+        // Its decoder fails about 2 s ahead of what is heard: inside the
+        // run-up, before the start is proposed.
+        val rig = PlayerRig(listOf(PcmSong("a", 6_000, failAtMs = 5_000), PcmSong("b", 3_000, sign = -1)))
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(rig.runUntil(7_000) { rig.decks[0].playerError != null })
+        rig.runFor(200)
+        // A blend was registered when it failed, and its start was undone.
+        val word = rig.mix.mixer.commitWord.get()
+        assertTrue("${rig.told()} at ${rig.decks[0].currentPosition}", commitGenerationOf(word) >= 1)
+        assertEquals(rig.told(), CommitState.CANCELLED, commitStateOf(word))
+        assertEquals(listOf("q:a"), rig.transitions)
+        assertSame(rig.decks[0], rig.player.deck)
+        assertFalse(rig.anyOf(-1))
+        assertEquals(0, rig.mixedCount())
+    }
+
+    @Test
+    fun theAppsOwnUpkeepWaitsForTheBlendAndRunsOnceInOneGo() {
+        val rig = PlayerRig(twoSongs())
+        var ran = 0
+        rig.player.upkeep { ran++ }
+        assertEquals("nothing under way: at once", 1, ran)
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(rig.runUntil(4_000) { rig.decks[1].playbackState != Player.STATE_IDLE })
+        // A refill landing with the spare loaded adds a song at the end.
+        rig.player.upkeep {
+            ran++
+            rig.player.addMediaItems(listOf(rig.song("c").item()))
+        }
+        assertEquals(1, ran)
+        assertTrue(handedOver(rig))
+        assertEquals("still waiting through the blend", 1, ran)
+        assertTrue(rig.runUntil(6_000) { !rig.player.isBlending })
+        rig.runFor(5)
+        assertEquals(2, ran)
+        // The blend was kept, and the song went in after it.
+        assertTrue(rig.mixedCount() > 0)
+        assertFalse(rig.events.any { it.kind == BlendEventKind.CANCELLED })
+        assertEquals(3, rig.player.mediaItemCount)
+    }
+
+    @Test
+    fun writesThatChangeNothingKeepTheBlendAndAChangedOrderUndoesIt() {
+        val rig = PlayerRig(twoSongs())
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(armed(rig))
+        rig.player.repeatMode = Player.REPEAT_MODE_OFF
+        rig.player.shuffleModeEnabled = false
+        rig.player.setPlayOrder(shuffleOrderOf(rig.decks[0]))
+        // The sleep timer's tick writes the end of song it already has.
+        rig.player.pauseAtEndOfSong = false
+        assertEquals(CommitState.INITIAL, rig.mix.mixer.commitWord.stateOf(1))
+        assertTrue(handedOver(rig))
+        assertTrue(rig.runUntil(6_000) { !rig.player.isBlending })
+        assertFalse(rig.events.any { it.kind == BlendEventKind.CANCELLED })
+        // A changed play order is an edit: the run-up is undone.
+        val again = PlayerRig(twoSongs())
+        again.play("a", "b", settings = crossfade)
+        assertTrue(armed(again))
+        again.player.setPlayOrder(shuffleOrderOf(again.decks[0]).reversedArray())
+        assertEquals(CommitState.CANCELLED, again.mix.mixer.commitWord.stateOf(1))
+        assertEquals(Player.STATE_IDLE, again.decks[1].playbackState)
+    }
+
+    @Test
+    fun aControllersVolumeIsHeardAtOnceAndReadsBackWithoutTheDuck() {
+        val rig = PlayerRig(listOf(PcmSong("a", 4_000)))
+        rig.play("a")
+        rig.runFor(600)
+        rig.player.volume = 0.5f
+        rig.runFor(1)
+        assertEquals(0.5f, rig.mix.lastTrack.volume, 1e-6f)
+        val audio = rig.context.getSystemService(AudioManager::class.java)
+        shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)
+        rig.runFor(1)
+        assertEquals(0.1f, rig.mix.lastTrack.volume, 1e-6f)
+        // A controller reads its own level and writes it back: still ducked.
+        assertEquals(0.5f, rig.player.volume, 1e-6f)
+        rig.player.volume = rig.player.volume
+        rig.runFor(1)
+        assertEquals(0.1f, rig.mix.lastTrack.volume, 1e-6f)
+        shadowOf(audio).lastAudioFocusRequest.listener.onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+        rig.runFor(1)
+        assertEquals(0.5f, rig.mix.lastTrack.volume, 1e-6f)
+        rig.player.mute()
+        rig.runFor(1)
+        assertEquals(0f, rig.mix.lastTrack.volume, 1e-6f)
+    }
+
+    // Songs whose second one is long enough to ease back (5 s) after the blend.
+    private fun longNext() = listOf(PcmSong("a", 5_000), PcmSong("b", 8_000, sign = -1), PcmSong("c", 2_500))
+
+    // A tempo-matched blend over the last 1.5 s, at rate 0.97.
+    private val matched: Planner = { current, _, _, _, _, _ ->
+        TransitionPlan(
+            current.durationMs - 1_500, 0, 1_500, TransitionKind.BLEND, BLEND_CURVE, 0.0, 0.97, null, null, false, 0.0, "rig",
+            latestEndMs = current.durationMs, lateMoveBars = LATE_MOVE_UNBOUNDED,
+        )
+    }
+
+    @Test
+    fun aSpeedChangeMidBlendSetsTheOldSongToThePaceAndTheNewToItsRateTimesIt() {
+        val contexts = ArrayList<TransitionContext>()
+        val rig = PlayerRig(longNext(), planner = { a, b, t, h, s, c -> contexts += c; matched(a, b, t, h, s, c) })
+        rig.play("a", "b", settings = AutomixSettings(maxOverlapMs = 1_500))
+        assertTrue(handedOver(rig))
+        assertEquals(0.97f, rig.decks[1].playbackParameters.speed, 1e-6f)
+        rig.player.playbackParameters = PlaybackParameters(1.25f)
+        assertEquals(1.25f, rig.decks[0].playbackParameters.speed, 1e-6f)
+        assertEquals(0.97f * 1.25f, rig.decks[1].playbackParameters.speed, 1e-5f)
+        assertEquals(1.25f, rig.player.listenerPace.speed, 1e-6f)
+        // The new song eases back to the listener's pace, never compounding
+        // its rate.
+        assertTrue(
+            "${rig.told()} at ${rig.decks[1].playbackParameters.speed}, blending ${rig.player.isBlending}",
+            rig.runUntil(9_000) { rig.decks[1].playbackParameters.speed == 1.25f },
+        )
+        // The next plan is made at the listener's pace.
+        rig.player.addMediaItems(listOf(rig.song("c").item()))
+        assertTrue(rig.runUntil(3_000) { contexts.size > 1 })
+        assertEquals(1.25, contexts.last().pace, 1e-9)
+    }
+
+    @Test
+    fun aMatchedSongKeepsItsRateOnItsOwnSongTimeUntilTheBlendsEnd() {
+        val rig = PlayerRig(longNext(), planner = matched)
+        rig.play("a", "b", settings = AutomixSettings(maxOverlapMs = 1_500))
+        assertTrue(handedOver(rig))
+        // Paused mid-blend, the start already heard, for a while: the song's
+        // own time stands still, so its rate does not move.
+        rig.runFor(900)
+        rig.player.pause()
+        rig.runFor(2_000)
+        assertEquals(0.97f, rig.decks[1].playbackParameters.speed, 1e-6f)
+        rig.player.play()
+        assertTrue(
+            "${rig.told()} at ${rig.decks[1].playbackParameters.speed}, blending ${rig.player.isBlending}, " +
+                "${rig.decks[1].currentPosition} ms, playing ${rig.decks[1].isPlaying}",
+            rig.runUntil(7_000) { rig.decks[1].playbackParameters.speed == 1f },
+        )
+    }
+
+    @Test
+    fun aStartTheMixerCouldNotMakeIsPlannedAgainWithTheSpareKept() {
+        val rig = PlayerRig(twoSongs())
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(armed(rig))
+        val made = rig.sources.made["b"]
+        rig.player.mixListener.onBlendEvent(MixEvent(BlendEventKind.INCOMING_NOT_READY, 1, 0, 0.0, 0.0, BlendCause.NOT_READY))
+        assertTrue("armed again", rig.runUntil(2_000) { rig.mix.mixer.commitWord.stateOf(2) != null })
+        assertEquals("the spare stayed loaded", made, rig.sources.made["b"])
+        assertTrue(handedOver(rig))
+        assertNotNull(rig.events.firstOrNull { it.kind == BlendEventKind.BLEND_END && it.generation == 2L } ?: run { rig.runUntil(5_000) { rig.events.any { it.kind == BlendEventKind.BLEND_END } }; rig.events.firstOrNull { it.kind == BlendEventKind.BLEND_END } })
+    }
+}

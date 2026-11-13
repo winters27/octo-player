@@ -94,6 +94,8 @@ class OutputSwitch(private val local: OctoPlayer, private val mirror: () -> Queu
 
     override fun setPlayOrder(order: IntArray) = active.setPlayOrder(order)
 
+    override fun upkeep(write: () -> Unit) = active.upkeep(write)
+
     override fun putBack(runs: List<Pair<Int, List<MediaItem>>>, order: IntArray) {
         active.putBack(runs, order)
         mirror()?.added(runs.flatMap { it.second }, playing)
@@ -151,7 +153,13 @@ class OutputSwitch(private val local: OctoPlayer, private val mirror: () -> Queu
         return result
     }
 
+    // Shuffle and repeat set to what the session already shows change
+    // nothing and go no further, so a controller sending them again (a car
+    // head unit) never re-keys the queue's order or cuts a blend. Compared
+    // with what this reports: the queue's repeat, never the player's own,
+    // which runs none on a window of a queue on repeat all.
     override fun handleSetShuffleModeEnabled(shuffleModeEnabled: Boolean): ListenableFuture<*> {
+        if (shuffleModeEnabled == this.shuffleModeEnabled) return Futures.immediateVoidFuture()
         val result = super.handleSetShuffleModeEnabled(shuffleModeEnabled)
         mirror()?.shuffleChanged(shuffleModeEnabled)
         return result
@@ -160,6 +168,7 @@ class OutputSwitch(private val local: OctoPlayer, private val mirror: () -> Queu
     // The listener's repeat is kept by the queue; the player runs it only
     // while it holds the whole queue.
     override fun handleSetRepeatMode(repeatMode: Int): ListenableFuture<*> {
+        if (repeatMode == this.repeatMode) return Futures.immediateVoidFuture()
         val mirror = mirror() ?: return super.handleSetRepeatMode(repeatMode)
         mirror.repeatChanged(repeatMode)
         return super.handleSetRepeatMode(mirror.innerRepeat())

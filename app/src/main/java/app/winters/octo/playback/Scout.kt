@@ -24,10 +24,10 @@ import kotlin.math.max
 // The scout gives up on a stretch after this long and the plan does without it.
 const val SCOUT_BUDGET_MS = 20_000L
 
-// How much of a song the scout listens to: the end of the playing song and
-// the start of the next.
+// How much of a song the scout listens to: the end of the playing song,
+// and the start of the next as far as every app reads a head
+// (AUTOMIX_HEAD_MS).
 const val TAIL_SCOUT_MS = 60_000L
-const val HEAD_SCOUT_MS = 30_000L
 
 // How long one wait on the decoder may take.
 private const val CODEC_WAIT_US = 10_000L

@@ -25,6 +25,12 @@ interface EditableQueue : Player {
 
     // Takes out runs of songs, last run first.
     fun removeRuns(runs: List<IntRange>)
+
+    // Runs the app's own queue upkeep `write` (a refill, an Autoplay add, a
+    // window top-up), never a person's edit: at once, or, while a blend is
+    // under way or being set up, once it is over. `write` checks its own
+    // guards again when it runs.
+    fun upkeep(write: () -> Unit) = write()
 }
 
 // A queue edit that can be taken back.
