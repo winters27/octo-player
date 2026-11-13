@@ -73,18 +73,24 @@ final class Autoplay {
             playbackLog.info("autoplay: nothing to add")
             return
         }
-        // Only if the song is still the last one, the setting still on, and no station is kept
-        // going meanwhile.
-        guard enabled, engine.currentItem?.entryId == key, engine.queue.nextOnEnd == nil, !player.stationKeepsGoing else { return }
-        let first = engine.queue.count
-        let ended = engine.ended
-        player.addAutoplay(items)
-        // The song already ended while the server answered: carry on.
-        if ended {
-            engine.seek(to: first)
-            engine.play()
+        // The add waits out a blend under way (it is the app's own upkeep, not the person's edit),
+        // and only goes in if the song is still the last one, the setting still on, and no
+        // station is kept going meanwhile.
+        engine.deferUpkeep { [weak self] in
+            guard let self else { return }
+            let engine = self.player.engine
+            guard self.enabled, engine.currentItem?.entryId == key, engine.queue.nextOnEnd == nil,
+                  !self.player.stationKeepsGoing else { return }
+            let first = engine.queue.count
+            let ended = engine.ended
+            self.player.addAutoplay(items)
+            // The song already ended while the server answered: carry on.
+            if ended {
+                engine.seek(to: first)
+                engine.play()
+            }
+            playbackLog.info("autoplay: added \(items.count)")
         }
-        playbackLog.info("autoplay: added \(items.count)")
     }
 
     /// Octo's radio for the seed and the listener's own recent songs (`anchors`), from the

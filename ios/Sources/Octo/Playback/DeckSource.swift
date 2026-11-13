@@ -70,6 +70,10 @@ final class DeckSource: @unchecked Sendable {
     let skipSilence: Atomic<Bool>
     /// Where the latest jump went, in ms, to show before sound arrives.
     let jumpMs: Atomic<Int>
+    #if DEBUG
+    /// The debug build's forced stall: no sound is delivered until this uptime (ms).
+    let stallUntilMs = Atomic<Int>(0)
+    #endif
 
     init(item: QueueItem, setUp: SongSetUp?, startMs: Int, outputRate: Double, isLocal: Bool, holdSeconds: Double = 15,
          skipSilence: Bool, open: @escaping @Sendable (OpenToken) throws -> OpenedSong) {
@@ -177,6 +181,12 @@ final class DeckSource: @unchecked Sendable {
                 waitBriefly(0.5)
                 continue
             }
+            #if DEBUG
+            if Int(ProcessInfo.processInfo.systemUptime * 1_000) < stallUntilMs.load(ordering: .relaxed) {
+                waitBriefly(0.01)
+                continue
+            }
+            #endif
             guard ring.freeChunk() != nil else {
                 waitBriefly(0.02)
                 continue

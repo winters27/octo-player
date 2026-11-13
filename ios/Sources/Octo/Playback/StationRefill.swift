@@ -72,22 +72,33 @@ final class StationRefill {
             settled()
             return
         }
-        let have = Set(stationSongsQueued(engine.queue.items, station: station))
-        var seen = Set<String>()
-        let adding = items.filter { !have.contains($0.trackId) && seen.insert($0.trackId).inserted }
-        guard !adding.isEmpty else {
-            gaveUpAfter = tail
-            settled()
-            return
+        // The add is the app's own upkeep, not the person's edit: it waits out a blend under way,
+        // then checks again that the station still runs low and leaves out what it gained.
+        engine.deferUpkeep { [weak self] in
+            guard let self else { return }
+            let engine = self.player.engine
+            guard let now = self.due(), now.station == station else {
+                self.gaveUpAfter = tail
+                self.settled()
+                return
+            }
+            let have = Set(stationSongsQueued(engine.queue.items, station: station))
+            var seen = Set<String>()
+            let adding = items.filter { !have.contains($0.trackId) && seen.insert($0.trackId).inserted }
+            guard !adding.isEmpty else {
+                self.gaveUpAfter = tail
+                self.settled()
+                return
+            }
+            let first = engine.queue.count
+            let ended = engine.ended
+            self.player.addStationSongs(adding)
+            // The queue played out while the server answered: carry on.
+            if ended {
+                engine.seek(to: first)
+                engine.play()
+            }
+            playbackLog.info("station: added \(adding.count)")
         }
-        let first = engine.queue.count
-        let ended = engine.ended
-        player.addStationSongs(adding)
-        // The queue played out while the server answered: carry on.
-        if ended {
-            engine.seek(to: first)
-            engine.play()
-        }
-        playbackLog.info("station: added \(adding.count)")
     }
 }

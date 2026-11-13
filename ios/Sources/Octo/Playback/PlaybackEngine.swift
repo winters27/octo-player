@@ -50,13 +50,12 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("playing", isDirectory: true))
         let first = Deck(name: "A", sound: sound, keepActive: keepActive)
         let second = Deck(name: "B", sound: sound, keepActive: keepActive)
-        second.volume = 0
         decks = [first, second]
         deck = first
         self.lengths = lengths
         streamContextNow = streamContext
         output = DeckOutput(decks: decks)
-        crossfader = Crossfader(player: self, spare: second, scout: scout, profiles: profiles, lengths: lengths)
+        crossfader = Crossfader(player: self, spare: second, mix: output.mix, scout: scout, profiles: profiles, lengths: lengths)
         output.onInterruption = { [weak self] began, shouldResume in self?.interruption(began: began, shouldResume: shouldResume) }
     }
 
@@ -79,12 +78,12 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     // MARK: Settings on both decks
 
-    /// Speed and pitch go to both decks, so a blend never jumps in pace.
+    /// The listener's own speed and pitch. Every deck plays at it, except a tempo-matched song,
+    /// which plays at its rate times it; during a blend the session hears of it.
     var pace = Pace(speed: 1, pitch: 1) {
         didSet {
             guard pace != oldValue else { return }
-            crossfader.paceChanged()
-            for each in decks { each.setPace(pace) }
+            crossfader.paceChanged(pace)
             output.updateDelays()
         }
     }
@@ -117,6 +116,12 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     var currentKey: String? { queue.currentItem?.entryId }
     var isBlending: Bool { crossfader.isBlending }
+
+    /// Whether the person wants music now: a call ending and headphones returning resume only this.
+    var wantsMusic: Bool { wantedMusic(playWhenReady: playWhenReady, ended: ended, stoppedAtEnd: stoppedAtEnd) }
+
+    /// Runs the app's own queue upkeep now, or once a blend under way is over.
+    func deferUpkeep(_ write: @escaping () -> Void) { crossfader.deferUpkeep(write) }
 
     func hasEntry(_ key: String) -> Bool { queue.position(ofEntry: key) != nil }
 
@@ -166,6 +171,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
         onQueueChange?()
         onSongChange?(.playlistChanged)
+        crossfader.followUp()
         if playing {
             if !wasPlaying { onPlayWhenReadyChange?(true, false) }
         } else if wasPlaying {
@@ -185,6 +191,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         ended = false
         stoppedAtEnd = false
         restoredPositionMs = max(0, positionMs)
+        crossfader.followUp()
         onQueueChange?()
         onSongChange?(.playlistChanged)
     }
@@ -197,6 +204,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
         lengthTold = nil
         restoredPositionMs = 0
+        deck.parked = false
         deck.setPace(pace)
         deck.skipSilence = skipSilence
         deck.startAfterMs = startAfterMs
@@ -247,9 +255,10 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         resumeWhenFocusReturns = false
         guard playWhenReady else { return }
         playWhenReady = false
-        crossfader.interrupt()
+        crossfader.interrupt(.pause)
         deck.playWhenReady = false
         dropLiveStream()
+        crossfader.followUp()
         onPlayWhenReadyChange?(false, false)
         stopOutputLater()
     }
@@ -266,6 +275,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         crossfader.interrupt()
         playWhenReady = false
         deck.clear()
+        crossfader.followUp()
         onPlayWhenReadyChange?(false, false)
         output.stopNow()
     }
@@ -282,6 +292,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             if playWhenReady { deck.playWhenReady = true }
         }
         crossfader.songChanged()
+        crossfader.followUp()
     }
 
     /// Opens the current song again from where it is, with a fresh source: the server began
@@ -294,6 +305,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         stoppedAtEnd = false
         loadCurrent(atMs: at)
         crossfader.songChanged()
+        crossfader.followUp()
     }
 
     /// Plays the song at queue position `index` from `ms`.
@@ -305,6 +317,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         queue.setCurrent(index)
         loadCurrent(atMs: ms)
         crossfader.songChanged()
+        crossfader.followUp()
         onSongChange?(.seek)
     }
 
@@ -327,23 +340,27 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
     }
 
+    /// A write that changes nothing (a controller sending the mode it already has) is skipped, so
+    /// it never ends a blend.
     var repeatMode: RepeatMode {
         get { queue.repeatMode }
         set {
-            crossfader.interrupt()
+            guard newValue != queue.repeatMode else { return }
+            let before = queue.currentItem?.entryId
             queue.repeatMode = newValue
-            refreshFollowing()
-            onQueueChange?()
+            crossfader.edited(currentBefore: before)
+            changedUnder()
         }
     }
 
     var shuffle: Bool {
         get { queue.shuffle }
         set {
-            crossfader.interrupt()
+            guard newValue != queue.shuffle else { return }
+            let before = queue.currentItem?.entryId
             queue.shuffle = newValue
-            refreshFollowing()
-            onQueueChange?()
+            crossfader.edited(currentBefore: before)
+            changedUnder()
         }
     }
 
@@ -354,8 +371,9 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             setQueue(items, startIndex: 0, play: false)
             return
         }
-        crossfader.interrupt()
+        let before = queue.currentItem?.entryId
         queue.add(items, at: index ?? queue.count)
+        crossfader.edited(currentBefore: before)
         changedUnder()
     }
 
@@ -366,23 +384,24 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             setQueue(items, startIndex: 0, play: false)
             return
         }
-        crossfader.interrupt()
+        let before = queue.currentItem?.entryId
         queue.addNext(items)
+        crossfader.edited(currentBefore: before)
         changedUnder()
     }
 
     /// Takes out queue positions `from` until `to`.
     func remove(from: Int, to: Int) {
-        crossfader.interrupt()
         let wasCurrent = queue.currentItem?.entryId
         let result = queue.remove(from: from, to: to)
+        crossfader.edited(currentBefore: result.currentRemoved ? nil : wasCurrent)
         afterRemoval(result, wasCurrent)
     }
 
     func removeRuns(_ runs: [ClosedRange<Int>]) {
-        crossfader.interrupt()
         let wasCurrent = queue.currentItem?.entryId
         let result = queue.removeRuns(runs)
+        crossfader.edited(currentBefore: result.currentRemoved ? nil : wasCurrent)
         afterRemoval(result, wasCurrent)
     }
 
@@ -402,6 +421,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             } else {
                 loadCurrent(atMs: 0)
             }
+            crossfader.followUp()
             onQueueChange?()
             onSongChange?(.playlistChanged)
             return
@@ -410,29 +430,35 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     }
 
     func move(from: Int, to: Int, newIndex: Int) {
-        crossfader.interrupt()
+        let before = queue.currentItem?.entryId
         queue.move(from: from, to: to, newIndex: newIndex)
+        crossfader.edited(currentBefore: before)
         changedUnder()
     }
 
     /// Puts songs back exactly where they were, for an undo.
     func putBack(_ runs: [(at: Int, items: [QueueItem])], order: [Int]) {
-        crossfader.interrupt()
+        let before = queue.currentItem?.entryId
         queue.putBack(runs, order: order)
+        crossfader.edited(currentBefore: before)
         changedUnder()
     }
 
+    /// A new play order; the same order again changes nothing and is skipped.
     func setPlayOrder(_ order: [Int]) {
+        guard order != queue.order else { return }
+        let before = queue.currentItem?.entryId
         queue.setPlayOrder(order)
+        crossfader.edited(currentBefore: before)
         changedUnder()
     }
 
     /// Runs an edit of the queue. `change` answers whether it took out the song on now with
     /// nothing left to play after it: then the queue has played out.
     func edit(_ change: (inout PlayQueue) -> Bool) {
-        crossfader.interrupt()
         let before = queue.currentItem?.entryId
         let playedOut = change(&queue)
+        crossfader.edited(currentBefore: before)
         if queue.isEmpty {
             stop()
         } else if queue.currentItem?.entryId != before {
@@ -459,22 +485,25 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         crossfader.interrupt()
         queue.clear()
         stop()
+        crossfader.followUp()
         onQueueChange?()
         onSongChange?(.playlistChanged)
     }
 
-    /// The queue changed but the song on now did not.
+    /// The queue changed but the song on now did not: the deck's follower is brought in line, then
+    /// an undone blend hears what the playing song plays after its end.
     private func changedUnder() {
         refreshFollowing()
+        crossfader.followUp()
         onQueueChange?()
     }
 
     // MARK: Hand-over between decks
 
-    /// The blend begins: the incoming deck (already playing, its processor holding it silent
-    /// until its entry) becomes the one everything talks to, while the outgoing one keeps
-    /// sounding. Their processors run the volumes from here; the decks' own volume only carries
-    /// the sleep timer's fade.
+    /// The blend begins: the incoming deck (registered and playing, held silent by the session
+    /// until its start) becomes the one everything talks to, while the outgoing one keeps
+    /// sounding. Their processors run the blend's volumes; the decks' own volume only carries the
+    /// sleep timer's fade. The incoming deck keeps the play state it has.
     func handOver(into: Deck, from: Deck) {
         deck = into
         if let next = queue.nextOnEnd, queue.items[next].entryId == into.item?.entryId {
@@ -484,7 +513,6 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
         lengthTold = nil
         applyVolume()
-        if !into.playWhenReady { into.playWhenReady = true }
         refreshFollowing()
         onSongChange?(.playlistChanged)
     }
@@ -493,22 +521,27 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         applyVolume()
     }
 
+    /// Every deck in play carries the player's level: the song on now, the old song of a blend and
+    /// a spare registered for the next one.
     private func applyVolume() {
         deck.volume = sleepFade
         crossfader.outgoing?.volume = sleepFade
+        crossfader.spare.volume = sleepFade
     }
 
     // MARK: Calls and other apps
 
     private func interruption(began: Bool, shouldResume: Bool) {
         if began {
-            // A call or a short interruption: pause, and come back after if it was playing.
-            resumeWhenFocusReturns = isPlaying || resumeWhenFocusReturns
+            // A call or a short interruption: pause, and come back after if music was wanted
+            // (buffering counts; a finished queue or an earlier pause does not).
+            resumeWhenFocusReturns = wantsMusic || resumeWhenFocusReturns
             guard playWhenReady else { return }
             playWhenReady = false
-            crossfader.interrupt()
+            crossfader.interrupt(.pause)
             deck.playWhenReady = false
             dropLiveStream()
+            crossfader.followUp()
             onPlayWhenReadyChange?(false, false)
         } else {
             let resume = resumeWhenFocusReturns && shouldResume
@@ -558,8 +591,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
 
     private func tick() {
         for event in deck.poll() { handle(event) }
-        if let outgoing = crossfader.outgoing { _ = outgoing.poll() }
-        _ = crossfader.spare.poll()
+        crossfader.tick()
         let playing = deck.isPlaying
         if playing != lastIsPlaying {
             lastIsPlaying = playing
@@ -581,9 +613,12 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
             }
         }
         loadFollowingWhenNear()
-        if (!playWhenReady || ended) && !playing && crossfader.outgoing == nil {
+        // The ticker runs on while a blend's generation is live, paused too, so its events are
+        // always heard.
+        if (!playWhenReady || ended) && !playing && !crossfader.live {
             ticker?.invalidate()
             ticker = nil
+            crossfader.tickerStopped()
         }
     }
 
@@ -624,6 +659,9 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
                 onSongChange?(.auto)
             }
         case .failed(let item, let error):
+            // A blend not yet handed over is undone first, so the failure's own skip plays the
+            // next song once on this deck.
+            crossfader.deckFailed(deck)
             onFailure?(item, error)
         }
     }
@@ -638,15 +676,20 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         }
     }
 
-    /// The song to follow is loaded once the one on now is close to its end. A live station has
-    /// no end, so nothing is loaded to follow it.
-    private func loadFollowingWhenNear() {
+    /// The song to follow is loaded once the one on now is close to its end, and whatever its end
+    /// while a blend is registered, so the playing song's own advance is there before the start.
+    /// A live station has no end, so nothing is loaded to follow it.
+    private func loadFollowingWhenNear(now: Bool = false) {
         guard deck.followingItem == nil, !deck.pauseAtEndOfSong, let current = deck.current, !current.item.isRadioStation,
               current.item.entryId == queue.currentItem?.entryId, let next = queue.nextOnEnd else { return }
         let length = playingLengthMs(listedMs: lengths.lengthMs(current.item.trackId, listedMs: current.item.durationMs),
                                      playerMs: current.measuredMs, positionMs: deck.positionMs)
-        let near = current.decodedToEnd.load(ordering: .relaxed) || (length > 0 && length - deck.positionMs < 30_000)
+        let near = now || crossfader.armed || current.decodedToEnd.load(ordering: .relaxed)
+            || (length > 0 && length - deck.positionMs < 30_000)
         guard near else { return }
         deck.setFollowing(makeSource(queue.items[next], startMs: 0))
     }
+
+    /// The playing song's follower, loaded now: a blend was registered.
+    func loadFollowingNow() { loadFollowingWhenNear(now: true) }
 }

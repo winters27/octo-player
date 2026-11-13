@@ -31,7 +31,9 @@ final class HeadsetWatch {
         defer { known = Set(now.map(\.uid)) }
         switch reason {
         case .oldDeviceUnavailable:
-            let wasPlaying = player.engine.playWhenReady
+            // Music the person wanted: a finished queue or a song stopped at its end as asked is
+            // not, so headphones coming back never start those again.
+            let wasPlaying = player.engine.wantsMusic
             if before.contains(where: { $0.portType == .airPlay }), !now.contains(where: { $0.portType == .airPlay }) {
                 // Playing on an AirPlay device ended. Picking the phone carries on as it was;
                 // the device going away pauses, unless the listener asked to keep playing here.

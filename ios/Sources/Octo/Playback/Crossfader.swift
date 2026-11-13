@@ -2,7 +2,7 @@ import Foundation
 import OctoKit
 
 /// How often to check on the song: rarely while the end is far off, and every frame or so near
-/// it and during the blend.
+/// it.
 private let farCheckMs = 1_000
 private let nearCheckMs = 40
 
@@ -17,26 +17,38 @@ private let levelHeardMs = 20_000
 private let rateStep = 0.0025
 
 /// Runs the transition between two decks. While a song plays it reads the end of it and the
-/// start of the next song, and plans where and how they meet (`planTransition`). Each comes from
-/// the server's transition profile of the song when the server has one, else from scouting it.
-/// Ahead of the blend it loads the spare deck with the next song, parked where the next song's
-/// silent run-up starts. A little before the blend the spare plays, silent, and is lined up with
-/// the playing song by its position. At the blend the player hands over to the spare, while the
-/// old deck plays on until the plan ends it. Volume and filters are run by each deck's own sound
-/// processor, on that deck's song time, once armed with the plan; this only arms them. Anything
-/// the listener does mid-blend (skip, seek, pause, editing the queue) ends the blend at once.
+/// start of the next song, and plans where and how they meet (`planTransition`), each from the
+/// server's transition profile of the song when the server has one, else from scouting it. Ahead
+/// of the blend it loads the spare deck with the next song, parked just before its entry; a
+/// little before the blend it registers the blend with the render thread's session under a new
+/// generation and the spare plays, silent and consuming nothing until the session starts it on
+/// its exact frame. The session decides the start first and then proposes it; main agrees in the
+/// turn that hands over, by moving the generation's commit word to acknowledged, so every edit
+/// handled before lands on the old song and every edit after on the new one. Anything the
+/// listener does before the handover undoes the start (nothing of the new song is rendered); after
+/// it, the old song leaves and the change lands on the song on screen. The session says when the
+/// blend ends.
 @MainActor
 final class Crossfader {
     private unowned let player: PlaybackEngine
     private(set) var spare: Deck
+    private let mix: MixRender
     private let scout: Scout?
     private let profiles: ServerProfiles?
     private let lengths: RealLengths
 
-    /// How transitions are planned; a longest blend of 0 turns them off.
+    /// How transitions are planned; a longest blend of 0 turns them off. A change ends a blend not
+    /// yet handed over by the phase rule; one already handed over plays on.
     var settings = AutomixSettings(maxOverlapMs: 0) {
         didSet {
-            if oldValue != settings { interrupt() }
+            guard oldValue != settings else { return }
+            if registered >= 0 {
+                disarm(.edit)
+                followUp()
+            }
+            dropPlan()
+            unloadSpare()
+            schedule(0)
         }
     }
 
@@ -45,12 +57,13 @@ final class Crossfader {
 
     private var check: DispatchWorkItem?
 
-    /// The queue entry the spare is loaded with, if it is loaded, and the plan it was loaded for.
+    /// The queue entry and file the spare is loaded with, if it is loaded, and the plan it was
+    /// loaded for.
     private var loadedFor: String?
+    private var loadedUri: String?
     private var loadedPlan: TransitionPlan?
-
-    /// The last next song that was not ready in time, so it is said once.
-    private var notReadyFor: String?
+    /// The spare's song that failed for this transition, not loaded again until the song changes.
+    private var failed = BlendFailedSpare()
 
     /// The plan for the coming transition, and what it was made from.
     private var plan: TransitionPlan?
@@ -59,9 +72,18 @@ final class Crossfader {
     /// The silence gate the playing song was armed with, for an early fade.
     private var outgoingGate: Double?
 
-    /// The silent run-up: lining the spare up with the playing song.
-    private var aligner: Aligner?
-    private var alignment: Aligner.Step?
+    /// The generation registered with the session and not yet handed over, its plan, its next song
+    /// and whether its start commits before main's acknowledgement (AirPlay's quiet starts).
+    private var nextGeneration: Int64 = 1
+    private var registered: Int64 = -1
+    private var registeredPlan: TransitionPlan?
+    private var registeredNext: (entryId: String?, uri: String)?
+    private var quietStarts: Set<Int64> = []
+    /// The generation handed over and not yet finished, and whether its old song was told to leave.
+    private var handedOver: Int64 = -1
+    private var leaving = false
+    /// An undone generation owed its follow-up, once the edit's own write has applied.
+    private var followUpFor: Int64 = -1
 
     /// During the blend: the deck playing out the old song, and the plan.
     private(set) var outgoing: Deck?
@@ -78,6 +100,17 @@ final class Crossfader {
     /// Where the song was at the last check, to see it jump.
     private var lastPosition = -1
     private var lastCheckAt = 0
+
+    /// The session's events drained from the ring, waiting until they are due.
+    private var waiting: [BlendEvent] = []
+    /// Main's lag: the ticker's own lateness, over the last ten minutes.
+    private var lag = LagWindow()
+    private var lastTickMs = -1.0
+
+    /// The app's own queue upkeep waiting for the blend to be over, and whether its one message is
+    /// on its way.
+    private var upkeep: [() -> Void] = []
+    private var upkeepPosted = false
 
     private final class Scouted {
         let entryId: String
@@ -99,23 +132,31 @@ final class Crossfader {
         init(_ entryId: String) { self.entryId = entryId }
     }
 
+    /// A tempo-matched song on its way back to its own speed, on its own song time: matched until
+    /// `easeFromMs` (its song time since entry over the rate, from the blend's end), then eased;
+    /// `applied` is the rate last set before the listener's pace.
+    @MainActor
     private final class Easing {
         let deck: Deck
+        let entryId: String?
         let plan: TransitionPlan
-        let enteredAt: Int
-        var rate: Float
-        let after: Pace
+        let rate: Double
+        var easeFromMs = Double.infinity
+        var applied: Double
 
-        init(deck: Deck, plan: TransitionPlan, enteredAt: Int, rate: Float, after: Pace) {
+        init(deck: Deck, entryId: String?, plan: TransitionPlan, rate: Double) {
             self.deck = deck
+            self.entryId = entryId
             self.plan = plan
-            self.enteredAt = enteredAt
             self.rate = rate
-            self.after = after
+            applied = rate
         }
+
+        var sinceEntryMs: Double { Double(deck.positionMs - plan.entryMs) / rate }
     }
 
-    /// Everything a plan depends on besides the clock. A change means a new plan.
+    /// Everything a plan depends on besides the clock. A change means a new plan. Once a blend is
+    /// registered, the scouts' readiness never changes it (`core`).
     private struct PlanKey: Equatable {
         var current: String?
         var next: String?
@@ -129,57 +170,127 @@ final class Crossfader {
         var tail: Bool
         var head: Bool
         var reading: Bool
+
+        var core: PlanKey {
+            var c = self
+            c.tail = false
+            c.head = false
+            c.reading = false
+            return c
+        }
     }
 
-    init(player: PlaybackEngine, spare: Deck, scout: Scout?, profiles: ServerProfiles?, lengths: RealLengths) {
+    init(player: PlaybackEngine, spare: Deck, mix: MixRender, scout: Scout?, profiles: ServerProfiles?, lengths: RealLengths) {
         self.player = player
         self.spare = spare
+        self.mix = mix
         self.scout = scout
         self.profiles = profiles
         self.lengths = lengths
+        spare.parked = true
     }
 
     private var nowMs: Int { Int(ProcessInfo.processInfo.systemUptime * 1000) }
 
     // MARK: What the player tells it
 
+    /// A pause reaches the blend through the player's pause and a rebuffer through the session:
+    /// neither is decided here.
     func isPlayingChanged(_ isPlaying: Bool) {
-        if isPlaying {
-            schedule(0)
-        } else {
-            let deck = player.deck
-            if outgoing != nil && isRebuffering(playWhenReady: deck.playWhenReady, state: deck.state, suppression: .none) {
-                // The incoming song is waiting for its sound: the blend goes on once it has it,
-                // each deck on its own song time.
-                schedule(nearCheckMs)
-                return
-            }
-            // A pause, a call or unplugged headphones: no half-finished blend.
-            finishFade()
-            dropRunUp()
-            cancelCheck()
-        }
+        if isPlaying { schedule(0) }
     }
 
-    /// The song changed some other way, so what the spare holds is stale.
+    /// The song on now changed some other way (the playing deck moved on into its own next song,
+    /// a jump): what the spare holds is stale.
     func songChanged() {
-        if outgoing == nil {
-            dropPlan()
-            unloadSpare()
-        }
-    }
-
-    /// Called before anything that changes what plays or where.
-    func interrupt() {
-        finishFade()
-        stopEasing()
+        failed.songChanged()
+        if outgoing != nil { return }
+        disarm(.edit)
+        // The change has applied by now (the deck moved on, or the jump was made).
+        followUp()
         dropPlan()
         unloadSpare()
         schedule(0)
     }
 
+    /// Called before anything that changes what plays or where: by the phase rule, a start not yet
+    /// handed over is undone and the spare unloaded; a blend already handed over lets the old song
+    /// leave and the change lands on the song on screen (a pause keeps the old song's frames up to
+    /// the start for the resume). Every caller calls `followUp()` once its own change has applied.
+    func interrupt(_ reason: BlendDisarm = .edit) {
+        // Anything after a pause past the handover supersedes the old song's kept frames.
+        keptOn?.dropKept()
+        keptOn = nil
+        let pausedPastHandover = reason == .pause && handedOver >= 0 && !leaving ? outgoing : nil
+        pausedPastHandover?.playWhenReady = false
+        disarm(reason)
+        keptOn = pausedPastHandover
+        dropPlan()
+        unloadSpare()
+        schedule(0)
+    }
+
+    /// The deck holding the old song's frames up to the start through a pause past the handover.
+    private var keptOn: Deck?
+
+    /// An edit of the queue that left the song on now unchanged: on the iPhone the spare holds no
+    /// copy of the queue, so an edit that leaves the registered next song (entry and file) as it
+    /// was keeps the blend; any other interrupts it.
+    func edited(currentBefore: String?) {
+        let queue = player.queue
+        let next = queue.nextOnEnd.map { (entryId: queue.items[$0].entryId, uri: queue.items[$0].uri) }
+        if registered >= 0, editKeepsBlend(currentBefore: currentBefore, currentAfter: queue.currentItem?.entryId,
+                                          registeredNext: registeredNext, nextAfter: next) {
+            return
+        }
+        if registered < 0 && handedOver < 0 && loadedFor != nil, let at = queue.nextOnEnd, entryKey(queue.items[at]) == loadedFor,
+           queue.items[at].uri == loadedUri, currentBefore == queue.currentItem?.entryId {
+            // Loaded but not yet registered, and still next: nothing to undo.
+            return
+        }
+        interrupt(.edit)
+    }
+
+    /// What the playing song plays after its end, for an undone start whose song had already read
+    /// past its end: sent once the change that undid it has applied (its follower brought in line
+    /// with the queue), so a song put next by that change is the one heard.
+    func followUp() {
+        let g = followUpFor
+        guard g >= 0 else { return }
+        followUpFor = -1
+        mix.send(.followUp(generation: g, pass: followUpPass()))
+    }
+
+    /// The listener's speed and pitch changed: every deck plays at them, except that a
+    /// tempo-matched song (in its blend, or easing back after it) plays at its rate times them,
+    /// and a parked spare at its plan's. During a blend the session hears of it.
+    func paceChanged(_ pace: Pace) {
+        let ease = easing.flatMap { $0.deck === player.deck ? $0 : nil }
+        for deck in [player.deck, spare] + (outgoing.map { [$0] } ?? []) {
+            if deck === outgoing {
+                deck.setPace(pace)
+            } else if let ease, deck === ease.deck {
+                deck.setPace(Pace(speed: Float(ease.applied) * pace.speed, pitch: pace.pitch))
+            } else if deck === spare && loadedFor != nil {
+                deck.setPace(pacedFor(loadedPlan, pace))
+            } else {
+                deck.setPace(pace)
+            }
+        }
+        if outgoing != nil && handedOver >= 0 { mix.send(.paceChanged(Double(pace.speed))) }
+    }
+
+    /// Runs `write` now, or, while a blend is under way, once it is over. For the app's own queue
+    /// upkeep only; each write checks its own guards again when it runs.
+    func deferUpkeep(_ write: @escaping () -> Void) {
+        upkeep.append(write)
+        idle()
+    }
+
     func release() {
         cancelCheck()
+        upkeep.removeAll()
+        disarm(.edit)
         finishFade()
         tail?.job?.cancel()
         head?.job?.cancel()
@@ -191,38 +302,232 @@ final class Crossfader {
     /// Whether a crossfade is under way.
     var isBlending: Bool { outgoing != nil }
 
+    /// Whether a blend is under way or being set up: a spare loaded, a generation registered or
+    /// handed over. The app's own queue upkeep waits while it is.
+    var busy: Bool { loadedFor != nil || registered >= 0 || handedOver >= 0 }
+
+    /// Whether a blend's start is registered and not yet handed over.
+    var armed: Bool { registered >= 0 }
+
+    /// Whether the ticker must keep running: a generation is live or owes main something.
+    var live: Bool { registered >= 0 || handedOver >= 0 || followUpFor >= 0 || !waiting.isEmpty || outgoing != nil }
+
+    // MARK: The ticker
+
+    /// Every 40 ms while anything plays or a generation is live: main's lag is measured, the
+    /// session's events are drained in order and each acted on once due, and both other decks'
+    /// own events are heard.
+    func tick() {
+        let now = ProcessInfo.processInfo.systemUptime * 1000
+        if lastTickMs >= 0 {
+            lag.add(nowMs: Int64(now), lagMs: max(0, now - lastTickMs - blendTickerMs))
+            mix.mainLagMs = lag.value(nowMs: Int64(now))
+        }
+        lastTickMs = now
+        drainEvents()
+        #if DEBUG
+        MixTapReport.shared.poll(mix)
+        #endif
+        if let outgoing {
+            for event in outgoing.poll() { if case .failed = event { deckFailed(outgoing) } }
+        }
+        for event in spare.poll() { if case .failed = event { deckFailed(spare) } }
+    }
+
+    /// The ticker stopped; the next tick is not late.
+    func tickerStopped() { lastTickMs = -1 }
+
+    private func drainEvents() {
+        while let event = mix.events.pop() { waiting.append(event) }
+        let nowBus = mix.nowBus
+        let delay = Int64(mix.outputDelayMs * blendBusRate / 1_000)
+        var blocked: Set<Int64> = []
+        var i = 0
+        while i < waiting.count {
+            let event = waiting[i]
+            if blocked.contains(event.generation) {
+                i += 1
+                continue
+            }
+            if blendEventDue(event, nowBus: nowBus, outputDelayFrames: delay, quietStart: quietStarts.contains(event.generation)) {
+                waiting.remove(at: i)
+                handle(event)
+            } else {
+                // A generation's events are acted on in order.
+                blocked.insert(event.generation)
+                i += 1
+            }
+        }
+    }
+
+    private func handle(_ event: BlendEvent) {
+        let g = event.generation
+        switch event.kind {
+        case .proposed:
+            proposed(g)
+        case .incomingNotReady:
+            guard g == registered else { return }
+            playbackLog.info("automix: the next song was not ready at the start (\(event.cause.rawValue, privacy: .public))")
+            forgetRegistration()
+            // The spare stays parked; the rest of the song is planned again from where it is now.
+            dropPlan()
+            idle()
+            schedule(0)
+        case .moved:
+            if g == registered || g == handedOver {
+                playbackLog.info("automix: the blend moved to \(Int(event.ms)) ms, \(Int(event.ms2)) ms longer")
+            }
+        case .blendEnd:
+            if g == handedOver { finishFade(easeFromMs: event.ms) }
+        case .cancelled:
+            canceled(g, event.cause)
+        case .followUpNeeded:
+            if g == followUpFor { followUpFor = -1 }
+            mix.send(.followUp(generation: g, pass: followUpPass()))
+        }
+    }
+
+    private func proposed(_ g: Int64) {
+        // A second proposal for a generation handed over does nothing.
+        guard g != handedOver, g == registered else { return }
+        if mix.word.ack(g) || mix.word.state(of: g) == .acked {
+            handOver(g)
+        } else {
+            // The render cancelled the start itself (at its commit deadline): the playing song goes
+            // on and the rest of it is planned again.
+            forgetRegistration()
+            dropPlan()
+            idle()
+            schedule(0)
+        }
+    }
+
+    private func canceled(_ g: Int64, _ cause: BlendCause) {
+        if g == registered {
+            playbackLog.info("automix: the blend was cancelled (\(cause.rawValue, privacy: .public))")
+            forgetRegistration()
+            // A deck's own pause undid it: what the playing song plays after its end is told now.
+            if cause == .paused { mix.send(.followUp(generation: g, pass: followUpPass())) }
+            dropPlan()
+            unloadSpare()
+            schedule(0)
+        } else if g == handedOver {
+            finishFade()
+        }
+    }
+
+    // MARK: The phase rule
+
+    /// Forgets the registered generation, its word left cancelled unless main acknowledged it.
+    private func forgetRegistration() {
+        if registered >= 0 {
+            _ = mix.word.cancel(registered)
+            // The playing song's part in a start that did not happen.
+            player.deck.processor.arm(nil)
+        }
+        registered = -1
+        registeredPlan = nil
+        registeredNext = nil
+    }
+
+    /// Main's side of the phase rule: a registered start has its commit word cancelled before the
+    /// disarm goes, so every edit handled before this lands on the old song; a handed-over one has
+    /// its old song leave.
+    private func disarm(_ reason: BlendDisarm) {
+        let g = registered
+        if g >= 0 {
+            _ = mix.word.cancel(g)
+            followUpFor = g
+            forgetRegistration()
+            mix.send(.disarm(reason, generation: g))
+            return
+        }
+        if handedOver >= 0 && !leaving {
+            leaving = true
+            mix.send(.disarm(reason, generation: handedOver))
+        }
+    }
+
+    /// What the outgoing deck plays after its end: nothing when it stops there, else the follower
+    /// loaded on it now, when that is the queue's next song.
+    private func followUpPass() -> Int64 {
+        let deck = player.deck
+        let queue = player.queue
+        let next = queue.nextOnEnd.map { queue.items[$0] }
+        let follower = deck.following
+        let matches = follower != nil && next != nil && follower?.item.entryId == next?.entryId && follower?.item.uri == next?.uri
+        return outgoingFollowUp(stopAtEnd: deck.pauseAtEndOfSong, followerSerial: follower.map { Int64($0.serial) },
+                                followerMatchesNext: matches)
+    }
+
+    /// A deck's player failed.
+    func deckFailed(_ deck: Deck) {
+        if deck === outgoing && handedOver >= 0 {
+            // The old song failed mid-blend: the new one plays on alone.
+            mix.send(.failed(.a, generation: handedOver, followUp: blendNoAnswer))
+        } else if deck === player.deck && handedOver >= 0 && !leaving {
+            // The new song failed after the handover: the player hears it as the song on screen,
+            // and the old one leaves at once.
+            leaving = true
+            mix.send(.failed(.b, generation: handedOver, followUp: blendNoAnswer))
+        } else if deck === spare && loadedFor != nil {
+            // The next song failed in the spare: the playing deck reaches it by its own advance
+            // instead, once, and the spare is not loaded with it again for this transition.
+            if let entry = loadedFor { failed.failed(entry) }
+            playbackLog.info("automix: the next song could not start in the spare")
+            let g = registered
+            if g >= 0 {
+                _ = mix.word.cancel(g)
+                forgetRegistration()
+                mix.send(.failed(.b, generation: g, followUp: followUpPass()))
+            }
+            unloadSpare()
+            schedule(0)
+        } else if deck === player.deck && registered >= 0 {
+            // The playing song failed before the handover: the start is undone, and the player's
+            // own failure handling plays the next song once on this deck.
+            let g = registered
+            _ = mix.word.cancel(g)
+            forgetRegistration()
+            mix.send(.failed(.a, generation: g, followUp: blendNoAnswer))
+            dropPlan()
+            unloadSpare()
+        }
+    }
+
     // MARK: The check
 
     private func step() {
         easeRate()
         if outgoing != nil {
-            blendStep()
+            // The blend is the session's until it says it has ended.
+            schedule(farCheckMs)
             return
         }
         let deck = player.deck
-        if !deck.isPlaying {
+        if !deck.playWhenReady {
+            // Paused: nothing to do until playing starts again.
             lastPosition = -1
-            // Briefly not playing while it loads after a seek: keep watching. Truly paused: stop
-            // until playing starts again.
-            if deck.playWhenReady { schedule(nearCheckMs) }
+            return
+        }
+        if !deck.isPlaying {
+            // Loading after a seek, or a rebuffer: keep watching.
+            lastPosition = -1
+            schedule(nearCheckMs)
             return
         }
         let queue = player.queue
         // A live station has no end to fade out of, and is never faded into.
         guard fadeMs > 0, let next = queue.nextOnEnd, let current = queue.currentItem, !current.isRadioStation,
               !queue.items[next].isRadioStation else {
-            dropPlan()
-            unloadSpare()
+            replanAway()
             schedule(farCheckMs)
             return
         }
         let nextItem = queue.items[next]
         let position = deck.positionMs
         let speed = player.pace.speed
-        if jumped(position, speed) {
-            dropRunUp()
-            dropPlan()
-        }
+        if jumped(position, speed) && registered < 0 { dropPlan() }
         let currentSong = current.fadeSong(durationMs: lengthOf(deck, current))
         let nextSong = nextItem.fadeSong(durationMs: nextLengthOf(nextItem))
         let repeatOne = queue.repeatMode == .one
@@ -230,28 +535,35 @@ final class Crossfader {
         // In real time: at 1.5x speed the song's last 6 seconds pass in 4.
         let remaining = Int(Double(currentSong.durationMs - position) / Double(speed))
         let plain = crossfadeLength(currentSong, nextSong, fadeMs: fadeMs, repeatOne: repeatOne, stopAtEndOfSong: stopAtEnd)
-        let waiting = plain == 0 && waitsOnLength(currentSong, nextSong, fadeMs: fadeMs, repeatOne: repeatOne, stopAtEndOfSong: stopAtEnd)
-        if waiting {
+        let lengthUnknown = plain == 0 && waitsOnLength(currentSong, nextSong, fadeMs: fadeMs, repeatOne: repeatOne, stopAtEndOfSong: stopAtEnd)
+        if lengthUnknown {
             // The next song's length is only known once it has opened, so open it early on the
             // spare and decide once it says.
-            dropPlan()
+            replanAway(keepSpare: true)
             let lead = loadLeadMs(blendMs: 0, fadeMs: fadeMs, lengthKnown: false)
-            if loadedFor != nextItem.entryId && remaining <= lead { load(nextItem, nil) }
+            if loadedFor != entryKey(nextItem) && remaining <= lead && mayLoad(nextItem) { load(nextItem, nil) }
             schedule(remaining > lead + farCheckMs ? farCheckMs : nearCheckMs)
             return
         }
         if plain == 0 {
             // Played gaplessly, by the usual rules: nothing to plan.
-            dropPlan()
-            unloadSpare()
+            replanAway()
             schedule(farCheckMs)
             return
         }
-        if aligner == nil {
+        let key = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, player.skipSilence)
+        if registered >= 0 && key.core != planKey?.core {
+            // What the blend was planned from changed before its handover (a speed, Skip silence,
+            // a length): undone by the phase rule, and planned again.
+            disarm(.edit)
+            followUp()
+            dropPlan()
+        }
+        if registered < 0 {
             scoutAhead(deck, current, nextItem, position, currentSong.durationMs)
-            let key = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, player.skipSilence)
-            if key != planKey && readyToPlan(key, remaining) {
-                makePlan(deck, key, currentSong, nextSong, position, repeatOne, stopAtEnd, speed, current, nextItem)
+            let fresh = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, player.skipSilence)
+            if fresh != planKey && readyToPlan(fresh, remaining) {
+                makePlan(deck, fresh, currentSong, nextSong, position, repeatOne, stopAtEnd, speed, current, nextItem)
             }
         }
         guard let p = plan else {
@@ -265,33 +577,31 @@ final class Crossfader {
             return
         }
         let toStart = Int(Double(p.startMs - position) / Double(speed))
-        if loadedFor != nextItem.entryId && toStart <= planLoadLeadMs { load(nextItem, p) }
-        if loadedFor == nextItem.entryId && loadedPlan != p { repark(p) }
-        if loadedFor == nextItem.entryId {
-            if aligner == nil && Double(position) >= p.preRollAtMs() - Double(nearCheckMs) {
-                if spare.hasEnoughToStart {
-                    startRunUp(p, position)
-                } else {
-                    // The next song is not ready for its run-up: the playing song is left alone,
-                    // and a later plan is made once it is.
-                    let nextEntry = planKey?.next
-                    if notReadyFor != nextEntry { playbackLog.info("automix: the next song was not ready for its run-up") }
-                    notReadyFor = nextEntry
-                    dropPlan()
-                    schedule(nearCheckMs)
-                    return
-                }
-            }
-            if aligner != nil {
-                if position >= p.startMs {
-                    handOver(p)
-                    schedule(nearCheckMs)
-                    return
-                }
-                runUp(p, position)
+        if loadedFor != entryKey(nextItem) && toStart <= planLoadLeadMs && mayLoad(nextItem) && !upkeepPosted { load(nextItem, p) }
+        if registered < 0 && loadedFor == entryKey(nextItem) && loadedPlan != p { repark(p) }
+        if registered < 0 && loadedFor == entryKey(nextItem) && spare.item != nil {
+            if Double(position) >= p.armAtMs(proposalLeadMs: mix.proposalLeadMs, speed: Double(speed)) - Double(nearCheckMs) {
+                arm(p, deck, current, nextItem)
             }
         }
-        schedule(toStart > planLoadLeadMs + farCheckMs ? farCheckMs : nearCheckMs)
+        schedule(registered >= 0 || toStart <= planLoadLeadMs + farCheckMs ? nearCheckMs : farCheckMs)
+    }
+
+    /// Whether the next song may go into the spare: not one whose spare failed for this transition.
+    private func mayLoad(_ item: QueueItem) -> Bool { failed.mayLoad(entryKey(item)) }
+
+    /// A queue entry's key: its entry id, or its song for an entry without one.
+    private func entryKey(_ item: QueueItem) -> String { item.entryId ?? item.trackId }
+
+    /// No blend for the coming transition: a registered start is undone by the phase rule, the plan
+    /// forgotten and the spare unloaded.
+    private func replanAway(keepSpare: Bool = false) {
+        if registered >= 0 {
+            disarm(.edit)
+            followUp()
+        }
+        dropPlan()
+        if !keepSpare { unloadSpare() }
     }
 
     /// How long the song is: what the deck measured, or the listed length (corrected where
@@ -304,7 +614,7 @@ final class Crossfader {
     /// listed length, corrected where it was found wrong.
     private func nextLengthOf(_ item: QueueItem) -> Int {
         let listed = lengths.lengthMs(item.trackId, listedMs: item.durationMs)
-        let spareMs = loadedFor == item.entryId && spare.item?.entryId == item.entryId ? spare.durationMs : nil
+        let spareMs = loadedFor == entryKey(item) && spare.item.map(entryKey) == entryKey(item) ? spare.durationMs : nil
         return nextSongLengthMs(listedMs: listed, spareMs: spareMs)
     }
 
@@ -418,8 +728,11 @@ final class Crossfader {
         let served = tail?.entryId == key.current ? tail?.profile : nil
         let heardLevel = heard.flatMap { $0.heardMs >= levelHeardMs ? $0.bodyLevelDb : nil }
         let (level, tempoPrior) = heardFor(served, heardLevelDb: heardLevel, heardTempo: heard?.tempoPrior)
+        // "Now" is where the output will be once a start could still be decided: the song's
+        // position plus the session's proposal lead.
+        let now = position + Int(mix.proposalLeadMs * Double(speed))
         let context = TransitionContext(
-            nowMs: position, playedMs: heard.map { Int(Double($0.heardMs) * Double(speed)) } ?? position,
+            nowMs: now, playedMs: heard.map { Int(Double($0.heardMs) * Double(speed)) } ?? position,
             repeatOne: repeatOne, stopAtEndOfSong: stopAtEnd, pace: Double(speed), skipSilence: player.skipSilence,
             currentGenre: current.genre, nextGenre: nextItem.genre, bodyLevelDb: level, tempoPrior: tempoPrior)
         let tailAnalysis = tail?.entryId == key.current ? tail?.analysis : nil
@@ -427,187 +740,168 @@ final class Crossfader {
         let made = planTransition(current: currentSong, next: nextSong, tail: tailAnalysis, head: headAnalysis,
                                   settings: settings.atSpeed(speed), context: context)
         planKey = key
-        let sound = deck.processor
         plan = made
-        sound.arm(nil)
         if made.kind == .gapless { return }
-        // The playing song is armed once the next one is ready for its run-up, so a late plan
-        // whose start has passed never fades it out while the next song is still loading.
         let measured = tailAnalysis.map { analysis in level.map(analysis.withBodyLevel) ?? analysis }
         outgoingGate = measured?.features.gateDb ?? level.map { max(silenceFloorDb, $0 - silenceBelowBodyDb) }
     }
 
     // MARK: The spare
 
-    /// The spare gets the next song, parked silently where its run-up starts (the song's start
-    /// when there is no plan yet).
+    /// The spare gets the next song, parked just before where it comes in (its start when there is
+    /// no plan yet): silent and consuming nothing until the session starts it, at the player's
+    /// level so its first frames are heard at their blend gain.
     private func load(_ next: QueueItem, _ plan: TransitionPlan?) {
-        let from = plan?.preRollFromMs() ?? 0
-        // The same pace, so the blend does not jump in speed or pitch; a tempo-matched song gets
-        // its rate from the start of its run-up.
+        let from = plan?.parkAtMs() ?? 0
+        spare.parked = true
         spare.setPace(pacedFor(plan, player.pace))
         spare.skipSilence = player.skipSilence
-        spare.volume = 0
+        spare.volume = player.sleepFade
         spare.playWhenReady = false
         spare.pauseAtEndOfSong = false
         spare.startAfterMs = player.deck.startAfterMs
         armIncoming(plan, next)
         spare.load(player.makeSource(next, startMs: from))
-        loadedFor = next.entryId
+        loadedFor = entryKey(next)
+        loadedUri = next.uri
         loadedPlan = plan
     }
 
-    /// A new plan for a song already loaded: armed again and moved to the new run-up start.
+    /// A new plan for a song already loaded: armed again and parked again where it now comes in,
+    /// unless it is there already (a move would make it load again).
     private func repark(_ plan: TransitionPlan) {
         guard let item = spare.item else { return }
         armIncoming(plan, item)
         spare.setPace(pacedFor(plan, player.pace))
-        // Parked there already, it is not moved: a move would make it load again, and a plan
-        // made again while it loads would never find it ready.
-        if needsRepark(spare.positionMs, plan.preRollFromMs()) { spare.seek(toMs: plan.preRollFromMs()) }
+        if needsRepark(spare.positionMs, plan.parkAtMs()) { spare.seek(toMs: plan.parkAtMs()) }
         loadedPlan = plan
     }
 
     private func pacedFor(_ plan: TransitionPlan?, _ pace: Pace) -> Pace {
         guard let rate = plan?.beatMatchRate else { return pace }
-        return Pace(speed: Float(rate), pitch: pace.pitch)
+        return Pace(speed: Float(rate) * pace.speed, pitch: pace.pitch)
     }
 
     private func armIncoming(_ plan: TransitionPlan?, _ item: QueueItem) {
         spare.processor.arm(plan.map { DeckTransition(entryId: item.entryId, plan: $0, incoming: true) })
     }
 
-    /// The run-up: the spare plays, still silent, from where the next song should be now.
-    private func startRunUp(_ plan: TransitionPlan, _ position: Int) {
-        let entry = player.queue.currentItem.map { $0.entryId ?? $0.trackId }
-        player.deck.processor.arm(DeckTransition(entryId: entry, plan: plan, incoming: false, gateDb: outgoingGate))
-        let target = Int(plan.incomingAtMs(Double(position)))
-        if target > spare.positionMs + nearCheckMs { spare.seek(toMs: target) }
+    /// Registers the blend with the session under a new generation, then plays the parked spare
+    /// so its sound waits there for the start. The session's events are drained first, so none of
+    /// an earlier generation is left behind the new one.
+    private func arm(_ p: TransitionPlan, _ deck: Deck, _ current: QueueItem, _ nextItem: QueueItem) {
+        drainEvents()
+        let g = nextGeneration
+        nextGeneration += 1
+        let quiet = commitsBeforeAck(p, outputDelayMs: mix.outputDelayMs, speed: Double(player.pace.speed))
+        let arm = BlendArm(generation: g, startMs: Double(p.startMs), overlapMs: Double(p.overlapMs),
+                           latestEndMs: Double(p.latestEndMs), outgoingEndMs: Double(lengthOf(deck, current)),
+                           lateMoveBars: p.lateMoveBars, barMs: p.barMs(), holdShare: p.holdShare,
+                           speed: Double(player.pace.speed), bothHeardStartMs: Double(p.bothHeardStartMs),
+                           bothHeardEndMs: Double(p.bothHeardEndMs), lockMs: p.lockMs, driftGap: p.driftGap, commitBeforeAck: quiet)
+        registered = g
+        registeredPlan = p
+        registeredNext = (entryId: nextItem.entryId, uri: nextItem.uri)
+        if quiet { quietStarts.insert(g) }
+        let entry = current.entryId ?? current.trackId
+        deck.processor.arm(DeckTransition(entryId: entry, plan: p, incoming: false, gateDb: outgoingGate))
+        mix.word.open(g)
+        mix.send(.arm(arm, outgoing: deck.render.index, entryMs: Double(p.entryMs)))
+        #if DEBUG
+        MixTapReport.shared.planned(generation: g, startMs: Double(p.startMs), entryMs: Double(p.entryMs), rate: p.incomingRate(),
+                                    pace: Double(player.pace.speed), outgoing: deck.render.index)
+        #endif
         spare.playWhenReady = true
-        aligner = Aligner(plan)
-        alignment = nil
+        // The playing song's follower is there before the start, whatever its own rule.
+        player.loadFollowingNow()
     }
 
-    private func runUp(_ plan: TransitionPlan, _ position: Int) {
-        guard let aligner, alignment == nil else { return }
-        let step = aligner.observe(nowMs: nowMs, outgoingMs: Double(position), incomingMs: Double(spare.positionMs),
-                                   incomingPlaying: spare.isPlaying)
-        switch step {
-        case .seek(let toMs): spare.seek(toMs: toMs)
-        case .settled: settle(plan, step)
-        case .wait: break
-        }
-    }
-
-    /// The decks are lined up as far as they will be. Too far apart for the beat, the playing
-    /// song's low-pass sweeps smoothly instead of in steps.
-    private func settle(_ plan: TransitionPlan, _ step: Aligner.Step) {
-        alignment = step
-        if case .settled(_, let locked) = step, plan.barLocked && !locked {
-            let entry = player.queue.currentItem.map { $0.entryId ?? $0.trackId }
-            player.deck.processor.arm(DeckTransition(entryId: entry, plan: plan, incoming: false, stepped: false, gateDb: outgoingGate))
-        }
-    }
-
-    private func handOver(_ plan: TransitionPlan) {
+    /// The session proposed the start and main agreed: the player hands over to the spare now, so
+    /// everything from here lands on the song on screen. The handover is marked first, so a
+    /// listener writing inside it (a sleep timer's end of song) never undoes it.
+    private func handOver(_ g: Int64) {
+        handedOver = g
+        leaving = false
+        let p = registeredPlan
+        let next = registeredNext
+        registered = -1
+        registeredPlan = nil
+        registeredNext = nil
         let from = player.deck
         let into = spare
-        var settled = alignment
-        if settled == nil, let finished = aligner?.finish() {
-            settle(plan, finished)
-            settled = finished
-        }
-        aligner = nil
-        // The old deck plays this song out, then stops instead of going on.
-        from.pauseAtEndOfSong = true
-        from.setFollowing(nil)
         outgoing = from
-        blending = plan
+        blending = p
         // Once the blend is over, the old deck is the spare for next time.
         spare = from
         loadedFor = nil
+        loadedUri = nil
         loadedPlan = nil
-        self.plan = nil
+        plan = nil
         planKey = nil
-        var aligned = "alignment not measured"
-        if case .settled(let error?, let locked) = settled {
-            aligned = "aligned to \(Int(error.rounded())) ms" + (plan.barLocked && locked ? ", on the beat" : "")
-        }
-        playbackLog.info("automix: \(plan.reason, privacy: .public); \(aligned, privacy: .public)")
-        if let rate = plan.beatMatchRate {
-            easing = Easing(deck: into, plan: plan, enteredAt: nowMs, rate: Float(rate), after: player.pace)
-        }
+        into.parked = false
+        if let p { playbackLog.info("automix: \(p.reason, privacy: .public)") }
+        if let p, let rate = p.beatMatchRate { easing = Easing(deck: into, entryId: next?.entryId, plan: p, rate: rate) }
         player.handOver(into: into, from: from)
     }
 
-    private func blendStep() {
-        guard let from = outgoing else { return }
-        let over = blending.map { from.positionMs >= $0.startMs + $0.overlapMs } ?? true
-            || from.state == .ended || !from.playWhenReady
-        if over { finishFade() } else { schedule(nearCheckMs) }
-        if outgoing == nil { schedule(easing != nil ? nearCheckMs : 0) }
-    }
-
-    /// Eases a tempo-matched song back to its own speed after the blend, in small steps; the
-    /// listener changing the speed ends it.
+    /// Eases a tempo-matched song back to its own speed on its own song time, toward the
+    /// listener's pace read at every step, until the deck is no longer that song.
     private func easeRate() {
         guard let ease = easing else { return }
-        if ease.deck !== player.deck || abs(ease.deck.pace.speed - ease.rate) > 1e-4 {
+        let pace = player.pace
+        if ease.deck !== player.deck {
             easing = nil
             return
         }
-        let since = Double(nowMs - ease.enteredAt)
-        let target = ease.plan.incomingRateAt(since)
-        let done = target == 1
-        if done || abs(target - Double(ease.rate)) >= rateStep {
-            ease.rate = done ? ease.after.speed : Float(target)
-            ease.deck.setPace(Pace(speed: ease.rate, pitch: ease.after.pitch))
-            if done { easing = nil }
+        if ease.deck.item?.entryId != ease.entryId {
+            ease.deck.setPace(pace)
+            easing = nil
+            return
+        }
+        let rate = blendIncomingRate(rate: ease.rate, incomingMs: Double(ease.deck.positionMs), entryMs: Double(ease.plan.entryMs),
+                                     easeFromMs: ease.easeFromMs)
+        if rate == 1 {
+            ease.applied = 1
+            ease.deck.setPace(pace)
+            easing = nil
+            return
+        }
+        if abs(rate - ease.applied) >= rateStep {
+            ease.applied = rate
+            ease.deck.setPace(Pace(speed: Float(rate) * pace.speed, pitch: pace.pitch))
         }
     }
 
-    private func stopEasing() {
-        guard let ease = easing else { return }
-        easing = nil
-        if ease.deck === player.deck { ease.deck.setPace(ease.after) }
-    }
-
-    /// Lets go of a blend: the listener changed the pace, so a tempo-matched song takes it.
-    func paceChanged() {
-        easing = nil
-    }
-
-    private func finishFade() {
+    /// The blend is over (the session said so, or the old song failed): the old deck stops and
+    /// becomes the spare. `easeFromMs` is where the new song's easing starts; with none, it starts
+    /// now.
+    private func finishFade(easeFromMs: Double = .nan) {
         guard let from = outgoing else { return }
+        let g = handedOver
         let plan = blending
         outgoing = nil
         blending = nil
-        if let plan, plan.overlapMs > 0 {
-            let progress = Float(from.positionMs - plan.startMs) / Float(plan.overlapMs)
+        handedOver = -1
+        leaving = false
+        quietStarts.remove(g)
+        if let easing { easing.easeFromMs = easeFromMs.isNaN ? easing.sinceEntryMs : easeFromMs }
+        if let plan, plan.overlapMs > 0, !easeFromMs.isNaN {
+            let progress = easeFromMs * plan.incomingRate() / Double(plan.overlapMs)
             if progress < 0.95 { playbackLog.info("automix: blend cut short at \(Int(min(max(progress, 0), 1) * 100))%") }
         }
         from.processor.arm(nil)
         from.clear()
         from.pauseAtEndOfSong = false
-        // The incoming song is past its part by now, or is cut short: either way it plays on
-        // untouched.
-        player.deck.processor.arm(nil)
+        from.parked = true
+        if g >= 0 { mix.send(.outgoingStopped(generation: g)) }
+        lastPosition = -1
         player.endFade()
+        idle()
+        schedule(0)
     }
 
-    /// Stops a run-up: the spare goes quiet and back to where it was parked.
-    private func dropRunUp() {
-        guard aligner != nil else { return }
-        aligner = nil
-        alignment = nil
-        unloadSpare()
-    }
-
-    /// Forgets the plan, and the playing deck's part in it.
+    /// Forgets the plan.
     private func dropPlan() {
-        if outgoing != nil { return }
-        if aligner != nil { dropRunUp() }
-        if plan != nil { player.deck.processor.arm(nil) }
         plan = nil
         planKey = nil
     }
@@ -615,11 +909,31 @@ final class Crossfader {
     private func unloadSpare() {
         guard loadedFor != nil else { return }
         loadedFor = nil
+        loadedUri = nil
         loadedPlan = nil
-        aligner = nil
-        alignment = nil
         spare.processor.arm(nil)
         spare.clear()
+        spare.parked = true
+        idle()
+    }
+
+    /// The upkeep waiting for the blend goes once nothing is under way, in one message, checked
+    /// again then.
+    private func idle() {
+        guard !busy, !upkeep.isEmpty, !upkeepPosted else { return }
+        upkeepPosted = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.applyUpkeep() }
+        }
+    }
+
+    private func applyUpkeep() {
+        upkeepPosted = false
+        guard !busy else { return }
+        let writes = upkeep
+        upkeep.removeAll()
+        for write in writes { write() }
+        schedule(0)
     }
 
     private func schedule(_ delayMs: Int) {

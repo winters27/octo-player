@@ -24,12 +24,22 @@ import SwiftUI
 /// - `prefetch:WIFI` or `prefetch:WIFI,MOBILE` sets how many songs are fetched ahead
 /// - `savedstate` shows how many of the next songs are saved whole on the phone
 /// - `playstate` shows a line with what the player is doing
+/// - `mixtap:on`, `mixtap:on:PERIOD_MS` turns on the mix tap (click tracks with a click every
+///   PERIOD_MS, 500 when left out), `mixtap:off`, `mixtap:dump` writes what it holds now
+/// - `mixtap:holdmain:MS` holds the main thread that long (a late acknowledgement)
+/// - `mixtap:stall:A:MS`, `mixtap:stall:B:MS` stops the song on now (A) or the spare (B) getting
+///   sound for that long
 @MainActor
 enum PlaybackDrive {
     static func install(player: Player, router: Router, overlays: Overlays) {
         Drive.steps.append { name, value in
             await step(name, value, player: player, router: router, overlays: overlays)
         }
+    }
+
+    /// Blocks the main thread for `ms`, as a busy main thread would: an acknowledgement comes late.
+    private static func holdMain(ms: Double) {
+        Thread.sleep(forTimeInterval: ms / 1_000)
     }
 
     private static func step(_ name: String, _ value: String, player: Player, router: Router, overlays: Overlays) async -> Bool {
@@ -121,6 +131,22 @@ enum PlaybackDrive {
                 if await StreamCache.shared.isFullySaved(key) { saved += 1 }
             }
             router.show("\(saved) of the next \(servers) server songs saved whole")
+        case "mixtap":
+            let parts = value.split(separator: ":").map(String.init)
+            let mix = player.engine.output.mix
+            switch parts.first {
+            case "on":
+                if parts.count > 1, let period = Double(parts[1]) { MixTapReport.shared.periodMs = period }
+                mix.tap.start()
+            case "off": mix.tap.stop()
+            case "dump": MixTapReport.shared.dump(mix)
+            case "holdmain": holdMain(ms: Double(parts.last ?? "") ?? 300)
+            case "stall":
+                let ms = parts.count > 2 ? Int(parts[2]) ?? 4_000 : 4_000
+                let deck = parts.count > 1 && parts[1] == "B" ? player.engine.crossfader.spare : player.engine.deck
+                deck.current?.stallUntilMs.store(Int(ProcessInfo.processInfo.systemUptime * 1_000) + ms, ordering: .relaxed)
+            default: break
+            }
         case "playstate":
             let quality = player.quality.map { "\($0.label) \($0.full)" } ?? "no badge"
             // "automix", "crossfade 8 s" or "gapless".

@@ -4,12 +4,21 @@ import OctoKit
 /// The sound going out: one audio engine both decks play into, the phone's audio session, and
 /// what the system says about it (a call, another app, headphones coming and going, a new
 /// output). Both decks share the one session.
+///
+/// Each deck plays through its time-pitch stage and its level unit into the main mixer; the
+/// limiter on the sum sits between the main mixer and the output, and runs the blend's rules each
+/// cycle (`MixRender`), so it is reconnected at the output's format whenever that changes.
 @MainActor
 final class DeckOutput {
     let engine = AVAudioEngine()
+    let mix: MixRender
     private let decks: [Deck]
+    private let limiter: AVAudioUnitEffect?
     /// Whether the engine should be running: music plays, or it waits silent a while after a pause.
     private var wanted = false
+    /// The engine stopped by itself (a new output, a reset): the next start resets both time-pitch
+    /// stages.
+    private var resetSinceStart = false
     private var stopTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
@@ -22,7 +31,12 @@ final class DeckOutput {
 
     init(decks: [Deck]) {
         self.decks = decks
+        let mix = MixRender(decks: decks.map(\.render))
+        self.mix = mix
+        limiter = OctoEffectUnit.node(OctoEffectUnit.mixLimiter, name: "mix limiter", renderer: MixLimiterRender(mix))
         for deck in decks { connect(deck) }
+        if let limiter { engine.attach(limiter) }
+        connectOutput()
         engine.prepare()
         listen()
     }
@@ -32,7 +46,26 @@ final class DeckOutput {
         engine.attach(deck.node)
         engine.attach(deck.timePitch)
         engine.connect(deck.node, to: deck.timePitch, format: format)
-        engine.connect(deck.timePitch, to: engine.mainMixerNode, format: format)
+        if let level = deck.level {
+            engine.attach(level)
+            engine.connect(deck.timePitch, to: level, format: format)
+            engine.connect(level, to: engine.mainMixerNode, format: format)
+        } else {
+            engine.connect(deck.timePitch, to: engine.mainMixerNode, format: format)
+        }
+    }
+
+    /// The main mixer into the limiter into the output, at the output's own rate and channels.
+    private func connectOutput() {
+        guard let limiter else { return }
+        let hardware = engine.outputNode.outputFormat(forBus: 0)
+        let rate = hardware.sampleRate > 0 ? hardware.sampleRate : deckRate
+        let channels = max(1, hardware.channelCount)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: channels) else { return }
+        engine.disconnectNodeOutput(engine.mainMixerNode)
+        engine.disconnectNodeOutput(limiter)
+        engine.connect(engine.mainMixerNode, to: limiter, format: format)
+        engine.connect(limiter, to: engine.outputNode, format: format)
     }
 
     /// How starting the sound went.
@@ -60,7 +93,7 @@ final class DeckOutput {
         wanted = true
         if !engine.isRunning {
             do {
-                try engine.start()
+                try startEngine()
             } catch {
                 playbackLog.info("audio engine did not start: \(String(describing: error), privacy: .public)")
                 return .failed
@@ -68,6 +101,15 @@ final class DeckOutput {
         }
         updateDelays()
         return .started
+    }
+
+    /// Starts the engine; after it stopped by itself, both decks are anchored again on the bus.
+    private func startEngine() throws {
+        if resetSinceStart {
+            resetSinceStart = false
+            mix.restarts.add(1, ordering: .releasing)
+        }
+        try engine.start()
     }
 
     /// Lets the engine stop once it has stayed silent for `after` seconds; playing again before
@@ -92,14 +134,23 @@ final class DeckOutput {
 
     var isRunning: Bool { engine.isRunning }
 
-    /// The time between a deck handing out sound and it being heard, for each deck's position.
+    /// The time between a deck handing out sound and it being heard, for each deck's position, and
+    /// the numbers the blend's rules run on: the output's delay (the limiter's included) and the
+    /// larger time-pitch latency.
     func updateDelays() {
         let session = AVAudioSession.sharedInstance()
-        let device = session.outputLatency + session.ioBufferDuration
+        let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let limiterDelay = rate > 0 ? Double(mix.limiterLatencyFrames) / rate : 0
+        let device = session.outputLatency + session.ioBufferDuration + limiterDelay
+        var latency = 0.0
         for deck in decks {
+            deck.refreshLatency()
             let stage = deck.timePitch.bypass ? 0 : deck.timePitch.latency
+            latency = max(latency, deck.latencyFrames)
             deck.outputDelayMs = (device + stage) * 1000
         }
+        mix.outputDelayMs = device * 1000
+        mix.latencyFrames.store(Int64(latency.rounded(.up)), ordering: .relaxed)
     }
 
     private func listen() {
@@ -123,10 +174,14 @@ final class DeckOutput {
         })
         observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                // The output changed under the engine (a new device, another rate): it stopped, so
-                // it starts again when it should be running.
-                guard let self, self.wanted, !self.engine.isRunning else { return }
-                try? self.engine.start()
+                // The output changed under the engine (a new device, another rate): it stopped and
+                // reset its stages, so the limiter is reconnected at the new format, and the engine
+                // starts again when it should be running.
+                guard let self, !self.engine.isRunning else { return }
+                self.resetSinceStart = true
+                self.connectOutput()
+                guard self.wanted else { return }
+                try? self.startEngine()
                 self.updateDelays()
             }
         })
@@ -134,6 +189,8 @@ final class DeckOutput {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.engine.stop()
+                self.resetSinceStart = true
+                self.connectOutput()
                 if self.wanted { self.start() }
             }
         })
