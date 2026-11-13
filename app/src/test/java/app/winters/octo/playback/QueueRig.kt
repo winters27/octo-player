@@ -31,6 +31,7 @@ import app.winters.octo.output.RemoteOutput
 import app.winters.octo.output.RemotePlayer
 import app.winters.octo.testing.openTestCatalog
 import app.winters.octo.testing.testMerge
+import app.winters.octo.testing.waitOnWork
 import app.winters.octo.ui.paging.ListLoaders
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -165,15 +166,9 @@ internal class QueueRig(
         }
     }
 
-    // Waits until `done`, the main looper turning, at most a few seconds.
-    fun until(what: String, done: () -> Boolean) {
-        val end = System.nanoTime() + 15_000_000_000L
-        while (!done()) {
-            settle()
-            if (System.nanoTime() > end) throw AssertionError("never: $what")
-            Thread.sleep(5)
-        }
-    }
+    // Waits until `done`, the main looper turning: at most 15 s, or with
+    // `progress`, for as long as that moves and 15 s once it stands still.
+    fun until(what: String, progress: (() -> Any?)? = null, done: () -> Boolean) = waitOnWork(what, 15_000, progress, ::settle, done)
 
     // The ids the player holds, in queue order.
     fun held(): List<String> = List(player.mediaItemCount) { player.getMediaItemAt(it).mediaId }
@@ -197,8 +192,9 @@ internal class QueueRig(
         return answer!!
     }
 
-    // Waits until no list of the queue in use is being written.
-    fun joined() = until("every list joined") { lists().all { it.fillState == QueueBuilds.JOINED } && window.building.value.isEmpty() }
+    // Waits until no list of the queue in use is being written, for as long
+    // as their writes move (each page a list writes moves its row).
+    fun joined() = until("every list joined", { lists() }) { lists().all { it.fillState == QueueBuilds.JOINED } && window.building.value.isEmpty() }
 
     // Next as a controller presses it, through the session's player.
     // A Next at the window's edge waits for a read, so this waits for the
