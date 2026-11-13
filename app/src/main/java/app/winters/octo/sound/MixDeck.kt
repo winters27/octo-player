@@ -96,6 +96,12 @@ internal class DeckState(val slot: Int) {
 
     var watchNanos = 0L
 
+    // When the ring last grew, as the mixer last looked: the output and
+    // its written count then.
+    var grewAt = 0L
+    var seenOut: MixAudioOutput? = null
+    var seenWritten = 0L
+
     fun arm(t: DeckTransition, rate: Int) {
         if (ownShaper == null) ownShaper = TransitionShaper(rate, 2)
         shaper = ownShaper
@@ -237,6 +243,7 @@ internal class DeckState(val slot: Int) {
         transition = null
         tail = null
         join = null
+        seenOut = null
     }
 }
 

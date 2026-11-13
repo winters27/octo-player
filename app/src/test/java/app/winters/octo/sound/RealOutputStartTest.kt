@@ -113,11 +113,13 @@ class RealOutputStartTest {
         rig.runFor(1.0)
         runUntil(rig) { rig.track(0).underrunCount > 0 }
         val t = rig.track(0)
-        // 25 ms after the underrun the source gives 30 ms more, and stops.
+        // 25 ms after the underrun the source gives its last 30 ms (its
+        // stream ends, so the dry deck takes them at once).
         rig.runFor(25.0)
         val before = t.thresholdCalls.size
         val writtenAt = rig.sched.now
         d.write(1_440)
+        d.end()
         rig.runFor(400.0)
         val calls = t.thresholdCalls.drop(before)
         val lowered = calls.first { it[1] < 2_400 }
@@ -233,19 +235,30 @@ class RealOutputStartTest {
     @Test
     fun theWindowStartsThreeHundredMsAfterTheFirstMusicCycleAndRunsAtLeast600Ms() {
         val rig = MixRig()
-        // Data comes at its own pace at first, so the first cycle comes well
-        // after the first music write; then the deck reads ahead.
+        // Data comes at its own pace at first, too slowly for the first music
+        // to go in; the deck reads ahead from 250 ms, the first music goes in
+        // the gate's slack after that, and the system mixer's first cycle
+        // comes only at 360 ms, well after it.
         val d = rig.deck(0)
         d.signal = ::counting
         d.play()
         d.pace(everyMs = 10.0, chunk = 480, forMs = 250.0)
         rig.sched.at(250 * ms) { d.feed() }
         var firstCycle = -1L
+        var firstGap = true
         rig.system.gapAfter = { now ->
             if (firstCycle < 0 && rig.builder.built.isNotEmpty() && rig.track(0).firstCycleNanos >= 0) firstCycle = rig.track(0).firstCycleNanos
-            // One long gap 200 ms after the first music cycle, inside a window
-            // that would start at the first write but not after the cycle.
-            if (firstCycle >= 0 && now in (firstCycle + 200 * ms) until (firstCycle + 240 * ms)) 90.0 else null
+            when {
+                firstGap -> {
+                    firstGap = false
+                    360.0
+                }
+                // One long gap 200 ms after the first music cycle, inside a
+                // window that would start at the first write but not after
+                // the cycle.
+                firstCycle >= 0 && now in (firstCycle + 200 * ms) until (firstCycle + 240 * ms) -> 90.0
+                else -> null
+            }
         }
         rig.runFor(3_000.0)
         val t = rig.track(0)
@@ -379,8 +392,9 @@ class RealOutputStartTest {
     @Test
     fun afterAFreshStartPositionsAreClampedToTheHeadLessTheRoutesLatency() {
         // Speaker 250 ms, Bluetooth 400 ms, Android Auto 500 ms before they
-        // are measured.
-        for ((route, latency) in listOf("2:0:speaker" to 250L, "8:00:11:22:bt" to 400L, "25:0:car" to 500L)) {
+        // are measured: a phone projecting to a car routes to a remote
+        // submix, Android Automotive to its bus.
+        for ((route, latency) in listOf("2:0:speaker" to 250L, "8:00:11:22:bt" to 400L, "25:0:car" to 500L, "21:0:bus" to 500L)) {
             val (rig, d) = clamped(route)
             checkClamp(rig, d, rig.track(0), 0, latency)
         }
@@ -422,9 +436,11 @@ class RealOutputStartTest {
         val d = rig.deck(0)
         d.signal = ::counting
         d.play()
-        // Data at its own pace: the output, waiting for its whole buffer,
-        // starts once its start is lowered, well after its first music write.
-        d.pace()
+        // Data at its own pace for 200 ms, then the stream ends: its first
+        // music is less than the output's whole buffer, so the output starts
+        // once its start is lowered, well after its first music write.
+        d.pace(forMs = 200.0)
+        rig.sched.at(200 * ms) { d.end() }
         rig.runFor(1.0)
         val t = rig.track(0)
         runUntil(rig) { t.firstCycleNanos >= 0 }

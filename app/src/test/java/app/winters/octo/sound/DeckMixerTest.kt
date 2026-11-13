@@ -5,6 +5,9 @@ import app.winters.octo.playback.BlendCause
 import app.winters.octo.playback.BlendDisarm
 import app.winters.octo.playback.BlendEventKind
 import app.winters.octo.playback.CommitState
+import app.winters.octo.playback.LATE_MOVE_UNBOUNDED
+import app.winters.octo.playback.TransitionKind
+import app.winters.octo.playback.TransitionPlan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -93,6 +96,51 @@ class DeckMixerTest {
         assertEquals("A alone before the start", 0, under)
         assertTrue(rig.events.any { it.kind == BlendEventKind.BLEND_END })
         a.feed(forMs = 0.0)
+    }
+
+    // The loudest point between frames k and k + 1 of `x`, read at eight
+    // points a frame by a long windowed sinc (Blackman, 48 frames each side).
+    private fun peakBetween(x: (Long) -> Float, k: Long): Double {
+        val half = 48
+        var peak = 0.0
+        for (step in 1 until 8) {
+            val along = step / 8.0
+            var y = 0.0
+            var norm = 0.0
+            for (j in -half + 1..half) {
+                val d = along - j
+                val w = 0.42 + 0.5 * kotlin.math.cos(PI * d / half) + 0.08 * kotlin.math.cos(2 * PI * d / half)
+                val c = sin(PI * d) / (PI * d) * w
+                y += x(k + j) * c
+                norm += c
+            }
+            peak = max(peak, abs(y / norm))
+        }
+        return peak
+    }
+
+    @Test
+    fun theMixHoldsTheSumsTruePeakUnderTheCeilingBetweenItsSamples() {
+        // Two loud sines at a quarter of the rate, a quarter cycle apart from
+        // their samples: each sample reads 0.71 of the wave's top, so a limit
+        // on samples alone lets the sound between them 3 dB past the ceiling.
+        val wave = { f: Long -> (0.95 * sin(PI / 2 * f + PI / 4)).toFloat() }
+        val rig = blended(testPlan(start = 1_500, entry = 0, overlap = 1_000), wave, wave, 4_000.0)
+        val t = rig.track(0)
+        val s = 1_500L * 48
+        val end = rig.events.first { it.kind == BlendEventKind.BLEND_END }.frame
+        assertTrue("written ${t.written} past $end", t.written > end + 4_800)
+        val left = { f: Long -> t.left(f) }
+        var worst = 0.0
+        var worstAt = -1L
+        for (k in s + 72 + 48 until end - 48) {
+            val p = peakBetween(left, k)
+            if (p > worst) {
+                worst = p
+                worstAt = k
+            }
+        }
+        assertTrue("the sum's true peak ${20 * kotlin.math.log10(worst)} dB at $worstAt, past the ceiling", worst <= ceiling * 1.01)
     }
 
     @Test
@@ -243,6 +291,27 @@ class DeckMixerTest {
         val from = end + 48 * 1_000
         assertTrue("written ${t.written} past $from", t.written > from + 4_800)
         for (i in from until from + 4_800) assertEquals("frame $i", 0.8f, t.left(i), 0f)
+    }
+
+    @Test
+    fun anIntroTrimmedToHalfPlaysTheIncomingSongAtHalfThroughTheHoldAndWholeByTheEnd() {
+        // A 4 s intro: B rises over its first second to 0.5, holds there to
+        // the hold's end at 2 s, then comes up to its own level by 4 s. A is
+        // silent, so what is heard is B's share alone.
+        val plan = TransitionPlan(
+            1_500, 0, 4_000, TransitionKind.INTRO, 0.4, 0.0, null, null, null, false, 0.0, "test",
+            holdShare = 0.5, riseShare = 0.25, introLevel = 0.5, latestEndMs = 9_500, lateMoveBars = LATE_MOVE_UNBOUNDED,
+        )
+        val rig = blended(plan, { 0f }, { 0.4f }, 7_000.0)
+        val s = 1_500L * 48
+        val t = rig.track(0)
+        assertTrue("written ${t.written}", t.written > s + 5_000L * 48)
+        for (m in s + 1_050L * 48 until s + 2_000L * 48) assertEquals("the hold at mix frame $m", 0.2f, t.left(m), 2e-3f)
+        // Up from the hold's end to its own level by the overlap's end.
+        val end = s + 4_000L * 48
+        assertTrue("past the hold ${t.left(s + 2_500L * 48)}", t.left(s + 2_500L * 48) > 0.2f + 1e-2f)
+        assertEquals("at the overlap's last frame", 0.4f, t.left(end - 1), 1e-3f)
+        for (m in end until end + 4_800) assertEquals("after the end at $m", 0.4f, t.left(m), 1e-3f)
     }
 
     @Test

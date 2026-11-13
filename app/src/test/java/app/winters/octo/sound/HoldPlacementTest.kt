@@ -47,7 +47,9 @@ class HoldPlacementTest {
 
     // A steady at `level`, B parked with `bFrames` frames of `b` written,
     // fed again from `bBackAtMs` on the clock; the blend armed at 200 ms and
-    // acked when proposed.
+    // acked when proposed. B's last frames are mixed, and B found dry, only
+    // once the output's lead has run down to its low-water mark, about the
+    // time they are heard: B comes back after that.
     private fun hold(
         rig: MixRig,
         plan: TransitionPlan,
@@ -100,8 +102,8 @@ class HoldPlacementTest {
         val plan = heldPlan()
         val click = 120_000L
         // B has half a second, so it runs dry at S + 24,000 (500 ms into a
-        // 2 s hold), and is fed again 2.4 s in.
-        hold(rig, plan, 0.3f, { fr -> if (fr == click) 0.5f else 0f }, 24_000, 2_400.0)
+        // 2 s hold), and is fed again 2.7 s in.
+        hold(rig, plan, 0.3f, { fr -> if (fr == click) 0.5f else 0f }, 24_000, 2_700.0)
         rig.runFor(7_400.0)
         val s = 2_000L * f
         val stop = s + 24_000
@@ -133,7 +135,7 @@ class HoldPlacementTest {
             val plan = heldPlan(kind = TransitionKind.INTRO, overlap = 6_000, holdShare = 0.5, riseShare = 0.25, headroomDb = 3.0, matched = matched)
             val click = 192_000L
             // B (at the matched rate through Sonic) runs dry 1 s into a 3 s hold.
-            hold(rig, plan, 0.3f, { fr -> if (fr == click) 0.5f else 0f }, 48_000, 2_800.0, speed = matched ?: 1.0)
+            hold(rig, plan, 0.3f, { fr -> if (fr == click) 0.5f else 0f }, 48_000, 3_200.0, speed = matched ?: 1.0)
             rig.runFor(7_300.0)
             val s = 2_000L * f
             val stop = s + 48_000
@@ -185,7 +187,7 @@ class HoldPlacementTest {
         val plan = heldPlan()
         // A's end leaves less than its ring lead, the sink buffer and 1 s
         // after one bar: no room to move, so A fades on.
-        hold(rig, plan, 0.3f, { fr -> (fr % 400_000 + 1) / 1_000_000f }, 24_000, 2_400.0, endMs = 5_000.0)
+        hold(rig, plan, 0.3f, { fr -> (fr % 400_000 + 1) / 1_000_000f }, 24_000, 2_700.0, endMs = 5_000.0)
         rig.runFor(4_500.0)
         val s = 2_000L * f
         val stop = s + 24_000
@@ -215,7 +217,7 @@ class HoldPlacementTest {
         val rig = rig(watchdogMs = 1_000)
         // A 4 s bar: B is held for one whole bar with a 1 s watchdog.
         val plan = heldPlan(overlap = 6_000, holdShare = 0.75, beatMs = 1_000.0)
-        val (a, b) = hold(rig, plan, 0.3f, { 0f }, 24_000, 2_400.0)
+        val (a, b) = hold(rig, plan, 0.3f, { 0f }, 24_000, 2_700.0)
         rig.runFor(6_800.0)
         val moved = rig.events.single { it.kind == BlendEventKind.MOVED }
         assertEquals(4_000.0, moved.ms2, 1e-6)

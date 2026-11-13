@@ -21,6 +21,7 @@ import app.winters.octo.playback.BlendTiming
 import app.winters.octo.playback.CommitState
 import app.winters.octo.playback.CommitWord
 import app.winters.octo.playback.TransitionPlan
+import app.winters.octo.playback.blendPassOf
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -137,7 +138,8 @@ class DeckMixer(
     private val session = BlendSession(commitWord, timing)
     private val action = BlendAction()
     private val event = BlendEvent()
-    private val limiter = Limiter(2, mixRate, rampedAttack = true)
+    // The sum is held under the ceiling between its samples too.
+    private val limiter = Limiter(2, mixRate, rampedAttack = true, truePeak = true)
     private val latency = limiter.latency
     private var mixPoint = 0L
     private var limiterOut = 0L
@@ -221,7 +223,7 @@ class DeckMixer(
         var outCount = 0
         val out = FloatArray(blockFrames * 2)
         val state = arrayOf(DeckState(0), DeckState(1))
-        val limiterState = Limiter(2, mixRate, rampedAttack = true)
+        val limiterState = Limiter(2, mixRate, rampedAttack = true, truePeak = true)
         var limiterOutAt = 0L
         var windowOnAt = Long.MAX_VALUE
         var windowOffAt = Long.MAX_VALUE
@@ -359,9 +361,17 @@ class DeckMixer(
     }
 
     fun followUp(generation: Long, pass: Long) = post {
+        // The answer to a pause's interrupt that waits for the paused output
+        // to settle goes right after that interrupt.
+        if (pendingDisarm != null && pendingDisarmGen == generation) {
+            pendingFollowUp = pass
+            return@post
+        }
         session.followUp(generation, pass)
         afterSession(fromMain = true)
     }
+
+    private var pendingFollowUp = BLEND_NO_FOLLOW
 
     fun outgoingStopped(generation: Long) = post {
         session.outgoingStopped(generation)
@@ -549,8 +559,9 @@ class DeckMixer(
         val d = decks[o.slot]
         if (d.out !== o) return
         // The ring's unmixed frames are kept so a Sonic restart can join
-        // them; at speed 1 the new output's own frames take over exactly.
-        d.tail = if (o.ring.written > d.mixIdx) Tail(o, d.mixIdx) else null
+        // them; at speed 1 the new output's own frames take over exactly. A
+        // next pass held, or not named by the answer, is never among them.
+        d.tail = if (o.ring.written > d.mixIdx && !heldAtBoundary(d, o)) Tail(o, d.mixIdx) else null
         d.out = null
         // A playing output released unannounced: the player's own restart,
         // its new output coming. The real output plays on meanwhile.
@@ -561,7 +572,10 @@ class DeckMixer(
             d.tail = null
         }
         val lone = decks.none { it !== d && it.out != null && it.on && !it.parked }
-        val paused = held != null || playerPaused
+        // Paused, or resumed with nothing playing out yet: what was mixed
+        // for the old place would go into the next output first.
+        val paused = held != null || playerPaused || cur?.let { !it.started || it.paused } != false
+        probe?.note("released ${o.slot}${if (d.announcedPending) " announced" else ""}${if (lone) " alone" else ""}${if (paused) " paused" else ""}", mixPoint)
         // An announced release (a seek, a hold) of the only playing deck: the
         // frames of the old position still unheard go. While paused or held
         // everything mixed or written past the settled head is mixed again
@@ -573,6 +587,12 @@ class DeckMixer(
             } else if (cur?.let { it.started && it.music } == true && blend == null) {
                 clearPlaying()
             }
+        } else if (d.announcedPending && holding) {
+            // The operation behind a hold moved the deck on screen while the
+            // outgoing one is still in the mix: nothing of the old mix is kept
+            // for the resume, the outgoing song's frames up to the start
+            // included; the moved deck plays its new place.
+            clearAll(keep = null)
         }
         // The operation behind a hold released its deck's output: the hold
         // is lifted, the clear above done first.
@@ -673,6 +693,15 @@ class DeckMixer(
         a.arm(b.outgoing, mixRate)
         bd.arm(b.incoming, mixRate)
         session.arm(b.arm)
+        // The outgoing deck's sound has already moved on from the song the
+        // plan was made for: it plays on, cancelled as its own advance.
+        val mixing = a.passEntry
+        if (a.out != null && mixing != null && b.outgoing.entryId != null && mixing != b.outgoing.entryId) {
+            val at = max(mixPoint, sessionPoint)
+            session.post(BlendDeck.A, BlendInput.MOVED_ON, at)
+            sessionPoint = at + 1
+            session.advance(sessionPoint, lastHeadMix, outgoingMs())
+        }
         afterSession(fromMain = true)
         wake(-1L)
     }
@@ -764,6 +793,7 @@ class DeckMixer(
     private var premixing = false
 
     private fun premix(to: Long) {
+        probe?.note("premix to $to", mixPoint)
         premixing = true
         try {
             while (mixPoint < to) {
@@ -777,7 +807,9 @@ class DeckMixer(
     }
 
     private fun schedule(a: Act) {
-        if (a.frame <= mixPoint) {
+        // What plays after a held end is an answer, not a frame: it applies
+        // at once, also when a re-run put the mix back before that end.
+        if (a.frame <= mixPoint || a.kind == BlendActionKind.A_FOLLOW) {
             a.frame = mixPoint
             apply(a)
         } else {
@@ -883,7 +915,9 @@ class DeckMixer(
             }
             BlendActionKind.A_LEAVE -> ad?.leave(a.value.toInt())
             BlendActionKind.A_END -> ad?.endDrop = true
-            BlendActionKind.A_HOLD_NEXT -> ad?.holdNext = true
+            // A hold the answer already came for is never put on again, nor
+            // one of a generation a newer arm replaced.
+            BlendActionKind.A_HOLD_NEXT -> ad?.let { if (it.follow == BLEND_NO_FOLLOW && a.gen == blendGen) it.holdNext = true }
             BlendActionKind.A_FOLLOW -> ad?.let { d ->
                 d.holdNext = false
                 d.follow = a.value
@@ -973,7 +1007,8 @@ class DeckMixer(
             schedule(Act(a.kind, a.frame, a.value, a.ms, a.gen))
         }
         for (a in extra) schedule(Act(a.kind, max(a.frame, start), a.value, a.ms, a.gen))
-        session.cleared(start)
+        // Nothing written is taken back: the events of the stretch mixed
+        // again still post as their frames pass the head.
         probe?.note("remix", start)
     }
 
@@ -1163,8 +1198,10 @@ class DeckMixer(
     // writes it.
     private fun fill(now: Long) {
         val r = cur
-        val writable = r != null && r.gateState == GATE_OPEN && !r.paused && !r.released
+        // A fresh output's first music waits for enough of it to play on.
+        val writable = r != null && r.gateState == GATE_OPEN && !r.paused && !r.released && (r.music || firstFillReady())
         val headNow = if (r != null && r.started) r.headMix else writePoint
+        val lowWater = lowWaterFrames()
         val writeTo = if (writable) headNow + realBufferFrames else writePoint
         var target = writeTo
         if (blend != null && session.state != BlendState.IDLE && commitWord.stateOf(blendGen) != CommitState.ACKED) {
@@ -1175,11 +1212,13 @@ class DeckMixer(
         }
         if (playerPaused || holding || held != null) target = min(target, max(writePoint, mixPoint))
         while (limiterOut < target) {
-            // Past what the real output takes now, a block is mixed ahead
-            // only while every playing deck already holds it and a dry-out
-            // ramp: running into a ring its deck is still filling would fade
-            // the deck out for nothing.
-            if (mixPoint >= writeTo && !aheadReady()) break
+            // A block is mixed only while every playing deck already holds it
+            // and a dry-out ramp, or, up to what the real output takes now,
+            // once the output's lead has run down to its low-water mark:
+            // running into a ring its deck is still filling would fade the
+            // deck out for nothing, and a deck fed at the rate it plays would
+            // fade out and back in at every wake.
+            if (!aheadReady() && (mixPoint >= writeTo || limiterOut - headNow > lowWater)) break
             val b = mixBlock() ?: break
             blocks.addLast(b)
             afterBlock(b)
@@ -1192,6 +1231,64 @@ class DeckMixer(
         val o = d.out
         o == null || !contributes(d) || !o.playing || o.ended || d.dry != DRY_NORMAL ||
             o.ring.written - d.mixIdx >= blockFrames + rampFrames
+    }
+
+    // The output's start threshold as set, or as it will be set: one head
+    // quantum plus a block, or the whole buffer before the route's quantum
+    // is known.
+    private fun startThresholdFrames(): Long {
+        val r = cur ?: fresh
+        if (r != null && r.thresholdSet > 0) return r.thresholdSet.toLong()
+        val m = r?.measure ?: measure()
+        return if (m != null && m.known) m.quantum + blockFrames else realBufferFrames.toLong()
+    }
+
+    // What a deck's ring holds before a dry deck comes back, and before a
+    // fresh output's first music: the start threshold plus one fill wake,
+    // within what the ring may hold.
+    private fun refillFrames(d: DeckState): Long {
+        val o = d.out ?: return 0
+        return min(startThresholdFrames() + realBufferFrames / 4, fillLimitFrames(o.ring.capacity) - blockFrames)
+    }
+
+    // Whether the deck's ring has stopped filling short of its refill
+    // amount: nothing written for one fill wake. What it holds then plays,
+    // so its position reaches its last frame and its player rebuffers,
+    // instead of holding it back for good.
+    private fun stoppedFilling(d: DeckState, o: MixAudioOutput): Boolean {
+        val now = loop.nanoTime()
+        val written = o.ring.written
+        if (d.seenOut !== o || d.seenWritten != written) {
+            d.seenOut = o
+            d.seenWritten = written
+            d.grewAt = now
+            return false
+        }
+        return now - d.grewAt >= realBufferFrames / 4 * 1_000_000_000L / mixRate
+    }
+
+    // The written lead under which a short ring is mixed anyway: one cycle
+    // and a block of the route, or a quarter of the buffer before its
+    // quantum is known.
+    private fun lowWaterFrames(): Long {
+        val m = measure()
+        return if (m != null && m.known) m.quantum + blockFrames else (realBufferFrames / 4).toLong()
+    }
+
+    // A fresh output takes its first music once every playing deck holds
+    // its refill amount past what is mixed already, or has ended: a deck
+    // decoding slower than it plays delays the start instead of dipping
+    // just after it.
+    private fun firstFillReady(): Boolean {
+        if (fallback != null) return true
+        val mixedEnd = blocks.lastOrNull()?.let { it.outStart + it.outCount } ?: writePoint
+        val mixed = max(0L, mixedEnd - writePoint)
+        for (d in decks) {
+            val o = d.out ?: continue
+            if (!contributes(d) || !o.playing || o.ended || d.dry == DRY_DRY) continue
+            if (mixed + (o.ring.written - d.mixIdx) < refillFrames(d) && !stoppedFilling(d, o)) return false
+        }
+        return true
     }
 
     // Writes stored block frames into `r` from the write point up to
@@ -1354,8 +1451,8 @@ class DeckMixer(
         val o = d.out ?: return false
         if (!contributes(d) || (!o.playing && !premixing)) return false
         val avail = o.ring.written - d.mixIdx
-        if (d.dry == DRY_DRY) return !d.holdNext && (avail >= blockFrames + rampFrames || (o.ended && avail > 0))
-        return avail > 0 && !d.holdNext
+        if (d.dry == DRY_DRY) return !d.holdNext && (avail >= refillFrames(d) || (avail > 0 && (o.ended || stoppedFilling(d, o))))
+        return avail > 0 && !heldAtBoundary(d, o)
     }
 
     // B's start at its frame: its first frame at or after entry is mixed
@@ -1381,10 +1478,11 @@ class DeckMixer(
         val o = d.out
         if (o == null) return takeTail(d, g0, n)
         if (d.held && d.on && !d.parked && (o.playing || premixing)) {
-            // Held for placement it consumes nothing; once its frames are
-            // back the session places it on a bar or cuts it in.
+            // Held for placement it consumes nothing; once it holds what a dry
+            // deck needs to come back, the session places it on a bar or cuts
+            // it in.
             val avail = o.ring.written - d.mixIdx
-            if (avail >= n + rampFrames || (o.ended && avail > 0)) postReady(d, g0)
+            if (avail >= max(n.toLong() + rampFrames, refillFrames(d)) || (o.ended && avail > 0)) postReady(d, g0)
             return 0
         }
         if (!contributes(d) || (!o.playing && !premixing)) return 0
@@ -1396,15 +1494,22 @@ class DeckMixer(
             val mark = view.covering(d.mixIdx)
             if (mark >= 0 && view.ringAt(mark) == d.mixIdx && startsPass(d, mark)) {
                 if (d.holdNext || (d.endDrop && d.role == ROLE_A)) return pos
-                if (d.follow == BLEND_PASS_NONE) return pos
+                // After a held end, the held pass plays only when the answer
+                // named it; none, or another pass, leaves its frames unmixed
+                // and unheard, and the player's own restart brings the named one.
+                if (d.follow != BLEND_NO_FOLLOW && !names(d.follow, d, view, mark)) return pos
                 d.newPass(view.entry(mark), view.flags(mark) and MARK_LIVE != 0, g0 + pos)
                 d.follow = BLEND_NO_FOLLOW
             }
             if (d.dry == DRY_DRY) {
-                if (avail >= n - pos + rampFrames || (o.ended && avail > 0)) {
+                // A dry deck comes back only with the start threshold and a
+                // fill wake in its ring, so a deck fed at the rate it plays
+                // goes on with no dry-out at the next wake.
+                if (avail >= max((n - pos).toLong() + rampFrames, refillFrames(d)) || (avail > 0 && (o.ended || stoppedFilling(d, o)))) {
                     d.dry = DRY_NORMAL
                     d.rampLeft = rampFrames
                     d.rampTotal = rampFrames
+                    probe?.note("back ${d.slot}", g0 + pos)
                     postReady(d, g0 + pos)
                 } else {
                     return pos
@@ -1473,6 +1578,7 @@ class DeckMixer(
     }
 
     private fun postDry(d: DeckState, frame: Long) {
+        probe?.note("dry ${d.slot}", frame)
         when (d.role) {
             ROLE_A -> postInput(BlendDeck.A, BlendInput.DRY, frame)
             ROLE_B -> postInput(BlendDeck.B, BlendInput.DRY, frame)
@@ -1583,6 +1689,30 @@ class DeckMixer(
 
     // Passes
 
+    // Whether the deck stands at the start of a next pass it holds, or that
+    // the answer did not name.
+    private fun heldAtBoundary(d: DeckState, o: MixAudioOutput): Boolean {
+        if (d.holdNext) return true
+        if (d.follow == BLEND_NO_FOLLOW || d.passEntry == null) return false
+        val v = o.ring.marks.view(heldView)
+        val m = v.covering(d.mixIdx)
+        if (m < 0 || v.ringAt(m) != d.mixIdx || v.flags(m) and MARK_STREAM_START == 0) return false
+        val later = v.entry(m) != d.passEntry || startsPassIn(v, d, m)
+        return later && !names(d.follow, d, v, m)
+    }
+
+    private val heldView = MarkView()
+
+    // Whether a follow-up answer names the pass starting at mark `mark` on
+    // deck `d`: the pass it holds, or that entry's play by its number (its
+    // own next play when it is the entry playing now).
+    private fun names(answer: Long, d: DeckState, v: MarkView, mark: Long): Boolean {
+        if (answer == BLEND_PASS_HELD) return true
+        if (answer == BLEND_PASS_NONE) return false
+        val entry = v.entry(mark) ?: return false
+        return answer == blendPassOf(if (entry == d.passEntry) "$entry#again" else entry)
+    }
+
     // Whether the stream starting at mark `mark` is a new play of a song for
     // this slot: another entry, or the same entry from its start right after
     // its end (a repeat); a flush that continues the song time is not.
@@ -1629,14 +1759,16 @@ class DeckMixer(
         return -1
     }
 
-    private fun startsPassAt(d: DeckState, mark: Long): Boolean {
-        val songMs = view.songMs(mark)
-        val blockMs = blockFrames * max(1e-9, abs(view.msPerFrame(mark)))
+    private fun startsPassAt(d: DeckState, mark: Long): Boolean = startsPassIn(view, d, mark)
+
+    private fun startsPassIn(v: MarkView, d: DeckState, mark: Long): Boolean {
+        val songMs = v.songMs(mark)
+        val blockMs = blockFrames * max(1e-9, abs(v.msPerFrame(mark)))
         if (songMs.isNaN() || songMs > blockMs) return false
         val end = d.lastSongEndMs
         val lastMs = d.lastSongMs
         if (lastMs.isNaN()) return false
-        return if (!end.isNaN()) lastMs >= end - 2 * blockMs - blockFrames * abs(view.msPerFrame(mark)) else lastMs > songMs + 2 * blockMs
+        return if (!end.isNaN()) lastMs >= end - 2 * blockMs - blockFrames * abs(v.msPerFrame(mark)) else lastMs > songMs + 2 * blockMs
     }
 
     // The outgoing deck's next frame begins a new pass: the session hears
@@ -1874,7 +2006,16 @@ class DeckMixer(
         val o = a.out ?: return
         if (!contributes(a) || a.dry != DRY_NORMAL) return
         o.ring.marks.view(view)
-        val reach = a.mixIdx + 2 * blockFrames
+        // A's frames are searched only up to its song's end: frames of its
+        // next pass never stand in for its own. Once that end is in its ring
+        // the session hears where it falls.
+        val songEnd = songEndRing(a, o)
+        if (songEnd != Long.MAX_VALUE && endKnownGen != blendGen) {
+            endKnownGen = blendGen
+            postInput(BlendDeck.A, BlendInput.DECODED_END, mixPoint - 1, mixPoint + (songEnd - a.mixIdx))
+            probe?.note("end known ${mixPoint + (songEnd - a.mixIdx)} (ring $songEnd, ${view.songAt(songEnd - 1)} ms; mixing ${a.mixIdx} at ${view.songAt(a.mixIdx)} ms, session at $sessionPoint, start ${session.startMs})", mixPoint)
+        }
+        val reach = min(a.mixIdx + 2 * blockFrames, songEnd)
         val rate = bl.plan.beatMatchRate ?: 1.0
         val startMs = session.startMs
         if (session.state == BlendState.ARMED && startPostedMs != startMs) {
@@ -1902,6 +2043,38 @@ class DeckMixer(
                 postInput(BlendDeck.A, BlendInput.END_REACHED, mixPoint - 1, mixPoint + (at - a.mixIdx))
             }
         }
+    }
+
+    // The generation whose outgoing song's decoded end the session has heard.
+    private var endKnownGen = -1L
+
+    // The ring frame where the song deck `d` is mixing ends in its ring: the
+    // first frame of its next pass, or its stream's end; Long.MAX_VALUE
+    // while neither is in hand.
+    private fun songEndRing(d: DeckState, o: MixAudioOutput): Long {
+        var m = view.covering(d.mixIdx)
+        if (m < 0) return Long.MAX_VALUE
+        val w = o.ring.written
+        if (view.ringAt(m) < d.mixIdx) m++
+        while (m < view.count) {
+            val at = view.ringAt(m)
+            if (at >= w) break
+            if (view.flags(m) and MARK_STREAM_START != 0) {
+                if (view.entry(m) != d.passEntry) return at
+                // The same entry again from its start right after its end: a
+                // repeat.
+                val song = view.songMs(m)
+                val before = if (m - 1 >= view.floor && at > d.mixIdx) {
+                    view.songMs(m - 1) + (at - view.ringAt(m - 1)) * view.msPerFrame(m - 1)
+                } else {
+                    d.lastSongMs
+                }
+                val blockMs = blockFrames * max(1e-9, abs(view.msPerFrame(m)))
+                if (!song.isNaN() && song <= blockMs && before > song + 2 * blockMs) return at
+            }
+            m++
+        }
+        return if (o.ended) w else Long.MAX_VALUE
     }
 
     // Positions
@@ -2031,7 +2204,7 @@ class DeckMixer(
     private fun watchdog(now: Long) {
         for (d in decks) {
             val o = d.out ?: continue
-            if (!o.playing || !d.on || d.parked || d.held || holding || d.endDrop || o.ended || d.holdNext) {
+            if (!o.playing || !d.on || d.parked || d.held || holding || d.endDrop || o.ended || heldAtBoundary(d, o)) {
                 d.watchNanos = now
                 continue
             }
@@ -2177,7 +2350,9 @@ class DeckMixer(
             }
         }
         val c = cur ?: return
-        if (c.gateState == GATE_IDLE && hasSomethingToPlay()) startGate(c, now)
+        // The gate starts once the first music can go in right after it, so
+        // no output waits started and empty for a slow deck.
+        if (c.gateState == GATE_IDLE && hasSomethingToPlay() && firstFillReady()) startGate(c, now)
     }
 
     private fun hasSomethingToPlay(): Boolean = decks.any { hasFrames(it) } || blocks.any { it.outStart + it.outCount > writePoint }
@@ -2426,6 +2601,12 @@ class DeckMixer(
         pendingDisarm?.let { reason ->
             pendingDisarm = null
             onDisarm(reason, pendingDisarmGen)
+            val answer = pendingFollowUp
+            if (answer != BLEND_NO_FOLLOW) {
+                pendingFollowUp = BLEND_NO_FOLLOW
+                session.followUp(pendingDisarmGen, answer)
+                afterSession(fromMain = true)
+            }
         }
         pendingPause?.let { deck ->
             pendingPause = null
