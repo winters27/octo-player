@@ -544,16 +544,15 @@ class DeckMixer(
         }
         val lone = decks.none { it !== d && it.out != null && it.on && !it.parked }
         val paused = held != null || playerPaused
-        // An announced release (a seek, a hold): the frames of the old
-        // position still unheard go. While paused or held everything mixed or
-        // written past the settled head is mixed again from there (decks whose
-        // output stayed play on from it); while playing, the only playing
-        // deck's output pauses at the release and the new position starts on
-        // a fresh output.
-        if (d.announcedPending) {
+        // An announced release (a seek, a hold) of the only playing deck: the
+        // frames of the old position still unheard go. While paused or held
+        // everything mixed or written past the settled head is mixed again
+        // from there; while playing, the output pauses at the release and the
+        // new position starts on a fresh output.
+        if (d.announcedPending && lone) {
             if (paused || holding) {
                 if (max(writePoint, mixPoint) > (if (settledHead >= 0) settledHead else lastHeadMix)) clearAll(keep = null)
-            } else if (lone && cur?.let { it.started && it.music } == true && blend == null) {
+            } else if (cur?.let { it.started && it.music } == true && blend == null) {
                 clearPlaying()
             }
         }
