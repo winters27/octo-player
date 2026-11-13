@@ -53,7 +53,12 @@ class MixTuning(
     // After a fresh start positions are clamped until a timestamp this long
     // after the first music cycle.
     val clampMs: Long = 100,
-    // The head-to-presented latency before a route is measured, by kind.
+    // The head-to-presented latency before a route is measured, by kind:
+    // speaker, wired and USB; Bluetooth; Android Auto; and the least taken
+    // for a device of no known kind.
+    val wiredLatencyMs: Double = 250.0,
+    val bluetoothLatencyMs: Double = 400.0,
+    val carLatencyMs: Double = 500.0,
     val unknownLatencyMs: Double = 250.0,
     // Media3's creation rules: retries this far apart, failing this long
     // after the first moment with no release pending.

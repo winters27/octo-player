@@ -67,6 +67,7 @@ internal class DuckGate(
         val playNanos: Long,
         val answer: (signalled: Boolean, nanos: Long, record: GateRecord?) -> Unit,
         val classify: (playNanos: Long, boundNanos: Long) -> Boolean,
+        val otherArrived: (fromNanos: Long, toNanos: Long) -> Boolean,
     ) : Runnable {
         var lowest = baseline
         var reads = IntArray(64)
@@ -117,12 +118,15 @@ internal class DuckGate(
             }
         }
 
+        // A rise after the bound is a late listing of Octo's own start, unless
+        // another app's music player was logged arriving by then.
         private fun finishLog(truncated: Boolean) {
-            var rose = false
-            for (i in 0 until n) if (times[i] > boundAt && reads[i] >= lowest + 1) rose = true
+            var riseAt = -1L
+            for (i in 0 until n) if (riseAt < 0 && times[i] > boundAt && reads[i] >= lowest + 1) riseAt = times[i]
+            val lateListing = riseAt >= 0 && !otherArrived(playNanos, riseAt)
             val own = classify(playNanos, boundAt)
             val cause = when {
-                rose -> GateBound.LATE_LISTING
+                lateListing -> GateBound.LATE_LISTING
                 own -> GateBound.OWN_ENTRY
                 else -> GateBound.OTHER_DEPARTURE
             }
@@ -142,9 +146,10 @@ internal class DuckGate(
         playNanos: Long,
         answer: (signalled: Boolean, nanos: Long, record: GateRecord?) -> Unit,
         classify: (playNanos: Long, boundNanos: Long) -> Boolean,
+        otherArrived: (fromNanos: Long, toNanos: Long) -> Boolean = { _, _ -> false },
     ): Long {
         val gen = ++generation
-        gateLoop.post(Poll(gen, output, baseline, playNanos, answer, classify))
+        gateLoop.post(Poll(gen, output, baseline, playNanos, answer, classify, otherArrived))
         return gen
     }
 

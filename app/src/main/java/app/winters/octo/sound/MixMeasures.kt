@@ -75,17 +75,21 @@ class RouteMeasure {
 // keep only spans taken while the output held at least two cycles of
 // unplayed frames (half its buffer before a quantum is known), its
 // underruns unchanged and both reads on time. It runs at least `minNanos`
-// and until it has `spans` spans, at most `maxNanos`.
+// and until it has `spans` spans, at most `maxNanos`. At each kept step it
+// also takes the head's lead over the presented frame: the latency at a
+// step, its largest value.
 internal class HeadLearning(
     private val startNanos: Long,
     private val minNanos: Long,
     private val maxNanos: Long,
     private val spans: Int,
     private val lateNanos: Long,
+    private val rate: Int,
 ) {
     private val steps = HashMap<Long, Int>()
     private var accepted = 0
     private var longest = 0L
+    private var latest = 0L
     private var lastHead = -1L
     private var lastNanos = 0L
     private var lastOnTime = false
@@ -93,9 +97,10 @@ internal class HeadLearning(
     var done = false
         private set
 
-    // A read at `nanos` scheduled for `dueNanos`. Returns true once the
+    // A read at `nanos` scheduled for `dueNanos`, with the frame presented
+    // at `nanos` by the output's timestamp (or -1). Returns true once the
     // window has ended (published into `into` when it had enough spans).
-    fun read(head: Long, nanos: Long, dueNanos: Long, unplayed: Long, bufferFrames: Int, underruns: Int, known: RouteMeasure, into: RouteMeasure): Boolean {
+    fun read(head: Long, nanos: Long, dueNanos: Long, unplayed: Long, bufferFrames: Int, underruns: Int, known: RouteMeasure, into: RouteMeasure, presented: Long = -1): Boolean {
         if (done) return true
         if (nanos < startNanos) return false
         val onTime = nanos - dueNanos <= lateNanos
@@ -108,6 +113,7 @@ internal class HeadLearning(
                     steps[step] = (steps[step] ?: 0) + 1
                     longest = max(longest, nanos - lastNanos)
                     accepted++
+                    if (presented >= 0) latest = max(latest, head - presented)
                 }
             }
             lastNanos = nanos
@@ -143,5 +149,6 @@ internal class HeadLearning(
         into.quantum = best
         into.largestStep = max(best, largest)
         into.intervalNanos = longest
+        if (latest > 0) into.latencyNanos = latest * 1_000_000_000L / rate
     }
 }

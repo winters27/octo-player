@@ -85,6 +85,10 @@ internal class DeckState(val slot: Int) {
 
     // A new output that plays on in the pass by song time.
     var continuing = false
+
+    // The player released the slot's playing output on its own (a restart,
+    // a format change): its next output is coming, and the sound plays on.
+    var restarting = false
     var announced = false
     var announcedPending = false
     var tail: Tail? = null
@@ -107,6 +111,22 @@ internal class DeckState(val slot: Int) {
         endDrop = false
         endPosted = false
         readyState = -1
+    }
+
+    // The slot's part in a blend is over: from here on its own sound, at
+    // its own level.
+    fun dropBlend() {
+        transition = null
+        shaper?.disarm(0)
+        frozen = false
+        offsetMs = 0.0
+        held = false
+        startAt = -1
+        holdNext = false
+        endDrop = false
+        leaveTotal = 0
+        leaveLeft = 0
+        rampLeft = 0
     }
 
     fun leave(frames: Int) {
@@ -145,6 +165,7 @@ internal class DeckState(val slot: Int) {
         lastSongMs = Double.NaN
         lastSongEndMs = Double.NaN
         continuing = false
+        restarting = false
         tail = null
         join = null
     }
@@ -202,6 +223,7 @@ internal class DeckState(val slot: Int) {
         lastSongEndMs = o.lastSongEndMs
         lastMsPerFrame = o.lastMsPerFrame
         continuing = o.continuing
+        restarting = o.restarting
         announced = o.announced
         announcedPending = o.announcedPending
         tail = o.tail?.let { Tail(it.out, it.at) }

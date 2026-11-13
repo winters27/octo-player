@@ -258,6 +258,9 @@ class MixAudioOutput internal constructor(
     // Set by the mixer when this deck must fail: its next write throws.
     @Volatile internal var failure = 0
 
+    // Whether its writes have woken the mixer yet.
+    @Volatile internal var nudged = false
+
     @Volatile internal var snap = OutputSnap(0, 0, false, 0, songRate)
 
     // Each play and pause call's number: a posted pause acts only if it is
