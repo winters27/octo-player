@@ -347,6 +347,9 @@ class MixedPlayerTest {
         assertEquals(listOf("q:a", "q:b"), rig.transitions)
         assertEquals(0, rig.mixedCount())
         assertFalse("no handover", rig.events.any { it.kind == BlendEventKind.PROPOSED })
+        // Cancelled once as A moving on, and the same song never planned again.
+        assertEquals(rig.told(), listOf(BlendCause.A_MOVED_ON), rig.events.filter { it.kind == BlendEventKind.CANCELLED }.map { it.cause })
+        assertEquals("armed once: ${rig.told()}", null, rig.mix.mixer.commitWord.stateOf(2))
         assertEquals(Player.STATE_IDLE, rig.decks[1].playbackState)
         // The next song once, gapless, from its first frame.
         assertWhole(rig, 1, rig.song("a"))

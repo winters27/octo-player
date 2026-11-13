@@ -329,6 +329,24 @@ class CrossfaderMixTest {
     }
 
     @Test
+    fun aFixedCrossfadeRefusedAsLateIsNotArmedAgainAndTheSongPlaysOnIntoItsNext() {
+        val rig = PlayerRig(twoSongs())
+        rig.play("a", settings = crossfade)
+        // The next song comes 250 ms before its fixed crossfade would start:
+        // too late to start it, and no room to move it before A's end.
+        assertTrue(rig.runUntil(5_000) { rig.player.currentPosition >= 3_500 })
+        rig.player.addMediaItems(listOf(rig.song("b").item()))
+        assertTrue(rig.runUntil(2_000) { rig.events.any { it.kind == BlendEventKind.INCOMING_NOT_READY } })
+        assertEquals(BlendCause.LATE, rig.events.first { it.kind == BlendEventKind.INCOMING_NOT_READY }.cause)
+        rig.runFor(200)
+        assertEquals("armed once, never again: ${rig.told()}", null, rig.mix.mixer.commitWord.stateOf(2))
+        assertEquals("the spare let go", Player.STATE_IDLE, rig.decks[1].playbackState)
+        // The song plays on into its next, gapless.
+        assertTrue(rig.runUntil(4_000) { rig.transitions.lastOrNull() == "q:b" })
+        assertEquals(0, rig.mixedCount())
+    }
+
+    @Test
     fun aStartTheMixerCouldNotMakeIsPlannedAgainWithTheSpareKept() {
         val rig = PlayerRig(twoSongs())
         rig.play("a", "b", settings = crossfade)
