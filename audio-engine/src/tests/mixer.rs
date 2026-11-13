@@ -846,16 +846,36 @@ fn a_blend_finishes_early_once_the_outgoing_song_falls_silent() {
     assert!((full[at * 2 + 1] - 0.25 * gin).abs() < 1e-6);
 }
 
-// A 14 s intro from A's first second: A holds its level for 10 s, B rises
-// over 2 s.
+// A 14 s blend from A's first second whose outgoing song holds its level
+// for the first 10 s.
 const INTRO_FRAMES: u64 = RATE as u64 * 14;
 const INTRO_HOLD: f64 = 10.0 / 14.0;
 
+// An intro over that: A holds, B rises over 2 s.
+fn intro_shape() -> FadeShape {
+    FadeShape {
+        kind: crate::automix::TransitionKind::Intro,
+        hold_share: INTRO_HOLD,
+        rise_share: 2.0 / 14.0,
+        ..Default::default()
+    }
+}
+
+// A blend over that, held while the next song's lead-in is silent (A at
+// its own level, B at 0), then its curve over the rest.
+fn lead_in_blend_shape() -> FadeShape {
+    FadeShape {
+        kind: crate::automix::TransitionKind::Blend,
+        k: crate::automix::BLEND_CURVE,
+        hold_share: INTRO_HOLD,
+        ..Default::default()
+    }
+}
+
 // A on the left at a steady level, silent over each of `breaks` (seconds
-// into the blend), into B on the right through that intro, with the
+// into the blend), into B on the right through a blend of `shape`, with the
 // silence gate on. Returns the sound.
-fn intro_with_breaks(breaks: &[(f64, f64)]) -> Vec<f32> {
-    use crate::automix::TransitionKind;
+fn held_with_breaks(shape: FadeShape, breaks: &[(f64, f64)]) -> Vec<f32> {
     let dir = temp_dir();
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
     let quiet = |n: usize| {
@@ -872,50 +892,69 @@ fn intro_with_breaks(breaks: &[(f64, f64)]) -> Vec<f32> {
     mixer.start(lane, Transition::Start);
     let next = deck(2, &b);
     wait_ready(&next);
-    let shape = FadeShape {
-        kind: TransitionKind::Intro,
-        hold_share: INTRO_HOLD,
-        rise_share: 2.0 / 14.0,
-        silence_gate_db: Some(-60.0),
-        ..Default::default()
-    };
+    let shape = FadeShape { silence_gate_db: Some(-60.0), ..shape };
     mixer.plan_fade(1, 1.0, INTRO_FRAMES, next, Loudness::default(), shape);
     render_all(&mut mixer).0
 }
 
-// The sample of A (left) or B (right) `secs` into the intro, and A's
-// planned gain there.
-fn intro_at(out: &[f32], secs: f64, side: usize) -> f32 {
+// The sample of A (left) or B (right) `secs` into the blend, and A's
+// planned gain there through a blend of `shape`.
+fn held_at(out: &[f32], secs: f64, side: usize) -> f32 {
     out[(48_000 + LATENCY + (secs * RATE as f64) as usize) * 2 + side]
 }
 
-fn intro_out_at(secs: f64) -> f32 {
+fn held_out_at(shape: &FadeShape, secs: f64) -> f32 {
     let p = (secs * RATE as f64) as usize as f64 / INTRO_FRAMES as f64;
-    0.25 * crate::automix::intro_out_gain(p, INTRO_HOLD) as f32
+    let overlap_ms = INTRO_FRAMES as f64 * 1_000.0 / RATE as f64;
+    let (s, hold, rise, level) = (shape, shape.hold_share, shape.rise_share, shape.intro_level);
+    let (out, _) = crate::automix::transition_gains(s.kind, s.curve, s.k, hold, rise, level, p, overlap_ms);
+    0.25 * out as f32
 }
 
 #[test]
 fn a_break_in_the_outgoing_song_during_an_intros_hold_is_heard_as_the_song() {
+    let intro = intro_shape();
     // A stop of half a second 40% into the hold: A holds its level on both
     // sides of it and fades as planned, never rushed to its end.
-    let out = intro_with_breaks(&[(4.0, 4.5)]);
+    let out = held_with_breaks(intro.clone(), &[(4.0, 4.5)]);
     for secs in [0.5, 3.9, 4.6, 6.0, 9.9] {
-        assert_eq!(intro_at(&out, secs, 0), 0.25, "A at {secs} s");
+        assert_eq!(held_at(&out, secs, 0), 0.25, "A at {secs} s");
     }
     for secs in [11.0, 12.0, 13.0] {
-        assert!((intro_at(&out, secs, 0) - intro_out_at(secs)).abs() < 1e-6, "A at {secs} s");
+        assert!((held_at(&out, secs, 0) - held_out_at(&intro, secs)).abs() < 1e-6, "A at {secs} s");
     }
     // A break that starts in the hold is counted only from the hold's end,
     // where too little of it is left to finish the blend.
-    let out = intro_with_breaks(&[(9.8, 10.2)]);
+    let out = held_with_breaks(intro.clone(), &[(9.8, 10.2)]);
     for secs in [10.3, 12.0] {
-        assert!((intro_at(&out, secs, 0) - intro_out_at(secs)).abs() < 1e-6, "A at {secs} s");
+        assert!((held_at(&out, secs, 0) - held_out_at(&intro, secs)).abs() < 1e-6, "A at {secs} s");
     }
     // Once A fades, the gate acts as in any blend: the rest of the blend
     // runs over 0.25 s, and B plays on alone.
-    let out = intro_with_breaks(&[(11.0, 11.5)]);
-    assert!((intro_at(&out, 10.9, 0) - intro_out_at(10.9)).abs() < 1e-6);
-    assert_eq!((intro_at(&out, 11.7, 0), intro_at(&out, 11.7, 1)), (0.0, 0.25));
+    let out = held_with_breaks(intro.clone(), &[(11.0, 11.5)]);
+    assert!((held_at(&out, 10.9, 0) - held_out_at(&intro, 10.9)).abs() < 1e-6);
+    assert_eq!((held_at(&out, 11.7, 0), held_at(&out, 11.7, 1)), (0.0, 0.25));
+}
+
+#[test]
+fn a_break_in_the_outgoing_song_while_a_blend_holds_through_a_silent_lead_in_is_heard_as_the_song() {
+    // A blend, not an intro, held for 10 s while the next song's lead-in is
+    // silent: a stop of half a second 40% into the hold leaves A at its own
+    // level on both sides of it, B silent, and A on its curve after the
+    // hold, never rushed to its end.
+    let blend = lead_in_blend_shape();
+    let out = held_with_breaks(blend.clone(), &[(4.0, 4.5)]);
+    for secs in [0.5, 3.9, 4.6, 6.0, 9.9] {
+        assert_eq!((held_at(&out, secs, 0), held_at(&out, secs, 1)), (0.25, 0.0), "at {secs} s");
+    }
+    for secs in [10.5, 11.5, 12.5, 13.5] {
+        assert!((held_at(&out, secs, 0) - held_out_at(&blend, secs)).abs() < 1e-6, "A at {secs} s");
+    }
+    // A break that starts in the hold is counted only from the hold's end.
+    let out = held_with_breaks(blend.clone(), &[(9.8, 10.2)]);
+    for secs in [10.3, 12.0] {
+        assert!((held_at(&out, secs, 0) - held_out_at(&blend, secs)).abs() < 1e-6, "A at {secs} s");
+    }
 }
 
 #[test]
