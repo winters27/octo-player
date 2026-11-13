@@ -93,6 +93,7 @@ fn context_of(o: &Value) -> TransitionContext {
         next_genre: text_or_none(o, "nextGenre"),
         body_level_db: num_or_none(o, "bodyLevelDb"),
         tempo_prior: num_or_none(o, "tempoPrior"),
+        lock_at_pace: o.get("lockAtPace").and_then(Value::as_bool).unwrap_or(false),
     }
 }
 
@@ -177,6 +178,8 @@ fn check(vectors: &Value) -> Vec<String> {
     });
 
     let mut untagged: HashMap<String, &SectionAnalysis> = HashMap::new();
+    // Heads measured against a whole song's body, by song and body level.
+    let mut against_body: Vec<(&str, f64, &SectionAnalysis)> = Vec::new();
     for (section, analysis) in sections.iter().zip(&analyses) {
         let name = text(section, "song");
         let part = text(section, "part");
@@ -187,9 +190,13 @@ fn check(vectors: &Value) -> Vec<String> {
             (Some(tag), _) => format!("{name} {part} tagged {tag}"),
             (None, Some(body)) => format!("{name} {part} against a body of {body}"),
         };
-        // The planner takes each song's plain section.
+        // The planner takes each song's plain section, or a head against
+        // the whole song's body when a case names one.
         if tag.is_none() && body.is_none() {
             untagged.insert(format!("{name}/{part}"), analysis);
+        }
+        if let (None, Some(body), "head") = (tag, body, part) {
+            against_body.push((name, body, analysis));
         }
         let envelope = &analysis.envelope;
         if envelope.size() as i64 != int(section, "hops") {
@@ -305,7 +312,14 @@ fn check(vectors: &Value) -> Vec<String> {
         let settings = &case["settings"];
         let next = fade_song_of(&case["next"]);
         let tail = (!flag(case, "tailMissing")).then(|| untagged[&format!("{}/tail", text(case, "a"))]);
-        let head = (!flag(case, "headMissing")).then(|| untagged[&format!("{}/head", text(case, "b"))]);
+        let b = text(case, "b");
+        let head = match (flag(case, "headMissing"), num_or_none(case, "headBodyLevelDb")) {
+            (true, _) => None,
+            (false, Some(body)) => {
+                against_body.iter().find(|(n, d, _)| *n == b && *d == body).map(|(_, _, a)| *a)
+            }
+            (false, None) => Some(untagged[&format!("{b}/head")]),
+        };
         let plan = plan_transition(
             &fade_song_of(&case["current"]),
             Some(&next),
@@ -375,6 +389,18 @@ fn check(vectors: &Value) -> Vec<String> {
         {
             c.fail(format!("{what}: lateMoveBars {}, expected {bars}", plan.late_move_bars));
         }
+        c.near(
+            &format!("{what} bothHeardEndMs"),
+            Some(num(e, "bothHeardEndMs")),
+            Some(plan.both_heard_end_ms as f64),
+            t("ms"),
+        );
+        c.near(
+            &format!("{what} driftAtEndMs"),
+            Some(num(e, "driftAtEndMs")),
+            Some(plan.drift_at_end_ms),
+            t("ms") / 10.0,
+        );
         if text(e, "reason") != plan.reason {
             c.fail(format!("{what}: reason \"{}\", expected \"{}\"", plan.reason, text(e, "reason")));
         }

@@ -295,6 +295,23 @@ impl SectionAnalysis {
         at as f64 / (to - from) as f64
     }
 
+    /// How long from `from_ms` to `to_ms` the 400 ms level is at or above
+    /// `threshold_db`, in milliseconds.
+    pub fn ms_at_least(&self, from_ms: f64, to_ms: f64, threshold_db: f64) -> f64 {
+        if to_ms <= from_ms {
+            0.0
+        } else {
+            self.share_at_least(from_ms, to_ms, threshold_db) * (to_ms - from_ms)
+        }
+    }
+
+    /// The 400 ms level at a moment in dBFS; [`SILENT_DB`] outside the
+    /// envelope.
+    pub fn level_at(&self, ms: f64) -> f64 {
+        let i = self.envelope.index_at(ms);
+        if i < 0 || i >= self.envelope.size() as i64 { SILENT_DB as f64 } else { self.body[i as usize] }
+    }
+
     /// The same section measured against a body level known from elsewhere,
     /// such as the whole song heard as it played: the gate, sound times,
     /// outro and intro move with it; the boundaries and tempo stay.

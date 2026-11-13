@@ -975,6 +975,58 @@ fn a_matched_blend_plays_its_rate_however_soon_the_next_song_ends() {
     assert!((182_000..189_000).contains(&b_heard), "B heard for {b_heard} frames");
 }
 
+// What each plan made for a 30 s song was asked from: where it plans
+// from, and whether its beats stay locked at any pace.
+static ASKED: Mutex<Vec<(f64, i64, bool)>> = Mutex::new(Vec::new());
+
+// A blend at 24 s already passed when the song is started at 25 s; asked
+// again, a blend from where it is asked, ending before the song does.
+fn asking_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    let c = &input.context;
+    if len == 30_000 {
+        ASKED.lock().unwrap().push((c.pace, c.now_ms, c.lock_at_pace));
+    }
+    let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 1_000, "asked");
+    (plan.kind, plan.k, plan.entry_ms) = (crate::automix::TransitionKind::Blend, 0.4, 0);
+    plan.start_ms = if c.now_ms < 26_000 { 24_000 } else { c.now_ms.min(len - 1_000) };
+    plan
+}
+
+#[test]
+fn a_blend_that_starts_too_soon_is_planned_again_from_where_the_next_song_is_ready() {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 30, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 8, 0.3));
+    for speed in [0.5, 1.0] {
+        ASKED.lock().unwrap().clear();
+        let (engine, events, _, _pump) = driven_engine();
+        engine.set_test_planner(Some(asking_plan));
+        engine.set_speed(speed as f32, 1.0).unwrap();
+        engine.set_crossfade(3_000).unwrap();
+        engine
+            .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+            .unwrap();
+        engine.load(vec![item("a", &a), item("b", &b)], 0, 25_000, true).unwrap();
+        let planned = events.wait_for("plan", Duration::from_secs(10), |e| {
+            matches!(e, EngineEvent::TransitionPlanned { .. })
+        });
+        let EngineEvent::TransitionPlanned { start_ms, reason, .. } = planned else { unreachable!() };
+        engine.shutdown();
+        let asked = ASKED.lock().unwrap().clone();
+        // Asked twice: once from where the song is, once from where the next
+        // song can be lined up and read again, nothing taken off.
+        assert_eq!(asked.len(), 2, "speed {speed}: {asked:?}");
+        let (now, again) = (asked[0].1, asked[1].1);
+        let ready = now + (3_000.0 * speed) as i64 + (500.0 * speed) as i64;
+        assert_eq!(again, ready, "speed {speed}: {asked:?}");
+        assert!(asked.iter().all(|&(pace, _, locked)| pace == speed && locked), "{asked:?}");
+        assert_eq!(start_ms as i64, ready, "speed {speed}: {reason}");
+        assert!(!reason.contains("late"), "speed {speed}: {reason}");
+    }
+}
+
 fn late_entry_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
     let len = input.current.duration_ms as i64;
     let mut plan = crate::automix::TransitionPlan::fixed_crossfade(len, 2_500, "test plan");

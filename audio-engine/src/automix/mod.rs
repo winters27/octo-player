@@ -25,8 +25,8 @@ pub use features::{
     analyze_tail, body_level_of, fold_tempo_ratio,
 };
 pub use planner::{
-    AUTOMIX_LONGEST_INTRO_MS, LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings, TransitionContext,
-    TransitionKind, TransitionPlan, is_plain_genre, plan_transition, transition_gains,
+    AUTOMIX_LONGEST_INTRO_MS, DRIFT_LIMIT_MS, LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings,
+    TransitionContext, TransitionKind, TransitionPlan, is_plain_genre, plan_transition, transition_gains,
 };
 pub use profile::{
     PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,
@@ -142,6 +142,8 @@ impl TransitionPlan {
             rise_share: 0.0,
             latest_end_ms: len_a_ms,
             late_move_bars: LATE_MOVE_UNBOUNDED,
+            both_heard_end_ms: 0,
+            drift_at_end_ms: 0.0,
         }
     }
 
@@ -155,7 +157,8 @@ impl TransitionPlan {
     /// line the incoming song up: the blend ends where it would have, starts
     /// at `now_ms` at the earliest, keeps its entry, curve and filters, and
     /// drops its bar lock and tempo matching, so it may move by any number
-    /// of bars. `None` when too little is left to blend.
+    /// of bars and its beats are no longer lined up. `None` when too little
+    /// is left to blend.
     pub fn late_from(&self, now_ms: i64) -> Option<Self> {
         let end = self.start_ms + self.overlap_ms;
         let start_ms = self.start_ms.max(now_ms);
@@ -171,6 +174,8 @@ impl TransitionPlan {
             beat_anchor_ms: None,
             late: true,
             late_move_bars: LATE_MOVE_UNBOUNDED,
+            both_heard_end_ms: 0,
+            drift_at_end_ms: 0.0,
             reason: format!(
                 "late {} at {} over {} ({})",
                 self.kind.name(),
@@ -180,6 +185,41 @@ impl TransitionPlan {
             ),
             ..self.clone()
         })
+    }
+
+    /// What plays when this plan's start comes before `now_ms + lead_ms`,
+    /// too soon to line the incoming song up, with `settle_ms` more for the
+    /// incoming song to read again after it is moved to its entry. With
+    /// smart transitions a planned kind (a blend, cut, lift or intro, late
+    /// or not) is planned again by `replan` from `now_ms + lead_ms +
+    /// settle_ms`, so every bound holds at its new place and its entry is
+    /// the new plan's own. A crossfade, as planned or as planned again (a
+    /// genre's, a short song's, or one standing in for a plan that did not
+    /// fit), and a new plan still starting before then, blend over what is
+    /// left from `now_ms + settle_ms` with their entry kept. The fixed
+    /// crossfade of smart transitions off blends over what is left from
+    /// `now_ms`, later by the settle only when it enters part way. A
+    /// gapless plan joins gaplessly; `None` when too little is left.
+    pub fn started_late(
+        self,
+        now_ms: i64,
+        lead_ms: i64,
+        settle_ms: i64,
+        smart: bool,
+        replan: impl FnOnce(i64) -> TransitionPlan,
+    ) -> Option<TransitionPlan> {
+        if !smart {
+            let settle = if self.entry_ms > 0 { settle_ms } else { 0 };
+            return self.late_from(now_ms + settle);
+        }
+        let ready = now_ms + lead_ms + settle_ms;
+        let plan = if self.kind == TransitionKind::Crossfade { self } else { replan(ready) };
+        match plan.kind {
+            TransitionKind::Gapless => Some(plan),
+            TransitionKind::Crossfade => plan.late_from(now_ms + settle_ms),
+            _ if plan.start_ms < ready => plan.late_from(now_ms + settle_ms),
+            _ => Some(plan),
+        }
     }
 
     pub fn start_secs(&self) -> f64 {

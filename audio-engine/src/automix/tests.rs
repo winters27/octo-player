@@ -391,24 +391,27 @@ fn a_quiet_intro_plays_under_the_end_of_a_hot_song() {
     let intro = head.features.intro_end_ms.unwrap();
     assert!((intro - 5_750).abs() <= 20, "{intro}");
     let song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
-    let plan_with = |max_overlap_ms| {
+    let plan_with = |settings: PlanSettings| {
         plan_transition(
             &song(200_000),
             Some(&song(180_000)),
             Some(&a.tail()),
             Some(&head),
-            &PlanSettings::new(max_overlap_ms),
+            &settings,
             &TransitionContext::default(),
         )
     };
-    let plan = plan_with(8_000);
-    // The blend lasts until the next song is near its full level, ending
+    let plan = plan_with(PlanSettings::new(8_000));
+    // The intro lasts until the next song is at its full level, ending
     // where the hot song does.
+    assert_eq!(plan.kind, TransitionKind::Intro, "{plan:?}");
     assert!(plan.overlap_ms >= intro - plan.entry_ms, "{plan:?}");
     assert_eq!(plan.start_ms + plan.overlap_ms, 199_750, "{plan:?}");
     assert!(plan.reason.contains("(full from 5."), "{}", plan.reason);
-    // Never longer than the slider allows.
-    assert_eq!(plan_with(4_000).overlap_ms, 4_000);
+    // Never longer than the longest intro allows, which says so.
+    let capped = plan_with(PlanSettings { longest_intro_ms: 6_000, ..PlanSettings::new(4_000) });
+    assert_eq!((capped.kind, capped.overlap_ms), (TransitionKind::Intro, 6_000), "{capped:?}");
+    assert!(capped.reason.contains(", capped)"), "{}", capped.reason);
 }
 
 #[test]
@@ -678,4 +681,227 @@ fn a_silent_song_has_a_profile_without_sound() {
     assert_eq!(profile.tempo, None);
     assert_eq!(profile.tail.features.sound_start_ms, None);
     assert!(profile.tail.levels.iter().all(|&l| l == SILENT_DB));
+}
+
+// A kick on every bar from `bar_ms` and a click on every beat from
+// `beat_ms` over a pad at `pad_db`, from `from_ms` to `to_ms`.
+fn steady(from_ms: f64, to_ms: f64, bpm: f64, beat_ms: f64, bar_ms: f64, pad_db: f64) -> Vec<SongLayer> {
+    let pulse = |hz, db, first_ms, every, decay_ms| SongLayer {
+        kind: "pulse".into(),
+        from_ms,
+        to_ms,
+        hz,
+        db,
+        end_db: db,
+        bpm,
+        first_ms,
+        every,
+        decay_ms,
+    };
+    vec![
+        tone(from_ms, to_ms, 300.0, pad_db),
+        tone(from_ms, to_ms, 100.0, pad_db - 3.0),
+        pulse(60.0, pad_db + 4.0, bar_ms, 4, 80.0),
+        pulse(2_000.0, pad_db - 4.0, beat_ms, 1, 10.0),
+    ]
+}
+
+// Two songs the desktop plans between, at a speed, its beats locked at
+// any speed as the desktop's are.
+struct Desk {
+    a: FadeSong,
+    b: FadeSong,
+    tail: SectionAnalysis,
+    head: SectionAnalysis,
+    match_tempo: bool,
+}
+
+impl Desk {
+    fn new(a: &SyntheticSong, b: &SyntheticSong, match_tempo: bool) -> Desk {
+        let song = |len: i64| FadeSong { album_id: None, album_order: None, duration_ms: len as u64 };
+        Desk { a: song(a.length_ms), b: song(b.length_ms), tail: a.tail(), head: b.head(), match_tempo }
+    }
+
+    // The plan made `now_ms` into the outgoing song at `speed`, with
+    // Automix's lengths heard at that speed.
+    fn plan(&self, now_ms: i64, speed: f64) -> TransitionPlan {
+        let automix =
+            AutomixSettings { smart_transitions: true, match_tempo: self.match_tempo, ..Default::default() };
+        let context = TransitionContext {
+            now_ms,
+            played_ms: now_ms,
+            pace: speed,
+            lock_at_pace: true,
+            ..Default::default()
+        };
+        let settings = automix.plan_settings(8_000, speed);
+        plan_transition(&self.a, Some(&self.b), Some(&self.tail), Some(&self.head), &settings, &context)
+    }
+
+    // `plan` decided `now_ms` into the outgoing song, as the player starts
+    // it late: its lead and the settle after a seek both scale with the
+    // speed. The result and the moment the incoming song is ready.
+    fn late(&self, plan: TransitionPlan, now_ms: i64, speed: f64) -> (Option<TransitionPlan>, i64) {
+        let lead_ms = (LEAD_SECS * speed * 1_000.0) as i64;
+        let settle_ms = (0.5 * speed * 1_000.0) as i64;
+        let late = plan.started_late(now_ms, lead_ms, settle_ms, true, |at| self.plan(at, speed));
+        (late, now_ms + lead_ms + settle_ms)
+    }
+}
+
+const SPEEDS: [f64; 3] = [0.5, 1.0, 2.0];
+
+#[test]
+fn a_late_intro_is_planned_again_on_a_later_bar_line_with_its_entry() {
+    // 101 BPM at full level until 186 s, then 12 dB under it, into 106 BPM
+    // with a quiet start of about 9.5 s: a matched intro around the outro,
+    // with some 11 s left after it for a later start.
+    let mut layers = steady(0.0, 186_000.0, 101.0, 0.0, 0.0, -14.0);
+    layers.extend(steady(186_000.0, 202_000.0, 101.0, 0.0, 0.0, -26.0));
+    let a = SyntheticSong { rate: 22_050, channels: 1, length_ms: 202_000, layers };
+    let mut layers = steady(0.0, 9_750.0, 106.0, 0.0, 0.0, -38.0);
+    layers.extend(steady(9_750.0, 180_000.0, 106.0, 0.0, 0.0, -14.0));
+    let b = SyntheticSong { rate: 22_050, channels: 1, length_ms: 180_000, layers };
+    let desk = Desk::new(&a, &b, true);
+    let bar = desk.tail.features.tempo.unwrap().bar_ms();
+    for speed in SPEEDS {
+        let mut planned = desk.plan(0, speed);
+        assert_eq!(planned.kind, TransitionKind::Intro, "speed {speed}: {}", planned.reason);
+        assert!(planned.beat_match_rate.is_some() && planned.bar_locked(), "{}", planned.reason);
+        // The same intro five bars earlier, leaving room after it.
+        planned.start_ms -= (5.0 * bar).round() as i64;
+        let lead_ms = (LEAD_SECS * speed * 1_000.0) as i64;
+        // Decided 3 s after it should have been.
+        let now = planned.start_ms - lead_ms + 3_000;
+        let (late, ready) = desk.late(planned.clone(), now, speed);
+        let late = late.expect("a plan");
+        assert!(late.start_ms >= ready, "speed {speed}: {} before {ready}", late.reason);
+        assert_eq!(late.entry_ms, planned.entry_ms, "speed {speed}: {}", late.reason);
+        assert_eq!(late.beat_match_rate, planned.beat_match_rate, "speed {speed}");
+        assert!(late.bar_locked(), "speed {speed}: {}", late.reason);
+        if late.kind == TransitionKind::Intro {
+            // Whole bars later, with its shape.
+            let bars = (late.start_ms - planned.start_ms) as f64 / bar;
+            assert!((bars - bars.round()).abs() * bar <= 1.0 && bars >= 1.0, "speed {speed}: {bars} bars");
+            assert_eq!(late.overlap_ms, planned.overlap_ms, "speed {speed}");
+            assert!((late.hold_share - planned.hold_share).abs() < 1e-9, "speed {speed}");
+            assert!((late.rise_share - planned.rise_share).abs() < 1e-9, "speed {speed}");
+        }
+        // There is room for the intro itself.
+        assert_eq!(
+            late.kind,
+            TransitionKind::Intro,
+            "speed {speed}: {} from {ready} after {}",
+            late.reason,
+            planned.reason
+        );
+    }
+    let planned = desk.plan(0, 1.0);
+    // With no room left, the planner's locked late plan from the same entry.
+    let near_the_end = 201_750 - planned.overlap_ms;
+    let (late, ready) = desk.late(planned.clone(), near_the_end, 1.0);
+    let late = late.expect("a plan");
+    if late.kind != TransitionKind::Gapless {
+        assert!(late.late && late.bar_locked() && late.start_ms >= ready, "{}", late.reason);
+        assert_eq!(late.entry_ms, planned.entry_ms, "{}", late.reason);
+    }
+}
+
+#[test]
+fn a_late_matched_blend_with_no_room_keeps_its_entry_and_rate() {
+    let a = SyntheticSong {
+        rate: 22_050,
+        channels: 1,
+        length_ms: 202_000,
+        layers: steady(0.0, 202_000.0, 100.0, 0.0, 0.0, -14.0),
+    };
+    let bpm = 100.0 / 1.03;
+    let b = SyntheticSong {
+        rate: 22_050,
+        channels: 1,
+        length_ms: 40_000,
+        layers: steady(0.0, 40_000.0, bpm, 0.0, 0.0, -14.0),
+    };
+    let desk = Desk::new(&a, &b, true);
+    for speed in SPEEDS {
+        let planned = desk.plan(0, speed);
+        assert!(planned.beat_match_rate.is_some() && !planned.late, "speed {speed}: {}", planned.reason);
+        let (late, ready) = desk.late(planned.clone(), planned.start_ms + 2_000, speed);
+        let late = late.expect("a plan");
+        // The planner's locked late plan from the same entry, or the gapless
+        // join where too little is left once the next song is ready.
+        if late.kind == TransitionKind::Gapless {
+            let shortest = crate::crossfade::SHORTEST_FADE_MS as i64;
+            assert!(ready + shortest > planned.latest_end_ms - 2_400, "speed {speed}: {}", late.reason);
+            continue;
+        }
+        assert!(late.late && late.bar_locked(), "speed {speed}: {}", late.reason);
+        assert!(late.start_ms >= ready, "speed {speed}: {} before {ready}", late.reason);
+        assert_eq!((late.entry_ms, late.beat_match_rate), (planned.entry_ms, planned.beat_match_rate));
+    }
+}
+
+#[test]
+fn a_late_crossfade_blends_over_what_is_left_from_its_own_entry() {
+    let never = |_: i64| -> TransitionPlan { panic!("a crossfade is not planned again") };
+    // The fixed crossfade, after a seek 4 s before the end: from there, the
+    // next song from its start.
+    let fixed = TransitionPlan::fixed_crossfade(200_000, 8_000, "test");
+    let late = fixed.started_late(196_000, 0, 500, false, never).unwrap();
+    assert_eq!((late.start_ms, late.overlap_ms, late.entry_ms), (196_000, 4_000, 0));
+    // A genre's crossfade 2 s past its start: from once the next song has
+    // settled at its entry.
+    let mut genre = TransitionPlan::fixed_crossfade(200_000, 8_000, "genre");
+    (genre.k, genre.entry_ms) = (0.4, 700);
+    let now = 192_000 + 2_000;
+    let late = genre.started_late(now, 3_000, 500, true, never).unwrap();
+    assert_eq!((late.start_ms, late.entry_ms), (now + 500, 700));
+    // A planned blend whose new plan did not fit stands in the fixed
+    // crossfade, which blends over what is left the same way.
+    let mut blend = TransitionPlan::fixed_crossfade(200_000, 6_000, "planned");
+    (blend.kind, blend.k, blend.start_ms, blend.entry_ms) = (TransitionKind::Blend, 0.2, 190_000, 1_200);
+    let late = blend
+        .started_late(now, 3_000, 500, true, |_| TransitionPlan::fixed_crossfade(200_000, 8_000, "fallback"));
+    let late = late.unwrap();
+    assert_eq!((late.start_ms, late.entry_ms, late.kind), (now + 500, 0, TransitionKind::Crossfade));
+}
+
+#[test]
+fn a_late_plan_is_planned_again_once_from_where_the_next_song_is_ready() {
+    for speed in SPEEDS {
+        let (lead, settle) = ((LEAD_SECS * speed * 1_000.0) as i64, (500.0 * speed) as i64);
+        // A late plan of the planner's own, entering at the next song's
+        // start: asked again once, from the lead and the settle on, though
+        // there is nothing to seek to.
+        let mut planned = TransitionPlan::fixed_crossfade(200_000, 6_000, "late");
+        (planned.kind, planned.k, planned.late, planned.start_ms) =
+            (TransitionKind::Intro, 0.0, true, 190_000);
+        let asked = std::cell::RefCell::new(Vec::new());
+        let now = 189_000;
+        let late = planned.clone().started_late(now, lead, settle, true, |at| {
+            asked.borrow_mut().push(at);
+            // A new plan that still starts too soon.
+            let mut again = TransitionPlan::fixed_crossfade(200_000, 6_000, "again");
+            (again.kind, again.k, again.entry_ms, again.start_ms) = (TransitionKind::Blend, 0.2, 900, at - 1);
+            again
+        });
+        assert_eq!(*asked.borrow(), vec![now + lead + settle], "speed {speed}");
+        // Not asked a second time: it blends over what is left from its own
+        // entry.
+        let late = late.unwrap();
+        assert_eq!((late.start_ms, late.entry_ms), (now + lead + settle - 1, 900), "speed {speed}");
+        assert!(late.late && !late.bar_locked());
+        // A gapless answer joins gaplessly.
+        let gapless = planned.started_late(now, lead, settle, true, |_| {
+            plan_transition(
+                &FadeSong { album_id: None, album_order: None, duration_ms: 200_000 },
+                None,
+                None,
+                None,
+                &PlanSettings::new(8_000),
+                &TransitionContext::default(),
+            )
+        });
+        assert_eq!(gapless.unwrap().kind, TransitionKind::Gapless);
+    }
 }

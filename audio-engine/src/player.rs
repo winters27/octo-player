@@ -1255,14 +1255,22 @@ impl Player {
             return;
         }
         // A start already passed, or too soon to line the incoming song up
-        // (a seek near the end), can only blend over what is left.
-        let lead_ms = if self.automix.smart_transitions { (LEAD_SECS * speed * 1_000.0) as i64 } else { 0 };
-        if !plan.late && now_ms + lead_ms > plan.start_ms {
+        // (a seek near the end): planned again from where the incoming song
+        // can be ready, once per decision, or blended over what is left.
+        let smart = self.automix.smart_transitions;
+        let lead_ms = if smart { (LEAD_SECS * speed * 1_000.0) as i64 } else { 0 };
+        if now_ms + lead_ms > plan.start_ms {
             // A song that comes in part way is moved there first, which
             // empties what it had read ahead: the blend waits for it to read
             // again, or the mixer would find it not ready and join gaplessly.
-            let settle_ms = if plan.entry_ms > 0 { (LATE_SEEK_SECS * speed * 1_000.0) as i64 } else { 0 };
-            match plan.late_from(now_ms + settle_ms) {
+            let settle_ms = (LATE_SEEK_SECS * speed * 1_000.0) as i64;
+            let replan = |at: i64| self.make_plan(current, next, &current_song, &next_song, blend_ms, at).0;
+            match plan.started_late(now_ms, lead_ms, settle_ms, smart, replan) {
+                Some(late) if late.kind == TransitionKind::Gapless => {
+                    let why = late.reason.strip_prefix("gapless: ").unwrap_or(&late.reason).to_string();
+                    self.join_gaplessly(current_key, key, deck, loudness, total, &why);
+                    return;
+                }
                 Some(late) if late.overlap_secs() / speed * 1_000.0 >= SHORTEST_FADE_MS as f64 => plan = late,
                 _ => {
                     self.join_gaplessly(current_key, key, deck, loudness, total, "too late to blend");
@@ -1355,6 +1363,9 @@ impl Player {
                 next_genre: b_item.genre.clone(),
                 body_level_db,
                 tempo_prior,
+                // The speed stage acts on the mixed sum, so both songs keep
+                // their song time against each other at any speed.
+                lock_at_pace: true,
             },
         };
         let plan = self.shared.plan(&input);
