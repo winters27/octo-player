@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
@@ -93,9 +94,9 @@ class BetweenSongsSettingsTest {
             }
             // A file that chose stores its choice at once, with the mirrors.
             val json = written()
-            assertEquals(case.name, 2, json.getValue("settingsVersion").jsonPrimitive.int)
-            assertEquals(case.name, case.choice.name, json.playback().getValue("betweenSongs").jsonPrimitive.content)
-            assertEquals(case.name, case.length, json.playback().getValue("crossfadeLength").jsonPrimitive.int)
+            assertEquals("${case.name}: written at once", 2, json["settingsVersion"]?.jsonPrimitive?.intOrNull)
+            assertEquals(case.name, case.choice.name, json.playback()["betweenSongs"]?.jsonPrimitive?.content)
+            assertEquals(case.name, case.length, json.playback()["crossfadeLength"]?.jsonPrimitive?.intOrNull)
             assertEquals("${case.name}: the older field", if (case.choice == BetweenSongs.Gapless) 0 else case.length, json.playback().getValue("crossfadeSeconds").jsonPrimitive.int)
             assertEquals("${case.name}: the older switch", case.choice == BetweenSongs.Automix, json.playback().getValue("smartTransitions").jsonPrimitive.boolean)
             assertEquals(case.name, "queue", json.getValue("sidePanel").jsonPrimitive.content)

@@ -237,8 +237,17 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
             // Everything but the pop-ups, as one group the keyboard can come back to.
             Box(Modifier.fillMaxSize().focusRequester(parts.window).focusGroup()) {
                 if (connection == null) {
-                    // The sign-in card frosts the colours behind it.
-                    Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) { OverArt { SignInPage(app, backdrop) } }
+                    // The sign-in card frosts the colours behind it. A
+                    // session on the defaults (its settings file held) opens
+                    // here, under its banner.
+                    Box(Modifier.fillMaxSize().padding(top = FrameSize.TitleBar)) {
+                        OverArt {
+                            Column(Modifier.fillMaxSize()) {
+                                SettingsBanners(app.settings, side = PageSide)
+                                Box(Modifier.weight(1f).fillMaxWidth()) { SignInPage(app, backdrop) }
+                            }
+                        }
+                    }
                 } else {
                     CompositionLocalProvider(LocalWindowShown provides shown) {
                         Box(Modifier.fillMaxSize().drawnUnless(covered)) { SignedInFrame(app, backdrop, parts) }
@@ -473,6 +482,8 @@ private fun SignedInFrame(app: AppState, backdrop: HazeState, parts: FrameFocus)
                             // While the slot changes width, the page keeps the width it
                             // ends at and its right edge, so its words never wrap anew.
                             val page = if (swapping) Modifier.wrapContentWidth(Alignment.End, unbounded = true).width(shown.page) else Modifier.fillMaxWidth()
+                            // The settings file's banners, over every page while they apply.
+                            SettingsBanners(app.settings, page, side = PageSide)
                             Box(Modifier.weight(1f).then(page)) { PageHost(app) }
                         }
                         // The notice floats over the page, above the player, so its coming and

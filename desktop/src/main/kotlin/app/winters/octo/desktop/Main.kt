@@ -52,8 +52,11 @@ import app.winters.octo.desktop.nav.shortcutFor
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.SettingsOpen
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.ui.waitForSettings
 import app.winters.octo.server.NEW_MUSIC_LOOK_MS
+import kotlin.system.exitProcess
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.settings.currentOs
 import app.winters.octo.desktop.settings.systemReducesMotion
@@ -164,7 +167,13 @@ fun main(args: Array<String>) {
     val claim = SingleInstance.claim(places.config, args.toList(), beforeHandover = ::letRunningOctoComeForward)
     if (claim is SingleInstance.Claim.HandedOver) return
     val instance = (claim as? SingleInstance.Claim.First)?.instance
-    val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
+    // The settings, or, while another program holds their file, a small
+    // window of its own that waits for it: Octo never opens on its defaults
+    // while the file is there. Closing that window quits.
+    val settings = when (val opening = SettingsStore.open(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)) {
+        is SettingsOpen.Opened -> opening.store
+        is SettingsOpen.Held -> waitForSettings(opening) ?: exitProcess(0)
+    }
     val os = currentOs()
     // Text smoothed as the system smooths its own, decided before any text
     // style is first read.

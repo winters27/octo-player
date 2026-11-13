@@ -39,6 +39,7 @@ import app.winters.octo.desktop.hotkeys.HotkeyBackend
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.ui.GpuCacheTrim
+import app.winters.octo.desktop.ui.SETTINGS_NOT_SAVED
 import app.winters.octo.desktop.ui.anyOutside
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,6 +189,12 @@ class SystemIntegration(
                 val notice = notices.noticeFor(nowPlayingOf(state), app.settings.current.system.nowPlayingNotices, windowVisible && windowInFront)
                 notice?.let { (title, text) -> notifier?.show(title, text) }
             }
+        }
+        // A settings file another program holds is told once per hold; the
+        // banner over the pages says it too, with Try again.
+        app.scope.launch {
+            val holds = SettingsHoldNotices()
+            app.settings.hold.collect { hold -> holds.noticeFor(hold)?.let { notifier?.show(SETTINGS_NOT_SAVED, it) } }
         }
         // A read of the library that fails while the window is in the tray says so.
         app.scope.launch {

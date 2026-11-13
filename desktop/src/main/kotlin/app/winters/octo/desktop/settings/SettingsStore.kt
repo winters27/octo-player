@@ -33,19 +33,19 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
-import java.io.FileOutputStream
 import app.winters.octo.radio.RadioAdventure
 import app.winters.octo.radio.RadioDiscovery
 import app.winters.octo.radio.RadioTuning
 import app.winters.octo.radio.RadioVariety
 import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 // Everything the desktop app remembers between runs, as one JSON file in
@@ -435,61 +435,124 @@ private val json = Json {
     coerceInputValues = true
 }
 
-// The settings as the file holds them: its version, then every setting.
-internal fun encodeSettings(settings: AppSettings): String {
+// The key of how many times the settings file has been written, which every
+// write raises; a pending file carries the count of the file it began from.
+internal const val SAVE_COUNT_KEY = "saveCount"
+
+// The settings as the file holds them: its version, its saveCount, then
+// every setting.
+internal fun encodeSettings(settings: AppSettings, saveCount: Long): ByteArray {
     val fields = json.encodeToJsonElement(AppSettings.serializer(), settings).jsonObject
     val file = buildJsonObject {
         put(SETTINGS_VERSION_KEY, SETTINGS_VERSION)
+        put(SAVE_COUNT_KEY, saveCount)
         fields.forEach { (key, value) -> put(key, value) }
     }
-    return json.encodeToString(JsonObject.serializer(), file)
+    return json.encodeToString(JsonObject.serializer(), file).toByteArray(Charsets.UTF_8)
 }
 
-// A file's settings as the app uses them, and what reading an older file's
-// crossfade settings came to (null for a file that has the choice). Throws
+// A file's settings as the app uses them, the saveCount it carries (0 for
+// a file without one), and what reading an older file's crossfade settings
+// came to (null for a file that has the choice). Throws
 // SerializationException or IllegalArgumentException for words that are
 // not settings.
-internal class ReadSettings(val settings: AppSettings, val migrated: MigratedFile?)
+internal class ReadSettings(val settings: AppSettings, val saveCount: Long, val migrated: MigratedFile?)
 
 internal fun decodeSettings(text: String): ReadSettings {
     val file = json.parseToJsonElement(text) as? JsonObject ?: throw SerializationException("The settings are not an object")
+    val count = (file[SAVE_COUNT_KEY] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: 0L
     val migrated = migratedBetweenSongs(file)
-    return ReadSettings(json.decodeFromJsonElement(AppSettings.serializer(), migrated?.json ?: file).settled(), migrated)
+    return ReadSettings(json.decodeFromJsonElement(AppSettings.serializer(), migrated?.json ?: file).settled(), count, migrated)
 }
 
 // Reads and writes the settings file. A write goes to a temporary file
 // first, is flushed to the disk, and then replaces the old one in a single
 // move, so neither a crash nor a power cut leaves half a file. A file that
 // is not valid settings is set aside, never deleted, and the app starts
-// from the defaults. A file from before the Between songs choice is read as
-// the choice its crossfade settings come to, and written at once when they
-// chose one (settings still at the old defaults are left as they are).
+// from the defaults, saying so (`setAside`). A file from before the Between
+// songs choice is read as the choice its crossfade settings come to, and
+// written at once when they chose one (settings still at the old defaults
+// are left as they are). The file is opened through `open`
+// (SettingsOpening says how a held file is waited for).
+//
+// A write that fails means another program holds the file (Windows lets a
+// reader in while refusing a replace, so a read proves nothing). On every
+// failed write the whole state goes to the pending file at once, with the
+// saveCount it began from, so a crash or a power cut mid-hold loses
+// nothing; the next start uses it, and the first write that succeeds
+// deletes it. `hold` and `locked` say how it stands.
 //
 // With `writeDelayMs`, changes are kept in memory at once and written a
 // moment later, together, off the caller's thread: a slider dragged for a
 // second is one write, not sixty. Whatever is waiting is written when the
-// app ends.
-class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) {
+// app ends. A store with no file (`readOnly`) changes memory only.
+class SettingsStore internal constructor(
+    private val file: File?,
+    private val writeDelayMs: Long,
+    private val writeRetryMs: Long,
+    private val disk: SettingsDisk,
+    start: SettingsStart,
+) {
+    // A store on `file`, read at once, waiting up to START_WAIT_MS while
+    // another program holds it, for the tests and tools that make their own
+    // file. Throws IllegalStateException when it stays held; the app opens
+    // through `open`, which hands back the wait.
+    constructor(file: File, writeDelayMs: Long = 0) : this(
+        file,
+        writeDelayMs,
+        WRITE_RETRY_MS,
+        RealSettingsDisk,
+        SettingsOpening(file, writeDelayMs, SettingsClock.Real, START_WAIT_MS, START_RETRY_MS, WRITE_RETRY_MS, RealSettingsDisk).waitForStart()
+            ?: throw IllegalStateException("Another program holds $file"),
+    )
+
     private val lock = Any()
-    private val opened = read()
-    private val _state = MutableStateFlow(opened.settings)
+    private val pending: File? = file?.let(::pendingFileFor)
+    private val _state = MutableStateFlow(start.settings)
 
     val state: StateFlow<AppSettings> = _state
 
     val current: AppSettings get() = _state.value
 
+    // A session on the defaults with no file behind it: nothing is written,
+    // kept beside the file or read back.
+    val readOnly: Boolean get() = file == null
+
+    private val _hold = MutableStateFlow(SettingsHold.Free)
+    val hold: StateFlow<SettingsHold> = _hold
+
+    // Whether the last write failed: the file is held.
+    private val _locked = MutableStateFlow(false)
+    val locked: StateFlow<Boolean> = _locked
+
+    // The name an unreadable settings file was set aside under, when the
+    // store started fresh because of it, until the listener has seen it.
+    private val _setAside = MutableStateFlow(start.setAside)
+    val setAside: StateFlow<String?> = _setAside
+
+    // The saveCount of the file as this store last read or wrote it.
+    private var saveCount = start.saveCount
+
+    // A pending file to delete once the main file is written.
+    private var pendingLeft = start.pendingLeft
+
     // The settings changed since the file was last written, if any.
     private var unsaved: AppSettings? = null
-    private val writer = if (writeDelayMs > 0) {
+    private val writer = if (file != null && writeDelayMs > 0) {
         Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "octo-settings").apply { isDaemon = true } }
     } else {
         null
     }
 
+    // The next write the writer has, and when it runs (System.nanoTime).
+    private var nextFlush: ScheduledFuture<*>? = null
+    private var flushDue = Long.MAX_VALUE
+
     init {
         if (writer != null) Runtime.getRuntime().addShutdownHook(Thread({ flush() }, "octo-settings-exit"))
-        // An older file whose crossfade settings chose stores that choice.
-        if (opened.migrated?.untouched == false) synchronized(lock) { keep(opened.settings) }
+        // Settings from the pending file, or an older file that chose, are
+        // written as the file at once.
+        if (start.write) synchronized(lock) { keep(start.settings, 0) }
     }
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -501,19 +564,40 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
             val next = if (alone) changed.settledServers().mirroredPlayback() else changed.mirrored()
             if (next == before) return
             _state.value = next
-            keep(next)
+            if (file != null) keep(next, writeDelayMs)
         }
     }
 
-    // Writes `settings` now, or soon with a write delay.
-    private fun keep(settings: AppSettings) {
+    // Writes `settings` now, or in `delayMs` with a writer.
+    private fun keep(settings: AppSettings, delayMs: Long) {
+        unsaved = settings
         if (writer == null) {
-            write(settings)
+            if (save(settings)) unsaved = null
             return
         }
-        val waiting = unsaved != null
-        unsaved = settings
-        if (!waiting) writer.schedule(::flush, writeDelayMs, TimeUnit.MILLISECONDS)
+        flushIn(delayMs)
+    }
+
+    // Has the writer write what is waiting in `delayMs`, unless it already
+    // will sooner.
+    private fun flushIn(delayMs: Long) {
+        val writer = writer ?: return
+        val due = System.nanoTime() + delayMs * 1_000_000
+        if (nextFlush?.isDone == false && flushDue <= due) return
+        nextFlush?.cancel(false)
+        flushDue = due
+        nextFlush = runCatching { writer.schedule(::flush, delayMs, TimeUnit.MILLISECONDS) }.getOrNull()
+    }
+
+    // Tries to write the file again now, as the banner's Try again asks.
+    fun tryAgain() {
+        if (file == null) return
+        if (writer == null) flush() else synchronized(lock) { flushIn(0) }
+    }
+
+    // The listener has seen that an unreadable file was set aside.
+    fun dismissSetAside() {
+        _setAside.value = null
     }
 
     // The one way the Between songs settings change: the Playback page's
@@ -534,69 +618,57 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
         update { it.copy(appearance = it.appearance.withThemes(setMatch(it.appearance.themes, on, deviceDark))) }
     }
 
-    // Writes what is waiting now. A write that fails is tried again later.
+    // Writes what is waiting now; one that fails is tried again in
+    // `writeRetryMs`. With nothing waiting, a pending file still left is
+    // deleted (the app's exit runs this too).
     fun flush() {
+        if (file == null) return
         synchronized(lock) {
-            val settings = unsaved ?: return
-            if (write(settings)) {
-                unsaved = null
-            } else {
-                runCatching { writer?.schedule(::flush, RETRY_MS, TimeUnit.MILLISECONDS) }
+            nextFlush = null
+            flushDue = Long.MAX_VALUE
+            val settings = unsaved
+            if (settings == null) {
+                if (pendingLeft) dropPending()
+                return
             }
+            if (save(settings)) unsaved = null else flushIn(writeRetryMs)
         }
     }
 
-    private fun read(): ReadSettings {
-        val fresh = ReadSettings(AppSettings().settled(), null)
-        if (!file.exists()) return fresh
-        // Another program (a sync tool, a virus scanner) can hold the file
-        // for a moment; that is not a broken file.
-        var text: String? = null
-        for (attempt in 1..READ_ATTEMPTS) {
-            text = try {
-                file.readText()
-            } catch (e: IOException) {
-                if (attempt < READ_ATTEMPTS) Thread.sleep(RETRY_READ_MS)
-                null
-            }
-            if (text != null) break
-        }
-        if (text == null) return fresh
-        return try {
-            decodeSettings(text)
-        } catch (e: SerializationException) {
-            setAside()
-            fresh
-        } catch (e: IllegalArgumentException) {
-            setAside()
-            fresh
-        }
-    }
-
-    private fun setAside() {
-        val aside = File(file.parentFile, file.nameWithoutExtension + ".unreadable-" + System.currentTimeMillis() + ".json")
-        runCatching { Files.move(file.toPath(), aside.toPath()) }
-    }
-
-    // True once the file holds these settings.
-    private fun write(settings: AppSettings): Boolean {
-        return try {
-            file.parentFile?.mkdirs()
-            val temp = File(file.parentFile, file.name + ".tmp")
-            FileOutputStream(temp).use { out ->
-                out.write(encodeSettings(settings).toByteArray(Charsets.UTF_8))
-                out.fd.sync()
-            }
-            try {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            } catch (e: IOException) {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
-            true
+    // True once the file holds these settings. While it is held the whole
+    // state goes to the pending file instead, encoded as the file is and
+    // with the count it began from.
+    private fun save(settings: AppSettings): Boolean {
+        val main = file ?: return false
+        try {
+            disk.replace(main, encodeSettings(settings, saveCount + 1))
         } catch (e: IOException) {
-            // The settings stay in memory; the next write tries again.
-            false
+            val kept = try {
+                disk.replace(pending!!, encodeSettings(settings, saveCount))
+                true
+            } catch (e: IOException) {
+                false
+            }
+            if (kept) pendingLeft = true
+            setHold(if (kept) SettingsHold.Kept else SettingsHold.Unkept)
+            return false
         }
+        saveCount += 1
+        if (pendingLeft) dropPending()
+        setHold(SettingsHold.Free)
+        return true
+    }
+
+    // Deletes the pending file; one that will not go is tried again after
+    // the next write and at the app's exit.
+    private fun dropPending() {
+        val kept = pending ?: return
+        if (disk.delete(kept)) pendingLeft = false
+    }
+
+    private fun setHold(hold: SettingsHold) {
+        _hold.value = hold
+        _locked.value = hold != SettingsHold.Free
     }
 
     companion object {
@@ -604,8 +676,40 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
 
         // How long the app waits to write changes, so a drag is one write.
         const val APP_WRITE_DELAY_MS = 400L
-        private const val RETRY_MS = 2_000L
-        private const val READ_ATTEMPTS = 3
-        private const val RETRY_READ_MS = 150L
+
+        // How long a start waits for a held settings file, and how often it
+        // looks again in that time.
+        const val START_WAIT_MS = 3_000L
+        const val START_RETRY_MS = 100L
+
+        // How soon a failed write is tried again.
+        const val WRITE_RETRY_MS = 2_000L
+
+        // Opens the settings file, waiting `waitMs` while another program
+        // holds it (looking again every `retryMs`); Held when it still does.
+        fun open(
+            file: File,
+            writeDelayMs: Long = 0,
+            clock: SettingsClock = SettingsClock.Real,
+            waitMs: Long = START_WAIT_MS,
+            retryMs: Long = START_RETRY_MS,
+            writeRetryMs: Long = WRITE_RETRY_MS,
+        ): SettingsOpen = openOn(RealSettingsDisk, file, writeDelayMs, clock, waitMs, retryMs, writeRetryMs)
+
+        internal fun openOn(
+            disk: SettingsDisk,
+            file: File,
+            writeDelayMs: Long = 0,
+            clock: SettingsClock = SettingsClock.Real,
+            waitMs: Long = START_WAIT_MS,
+            retryMs: Long = START_RETRY_MS,
+            writeRetryMs: Long = WRITE_RETRY_MS,
+        ): SettingsOpen = SettingsOpening(file, writeDelayMs, clock, waitMs, retryMs, writeRetryMs, disk).open()
+
+        // A session on the defaults that saves nothing, for Open without my
+        // settings: its changes stay in memory, with no writer, no exit
+        // write and no pending file.
+        fun readOnly(): SettingsStore =
+            SettingsStore(null, 0, 0, RealSettingsDisk, SettingsStart(AppSettings().settled(), 0, write = false, pendingLeft = false, setAside = null))
     }
 }
