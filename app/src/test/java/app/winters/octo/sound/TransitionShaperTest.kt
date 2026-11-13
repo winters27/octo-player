@@ -359,4 +359,54 @@ class TransitionShaperTest {
         val biggestStep = (1 until out.size).maxOf { abs(out[it] - out[it - 1]) }
         assertTrue("$biggestStep", biggestStep <= 0.5f / (rate * TRANSITION_SLEW_MS / 1_000).toFloat() * 1.01f)
     }
+
+    // A stereo sine for the shaper, `frames` long from frame `from`.
+    private fun sweepInput(frames: Int, from: Int): FloatArray =
+        FloatArray(frames * 2) { i -> (0.5 * sin(2 * PI * 220 * (from + i / 2) / rate)).toFloat() }
+
+    // A copy taken mid-sweep shapes the same stretch again sample for
+    // sample: filters, volume and the early-fade gate all carried over.
+    @Test
+    fun aSnapshotShapesTheSameStretchAgainSampleForSample() {
+        val p = plan(start = 0, overlap = 4_000, strength = FILTER_STRENGTH, headroomDb = 3.0)
+        val first = TransitionShaper(rate, 2)
+        first.arm(DeckTransition("a", p, incoming = false, gateDb = -60.0), 0.0)
+        val per = 1_000.0 / rate
+        var at = 0
+        repeat(40) {
+            first.process(sweepInput(1_000, at), 1_000, at * per, per)
+            at += 1_000
+        }
+        val copy = TransitionShaper(rate, 2)
+        copy.copyFrom(first)
+        val a = sweepInput(9_000, at)
+        val b = a.copyOf()
+        first.process(a, 9_000, at * per, per)
+        copy.process(b, 9_000, at * per, per)
+        for (i in a.indices) assertEquals("sample $i", a[i], b[i], 0f)
+    }
+
+    // A disarm takes the song from where the sweep left it to its own
+    // volume and sound in a straight line, with no step where it starts.
+    @Test
+    fun aDisarmGoesStraightFromTheShapedSoundToTheSongsOwn() {
+        val p = plan(start = 0, overlap = 4_000, strength = FILTER_STRENGTH)
+        val s = TransitionShaper(rate, 2)
+        s.arm(DeckTransition("a", p, incoming = false), 0.0)
+        val per = 1_000.0 / rate
+        val before = sweepInput(96_000, 0)
+        s.process(before, 96_000, 0.0, per)
+        assertTrue(s.level < 0.9)
+        val ramp = 12_000
+        s.disarm(ramp.toLong())
+        val after = sweepInput(ramp + 4_800, 96_000)
+        val plain = after.copyOf()
+        s.process(after, ramp + 4_800, 96_000 * per, per)
+        // No step at the start beyond the sine's own.
+        val step = abs(after[0] - before[before.size - 2])
+        assertTrue("step $step", step < 0.05f)
+        // The song's own sound once the ramp is done, exactly.
+        for (i in ramp * 2 until after.size) assertEquals("sample $i", plain[i], after[i], 0f)
+        assertEquals(1.0, s.level, 0.0)
+    }
 }
