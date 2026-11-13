@@ -148,8 +148,8 @@ object AutomixCases {
         "audible-83" to SyntheticSong(22_050, 1, 45_000, audibleStart(250.0 / 3)),
         "audible-85" to SyntheticSong(22_050, 1, 45_000, audibleStart(84.5)),
         // 100 BPM with a quiet start of 11 s, 11 dB and 13 dB under its own
-        // body but 5 dB and 7 dB under steady-100: just over and just under
-        // the line an intro must keep under the outgoing song.
+        // body but 5 dB and 7 dB under steady-100: an intro lowers each to
+        // INTRO_UNDER_OUTGOING_DB under it.
         "near-100" to SyntheticSong(
             22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -19.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -8.0),
         ),
@@ -157,7 +157,8 @@ object AutomixCases {
             22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -21.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -8.0),
         ),
         // 100 BPM with a quiet start of 11 s, 8 dB under its own body but at
-        // steady-100's level: an intro lowers it about 6 dB through the hold.
+        // steady-100's level: an intro lowers it by INTRO_UNDER_OUTGOING_DB
+        // through the hold.
         "level-100" to SyntheticSong(
             22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -14.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -6.0),
         ),
@@ -283,10 +284,11 @@ object AutomixCases {
         Pair("intro-phone-pace", "beat-120", "quiet-intro", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-phone-pace-confident", "steady-100", "quiet-100", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-cap", "hot-end", "long-intro", eight, headAgainstBody = true),
-        // An intro's quiet start kept 6 dB under the outgoing song: 7 dB under
-        // plays at its own level, 5 dB under is lowered about 1 dB and one at
-        // the outgoing song's level about 6 dB; one that would need over
-        // INTRO_TRIM_CAP_DB gives the blend.
+        // An intro's quiet start kept INTRO_UNDER_OUTGOING_DB under the
+        // outgoing song: one 7 dB under (intro-under-line), one 5 dB under
+        // (intro-over-line) and one at its level are each lowered by what
+        // they lack of that; one that would need over INTRO_TRIM_CAP_DB gives
+        // the blend.
         Pair("intro-under-line", "steady-100", "under-100", eight),
         Pair("intro-over-line", "steady-100", "near-100", eight),
         Pair("intro-trimmed", "steady-100", "level-100", eight),

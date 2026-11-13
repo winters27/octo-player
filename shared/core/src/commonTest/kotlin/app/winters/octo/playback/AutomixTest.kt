@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
@@ -967,19 +968,19 @@ class AutomixTest {
         assertEquals(-5.0, under("steady-100", 180_000.0, "near-100"), 0.5)
         assertEquals(0.0, under("steady-100", 180_000.0, "level-100"), 0.5)
         fun trimDb(plan: TransitionPlan) = -20 * kotlin.math.log10(plan.introLevel)
-        // 7 dB under: the intro at the next song's own level.
+        // 7 dB and 5 dB under: lowered by what each lacks of
+        // INTRO_UNDER_OUTGOING_DB.
         val quiet = plan("intro-under-line")
         assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
-        assertEquals(1.0, quiet.introLevel, 0.0)
-        // 5 dB under: lowered about 1 dB, so it stays 6 dB under.
+        assertEquals(max(0.0, INTRO_UNDER_OUTGOING_DB - 7), trimDb(quiet), 0.5)
         val near = plan("intro-over-line")
         assertEquals(near.reason, TransitionKind.INTRO, near.kind)
-        assertEquals(1.0, trimDb(near), 0.5)
-        // At the outgoing song's level: lowered about 6 dB and held there,
-        // then brought up as the outgoing song fades.
+        assertEquals(INTRO_UNDER_OUTGOING_DB - 5, trimDb(near), 0.5)
+        // At the outgoing song's level: lowered by the whole of it and held
+        // there, then brought up as the outgoing song fades.
         val level = plan("intro-trimmed")
         assertEquals(level.reason, TransitionKind.INTRO, level.kind)
-        assertEquals(6.0, trimDb(level), 0.5)
+        assertEquals(INTRO_UNDER_OUTGOING_DB, trimDb(level), 0.5)
         assertTrue(level.reason, level.reason.contains(", next song lowered "))
         assertEquals(level.introLevel, level.inGain(level.holdShare / 2), 0.0)
         assertEquals(1.0, level.inGain(1.0), 1e-9)

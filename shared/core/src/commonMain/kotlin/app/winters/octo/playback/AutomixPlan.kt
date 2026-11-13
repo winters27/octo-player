@@ -61,9 +61,11 @@ const val INTRO_RISE_MS = 1_000L
 // INTRO_UNDER_OUTGOING_SHARE of the hold where it sounds: the two together
 // are then never clearly louder than the outgoing song alone, and a short
 // break in the outgoing song, where the incoming one plays alone, does not
-// count. An intro that would need it lowered by over INTRO_TRIM_CAP_DB is
-// not planned.
-const val INTRO_UNDER_OUTGOING_DB = 6.0
+// count. The levels are flat ones of the channels' mean; heard with the
+// ear's weighting and in stereo the incoming song can sit a few dB nearer
+// the outgoing one, which the margin leaves room for. An intro that would
+// need it lowered by over INTRO_TRIM_CAP_DB is not planned.
+const val INTRO_UNDER_OUTGOING_DB = 8.0
 const val INTRO_UNDER_OUTGOING_SHARE = 0.95
 const val INTRO_TRIM_CAP_DB = 30.0
 
