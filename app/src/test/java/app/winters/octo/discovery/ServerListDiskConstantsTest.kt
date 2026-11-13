@@ -1,6 +1,7 @@
 package app.winters.octo.discovery
 
 import app.winters.octo.catalog.CatalogDatabase
+import app.winters.octo.catalog.LaunchMark
 import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.folders.LEVEL_PAGE
 import app.winters.octo.subsonic.Song
@@ -18,8 +19,9 @@ import java.nio.file.Files
 // An entry of a server list, and a song's row of a server folder's level,
 // take no more than SERVER_BYTES_PER_ENTRY says: their rows with their
 // indexes, measured on whole reads of songs that are all finds, under an
-// owner as the app writes it (the launch's mark first), as the file's pages
-// once the log is checkpointed in. The room asked for a drained answer
+// owner as the app writes it (the launch's mark first, as long as a mark
+// can be, so every run measures the most an entry takes), as the file's
+// pages once the log is checkpointed in. The room asked for a drained answer
 // (drainedEntries) covers the rows its read then writes, for songs with
 // short names and with long ones.
 @RunWith(RobolectricTestRunner::class)
@@ -59,6 +61,9 @@ class ServerListDiskConstantsTest {
     // A whole read of the list, or of the folder's level, into a database of
     // its own.
     private suspend fun measure(suffix: String, folder: Boolean): Measure {
+        // A launch's mark is random, and every owner carries it, so a mark
+        // of fewer digits measures less: 19 digits, the most it has.
+        while (LaunchMark.current < 1_000_000_000_000_000_000L) LaunchMark.next()
         val server = server(suffix)
         val dir = Files.createTempDirectory("catalog").toFile()
         val drains = Files.createTempDirectory("drain").toFile()

@@ -105,7 +105,8 @@ import javax.inject.Singleton
 // The disk one entry of a server list's rows takes with their indexes,
 // measured as the file's pages once the log is checkpointed in, on a whole
 // read of songs with long names that are all finds, under an owner led by
-// the launch's mark (ServerListDiskConstantsTest: 1,317 bytes). A folder
+// the launch's mark at its longest, 19 digits (ServerListDiskConstantsTest:
+// 1,317 bytes; a shorter mark takes a few bytes less). A folder
 // level's row asks the same (it takes 959). The drained answer is on the
 // disk already when its rows are asked for, so it is not asked again.
 const val SERVER_BYTES_PER_ENTRY = 1_450L
