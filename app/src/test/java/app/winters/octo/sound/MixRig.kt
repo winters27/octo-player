@@ -9,6 +9,7 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioOutputProvider.OutputConfig
 import app.winters.octo.playback.BlendArm
+import app.winters.octo.playback.BlendEventKind
 import app.winters.octo.playback.LATE_MOVE_UNBOUNDED
 import app.winters.octo.playback.TransitionKind
 import app.winters.octo.playback.TransitionPlan
@@ -93,7 +94,7 @@ class TestLoop(private val sched: Sched, val name: String) : MixLoop {
 @UnstableApi
 class FakeSystemMixer(
     val sched: Sched,
-    val quantum: Int = 1_920,
+    var quantum: Int = 1_920,
     val bufferFrames: Int = 24_000,
     val pauseCycles: Int = 1,
     val latencyCycles: Int = 3,
@@ -101,9 +102,28 @@ class FakeSystemMixer(
     val spacingMs: DoubleArray = doubleArrayOf(40.0),
 ) {
     val tracks = ArrayList<FakeTrack>()
-    private var cycles = 0L
+    var cycles = 0L
+        private set
     var running = false
         private set
+
+    // The frames a cycle takes, by cycle number, when a test sets it (a
+    // cycle a track only partly fills, an alternating resampled route).
+    var takes: ((Long) -> Int)? = null
+
+    // The gap before the cycle after the one at `nanos`, when a test sets
+    // it; null keeps the spacing.
+    var gapAfter: ((Long) -> Double?)? = null
+
+    // A session effect that controls volume: every track is mixed at
+    // unity and one volume, that of the track whose volume was set last,
+    // applies to the whole session, smoothed over 100 ms (LVM) or stepped
+    // once a cycle (DynamicsProcessing).
+    var effect = Effect.NONE
+    enum class Effect { NONE, SMOOTHED, STEPPED }
+    internal var lastVolumeSet: FakeTrack? = null
+    private var sessionVolume = 1f
+    val sessionVolumes = ArrayList<Float>()
 
     fun start() {
         if (running) return
@@ -115,12 +135,30 @@ class FakeSystemMixer(
         running = false
     }
 
+    fun take(): Int = takes?.invoke(cycles) ?: quantum
+
     private fun schedule() {
-        val gap = spacingMs[(cycles % spacingMs.size).toInt()]
+        val gap = gapAfter?.invoke(sched.now) ?: spacingMs[(cycles % spacingMs.size).toInt()]
         sched.at(sched.now + (gap * 1_000_000).toLong()) {
             if (!running) return@at
             cycles++
-            for (t in tracks.toList()) t.cycle(sched.now)
+            if (effect == Effect.NONE) {
+                for (t in tracks.toList()) t.cycle(sched.now, null)
+            } else {
+                val target = lastVolumeSet?.volume ?: 1f
+                val perFrame = 1f / (bufferFrames / 500f * 100f)
+                val volumes = FloatArray(take()) { k ->
+                    if (effect == Effect.STEPPED) {
+                        target
+                    } else {
+                        sessionVolume += (target - sessionVolume).coerceIn(-perFrame, perFrame)
+                        sessionVolume
+                    }
+                }
+                if (effect == Effect.STEPPED) sessionVolume = target
+                for (v in volumes) sessionVolumes += v
+                for (t in tracks.toList()) t.cycle(sched.now, volumes)
+            }
             schedule()
         }
     }
@@ -133,6 +171,7 @@ class FakeSystemMixer(
 
 @UnstableApi
 class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bufferFrames: Int) : RealOutput {
+    val builtAt = mixer.sched.now
     private val data = ArrayList<Float>()
     var written = 0L
         private set
@@ -145,9 +184,16 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
     private var filling = true
     var threshold = bufferFrames
         private set
+
+    // API 29 and 30: the buffer size in use, which bounds what the track
+    // holds and, with no start threshold, what it must hold to start.
+    var sizeInUse = bufferFrames
+        private set
     var volume = 1f
         private set
     var released = false
+        private set
+    var releasedAt = -1L
         private set
     var dead = false
     var underrunCount = 0
@@ -161,11 +207,29 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
         private set
     var pauses = 0
         private set
+    val playTimes = ArrayList<Long>()
+    val pauseTimes = ArrayList<Long>()
+
+    // Every start-threshold and buffer-size call, and every volume set, as
+    // (nanos, value).
+    val thresholdCalls = ArrayList<LongArray>()
+    val sizeCalls = ArrayList<LongArray>()
+    val volumeCalls = ArrayList<Pair<Long, Float>>()
+
+    // The first cycle that took music from this track, and the head at
+    // each cycle, as (nanos, head).
+    var firstCycleNanos = -1L
+        private set
+    val steps = ArrayList<LongArray>()
+
+    // Timestamps stop at this frame (a fake whose timestamps freeze short
+    // of the head).
+    var stampsUpTo = Long.MAX_VALUE
 
     override fun write(samples: FloatArray, offset: Int, frames: Int): Int {
         if (dead) throw RealOutputDead(-32)
         check(!released) { "write after release" }
-        val room = (bufferFrames - (written - head)).toInt()
+        val room = (min(bufferFrames, sizeInUse) - (written - head)).toInt().coerceAtLeast(0)
         val n = min(frames, room)
         for (i in 0 until n * 2) data += samples[offset * 2 + i]
         written += n
@@ -181,47 +245,71 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
     override fun play() {
         check(!released)
         plays++
+        playTimes += mixer.sched.now
         playing = true
         pausing = 0
         filling = true
         playedAt = mixer.sched.now
     }
 
+    // What it held written at each pause.
+    val writtenAtPauses = ArrayList<Long>()
+
     override fun pause() {
         if (!playing) return
         pauses++
+        pauseTimes += mixer.sched.now
+        writtenAtPauses += written
         pausing = mixer.pauseCycles
         playing = false
+        // A pausing track under a volume-controlling effect goes to 0 with
+        // no ramp of its own.
+        if (mixer.effect != FakeSystemMixer.Effect.NONE) setVolume(0f)
     }
 
     override fun release() {
         released = true
+        releasedAt = mixer.sched.now
         mixer.tracks.remove(this)
     }
 
-    internal fun cycle(nanos: Long) {
+    // The route went away and the next client call restores the track:
+    // its unplayed frames are dropped and its head moves to its written
+    // count, as AudioTrack's restoreTrack_l does.
+    fun invalidate(to: String) {
+        route = to
+        head = written
+    }
+
+    // A stuck track takes nothing more, with no error.
+    var stuck = false
+
+    internal fun cycle(nanos: Long, sessionVolumes: FloatArray?) {
         // A dead track plays nothing more.
-        if (released || dead) return
+        if (released || dead || stuck) return
         val active = playing || pausing > 0
         if (!active) return
         // A newly played track joins at the first cycle after play().
         if (playing && playedAt >= nanos) return
         val unplayed = written - head
         if (filling) {
-            if (unplayed < min(threshold, bufferFrames)) return
+            if (unplayed < min(threshold, min(bufferFrames, sizeInUse))) return
             filling = false
         }
-        val take = min(mixer.quantum.toLong(), unplayed).toInt()
+        val quantum = mixer.take()
+        val take = min(quantum.toLong(), unplayed).toInt()
         val fade = if (!playing && pausing > 0) pausing.toFloat() / (mixer.pauseCycles + 1) else 1f
         for (k in 0 until take) {
             val f = head + k
-            var g = volume
-            if (!playing) g *= fade * (1f - k.toFloat() / take)
+            var g = if (sessionVolumes != null) sessionVolumes[min(k, sessionVolumes.size - 1)] else volume
+            if (!playing && sessionVolumes == null) g *= fade * (1f - k.toFloat() / take)
             mixer.heard += FakeSystemMixer.Played(id, nanos, f, left(f) * g, right(f) * g)
         }
+        if (take > 0 && firstCycleNanos < 0) firstCycleNanos = nanos
         head += take
-        presented += longArrayOf(nanos + mixer.latencyCycles * (mixer.spacingMs[0] * 1_000_000).toLong(), head)
-        if (take < mixer.quantum && playing) {
+        steps += longArrayOf(nanos, head)
+        if (head <= stampsUpTo) presented += longArrayOf(nanos + mixer.latencyCycles * (mixer.spacingMs[0] * 1_000_000).toLong(), head)
+        if (take < quantum && playing) {
             underrunCount++
             filling = true
         }
@@ -245,17 +333,20 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
 
     override fun setVolume(volume: Float) {
         this.volume = volume
+        volumeCalls += mixer.sched.now to volume
+        mixer.lastVolumeSet = this
     }
 
     override fun setStartThreshold(frames: Int): Int {
         threshold = max(1, frames)
-        if (playing && filling && written - head >= min(threshold, bufferFrames)) filling = true
+        thresholdCalls += longArrayOf(mixer.sched.now, threshold.toLong())
         return threshold
     }
 
     override fun setBufferSize(frames: Int): Int {
-        threshold = frames
-        return frames
+        sizeInUse = min(bufferFrames, max(1, frames))
+        sizeCalls += longArrayOf(mixer.sched.now, sizeInUse.toLong())
+        return sizeInUse
     }
 
     override fun isStalled(): Boolean = false
@@ -271,6 +362,11 @@ class FakeTrack(private val mixer: FakeSystemMixer, val id: Int, override val bu
         routeListener?.invoke()
     }
 
+    // A new client proxy (a re-route on API 29 and 30) starts at the whole buffer.
+    fun resetSize() {
+        sizeInUse = bufferFrames
+    }
+
     override fun setPreferredDevice(device: AudioDeviceInfo?) {}
 
     override fun attachAuxEffect(effectId: Int) {}
@@ -284,12 +380,20 @@ class FakeBuilder(private val mixer: FakeSystemMixer) : RealOutputBuilder {
     var failing = 0
     var pendingReleaseUntil = -1L
 
+    // What each new track is routed to, and where its timestamps stop.
+    var nextRoute: String? = "speaker"
+    var nextStampsUpTo = Long.MAX_VALUE
+    var nextStuck = false
+
     override fun build(bufferFrames: Int): RealOutput {
         if (failing > 0) {
             failing--
             throw IllegalStateException("no track")
         }
         val t = FakeTrack(mixer, built.size + 1, bufferFrames)
+        t.route = nextRoute
+        t.stampsUpTo = nextStampsUpTo
+        t.stuck = nextStuck
         built += t
         mixer.tracks += t
         mixer.start()
@@ -306,13 +410,23 @@ class FakeBuilder(private val mixer: FakeSystemMixer) : RealOutputBuilder {
 // The system's playback list as a script: Octo's tracks appear once they
 // play, plus whatever the test adds.
 @UnstableApi
-class FakeList(private val builder: FakeBuilder) : PlaybackList {
+class FakeList(private val builder: FakeBuilder, private val sched: Sched) : PlaybackList {
     var others = 0
     var hidden = false
 
+    // How long system_server takes to list a started track and to take a
+    // paused or released one off.
+    var arriveLagNanos = 0L
+    var departLagNanos = 0L
+
     override fun musicEntries(): Int {
         if (hidden) return others
-        return others + builder.built.count { it.playing && !it.released }
+        val now = sched.now
+        return others + builder.built.count { t ->
+            val played = t.playTimes.lastOrNull() ?: return@count false
+            val left = listOfNotNull(t.pauseTimes.lastOrNull()?.takeIf { it >= played }, t.releasedAt.takeIf { it >= 0 }).minOrNull()
+            now >= played + arriveLagNanos && (left == null || now < left + departLagNanos)
+        }
     }
 }
 
@@ -324,11 +438,15 @@ class MixRig(
     spacingMs: DoubleArray = doubleArrayOf(40.0),
     val tuning: MixTuning = MixTuning(watchdogMs = 2_000),
     latencyCycles: Int = 3,
+    sdk: Int = 35,
+    // Route measures the mixer keeps by device key; a test may store some.
+    val routes: MutableMap<String, RouteMeasure> = HashMap(),
+    pauseCycles: Int = 1,
 ) {
     val sched = Sched()
-    val system = FakeSystemMixer(sched, quantum = quantum, bufferFrames = rate / 2, spacingMs = spacingMs, latencyCycles = latencyCycles)
+    val system = FakeSystemMixer(sched, quantum = quantum, bufferFrames = rate / 2, spacingMs = spacingMs, latencyCycles = latencyCycles, pauseCycles = pauseCycles)
     val builder = FakeBuilder(system)
-    val list = FakeList(builder)
+    val list = FakeList(builder, sched)
     val mixLoop = sched.loop("mix")
     val builderLoop = sched.loop("builder")
     val gateLoop = sched.loop("gate")
@@ -361,9 +479,21 @@ class MixRig(
             }
         },
         tuning = tuning,
-        sdk = 35,
+        sdk = sdk,
         pcmTargetFrames = { it / 2 },
+        routes = routes,
     )
+
+    // Main acks every proposal as it hears it, as the Crossfader does.
+    fun ackProposals() {
+        onEvent = { e -> if (e.kind == BlendEventKind.PROPOSED && mixer.commitWord.ack(e.generation)) mixer.acked(e.generation) }
+    }
+
+    // Registers `blend` as the Crossfader does: the generation opened first.
+    fun arm(blend: MixBlend) {
+        mixer.commitWord.open(blend.arm.generation)
+        mixer.arm(blend)
+    }
 
     // Every frame written to any track, in the order of the mix timeline.
     val tap = MixTapRecorder()
@@ -472,6 +602,38 @@ class TestDeck(val rig: MixRig, val slot: Int, val songRate: Int) {
     fun fill(chunk: Int = 1_024) {
         while (write(chunk) == chunk) {}
     }
+
+    // The deck reads on into its next song gaplessly: the same output, a
+    // new stream from `fromMs` of `next`.
+    fun nextSong(next: String, fromMs: Double = 0.0, endMs: Double = Double.NaN) {
+        entry = next
+        songMs = fromMs
+        songEndMs = endMs
+        frameIndex = Math.round(fromMs * songRate / 1_000.0)
+        streamStart = true
+    }
+
+    // The song frame the next write starts at.
+    val nextFrame: Long get() = frameIndex
+
+    // The deck's data arrives at its own pace: `chunk` frames every
+    // `everyMs` and no more, for `forMs`. A later call takes over from an
+    // earlier one.
+    private var paces = 0
+
+    fun pace(everyMs: Double = 10.0, chunk: Int = (songRate * everyMs / 1_000).toInt(), forMs: Double = 1e9, until: () -> Boolean = { false }) {
+        val stop = rig.sched.now + (forMs * 1_000_000).toLong()
+        val mine = ++paces
+        fun step() {
+            if (mine != paces || rig.sched.now >= stop || until() || rig.sched.now >= rig.stalled[slot]) return
+            write(chunk)
+            rig.sched.at(rig.sched.now + (everyMs * 1_000_000).toLong()) { step() }
+        }
+        step()
+    }
+
+    // The sink's stream ends: its last frames are in the ring.
+    fun end() = output.stop()
 
     // The deck's sink feeds as a playback thread would: `chunk` frames
     // every `everyMs`, for `forMs`.
