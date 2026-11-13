@@ -8,7 +8,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -174,10 +173,6 @@ class MixedPlayerTest {
         assertFalse(rig.player.isBlending)
     }
 
-    // Waits on the mixer keeping the old song's frames up to the start
-    // through a pause after the old deck is stopped: today the new song
-    // never starts after the resume.
-    @Ignore("waits on the mixer's kept ranges through a pause after the handover")
     @Test
     fun aPauseJustAfterTheHandoverPlaysTheOldSongToTheStartThenTheNewOneOnResume() {
         val rig = PlayerRig(twoSongs())
@@ -193,8 +188,17 @@ class MixedPlayerTest {
         // The old song plays on to the start, every frame once, and the new
         // one from there to its end.
         assertEquals(rig.notes.toString(), emptyList<String>(), rig.breaksOf(1))
-        assertEquals(emptyList<String>(), rig.breaksOf(-1, from = atResume))
-        assertTrue(rig.framesOf(-1, from = atResume).first() <= 1)
+        // A to the start, then the cut: at most its 20 ms of both (where a
+        // frame of the two can read as some frame of one), then the new
+        // song alone from where the cut left it, its entry at the start.
+        val s = rig.heardSongs()
+        val mixedAfter = (atResume until rig.heardCount).filter { s[it].first == MIXED }
+        assertTrue("from $atResume: mixed ${mixedAfter.size} (${mixedAfter.firstOrNull()} to ${mixedAfter.lastOrNull()}): ${rig.notes}", mixedAfter.size in 1..960)
+        val afterCut = mixedAfter.last() + 1
+        assertEquals("from $afterCut: ${rig.notes}", emptyList<String>(), rig.breaksOf(-1, from = afterCut))
+        val cut = afterCut - mixedAfter.first()
+        val firstB = rig.framesOf(-1, from = afterCut).first()
+        assertTrue("the new song from its start: $firstB after a cut of $cut", firstB in cut - 2..cut + 2)
         assertEquals(((rig.song("b").frames - 1) % SAW).toInt(), rig.framesOf(-1).last())
         assertFalse(rig.player.isBlending)
     }
@@ -334,10 +338,6 @@ class MixedPlayerTest {
         assertEquals(((rig.song("b").frames - 1) % SAW).toInt(), rig.framesOf(-1).last())
     }
 
-    // Waits on the blend's rules: near the outgoing song's real end the late
-    // start moves its start by a predicted frame that song never reaches,
-    // and proposes it, so the spare comes in instead of the song's own next.
-    @Ignore("waits on the late start never proposing a start past the outgoing song's real end")
     @Test
     fun aSongThatEndsBeforeItsPlannedStartGoesOnIntoItsNextOnceFromItsFirstFrame() {
         // Listed at 5 s, its sound 3 s: the blend planned at 3.5 s never comes.

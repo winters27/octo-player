@@ -125,6 +125,16 @@ internal class Crossfader(
     // by the playing deck's own advance instead.
     private val failed = BlendFailedSpare()
 
+    // The playing song whose sound the mixer found ended before its planned
+    // start: until the song changes or the person moves in it, it plays on
+    // into its own next song with no blend planned.
+    private var endedEarly: String? = null
+
+    // A plan the mixer refused as too late to start: planned again exactly
+    // the same (a fixed crossfade has no later place), the song plays on
+    // into its next with no blend instead of being armed again.
+    private var refused: TransitionPlan? = null
+
     // The plan for the coming transition, and what it was made from.
     private var plan: TransitionPlan? = null
     private var planKey: PlanKey? = null
@@ -139,6 +149,7 @@ internal class Crossfader(
     private var registered = -1L
     private var registeredPlan: TransitionPlan? = null
     private var registeredNext: String? = null
+    private var registeredFrom: String? = null
     private var handedOver = -1L
     private var handedOverNext: String? = null
     private var leaving = false
@@ -245,6 +256,8 @@ internal class Crossfader(
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         failed.songChanged()
+        endedEarly = null
+        refused = null
         if (outgoing != null) return
         // The song changed some other way (the playing deck moved on into
         // its own next song before the start): what the spare holds is stale.
@@ -283,6 +296,8 @@ internal class Crossfader(
     fun interrupt(reason: BlendDisarm = BlendDisarm.EDIT, releasing: Boolean = false): Boolean {
         val mixer = mixer
         var held = false
+        endedEarly = null
+        refused = null
         if (releasing && mixer != null) {
             val g = if (handedOver >= 0) handedOver else registered
             if (g >= 0) {
@@ -368,6 +383,7 @@ internal class Crossfader(
             BlendEventKind.PROPOSED -> proposed(g)
             BlendEventKind.INCOMING_NOT_READY -> if (g == registered) {
                 Log.i("Octo", "automix: the next song was not ready at the start (${event.cause.name.lowercase()})")
+                if (event.cause == BlendCause.LATE) refused = registeredPlan
                 forgetRegistration()
                 // The spare stays parked; the rest of the song is planned
                 // again from where the output is now.
@@ -414,7 +430,11 @@ internal class Crossfader(
             registered -> {
                 Log.i("Octo", "automix: the blend was canceled (${cause.name.lowercase()})")
                 val next = registeredNext
+                val from = registeredFrom
                 forgetRegistration()
+                // The playing song's sound ended before the start: it goes on
+                // into its own next song, and nothing more of it is planned.
+                if (cause == BlendCause.A_MOVED_ON || cause == BlendCause.A_ENDED) endedEarly = from
                 // A deck's own pause undid it: what the playing song plays
                 // after its end is told now.
                 if (cause == BlendCause.PAUSED) mixer?.followUp(g, followUpPass(next))
@@ -433,6 +453,7 @@ internal class Crossfader(
         registered = -1
         registeredPlan = null
         registeredNext = null
+        registeredFrom = null
     }
 
     // The phase rule's main side: a registered start has its commit word
@@ -545,7 +566,7 @@ internal class Crossfader(
         }
         val next = deck.nextMediaItemIndex
         val current = deck.currentMediaItem
-        if (fadeMs <= 0 || next == C.INDEX_UNSET || current == null) {
+        if (fadeMs <= 0 || next == C.INDEX_UNSET || current == null || (current.entryId ?: current.mediaId) == endedEarly) {
             replanAway()
             schedule(times.farCheckMs)
             return
@@ -603,7 +624,7 @@ internal class Crossfader(
             schedule(if (remaining > fadeMs + times.planLoadLeadMs * 2) times.farCheckMs else times.nearCheckMs)
             return
         }
-        if (p.kind == TransitionKind.GAPLESS) {
+        if (p.kind == TransitionKind.GAPLESS || p == refused) {
             unloadSpare()
             schedule(times.farCheckMs)
             return
@@ -915,6 +936,7 @@ internal class Crossfader(
         registered = g
         registeredPlan = p
         registeredNext = nextItem.entryId ?: nextItem.mediaId
+        registeredFrom = current?.let { it.entryId ?: it.mediaId }
         mixer.commitWord.open(g)
         mixer.arm(blend)
         spare.play()

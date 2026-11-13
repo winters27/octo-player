@@ -79,6 +79,11 @@ class PcmSong(
     val failAtMs: Long = -1,
     // How long its sound really is, when its listed length is wrong.
     val realMs: Long = durationMs,
+    // Its saw runs below zero, so it is told from a song with the same
+    // sign at any level.
+    val flip: Boolean = false,
+    // Its decoder fails (at failAtMs) only the first time it opens.
+    val failOnce: Boolean = false,
 ) {
     val frames: Long get() = realMs * rate / 1_000
 
@@ -154,7 +159,7 @@ class PcmSources(songs: List<PcmSong>, private val failing: Set<String> = emptyS
             val n = minOf(piece.toLong(), song.frames - f).toInt()
             val bytes = ByteArray(n * song.channels * 2)
             for (i in 0 until n) {
-                val v = sawAt(f + i)
+                val v = if (song.flip) (-sawAt(f + i)).toShort() else sawAt(f + i)
                 for (c in 0 until song.channels) {
                     val s: Short = if (c == 0) v else (REF * song.sign).toShort()
                     val at = (i * song.channels + c) * 2
@@ -292,7 +297,11 @@ class PlayerRig(
     val context: Context = ApplicationProvider.getApplicationContext()
     val mix = MixRig(latencyCycles = latencyCycles, tuning = tuning)
     val sources = PcmSources(songs, failing, stalled)
-    private val failAtUs: (String?) -> Long = { id -> songs.firstOrNull { it.id == id }?.failAtMs?.takeIf { it >= 0 }?.let { it * 1_000 } ?: -1 }
+    private val failedOnce = HashSet<String>()
+    private val failAtUs: (String?) -> Long = { id ->
+        val song = songs.firstOrNull { it.id == id }
+        if (song == null || song.failAtMs < 0 || (song.failOnce && !failedOnce.add(song.id))) -1 else song.failAtMs * 1_000
+    }
     val renderers = listOf(PcmRenderers(context, mix, 0, failAtUs), PcmRenderers(context, mix, 1, failAtUs))
     val decks: List<ExoPlayer> = renderers.map { r ->
         buildDeck(context, sources, r, 7, OctoLoadControl(), PlaybackLooperProvider(Looper.getMainLooper()), releaseTimeoutMs = 0)
@@ -400,6 +409,8 @@ class PlayerRig(
         val r = rights[i]
         if (l == 0f && r == 0f) return@List 0 to -1
         if (l == r && l > 0f) return@List MONO to (l * 32_768f).roundToInt() - 1
+        // A flipped song's saw is below zero, its constant above.
+        if (l < 0f && r > 0f) return@List sawFrame(-l, r).let { if (it < 0) MIXED to -1 else FLIP to it }
         val f = sawFrame(l, r)
         if (f < 0) MIXED to -1 else (if (r > 0) 1 else -1) to f
     }
@@ -423,7 +434,10 @@ class PlayerRig(
             val (kind, f) = s[i]
             when (kind) {
                 sign -> {
-                    if (lastAt >= 0 && f != (lastFrame + (i - lastAt)) % SAW) out += "heard $i: $lastFrame then $f, ${i - lastAt} on"
+                    if (lastAt >= 0 && f != (lastFrame + (i - lastAt)) % SAW) {
+                        val around = (maxOf(0, i - 6) until minOf(heardCount, i + 4)).map { "${s[it].first}/${s[it].second}@${"%.3f".format(level(it))}" }
+                        out += "heard $i: $lastFrame then $f, ${i - lastAt} on, around $around"
+                    }
                     lastAt = i
                     lastFrame = f
                 }
@@ -468,6 +482,17 @@ class PlayerRig(
     // Heard frames of the song with `sign` at all.
     fun anyOf(sign: Int): Boolean = heardSongs().any { it.first == sign }
 
+    // The level heard frame `i` was played at, 1 for a song's own level (a
+    // stereo song's: its right channel against the constant it carries).
+    fun level(i: Int): Float = kotlin.math.abs(rights[i]) * 32_768f / REF
+
+    // The first heard frame of the kind `kind` from heard frame `from`, or -1.
+    fun firstOf(kind: Int, from: Int = 0): Int {
+        val s = heardSongs()
+        for (i in from until heardCount) if (s[i].first == kind) return i
+        return -1
+    }
+
     // Lets go of what the rig holds, so the next test has the room: the
     // decks are released (their taps' workers end), the mixer lets its
     // outputs go.
@@ -503,6 +528,9 @@ class PlayerRig(
 }
 
 const val MIXED = 3
+
+// A flipped song's frames (PcmSong.flip with sign 1).
+const val FLIP = 4
 
 // Every place in `frames` (one song's heard saw positions, in order) where
 // a frame repeats or is skipped.
