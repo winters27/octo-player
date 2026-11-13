@@ -171,6 +171,43 @@ class RealOutputLifecycleTest {
     }
 
     @Test
+    fun aHeadStuckForASecondIsRebuiltAndAStuckRebuildFailsTheDecks() {
+        val rig = MixRig()
+        val d = counting(rig)
+        rig.runFor(1_000.0)
+        val stuck = rig.track(0)
+        // The head stops while the output plays with data.
+        stuck.stuck = true
+        val stoppedAt = rig.sched.now
+        val consumed = stuck.head
+        // Its last step was seen at most one fill wake (125 ms) before.
+        rig.runFor(850.0)
+        assertEquals("not before a second", 1, rig.builder.built.size)
+        rig.runFor(450.0)
+        val f = rig.lastTrack
+        assertTrue(f !== stuck)
+        assertTrue(stuck.released)
+        assertTrue("rebuilt ${(f.builtAt - stoppedAt) / 1e6} ms after", f.builtAt - stoppedAt in 875_000_000L..1_200_000_000L)
+        // Mixed again from its consumed point, with the onset ramp.
+        for (j in 960 until 4_800) assertEquals("frame $j", consumed + j, carried(f.left(j.toLong())))
+        assertEquals(0, d.output.failure)
+
+        // A rebuilt output stuck from its start: the decks fail through
+        // their writes, as 1.12.0's sink would.
+        val rig2 = MixRig()
+        val e = counting(rig2)
+        rig2.runFor(1_000.0)
+        rig2.builder.nextStuck = true
+        rig2.track(0).stuck = true
+        rig2.runFor(1_200.0)
+        assertEquals(2, rig2.builder.built.size)
+        assertEquals(0, e.output.failure)
+        rig2.stalled[0] = rig2.sched.now
+        rig2.runFor(1_300.0)
+        assertTrue("the deck failed", e.output.failure != 0)
+    }
+
+    @Test
     fun aFailedBuildWaitsOutAPendingReleaseThenRetriesAndOnlyThenFails() {
         val rig = MixRig()
         rig.builder.failing = 1
