@@ -117,6 +117,49 @@ pub fn frequency(stereo: &[f32], rate: u32) -> f64 {
     (crossings.len() - 1) as f64 * rate as f64 / span
 }
 
+/// The true peak of interleaved stereo from frame `from` to `to`, as a level
+/// (1 is full scale): the samples, and the sound read at 7 points between
+/// each two, each through a windowed sinc (Blackman) 48 samples either side.
+/// Finer and longer than the limiter's own reading, so it can check it.
+pub fn true_peak(stereo: &[f32], from: usize, to: usize) -> f64 {
+    use std::f64::consts::PI;
+    const STEPS: usize = 8;
+    const HALF: isize = 48;
+    let frames = stereo.len() / 2;
+    let taps: Vec<Vec<f64>> = (1..STEPS)
+        .map(|p| {
+            let along = p as f64 / STEPS as f64;
+            let raw: Vec<f64> = (-HALF + 1..=HALF)
+                .map(|n| {
+                    let d = along - n as f64;
+                    let span = HALF as f64;
+                    let window = 0.42 + 0.5 * (PI * d / span).cos() + 0.08 * (2.0 * PI * d / span).cos();
+                    (PI * d).sin() / (PI * d) * window
+                })
+                .collect();
+            let sum: f64 = raw.iter().sum();
+            raw.into_iter().map(|h| h / sum).collect()
+        })
+        .collect();
+    let mut peak = 0f64;
+    for ch in 0..2 {
+        for i in from..to.min(frames) {
+            peak = peak.max((stereo[i * 2 + ch] as f64).abs());
+            for phase in &taps {
+                let mut y = 0.0;
+                for (j, h) in phase.iter().enumerate() {
+                    let at = i as isize + j as isize - HALF + 1;
+                    if at >= 0 && (at as usize) < frames {
+                        y += stereo[at as usize * 2 + ch] as f64 * h;
+                    }
+                }
+                peak = peak.max(y.abs());
+            }
+        }
+    }
+    peak
+}
+
 /// `audio` with an ID3v2.3 tag in front holding `text` frames (like
 /// "TBPM") and `user` TXXX frames (description, value), as taggers write
 /// them into MP3 files.

@@ -7,6 +7,14 @@ pub const LIMITER_CEILING_DB: f32 = -1.0;
 pub const LIMITER_LOOKAHEAD_MS: f32 = 1.5;
 pub const LIMITER_RELEASE_MS: f32 = 100.0;
 
+/// With the true peak read, the sound between two samples is read at this
+/// many points a sample (a quarter, a half and three quarters of the way
+/// along, besides the samples themselves), each from this many samples on
+/// either side.
+pub const TRUE_PEAK_STEPS: usize = 4;
+pub const TRUE_PEAK_HALF_TAPS: usize = 16;
+const TRUE_PEAK_TAPS: usize = TRUE_PEAK_HALF_TAPS * 2;
+
 /// Keeps peaks from going over the ceiling. The sound runs a moment late, so
 /// the limiter sees a peak coming and turns the level down in time instead
 /// of clipping it, then lets the level back up slowly so the change is not
@@ -21,6 +29,19 @@ pub struct Limiter {
     /// Off, the level returns to unity and the sound only passes through
     /// the delay, so the delay never changes.
     pub enabled: bool,
+    /// Also holds the sound between samples under the ceiling (the true
+    /// peak), so a sum whose samples all stay under it does not pass it once
+    /// it is turned back into sound. Off, only the samples count, and the
+    /// sound comes out exactly as without this. It needs a look-ahead of at
+    /// least `2 * TRUE_PEAK_HALF_TAPS` frames (0.7 ms at 48 kHz) and is left
+    /// out with a shorter one.
+    pub true_peak: bool,
+    // The last `TRUE_PEAK_TAPS` frames in, each channel's kept twice over so
+    // its newest frames are one slice from `recent_at`.
+    recent: Vec<f32>,
+    recent_at: usize,
+    // The filter that reads each point between two samples.
+    between: [[f32; TRUE_PEAK_TAPS]; TRUE_PEAK_STEPS - 1],
     ceiling: f32,
     release: f32,
     // The delayed frames, oldest first from `head`.
@@ -57,6 +78,10 @@ impl Limiter {
             channels,
             latency,
             enabled: true,
+            true_peak: false,
+            recent: vec![0.0; channels * TRUE_PEAK_TAPS * 2],
+            recent_at: 0,
+            between: between_taps(),
             ceiling: 10f32.powf(ceiling_db / 20.0),
             release: 1.0 - (-1.0 / (sample_rate as f32 * release_ms / 1_000.0)).exp(),
             held: vec![0.0; latency * channels],
@@ -90,7 +115,17 @@ impl Limiter {
         let mut out_index = 0;
         let mut written = 0;
         for frame in input[..frames * ch].chunks_exact(ch) {
-            let peak = frame.iter().fold(0f32, |p, s| p.max(s.abs()));
+            let mut peak = frame.iter().fold(0f32, |p, s| p.max(s.abs()));
+            // Kept whether or not the true peak is read, so it can start
+            // reading at any frame.
+            self.remember(frame);
+            if self.enabled && self.true_peak && self.latency >= TRUE_PEAK_TAPS {
+                // The reading is about the frames `TRUE_PEAK_HALF_TAPS` back,
+                // but its need counts from this frame, so it holds the level
+                // down from `latency` frames before this one: over every
+                // sample the reading used.
+                peak = peak.max(self.peak_between());
+            }
             let level = if self.enabled && peak > self.ceiling { self.ceiling / peak } else { 1.0 };
             self.push_need(level);
             self.in_count += 1;
@@ -136,6 +171,32 @@ impl Limiter {
         self.in_count = 0;
         self.out_count = 0;
         self.gain = 1.0;
+        self.recent.fill(0.0);
+        self.recent_at = 0;
+    }
+
+    fn remember(&mut self, frame: &[f32]) {
+        for (ch, &s) in frame.iter().enumerate() {
+            let at = ch * TRUE_PEAK_TAPS * 2 + self.recent_at;
+            self.recent[at] = s;
+            self.recent[at + TRUE_PEAK_TAPS] = s;
+        }
+        self.recent_at = (self.recent_at + 1) % TRUE_PEAK_TAPS;
+    }
+
+    // The loudest point read between the two samples in the middle of the
+    // frames remembered, on any channel.
+    fn peak_between(&self) -> f32 {
+        let mut peak = 0f32;
+        for ch in 0..self.channels {
+            let from = ch * TRUE_PEAK_TAPS * 2 + self.recent_at;
+            let frames = &self.recent[from..from + TRUE_PEAK_TAPS];
+            for taps in &self.between {
+                let y: f32 = frames.iter().zip(taps).map(|(x, h)| x * h).sum();
+                peak = peak.max(y.abs());
+            }
+        }
+        peak
     }
 
     // Writes the oldest held frame, turned down as far as any frame in view
@@ -170,4 +231,29 @@ impl Limiter {
         self.need_at[slot] = self.in_count;
         self.need_size += 1;
     }
+}
+
+// For each point read between two samples, a windowed sinc (Blackman) over
+// the `TRUE_PEAK_TAPS` samples around it, oldest first, with the point
+// between the middle two; scaled so a steady level reads as itself.
+fn between_taps() -> [[f32; TRUE_PEAK_TAPS]; TRUE_PEAK_STEPS - 1] {
+    use std::f64::consts::PI;
+    let half = TRUE_PEAK_HALF_TAPS as f64;
+    let mut all = [[0.0; TRUE_PEAK_TAPS]; TRUE_PEAK_STEPS - 1];
+    for (step, taps) in all.iter_mut().enumerate() {
+        let along = (step + 1) as f64 / TRUE_PEAK_STEPS as f64;
+        let mut raw = [0.0f64; TRUE_PEAK_TAPS];
+        for (j, h) in raw.iter_mut().enumerate() {
+            // How far the point read lies from sample `j`.
+            let d = along + half - 1.0 - j as f64;
+            let sinc = (PI * d).sin() / (PI * d);
+            let window = 0.42 + 0.5 * (PI * d / half).cos() + 0.08 * (2.0 * PI * d / half).cos();
+            *h = sinc * window;
+        }
+        let sum: f64 = raw.iter().sum();
+        for (t, h) in taps.iter_mut().zip(raw) {
+            *t = (h / sum) as f32;
+        }
+    }
+    all
 }

@@ -167,6 +167,115 @@ fn limiter_timing_matches_android() {
     assert_eq!(limiter.latency(), 66);
 }
 
+// Two songs at 12 kHz, a quarter of the sample rate, whose samples fall
+// halfway between the waveform's peaks: every sample of their sum stays at
+// -2 dBFS, a dB under the ceiling, while the sound between samples reaches
+// +1 dBFS. The two channels are opposite.
+fn quarter_rate_sum(frames: usize) -> Vec<f32> {
+    (0..frames)
+        .flat_map(|n| {
+            let wave = (PI / 2.0 * n as f64 + PI / 4.0).sin();
+            let sum = (0.6 * wave + 0.52 * wave) as f32;
+            [sum, -sum]
+        })
+        .collect()
+}
+
+// Every frame through `limiter`, the delay drained at the end, so output
+// frame `i` is input frame `i`.
+fn limited(limiter: &mut Limiter, input: &[f32]) -> Vec<f32> {
+    let frames = input.len() / 2;
+    let mut out = vec![0.0; input.len()];
+    let written = limiter.process(input, frames, &mut out);
+    limiter.drain(&mut out[written * 2..]);
+    out
+}
+
+fn db(level: f64) -> f64 {
+    20.0 * level.log10()
+}
+
+#[test]
+fn the_mix_limiter_holds_the_sound_between_samples_under_the_ceiling() {
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    let sum = quarter_rate_sum(9_600);
+    assert!(sum.iter().all(|s| s.abs() < ceiling * 0.9), "every sample a dB under the ceiling");
+    assert!(db(crate::testing::fixtures::true_peak(&sum, 0, 9_600)) > 0.9);
+    let mut limiter = Limiter::new(2, 48_000);
+    limiter.true_peak = true;
+    let out = limited(&mut limiter, &sum);
+    let peak = db(crate::testing::fixtures::true_peak(&out, 2_400, 7_200));
+    assert!(peak <= LIMITER_CEILING_DB as f64 + 0.02, "true peak {peak} dBTP");
+    // Turned down by what the sound between samples needs, no further.
+    assert!(peak > LIMITER_CEILING_DB as f64 - 0.05, "true peak {peak} dBTP");
+}
+
+// The sample limiter written out plainly: each frame turned down as far as
+// any frame from it to `latency` ahead needs, down at once and back up
+// slowly, then held at the ceiling.
+fn sample_limited(input: &[f32], rate: u32) -> Vec<f32> {
+    let latency = (rate as f32 * super::limiter::LIMITER_LOOKAHEAD_MS / 1_000.0).round() as usize;
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    let release = 1.0 - (-1.0 / (rate as f32 * super::limiter::LIMITER_RELEASE_MS / 1_000.0)).exp();
+    let frames = input.len() / 2;
+    let need: Vec<f32> = (0..frames)
+        .map(|i| {
+            let peak = 0f32.max(input[i * 2].abs()).max(input[i * 2 + 1].abs());
+            if peak > ceiling { ceiling / peak } else { 1.0 }
+        })
+        .collect();
+    let mut gain = 1.0f32;
+    let mut out = Vec::with_capacity(input.len());
+    for i in 0..frames {
+        let target = need[i..(i + latency + 1).min(frames)].iter().fold(1.0f32, |m, &n| m.min(n));
+        gain = if target < gain { target } else { gain + (target - gain) * release };
+        for ch in 0..2 {
+            out.push((input[i * 2 + ch] * gain).clamp(-ceiling, ceiling));
+        }
+    }
+    out
+}
+
+#[test]
+fn without_the_true_peak_the_limiter_holds_samples_as_it_always_has() {
+    // A song alone: noise bursts far over full scale between quiet stretches,
+    // then the quarter-rate sum, whose samples need nothing.
+    let mut state = 12_345u64;
+    let mut input: Vec<f32> = (0..24_000 * 2)
+        .map(|i| {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            let noise = ((state >> 40) as f32 / (1u64 << 24) as f32) * 2.0 - 1.0;
+            if (i / 2 / 3_000) % 2 == 0 { noise * 2.5 } else { noise * 0.2 }
+        })
+        .collect();
+    input.extend(quarter_rate_sum(9_600));
+    for rate in [48_000, 44_100] {
+        let out = limited(&mut Limiter::new(2, rate), &input);
+        assert_eq!(out, sample_limited(&input, rate), "at {rate} Hz");
+    }
+    // Its sound between samples passes over the ceiling untouched.
+    let alone = limited(&mut Limiter::new(2, 48_000), &quarter_rate_sum(9_600));
+    assert_eq!(alone, quarter_rate_sum(9_600));
+}
+
+#[test]
+fn the_shaper_reads_the_true_peak_only_while_two_songs_blend() {
+    let mut shaper = SoundShaper::new(48_000, 2);
+    // ReplayGain on the song playing, so the limiter runs on it alone too.
+    shaper.apply(&SoundSettings::default(), 0.5, true);
+    assert!(shaper.limiter_enabled());
+    let lat = shaper.latency();
+    let mut alone = quarter_rate_sum(4_800);
+    shaper.process(&mut alone, 4_800);
+    // A song alone keeps its sound between samples, as before.
+    assert_eq!(&alone[lat * 2..], &quarter_rate_sum(4_800)[..(4_800 - lat) * 2]);
+    shaper.set_blending(true);
+    let mut blend = quarter_rate_sum(9_600);
+    shaper.process(&mut blend, 9_600);
+    let peak = db(crate::testing::fixtures::true_peak(&blend, 2_400, 7_200));
+    assert!(peak <= LIMITER_CEILING_DB as f64 + 0.02, "true peak {peak} dBTP while blending");
+}
+
 #[test]
 fn shaper_keeps_the_frame_count_and_delays_by_its_latency() {
     let mut shaper = SoundShaper::new(48_000, 2);

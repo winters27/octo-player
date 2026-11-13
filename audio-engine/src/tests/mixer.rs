@@ -396,6 +396,34 @@ fn every_blend_is_limited_whatever_the_limiter_setting() {
     assert!(loudest(&out, fade_start + 24_000 + 2_000, out.len() / 2) > 0.99);
 }
 
+// A tone at a quarter of the sample rate whose samples fall halfway between
+// its peaks, so the sound between samples is 3 dB over them.
+fn quarter_rate(frames: usize, amplitude: f64) -> Vec<i16> {
+    (0..frames)
+        .flat_map(|n| {
+            let wave = (std::f64::consts::FRAC_PI_2 * n as f64 + std::f64::consts::FRAC_PI_4).sin();
+            [(wave * amplitude * 32_767.0).round() as i16; 2]
+        })
+        .collect()
+}
+
+#[test]
+fn a_blend_whose_sum_peaks_between_samples_stays_under_the_ceiling() {
+    // Each song alone peaks at -2.5 dBTP. In the middle of an equal-power
+    // blend their sum's samples stay at -2.5 dBFS while the sound between
+    // them reaches +0.5 dBFS; with the Limiter off the blend is still held.
+    let song = quarter_rate(96_000, 0.75);
+    let out = blend_of(&song, &song, 24_000, FadeShape::default(), &limiter_off());
+    let fade_start = 48_000 + LATENCY;
+    let db = |level: f64| 20.0 * level.log10();
+    let middle = db(crate::testing::fixtures::true_peak(&out, fade_start + 9_000, fade_start + 15_000));
+    let ceiling = crate::sound::limiter::LIMITER_CEILING_DB as f64;
+    assert!(middle <= ceiling + 0.02, "true peak {middle} dBTP in the middle of the blend");
+    // The outgoing song alone before its blend is left as it is.
+    let before = db(crate::testing::fixtures::true_peak(&out, fade_start - 6_000, fade_start - 100));
+    assert!((before - db(0.75)).abs() < 0.01, "{before} dBTP before the blend");
+}
+
 #[test]
 fn an_outgoing_song_that_ends_inside_its_blend_lets_the_next_one_up_gently() {
     let fade = 48_000u64;
