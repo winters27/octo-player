@@ -416,6 +416,30 @@ class RealOutputStartTest {
     }
 
     @Test
+    fun theClampRunsFromTheFirstMusicCycleNotTheFirstWrite() {
+        val rig = MixRig(latencyCycles = 0)
+        rig.builder.nextRoute = "2:0:speaker"
+        val d = rig.deck(0)
+        d.signal = ::counting
+        d.play()
+        // Data at its own pace: the output, waiting for its whole buffer,
+        // starts once its start is lowered, well after its first music write.
+        d.pace()
+        rig.runFor(1.0)
+        val t = rig.track(0)
+        runUntil(rig) { t.firstCycleNanos >= 0 }
+        assertTrue("first cycle ${(t.firstCycleNanos - t.writes.first()) / 1e6} ms after the first write", t.firstCycleNanos - t.writes.first() >= 100 * ms)
+        // Its timestamps claim every frame presented at once; for 100 ms
+        // after the first cycle positions stay clamped to the head less 250 ms.
+        while (rig.sched.now < t.firstCycleNanos + 90 * ms) {
+            rig.runFor(1.0)
+            val s = d.output.snap
+            val head = t.steps.lastOrNull { it[0] <= s.nanos }?.get(1) ?: 0L
+            assertTrue("presented ${s.presentedIn}, head $head", s.presentedIn <= maxOf(0L, head - 250L * 48) + 1)
+        }
+    }
+
+    @Test
     fun theClampAppliesAgainAfterAResume() {
         val (rig, d) = clamped("2:0:speaker")
         rig.runFor(1_500.0)
