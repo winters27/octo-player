@@ -61,15 +61,15 @@ public struct SettingEntry: Sendable, Hashable, Identifiable {
 /// Every setting, written down once. The rows take their titles from here, so what search finds
 /// is always what the page shows. The order breaks ties between equally good matches.
 public enum SettingsIndex {
-    // Playback
-    public static let crossfade = SettingEntry("crossfade", .playback, "Crossfade", "Each song fades into the next",
-                                               ["fade", "blend", "gapless", "transition", "mix"])
-    public static let crossfadeLength = SettingEntry("crossfade_length", .playback, "Longest blend", "The most seconds two songs blend for",
-                                                     ["fade", "seconds", "duration", "crossfade length"])
+    // Playback. Between songs keeps the id the Crossfade switch had, and the rows under it keep
+    // theirs.
+    public static let betweenSongs = SettingEntry("crossfade", .playback, "Between songs", "Gapless, Crossfade or Automix",
+                                                  ["crossfade", "gapless", "automix", "blend", "mix", "transition", "dj", "smart transitions",
+                                                   "between songs", "fade"])
+    public static let crossfadeLength = SettingEntry("crossfade_length", .playback, "Length", "How many seconds a crossfade lasts",
+                                                     ["fade", "seconds", "duration", "crossfade length", "longest blend"])
     public static let crossfadeCurve = SettingEntry("crossfade_curve", .playback, "Crossfade curve", "How the two volumes cross in a blend",
                                                     ["curve", "fade", "linear", "s-curve", "equal power", "logarithmic", "loudness", "dj", "overlap"])
-    public static let smartTransitions = SettingEntry("smart_transitions", .playback, "Smart transitions", "Each blend starts where the songs meet best",
-                                                      ["automix", "dj", "mix", "transition", "beat", "outro"])
     public static let filterSweeps = SettingEntry("filter_sweeps", .playback, "Filter sweeps", "Songs thin out as they cross",
                                                   ["filter", "sweep", "bass", "eq", "dj"])
     public static let matchTempo = SettingEntry("match_tempo", .playback, "Match tempo", "The next song nudges its speed to the beat",
@@ -334,7 +334,7 @@ public enum SettingsIndex {
 
     /// Every setting, in the order written.
     public static let all: [SettingEntry] = [
-        crossfade, crossfadeLength, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, speed, skipSilence, songSwipe, autoplay,
+        betweenSongs, crossfadeLength, crossfadeCurve, filterSweeps, matchTempo, speed, skipSilence, songSwipe, autoplay,
         resumeWired, resumeBluetooth, resumeAlways, castKeepPlaying,
         radioDiscovery, radioAdventure, radioVariety, radioFavorites, liveRadioNear, radioStations,
     ] + sound + [

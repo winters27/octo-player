@@ -224,13 +224,40 @@ public struct ServerBackup: Codable, Sendable, Equatable {
     }
 }
 
+/// The player's settings in a backup. The Between songs choice: `settingsVersion` says the
+/// backup has it, `betweenSongs` is written only when the device stored a choice, and `crossfade`
+/// and `smartTransitions` say the same to older apps. Read back, `prefs` holds the backup's fields
+/// (its choice when it names one), and `settingsVersion` and `saved` the Between songs fields as
+/// the file has them, for `restoredPlayer` to work out what the restore leaves the device showing.
+public struct PlayerBackup: Sendable, Equatable {
+    public var prefs: PlayerPrefs
+    /// Nil in a backup from before the Between songs choice.
+    public var settingsVersion: Int?
+    public var saved: StoredBetweenSongs
+
+    public init(prefs: PlayerPrefs, settingsVersion: Int?, saved: StoredBetweenSongs) {
+        self.prefs = prefs
+        self.settingsVersion = settingsVersion
+        self.saved = saved
+    }
+
+    /// A device's settings as its backup holds them.
+    public init(_ prefs: PlayerPrefs) {
+        let mirrors = BetweenSongsWrite(prefs.betweenSongs)
+        self.init(prefs: prefs, settingsVersion: betweenSongsSettingsVersion, saved: StoredBetweenSongs(
+            betweenSongs: prefs.betweenSongsStored ? prefs.betweenSongs.storedName : nil, crossfade: mirrors.crossfade,
+            crossfadeSeconds: prefs.crossfadeSeconds, smartTransitions: mirrors.smartTransitions, filterSweeps: prefs.filterSweeps,
+            matchTempo: prefs.matchTempo, crossfadeCurve: prefs.crossfadeCurve.storedName))
+    }
+}
+
 /// Everything a backup holds. Every part is optional, so a backup from an older app with fewer
 /// settings still reads. Some stored key names keep the other apps' British spelling.
 public struct Backup: Sendable, Equatable {
     public var kind = backupKind
     public var version = backupVersion
     public var createdAt: Int64 = 0
-    public var player: PlayerPrefs?
+    public var player: PlayerBackup?
     public var streaming: StreamPrefs?
     public var sound: SoundBackup?
     public var presets: [PresetBackup] = []
@@ -324,19 +351,23 @@ public enum BackupFile {
                  ("state", .string(s.state)), ("tags", .strings(s.tags)), ("clicks", .int(Int64(s.clicks)))])
     }
 
-    static func playerJSON(_ p: PlayerPrefs) -> OrderedJSON {
+    static func playerJSON(_ backup: PlayerBackup) -> OrderedJSON {
+        let p = backup.prefs
         let b = p.background
         let a = p.ambient
-        return .object([
+        let mirrors = BetweenSongsWrite(p.betweenSongs)
+        return .fields([
+            ("settingsVersion", .int(Int64(betweenSongsSettingsVersion))),
             ("liveBackground", .bool(p.liveBackground)),
             ("background", .object([
                 ("mode", .string(b.mode.storedName)), ("brightnessCap", .int(Int64(b.brightnessCap))), ("saturation", .int(Int64(b.saturation))),
                 ("contrast", .double(Double(String(b.contrast)) ?? Double(b.contrast))), ("useBpm", .bool(b.useBpm)),
                 ("fps", .int(Int64(b.fps))), ("speed", .int(Int64(b.speed))),
             ])),
-            ("crossfade", .bool(p.crossfade)), ("crossfadeSeconds", .int(Int64(p.crossfadeSeconds))),
+            ("betweenSongs", p.betweenSongsStored ? .string(p.betweenSongs.storedName) : nil),
+            ("crossfade", .bool(mirrors.crossfade)), ("crossfadeSeconds", .int(Int64(p.crossfadeSeconds))),
             ("crossfadeCurve", .string(p.crossfadeCurve.storedName)),
-            ("smartTransitions", .bool(p.smartTransitions)), ("filterSweeps", .bool(p.filterSweeps)), ("matchTempo", .bool(p.matchTempo)),
+            ("smartTransitions", .bool(mirrors.smartTransitions)), ("filterSweeps", .bool(p.filterSweeps)), ("matchTempo", .bool(p.matchTempo)),
             ("lyricsOnline", .bool(p.lyricsOnline)), ("speed", .double(Double(String(p.speed)) ?? Double(p.speed))),
             ("keepPitch", .bool(p.keepPitch)), ("pitchSemitones", .int(Int64(p.pitchSemitones))), ("skipSilence", .bool(p.skipSilence)),
             ("autoplay", .bool(p.autoplay)), ("radioDiscovery", .string(p.radioDiscovery.storedName)),
@@ -448,7 +479,7 @@ public enum BackupFile {
         var b = Backup()
         b.version = version
         b.createdAt = o["createdAt"]?.whole ?? 0
-        b.player = part(o["player"], PlayerPrefs.self)
+        b.player = playerBackup(o["player"])
         b.streaming = part(o["streaming"], StreamPrefs.self)
         if case .object(let sound)? = o["sound"] { b.sound = soundBackup(Fields(sound)) }
         if case .array(let presets)? = o["presets"] {
@@ -477,6 +508,26 @@ public enum BackupFile {
         }
         b.keptStations = part(o["keptStations"], [LiveStation].self) ?? []
         return b
+    }
+
+    /// The player's part of a checked backup: its settings, with the Between songs fields as the
+    /// file has them beside them, and the choice in the settings when the file names one.
+    static func playerBackup(_ value: OrderedJSON?) -> PlayerBackup? {
+        guard var prefs = part(value, PlayerPrefs.self), case .object(let pairs)? = value else { return nil }
+        let fields = Fields(pairs)
+        func flag(_ key: String) -> Bool? {
+            if case .bool(let on)? = fields[key] { return on }
+            return nil
+        }
+        let saved = StoredBetweenSongs(
+            betweenSongs: fields["betweenSongs"]?.text, crossfade: flag("crossfade"),
+            crossfadeSeconds: fields["crossfadeSeconds"]?.whole.flatMap { Int(exactly: $0) }, smartTransitions: flag("smartTransitions"),
+            filterSweeps: flag("filterSweeps"), matchTempo: flag("matchTempo"), crossfadeCurve: fields["crossfadeCurve"]?.text)
+        if let choice = BetweenSongs.ofStored(saved.betweenSongs) {
+            prefs.betweenSongs = choice
+            prefs.betweenSongsStored = true
+        }
+        return PlayerBackup(prefs: prefs, settingsVersion: fields["settingsVersion"]?.whole.flatMap { Int(exactly: $0) }, saved: saved)
     }
 
     /// One part of a checked backup, read by its own decoder. Null is no part.

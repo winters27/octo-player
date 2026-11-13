@@ -7,14 +7,14 @@ import Testing
         var backup = Backup()
         var player = PlayerPrefs()
         player.animatedArt = .fullScreen
-        backup.player = player
+        backup.player = PlayerBackup(player)
         let text = BackupFile.encode(backup)
         #expect(text.contains("\"animatedArt\": \"full_screen\""))
         guard case .read(let read) = BackupFile.decode(text) else {
             Issue.record("not read")
             return
         }
-        #expect(read.player?.animatedArt == .fullScreen)
+        #expect(read.player?.prefs.animatedArt == .fullScreen)
     }
 
     @Test func aBackupWithoutItKeepsTheDefault() {
@@ -22,11 +22,11 @@ import Testing
             Issue.record("not read")
             return
         }
-        #expect(read.player?.animatedArt == .square)
+        #expect(read.player?.prefs.animatedArt == .square)
         guard case .read(let unknown) = BackupFile.decode(#"{"player": {"animatedArt": "spinning"}}"#) else {
             Issue.record("not read")
             return
         }
-        #expect(unknown.player?.animatedArt == .square)
+        #expect(unknown.player?.prefs.animatedArt == .square)
     }
 }

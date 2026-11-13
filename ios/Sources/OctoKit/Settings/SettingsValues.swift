@@ -546,18 +546,22 @@ public struct OfflinePrefs: Sendable, Equatable, Codable {
 
 /// How the player looks and plays. The defaults are what a new install gets.
 public struct PlayerPrefs: Sendable, Equatable, Codable {
-    /// The range the longest blend can be set to.
-    public static let crossfadeSecondsRange = 2...16
+    /// The range Crossfade's length can be set to.
+    public static let crossfadeSecondsRange = shortestCrossfadeSeconds...longestCrossfadeSeconds
 
     public var liveBackground = true
     public var background = BackgroundPrefs()
-    public var crossfade = false
-    public var crossfadeSeconds = 8
-    /// The curve of the crossfade while smart transitions are off.
+    /// What plays between two songs, and whether that choice is stored: a device that never chose
+    /// shows Automix without storing it. A backup writes these itself.
+    public var betweenSongs: BetweenSongs = .automix
+    public var betweenSongsStored = false
+    /// Crossfade's length in seconds and its curve. Automix picks its own lengths and curves.
+    public var crossfadeSeconds = defaultCrossfadeSeconds
     public var crossfadeCurve: FadeCurve = .equalPower
-    public var smartTransitions = true
+    /// Automix's own two: filter sweeps thin the songs out as they cross, and matching the tempo
+    /// nudges the next song's speed.
     public var filterSweeps = true
-    public var matchTempo = false
+    public var matchTempo = true
     public var lyricsOnline = true
     public var speed: Float = 1
     public var keepPitch = true
@@ -606,7 +610,13 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
     }
 
     /// The longest blend the player uses, or 0 for none.
-    public var crossfadeMs: Int { crossfade ? crossfadeSeconds * 1_000 : 0 }
+    public var crossfadeMs: Int { crossfadeMsOf(betweenSongs, crossfadeSeconds: crossfadeSeconds) }
+
+    /// How the player plans the blends.
+    public var automix: AutomixSettings {
+        automixSettingsOf(betweenSongs, crossfadeSeconds: crossfadeSeconds, crossfadeCurve: crossfadeCurve, filterSweeps: filterSweeps,
+                          matchTempo: matchTempo)
+    }
 
     /// The speed and pitch the player is set to.
     public var pace: Pace { Pace.of(speed: speed, keepPitch: keepPitch, semitones: pitchSemitones) }
@@ -619,7 +629,7 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         RadioTuning(discovery: radioDiscovery, adventure: radioAdventure, variety: radioVariety, favorites: radioFavorites)
     }
 
-    /// Held to the ranges the settings offer: the blend length, the speed's steps, the pitch and
+    /// Held to the ranges the settings offer: Crossfade's length, the speed's steps, the pitch and
     /// the background's values.
     public func sane() -> PlayerPrefs {
         var held = self
@@ -631,8 +641,10 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         return held
     }
 
+    /// The fields as a backup names them. The Between songs choice is read from the backup's own
+    /// fields as a whole (`PlayerBackup`), never from here.
     enum CodingKeys: String, CodingKey {
-        case liveBackground, background, crossfade, crossfadeSeconds, crossfadeCurve, smartTransitions, filterSweeps, matchTempo, lyricsOnline,
+        case liveBackground, background, crossfadeSeconds, crossfadeCurve, filterSweeps, matchTempo, lyricsOnline,
              speed, keepPitch, pitchSemitones, skipSilence, autoplay, radioDiscovery, radioAdventure, radioVariety, radioFavorites,
              resumeWired, resumeBluetooth, resumeAlways, ambient, reduceMotion, castRenderers, castKeepPlaying, libraryOnly, swipeAction, accent, glassTint,
              animatedArt, theme, themeLight, themeDark, themeMatch
@@ -643,10 +655,8 @@ public struct PlayerPrefs: Sendable, Equatable, Codable {
         let d = PlayerPrefs()
         liveBackground = c.value(.liveBackground, or: d.liveBackground)
         background = c.value(.background, or: d.background)
-        crossfade = c.value(.crossfade, or: d.crossfade)
         crossfadeSeconds = c.value(.crossfadeSeconds, or: d.crossfadeSeconds)
         crossfadeCurve = c.choice(.crossfadeCurve, or: d.crossfadeCurve)
-        smartTransitions = c.value(.smartTransitions, or: d.smartTransitions)
         filterSweeps = c.value(.filterSweeps, or: d.filterSweeps)
         matchTempo = c.value(.matchTempo, or: d.matchTempo)
         lyricsOnline = c.value(.lyricsOnline, or: d.lyricsOnline)

@@ -181,12 +181,12 @@ private struct FadeCurveVectors: Decodable {
         var backup = Backup()
         var player = PlayerPrefs()
         player.crossfadeCurve = .sCurve
-        backup.player = player
+        backup.player = PlayerBackup(player)
         let text = BackupFile.encode(backup)
         #expect(text.contains("\"crossfadeCurve\": \"SCurve\""))
         guard case .read(let read) = BackupFile.decode(text) else { Issue.record("not read"); return }
-        #expect(read.player?.crossfadeCurve == .sCurve)
+        #expect(read.player?.prefs.crossfadeCurve == .sCurve)
         guard case .read(let odd) = BackupFile.decode(#"{"player": {"crossfadeCurve": "Bungee"}}"#) else { Issue.record("not read"); return }
-        #expect(odd.player?.crossfadeCurve == .equalPower)
+        #expect(odd.player?.prefs.crossfadeCurve == .equalPower)
     }
 }

@@ -111,13 +111,16 @@ import Testing
 
     @Test func playerDefaultsAreWhatANewInstallGets() {
         let prefs = PlayerPrefs()
-        #expect(!prefs.crossfade && prefs.crossfadeSeconds == 8 && prefs.smartTransitions && prefs.filterSweeps && !prefs.matchTempo)
+        // Automix with Match tempo on, the choice not stored until someone makes it.
+        #expect(prefs.betweenSongs == .automix && !prefs.betweenSongsStored && prefs.crossfadeSeconds == 8 && prefs.filterSweeps && prefs.matchTempo)
+        #expect(prefs.crossfadeCurve == .equalPower)
         #expect(prefs.speed == 1 && prefs.keepPitch && prefs.pitchSemitones == 0 && prefs.paceIsDefault)
         #expect(!prefs.skipSilence && prefs.autoplay)
         #expect(prefs.radioDiscovery == .balanced && prefs.radioAdventure == .balanced && prefs.radioVariety == .normal && !prefs.radioFavorites)
         #expect(!prefs.resumeWired && !prefs.resumeBluetooth && !prefs.resumeAlways)
         #expect(prefs.castRenderers && !prefs.castKeepPlaying && !prefs.libraryOnly && !prefs.reduceMotion && prefs.liveBackground)
-        #expect(prefs.crossfadeMs == 0)
+        #expect(prefs.crossfadeMs == automixLongestBlendMs)
+        #expect(prefs.automix == AutomixSettings(maxOverlapMs: automixLongestBlendMs, longestIntroMs: automixLongestIntroMs, beatMatch: true))
     }
 
     @Test func saneHoldsValuesToTheirRanges() {
@@ -138,9 +141,11 @@ import Testing
     }
 
     @Test func savedPlayerSettingsReadWithDefaultsForWhatIsMissing() throws {
-        let json = #"{"crossfade": true, "radioDiscovery": "Nonsense", "background": {"mode": "Colour"}, "ambient": {"strength": "Wild"}}"#
+        let json = #"{"crossfade": true, "matchTempo": false, "radioDiscovery": "Nonsense", "background": {"mode": "Colour"}, "ambient": {"strength": "Wild"}}"#
         let prefs = try JSONDecoder().decode(PlayerPrefs.self, from: Data(json.utf8))
-        #expect(prefs.crossfade)
+        // The Between songs choice comes from a backup's fields as a whole, never from here.
+        #expect(prefs.betweenSongs == .automix && !prefs.betweenSongsStored)
+        #expect(!prefs.matchTempo)
         #expect(prefs.crossfadeSeconds == 8)
         #expect(prefs.radioDiscovery == .balanced)
         #expect(prefs.background.mode == .color)

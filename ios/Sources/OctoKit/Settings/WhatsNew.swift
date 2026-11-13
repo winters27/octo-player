@@ -41,7 +41,8 @@ public enum WhatsNew {
     - **Autoplay** keeps similar songs coming when the queue runs out.
     - Change the **speed and pitch**, and skip the quiet parts.
     - The **sleep timer** can add a few minutes, or stop after a few songs.
-    - Songs can **fade into each other**, and music can carry on when headphones reconnect.
+    - **Automix is now its own choice next to Crossfade and is on by default:** songs blend where they meet best, and a quiet intro plays under the end of the song before it. If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on. Gapless is under Between songs. A Crossfade setup you chose stays as it was. Automix now picks its own blend lengths. Match tempo is now on for Automix; turn it off under Between songs if you prefer.
+    - Music can carry on when headphones reconnect.
     - Swipe the artwork to skip.
     - Play on **AirPlay** speakers and TVs from the player.
 

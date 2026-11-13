@@ -13,10 +13,12 @@ import Testing
     }
 
     @Test func playback() {
-        #expect(SettingsSummaries.playback(PlayerPrefs()) == "Gapless · Autoplay")
-        #expect(SettingsSummaries.playback(player { $0.crossfade = true }) == "Crossfade 8 s · Autoplay")
+        // A new install is Automix.
+        #expect(SettingsSummaries.playback(PlayerPrefs()) == "Automix · Autoplay")
+        #expect(SettingsSummaries.playback(player { $0.betweenSongs = .crossfade }) == "Crossfade 8 s · Autoplay")
+        #expect(SettingsSummaries.playback(player { $0.betweenSongs = .gapless }) == "Gapless · Autoplay")
         #expect(SettingsSummaries.playback(player {
-            $0.crossfade = true
+            $0.betweenSongs = .crossfade
             $0.crossfadeSeconds = 4
             $0.speed = 1.25
             $0.autoplay = false
@@ -24,11 +26,17 @@ import Testing
         }) == "Crossfade 4 s · 1.25x · Skip silence")
         // Never more than three parts.
         #expect(SettingsSummaries.playback(player {
+            $0.betweenSongs = .gapless
             $0.speed = 2
             $0.skipSilence = true
         }) == "Gapless · 2x · Autoplay")
         // Normal speed with the pitch moved still says the speed.
-        #expect(SettingsSummaries.playback(player { $0.keepPitch = false }) == "Gapless · 1x · Autoplay")
+        #expect(SettingsSummaries.playback(player { $0.keepPitch = false }) == "Automix · 1x · Autoplay")
+        // Crossfade's length shows only for Crossfade.
+        #expect(SettingsSummaries.betweenSongs(player {
+            $0.betweenSongs = .automix
+            $0.crossfadeSeconds = 12
+        }) == "Automix")
     }
 
     @Test func appearance() {
@@ -102,7 +110,7 @@ import Testing
     @Test func linesUseTheMiddleDotAndNoDashes() {
         let lines = [
             SettingsSummaries.playback(player {
-                $0.crossfade = true
+                $0.betweenSongs = .crossfade
                 $0.speed = 1.5
             }),
             SettingsSummaries.streaming(StreamPrefs(), OfflinePrefs()),

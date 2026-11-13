@@ -142,6 +142,7 @@ extension BackupShape {
     )
 
     static let player = fields(
+        BackupField("settingsVersion", .int), BackupField("betweenSongs", .choice),
         BackupField("liveBackground", .flag),
         BackupField("background", fields(
             BackupField("mode", .choice), BackupField("brightnessCap", .int), BackupField("saturation", .int),

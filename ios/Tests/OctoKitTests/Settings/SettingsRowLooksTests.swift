@@ -8,7 +8,7 @@ import Testing
         #expect(!smart.choosable)
         #expect(smart.value == smartCurveValue)
         // The reason names the switch by the title it has on the page.
-        #expect(smart.helper.contains("Turn off \(SettingsIndex.smartTransitions.title)"))
+        #expect(smart.helper.contains("Turn off Smart transitions"))
         #expect(!smart.helper.contains("Automix"))
         #expect(smart.helper == "Smart transitions picks the curve for each blend. Turn off Smart transitions, just below, to choose one.")
         #expect(curveRowLook(.linear, smartTransitions: false) == RowLook(choosable: true, value: "Linear", helper: FadeCurve.linear.detail))

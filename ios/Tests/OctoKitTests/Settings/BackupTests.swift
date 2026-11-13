@@ -12,13 +12,15 @@ import Testing
         var b = Backup()
         b.createdAt = 1_758_000_000_000
         var player = PlayerPrefs()
-        player.crossfade = true
+        player.betweenSongs = .crossfade
+        player.betweenSongsStored = true
         player.crossfadeSeconds = 4
+        player.matchTempo = false
         player.speed = 1.25
         player.keepPitch = false
         player.skipSilence = true
         player.resumeBluetooth = true
-        b.player = player
+        b.player = PlayerBackup(player)
         b.streaming = StreamPrefs(copies: .bestQuality, wifi: .mp3(kbps: 320), mobile: .mp3(kbps: 128))
         var parametric = SoundSettings()
         parametric.eqEnabled = true
@@ -44,13 +46,16 @@ import Testing
 
     @Test func everyPlayerSettingIsWritten() {
         var backup = Backup()
-        backup.player = PlayerPrefs()
+        backup.player = PlayerBackup(PlayerPrefs())
         let text = BackupFile.encode(backup)
-        for key in ["liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones", "skipSilence",
-                    "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "radioDiscovery", "crossfadeCurve",
-                    "ambient", "background", "castRenderers", "castKeepPlaying", "libraryOnly", "swipeAction", "reduceMotion"] {
+        for key in ["settingsVersion", "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
+                    "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo",
+                    "radioDiscovery", "crossfadeCurve", "ambient", "background", "castRenderers", "castKeepPlaying", "libraryOnly", "swipeAction",
+                    "reduceMotion"] {
             #expect(text.contains("\"\(key)\""), "\(key) is missing")
         }
+        // A choice the device never stored is not written.
+        #expect(!text.contains("\"betweenSongs\""))
         #expect(text.contains("\"contrast\": 1.3"))
         #expect(text.contains("\"speed\": 1.0"))
     }
@@ -78,9 +83,7 @@ import Testing
     @Test func anOlderOrSmallerBackupStillReads() {
         guard case .read(let backup) = BackupFile.decode("\u{FEFF}" + #"{"kind": "octo-settings", "version": 1, "player": {"crossfade": true}, "extra": 5}"#)
         else { Issue.record("not read"); return }
-        var expected = PlayerPrefs()
-        expected.crossfade = true
-        #expect(backup.player == expected)
+        #expect(backup.player == PlayerBackup(prefs: PlayerPrefs(), settingsVersion: nil, saved: StoredBetweenSongs(crossfade: true)))
         #expect(backup.sound == nil)
         #expect(backup.playlists.isEmpty)
         // No kind at all is still a backup.
@@ -97,14 +100,14 @@ import Testing
         var backup = Backup()
         var player = PlayerPrefs()
         player.swipeAction = .addToQueue
-        backup.player = player
+        backup.player = PlayerBackup(player)
         guard case .read(let back) = BackupFile.decode(BackupFile.encode(backup)) else { Issue.record("not read"); return }
-        #expect(back.player?.swipeAction == .addToQueue)
+        #expect(back.player?.prefs.swipeAction == .addToQueue)
         guard case .read(let unknown) = BackupFile.decode(#"{"kind": "octo-settings", "player": {"swipeAction": "Nothing"}}"#),
               case .read(let missing) = BackupFile.decode(#"{"kind": "octo-settings", "player": {"crossfade": true}}"#)
         else { Issue.record("not read"); return }
-        #expect(unknown.player?.swipeAction == .playNext)
-        #expect(missing.player?.swipeAction == .playNext)
+        #expect(unknown.player?.prefs.swipeAction == .playNext)
+        #expect(missing.player?.prefs.swipeAction == .playNext)
     }
 
     @Test func songsAreFoundByRelinkKeyFirst() {
@@ -374,7 +377,7 @@ import Testing
             #"{"kind": null, "version": null, "likes": null, "player": {"crossfade": null, "speed": null}, "lyrics": {"look": null, "offsets": null}}"#)
         else { Issue.record("not read"); return }
         #expect(backup.likes.isEmpty)
-        #expect(backup.player == PlayerPrefs())
+        #expect(backup.player == PlayerBackup(prefs: PlayerPrefs(), settingsVersion: nil, saved: StoredBetweenSongs()))
         #expect(backup.lyrics == LyricsBackup())
         guard case .read(let handMade) = BackupFile.decode(#"{"sound": {"profiles": {"all": {"preset": null}}}}"#)
         else { Issue.record("not read"); return }
@@ -384,15 +387,16 @@ import Testing
     @Test func numbersWrittenInQuotesStillRead() {
         guard case .read(let backup) = BackupFile.decode(#"{"player": {"crossfadeSeconds": "4", "speed": "1.25"}}"#)
         else { Issue.record("not read"); return }
-        #expect(backup.player?.crossfadeSeconds == 4)
-        #expect(backup.player?.speed == 1.25)
+        #expect(backup.player?.prefs.crossfadeSeconds == 4)
+        #expect(backup.player?.saved.crossfadeSeconds == 4)
+        #expect(backup.player?.prefs.speed == 1.25)
         #expect(BackupFile.decode(#"{"kind": "octo-settings", "version": "2"}"#) == .tooNew)
     }
 
     @Test func aFieldWrittenTwiceKeepsItsLastValue() {
         guard case .read(let backup) = BackupFile.decode(#"{"player": {"crossfade": true, "crossfade": false}}"#)
         else { Issue.record("not read"); return }
-        #expect(backup.player?.crossfade == false)
+        #expect(backup.player?.saved.crossfade == false)
     }
 
     @Test func unknownSoundAndLookChoicesFallBackToTheirDefaults() {
@@ -456,28 +460,28 @@ import Testing
             var backup = Backup()
             var player = PlayerPrefs()
             player.themes = pickTheme(ThemeSettings(theme: .octo, light: .paper, dark: .dusk, match: true), theme)
-            backup.player = player
+            backup.player = PlayerBackup(player)
             let text = BackupFile.encode(backup)
             for key in ["theme", "themeLight", "themeDark", "themeMatch"] { #expect(text.contains("\"\(key)\""), "\(key) is missing") }
             guard case .read(let read) = BackupFile.decode(text) else { Issue.record("not read"); return }
-            #expect(read.player?.themes == player.themes)
-            #expect(read.player?.theme == theme)
+            #expect(read.player?.prefs.themes == player.themes)
+            #expect(read.player?.prefs.theme == theme)
         }
         // Names this app does not know, or a theme in the wrong slot, read as each slot's default.
         let odd = #"{"kind": "octo-settings", "version": 1, "player": {"theme": "Neon", "themeLight": "Moss", "themeDark": "Paper", "themeMatch": true}}"#
         guard case .read(let coerced) = BackupFile.decode(odd) else { Issue.record("not read"); return }
-        #expect(coerced.player?.themes == ThemeSettings(theme: .octo, light: .daylight, dark: .octo, match: true))
+        #expect(coerced.player?.prefs.themes == ThemeSettings(theme: .octo, light: .daylight, dark: .octo, match: true))
     }
 
     @Test func anOldBackupKeepsOcto() {
         guard case .read(let old) = BackupFile.decode(#"{"kind": "octo-settings", "version": 1, "player": {"crossfade": true}}"#) else {
             Issue.record("not read"); return
         }
-        #expect(old.player?.themes == ThemeSettings())
-        #expect(old.player?.theme == .octo)
-        #expect(old.player?.themeLight == .daylight)
-        #expect(old.player?.themeDark == .octo)
-        #expect(old.player?.themeMatch == false)
+        #expect(old.player?.prefs.themes == ThemeSettings())
+        #expect(old.player?.prefs.theme == .octo)
+        #expect(old.player?.prefs.themeLight == .daylight)
+        #expect(old.player?.prefs.themeDark == .octo)
+        #expect(old.player?.prefs.themeMatch == false)
     }
 
     /// The backup file Android's test reads too: the same four fields read to the same settings on
@@ -502,6 +506,6 @@ import Testing
         }
         let expected = themeSettings(want["theme"] as? String, want["light"] as? String, want["dark"] as? String,
                                      want["match"] as? Bool ?? false)
-        #expect(read.player?.themes == expected)
+        #expect(read.player?.prefs.themes == expected)
     }
 }

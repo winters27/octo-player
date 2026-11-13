@@ -85,27 +85,27 @@ import Testing
             var player = PlayerPrefs()
             player.accent = accent
             player.glassTint = true
-            backup.player = player
+            backup.player = PlayerBackup(player)
             guard case .read(let read) = BackupFile.decode(BackupFile.encode(backup)) else { Issue.record("not read"); return }
-            #expect(read.player?.accent == accent)
-            #expect(read.player?.glassTint == true)
+            #expect(read.player?.prefs.accent == accent)
+            #expect(read.player?.prefs.glassTint == true)
         }
         var backup = Backup()
         var player = PlayerPrefs()
         player.accent = .fromArt
-        backup.player = player
+        backup.player = PlayerBackup(player)
         let text = BackupFile.encode(backup)
         #expect(text.contains("\"accent\": \"FromArt\""))
         // One this app does not know, from a newer Octo, reads as Octo's own.
         guard case .read(let newer) = BackupFile.decode(text.replacingOccurrences(of: "\"FromArt\"", with: "\"Chartreuse\"")) else {
             Issue.record("not read"); return
         }
-        #expect(newer.player?.accent == .octo)
+        #expect(newer.player?.prefs.accent == .octo)
         // A backup from before accents leaves Octo's own.
         guard case .read(let old) = BackupFile.decode(#"{"kind": "octo-settings", "version": 1, "player": {}}"#) else {
             Issue.record("not read"); return
         }
-        #expect(old.player?.accent == .octo)
-        #expect(old.player?.glassTint == false)
+        #expect(old.player?.prefs.accent == .octo)
+        #expect(old.player?.prefs.glassTint == false)
     }
 }

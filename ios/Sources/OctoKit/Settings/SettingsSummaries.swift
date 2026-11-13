@@ -33,9 +33,18 @@ public enum SettingsSummaries {
         return (n < 0 ? "-" : "") + out
     }
 
+    /// What plays between songs, as the front page says it: "Automix", "Crossfade 8 s" or "Gapless".
+    public static func betweenSongs(_ prefs: PlayerPrefs) -> String {
+        switch prefs.betweenSongs {
+        case .gapless: "Gapless"
+        case .crossfade: "Crossfade \(prefs.crossfadeSeconds) s"
+        case .automix: "Automix"
+        }
+    }
+
     public static func playback(_ prefs: PlayerPrefs) -> String {
         line(
-            prefs.crossfade ? "Crossfade \(prefs.crossfadeSeconds) s" : "Gapless",
+            betweenSongs(prefs),
             prefs.paceIsDefault ? nil : Pace.speedLabel(prefs.speed),
             prefs.autoplay ? "Autoplay" : nil,
             prefs.skipSilence ? "Skip silence" : nil
