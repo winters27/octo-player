@@ -736,6 +736,28 @@ fn a_matched_tempo_eases_back_to_normal() {
     assert!((last.secs_per_frame - 1.0 / RATE as f64).abs() < 1e-11, "{last:?}");
 }
 
+#[test]
+fn a_matched_rate_never_steps_the_sound_from_its_start_to_its_drop() {
+    // From a silent song into a steady tone at a matched rate, held through
+    // the 1 s blend, eased back to normal over 5 s, then dropped: at a rate
+    // that repeats periods and at one that skips them, the tone never moves
+    // further between two frames than it does on its own.
+    let slope = 0.25 * 2.0 * std::f32::consts::PI * 220.0 / RATE as f32;
+    let silent = vec![0i16; 96_000 * 2];
+    let tone = sine(220.0, RATE, 2, 0, RATE as usize * 8, 0.25);
+    for rate in [0.947, 1.036] {
+        let shape = FadeShape { rate: Some(rate), ..Default::default() };
+        let out = blend_of(&silent, &tone, 48_000, shape, &SoundSettings::default());
+        let fade_start = 48_000 + LATENCY;
+        // The tone plays on well past the ease, where the rate stage is gone;
+        // its own end is left out.
+        let until = out.len() / 2 - RATE as usize / 2;
+        assert!(until > fade_start + RATE as usize * 7, "rate {rate}: {} frames", out.len() / 2);
+        let step = (fade_start..until).map(|i| (out[i * 2] - out[(i - 1) * 2]).abs()).fold(0.0, f32::max);
+        assert!(step < slope * 1.5, "rate {rate}: a step of {step} (the tone moves {slope} a frame)");
+    }
+}
+
 // A with sound for its first `sound` frames and silence after, into B as
 // a steady level on the right, blending from 1 s for 1 s.
 fn blend_into_silence(shape: FadeShape, sound: usize) -> Vec<f32> {
