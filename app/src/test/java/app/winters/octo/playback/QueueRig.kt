@@ -64,6 +64,24 @@ internal class AnyMedia : MediaForDevice {
     override suspend fun make(item: MediaItem, output: RemoteOutput) = RemoteMedia("http://device/${item.mediaId}", "audio/mpeg", item.mediaId)
 }
 
+// A player whose upkeep waits while `busy`, as the phone's does while a
+// blend is under way; `free()` lets what waited run, as the blend's end does.
+internal class GatedQueue(private val to: EditableQueue) : EditableQueue by to {
+    var busy = false
+    val waiting = ArrayList<() -> Unit>()
+
+    override fun upkeep(write: () -> Unit) {
+        if (busy) waiting += write else write()
+    }
+
+    fun free() {
+        busy = false
+        val writes = waiting.toList()
+        waiting.clear()
+        writes.forEach { it() }
+    }
+}
+
 // The queue as the service holds it, over a test library: the session's
 // player (the phone's, swapped for a quiet device's so nothing loads), the
 // window over Room, its builders and its first reads, with small window
@@ -82,6 +100,9 @@ internal class QueueRig(
     listening: app.winters.octo.listening.TotalsRig? = null,
     // The library's merge, when the test runs one of its own.
     libraryMerge: CatalogMerge? = null,
+    // Whether the window moves the player through a gate that can hold the
+    // app's own upkeep back, as a blend under way does.
+    gated: Boolean = false,
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val scope = MainScope()
@@ -105,14 +126,19 @@ internal class QueueRig(
     val player = OutputSwitch(local) { if (::window.isInitialized) window else null }
     val words = ArrayList<String>()
 
+    // The gate, when `gated`: the device's player with the upkeep held back
+    // while `busy`.
+    val gate = GatedQueue(remote)
+    private val inner: () -> EditableQueue = if (gated) ({ gate }) else ({ player.active })
+
     init {
         remote.start(QueueState(emptyList(), 0, 0, playing = false))
         player.useRemote(remote)
         val guard = PlayGuard({ player.replacements }, { "home" })
         window = if (random == null) {
-            QueueWindow(player, { player.active }, store, builds, starts, ::items, { "home" }, guard, scope, sizes, { words += it })
+            QueueWindow(player, inner, store, builds, starts, ::items, { "home" }, guard, scope, sizes, { words += it })
         } else {
-            QueueWindow(player, { player.active }, store, builds, starts, ::items, { "home" }, guard, scope, sizes, { words += it }, random)
+            QueueWindow(player, inner, store, builds, starts, ::items, { "home" }, guard, scope, sizes, { words += it }, random)
         }
     }
 

@@ -114,14 +114,22 @@ class StationRefill @Inject constructor(
             Log.i("Octo", "station top-up: nothing added")
             return
         }
-        val first = player.mediaItemCount
-        val window = window
-        if (window != null) window.addAtEnd(items, autoplay = false, source = station.encoded()) else player.addMediaItems(first, items)
-        // The last song already ended while the server answered: carry on.
-        if (player.playbackState == Player.STATE_ENDED) {
-            player.seekTo(first, 0)
-            player.play()
+        // The add is the app's own upkeep: while a blend is under way it waits,
+        // and goes only if the queue still ends as it did then.
+        player.upkeep {
+            if (lastToPlay(player) != last) {
+                Log.i("Octo", "station top-up: nothing added, the queue changed")
+                return@upkeep
+            }
+            val first = player.mediaItemCount
+            val window = window
+            if (window != null) window.addAtEnd(items, autoplay = false, source = station.encoded()) else player.addMediaItems(first, items)
+            // The last song already ended while the server answered: carry on.
+            if (player.playbackState == Player.STATE_ENDED) {
+                player.seekTo(first, 0)
+                player.play()
+            }
+            Log.i("Octo", "station top-up: added ${items.size}")
         }
-        Log.i("Octo", "station top-up: added ${items.size}")
     }
 }

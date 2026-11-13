@@ -167,17 +167,21 @@ class Autoplay @Inject constructor(
             Log.i("Octo", "autoplay: nothing to add")
             return
         }
-        // Only if the song is still the last one and the setting still on.
-        if (!enabled || player.currentMediaItem?.entryId != key || player.hasNextMediaItem()) return
-        val first = player.mediaItemCount
-        val window = window
-        if (window != null) window.addAtEnd(items, autoplay = true, source = QueueSource.Autoplay.encoded()) else player.addMediaItems(first, items)
-        // The song already ended while the server answered: carry on.
-        if (player.playbackState == Player.STATE_ENDED) {
-            player.seekTo(first, 0)
-            player.play()
+        // The add is the app's own upkeep: while a blend is under way it
+        // waits. Either way, only if the song is still the last one and the
+        // setting still on.
+        player.upkeep {
+            if (!enabled || player.currentMediaItem?.entryId != key || player.hasNextMediaItem()) return@upkeep
+            val first = player.mediaItemCount
+            val window = window
+            if (window != null) window.addAtEnd(items, autoplay = true, source = QueueSource.Autoplay.encoded()) else player.addMediaItems(first, items)
+            // The song already ended while the server answered: carry on.
+            if (player.playbackState == Player.STATE_ENDED) {
+                player.seekTo(first, 0)
+                player.play()
+            }
+            Log.i("Octo", "autoplay: added ${items.size}")
         }
-        Log.i("Octo", "autoplay: added ${items.size}")
     }
 
     // How long until the song ends, in real time at the current speed.

@@ -234,11 +234,16 @@ class QueueWindow(
     // A rename left a list that plays each song once holding a song twice:
     // the row later in the order that plays leaves the player and Room,
     // unless it is the song playing, when the other one does.
+    // It is the app's own upkeep: while a blend is under way it waits, and
+    // decides again with the song on then.
     private fun dropDoubled(pairs: List<Doubled>) {
         val queueId = queueId
-        val current = entryOfKey(inner().currentMediaItem?.entryId)
-        val out = pairs.filter { it.queueId == queueId }.map { if (it.drop == current) it.keep else it.drop }.distinct()
-        if (out.isNotEmpty()) removeEntries(out)
+        inner().upkeep {
+            if (queueId != this.queueId) return@upkeep
+            val current = entryOfKey(inner().currentMediaItem?.entryId)
+            val out = pairs.filter { it.queueId == queueId }.map { if (it.drop == current) it.keep else it.drop }.distinct()
+            if (out.isNotEmpty()) removeEntries(out)
+        }
     }
 
     fun release() {
@@ -1114,8 +1119,14 @@ class QueueWindow(
     // the same song either way.
     override fun innerRepeat(): Int = if (windowed && _listenerRepeat == Player.REPEAT_MODE_ALL) Player.REPEAT_MODE_OFF else _listenerRepeat
 
-    private fun applyRepeat() {
+    // From the count's read (`upkeep`), the write waits while a blend is
+    // under way.
+    private fun applyRepeat(upkeep: Boolean = false) {
         val now = inner()
+        if (upkeep) {
+            if (now.repeatMode != innerRepeat()) now.upkeep { if (inner() === now) applyRepeat() }
+            return
+        }
         if (now.repeatMode != innerRepeat()) now.repeatMode = innerRepeat()
     }
 
@@ -1181,7 +1192,7 @@ class QueueWindow(
             if (queueId != this@QueueWindow.queueId) return@launch
             _logicalCount.value = count + expected.toInt()
             _windowed = count > sizes.window
-            applyRepeat()
+            applyRepeat(upkeep = true)
             refreshEnds()
             topUpSoon()
         }
@@ -1232,11 +1243,23 @@ class QueueWindow(
         (player as? app.winters.octo.output.OutputSwitch)?.mirrorChanged()
     }
 
-    // Tops the window up once nothing is under way: never during a blend.
+    // Tops the window up. It is the app's own upkeep: it reads at once,
+    // and its writes wait while a blend is under way, so every song still
+    // blends and the window still moves on when every song does.
     fun topUpSoon() {
-        if (!windowed || topUp?.isActive == true || (inner() as? SleepTarget)?.isBlending == true) return
-        topUp = scope.launch { topUpNow() }
+        if (topUp?.isActive == true) topUpAgain = true
+        if (!windowed || topUp?.isActive == true) return
+        topUp = scope.launch {
+            do {
+                topUpAgain = false
+                topUpNow()
+            } while (topUpAgain && windowed)
+        }
     }
+
+    // A top-up asked for while one runs (a waiting write found the window
+    // moved and reads again): it runs once more when that one ends.
+    private var topUpAgain = false
 
     // Brings the window to `ahead` songs past the current one in the order
     // that plays, and trims it to `behind` before it.
@@ -1246,10 +1269,10 @@ class QueueWindow(
         if (queueId == 0L || now.mediaItemCount == 0) return false
         var moved = false
         val ahead = upcoming(now).size
-        if (ahead < sizes.topUpAt) moved = extend(queueId, forward = true, asked = sizes.ahead - ahead)
-        trim(now)
+        if (ahead < sizes.topUpAt) moved = extend(queueId, forward = true, asked = sizes.ahead - ahead, upkeep = true)
+        trim(now, upkeep = true)
         val behind = playedBefore(now).size
-        if (behind < 50 && !atLogicalStart) moved = extend(queueId, forward = false, asked = sizes.behind - behind) || moved
+        if (behind < 50 && !atLogicalStart) moved = extend(queueId, forward = false, asked = sizes.behind - behind, upkeep = true) || moved
         return moved
     }
 
@@ -1267,19 +1290,24 @@ class QueueWindow(
 
     // Adds up to `want` rows past the window's edge in the order that
     // plays, stopping at a list still being written; under repeat-all the
-    // queue's first rows follow its last.
-    private suspend fun extend(queueId: Long, forward: Boolean, asked: Int): Boolean {
+    // queue's first rows follow its last. For the app's own top-up
+    // (`upkeep`), each player write waits while a blend is under way and is
+    // checked again when it runs; the read is kept unless the window moved.
+    private suspend fun extend(queueId: Long, forward: Boolean, asked: Int, upkeep: Boolean = false): Boolean {
         val now = inner()
         // The player never holds more than the window: going forward what
         // was played goes, going back what is furthest ahead.
-        trim(now)
+        trim(now, upkeep)
         if (!forward) {
-            val far = upcoming(now).drop(sizes.ahead)
-            if (far.isNotEmpty()) {
-                far.forEach { i -> entryOfKey(now.getMediaItemAt(i).entryId)?.let(queueRows::add) }
-                now.removeRuns(removalRuns(far))
-                version++
-                _atLogicalEnd.value = false
+            if (upkeep) {
+                if (upcoming(now).size > sizes.ahead) {
+                    now.upkeep {
+                        if (queueId != this.queueId || inner() !== now) return@upkeep
+                        if (dropFar(now)) topUpSoon()
+                    }
+                }
+            } else {
+                dropFar(now)
             }
         }
         val want = minOf(asked, sizes.window - now.mediaItemCount)
@@ -1313,8 +1341,31 @@ class QueueWindow(
         val (page, windowRows) = read
         if (page.isEmpty()) return false
         val placed = itemsOf(page) ?: return false
-        if (stamp != version || queueId != this.queueId) return extend(queueId, forward, want)
-        place(now, windowRows + placed.first, placed.second)
+        if (stamp != version || queueId != this.queueId) return extend(queueId, forward, want, upkeep)
+        if (!upkeep) {
+            place(now, windowRows + placed.first, placed.second)
+            return true
+        }
+        now.upkeep {
+            if (queueId != this.queueId || inner() !== now) return@upkeep
+            // The window moved while the write waited: read again.
+            if (stamp != version) {
+                topUpSoon()
+                return@upkeep
+            }
+            place(now, windowRows + placed.first, placed.second)
+        }
+        return true
+    }
+
+    // Takes out what lies furthest ahead past `ahead`; true when it took any.
+    private fun dropFar(now: EditableQueue): Boolean {
+        val far = upcoming(now).drop(sizes.ahead)
+        if (far.isEmpty()) return false
+        far.forEach { i -> entryOfKey(now.getMediaItemAt(i).entryId)?.let(queueRows::add) }
+        now.removeRuns(removalRuns(far))
+        version++
+        _atLogicalEnd.value = false
         return true
     }
 
@@ -1407,8 +1458,13 @@ class QueueWindow(
     }
 
     // Takes the oldest items behind the current one out of the player, down
-    // to `behind`, once there are more than `trimAt`.
-    private fun trim(now: EditableQueue) {
+    // to `behind`, once there are more than `trimAt`. For the app's own
+    // top-up (`upkeep`) it waits while a blend is under way and counts again.
+    private fun trim(now: EditableQueue, upkeep: Boolean = false) {
+        if (upkeep) {
+            if (playedBefore(now).size > sizes.trimAt) now.upkeep { if (inner() === now) trim(now) }
+            return
+        }
         val played = playedBefore(now)
         if (played.size <= sizes.trimAt) return
         played.drop(sizes.behind).forEach { i -> entryOfKey(now.getMediaItemAt(i).entryId)?.let(queueRows::add) }
@@ -1418,8 +1474,10 @@ class QueueWindow(
     }
 
     // The window around the current entry again, after a shuffle change or
-    // a join: rows that belong come in, the rest go, the current stays.
-    fun rebuild() {
+    // a join: rows that belong come in, the rest go, the current stays. After
+    // a join it is the app's own upkeep (`upkeep`): its write waits while a
+    // blend is under way, and reads again if the window moved meanwhile.
+    fun rebuild(upkeep: Boolean = false) {
         val queueId = queueId
         val now = inner()
         if (now.currentMediaItem == null) return
@@ -1439,12 +1497,23 @@ class QueueWindow(
                 if (stamp != version && tries < REBUILD_TRIES) continue
                 // Still moving on the last try: nothing is taken out, and the
                 // next top-up and trim tidy the window.
-                val out = if (stamp != version) emptyList() else (0 until now.mediaItemCount).filter { i ->
-                    val e = entryOfKey(now.getMediaItemAt(i).entryId)
-                    e != current && e !in wanted
+                val write = {
+                    val out = if (stamp != version) emptyList() else (0 until now.mediaItemCount).filter { i ->
+                        val e = entryOfKey(now.getMediaItemAt(i).entryId)
+                        e != current && e !in wanted
+                    }
+                    if (out.isNotEmpty()) now.removeRuns(removalRuns(out))
+                    place(now, window.filter { it.entry in held || it.entry in placed.second }, placed.second)
                 }
-                if (out.isNotEmpty()) now.removeRuns(removalRuns(out))
-                place(now, window.filter { it.entry in held || it.entry in placed.second }, placed.second)
+                if (!upkeep) {
+                    write()
+                } else {
+                    val stampNow = version
+                    now.upkeep {
+                        if (queueId != this@QueueWindow.queueId || inner() !== now) return@upkeep
+                        if (version != stampNow || entryOfKey(now.currentMediaItem?.entryId) != current) rebuild(upkeep = true) else write()
+                    }
+                }
                 break
             }
             refreshCount()
@@ -1637,7 +1706,7 @@ class QueueWindow(
             val waiting = withContext(Dispatchers.IO) { dao.listsOf(queueId).filter { it.fillState == QueueBuilds.BUILDING } }
             waiting.forEach { fill.start(it.listId, it.queueId) }
             refreshCount()
-            rebuild()
+            rebuild(upkeep = true)
             rebuilding?.join()
             // The server's copy of the queue holds the joined list's songs
             // now, whether or not the window changed.
