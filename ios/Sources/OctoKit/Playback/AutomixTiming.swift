@@ -54,12 +54,14 @@ public func isRebuffering(playWhenReady: Bool, state: DeckState, suppression: De
 }
 
 extension AutomixSettings {
-    /// The settings the planner gets at a playback speed: the longest blend is in song time, so
-    /// at 1.5x speed an 8 s blend covers 12 s of the songs and still lasts 8 s.
+    /// The settings the planner gets at a playback speed: the longest blend and the longest intro
+    /// are in song time, so at 1.5x speed an 8 s blend covers 12 s of the songs and still lasts
+    /// 8 s.
     public func atSpeed(_ speed: Float) -> AutomixSettings {
         if speed == 1 { return self }
         var paced = self
         paced.maxOverlapMs = Int((Double(maxOverlapMs) * Double(speed)).rounded())
+        paced.longestIntroMs = Int((Double(longestIntroMs) * Double(speed)).rounded())
         return paced
     }
 }

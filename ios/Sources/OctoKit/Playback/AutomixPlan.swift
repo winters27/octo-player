@@ -24,11 +24,45 @@ public let preRollMs = 3_000
 /// Without a beat grid the start is tried every this many milliseconds.
 public let startStepMs = 250
 
-/// The incoming song's entry moves onto a beat this close to its first sound.
-public let entrySnapMs = 300.0
-
 /// Both songs play this much quieter through the overlap, so their sum does not clip.
 public let overlapHeadroomDb = 1.0
+
+/// Automix's longest blend, and its longest intro played under the end of the song before, both
+/// in song time.
+public let automixLongestBlendMs = 8_000
+public let automixLongestIntroMs = 16_000
+
+/// An intro plays under the outgoing song only when its quiet stretch lasts at least this long.
+public let introShortestMs = 4_000
+
+/// The outgoing song fades out under an intro over this many bars when the blend is locked to the
+/// bar, else over `introFadeMs`.
+public let introFadeBars = 2
+public let introFadeMs = 3_000
+
+/// The incoming song rises to its own level over this long at the start of an intro (one bar
+/// when locked).
+public let introRiseMs = 1_000
+
+/// Music at full level the outgoing song would lose after a blend's end: above
+/// `keptMusicLimitMs` the start is left out, and each second below it costs `keptMusicWeight`.
+/// Full level is within `keptMusicBelowBodyDb` of the body.
+public let keptMusicLimitMs = 1_000
+public let keptMusicWeight = 0.5
+public let keptMusicBelowBodyDb = 6.0
+
+/// Match tempo reaches tempos this far apart, as a share.
+public let beatMatchLargestGap = 0.06
+
+/// Wherever both songs are clearly heard together, their beats drift apart by at most
+/// `blendDriftLimitMs`; clearly heard is within `bothHeardBelowBodyDb` of a song's body.
+public let bothHeardBelowBodyDb = 10.0
+
+/// How finely the planner walks a blend to find where both songs are heard.
+private let heardStepMs = 10.0
+
+/// A song's grid point this close before its start counts as at its start.
+private let gridAtStartMs = 1.0
 
 /// Songs in these genres get the plain crossfade, never a planned one.
 public func isPlainCrossfadeGenre(_ genre: String) -> Bool {
@@ -40,7 +74,7 @@ public func isPlainCrossfadeGenre(_ genre: String) -> Bool {
 public enum TransitionKind: String, Sendable {
     /// One song straight after the other, no overlap.
     case gapless = "GAPLESS"
-    /// The fixed equal-power crossfade at the end of the song.
+    /// The fixed crossfade at the end of the song.
     case crossfade = "CROSSFADE"
     /// A short planned swap.
     case cut = "CUT"
@@ -48,12 +82,18 @@ public enum TransitionKind: String, Sendable {
     case lift = "LIFT"
     /// A planned blend.
     case blend = "BLEND"
+    /// The next song's quiet start played under the end of this one: the outgoing song holds its
+    /// level, then fades out around the moment the incoming one reaches its full level.
+    case intro = "INTRO"
 }
 
 /// What the player sets for planned transitions.
 public struct AutomixSettings: Sendable, Equatable, Hashable {
-    /// The longest blend, from the crossfade slider; 0 turns crossfade off.
+    /// The longest blend: Crossfade's length, or `automixLongestBlendMs` for Automix; 0 plays
+    /// every song gapless.
     public var maxOverlapMs: Int
+    /// The longest intro played under the end of the song before.
+    public var longestIntroMs: Int
     /// Off plays the fixed crossfade at the end of each song.
     public var smart: Bool
     public var filterSweeps: Bool
@@ -63,9 +103,10 @@ public struct AutomixSettings: Sendable, Equatable, Hashable {
     /// their own curves.
     public var fadeCurve: FadeCurve
 
-    public init(maxOverlapMs: Int, smart: Bool = true, filterSweeps: Bool = true, beatMatch: Bool = false,
-                fadeCurve: FadeCurve = .equalPower) {
+    public init(maxOverlapMs: Int, longestIntroMs: Int = automixLongestIntroMs, smart: Bool = true, filterSweeps: Bool = true,
+                beatMatch: Bool = false, fadeCurve: FadeCurve = .equalPower) {
         self.maxOverlapMs = maxOverlapMs
+        self.longestIntroMs = longestIntroMs
         self.smart = smart
         self.filterSweeps = filterSweeps
         self.beatMatch = beatMatch
@@ -76,8 +117,10 @@ public struct AutomixSettings: Sendable, Equatable, Hashable {
 /// Where the player is when it plans, and what it knows besides the scouted sections. `nowMs` is
 /// the outgoing song's position and `playedMs` how much of it has actually been heard (less than
 /// nowMs after a seek forward). `bodyLevelDb` and `tempoPrior` come from a LiveTap of the
-/// outgoing song. A pace other than 1 or skip-silence moves media time away from the beat, so
-/// they turn off bar lock and tempo matching.
+/// outgoing song. Skip-silence moves media time away from the beat, and so does a pace other
+/// than 1 unless `lockAtPace` says the player changes the speed of both songs together after
+/// they are mixed: either turns off bar lock and tempo matching. `pace` is also the speed the
+/// beats are heard at.
 public struct TransitionContext: Sendable, Equatable {
     public var nowMs: Int
     public var playedMs: Int
@@ -89,10 +132,11 @@ public struct TransitionContext: Sendable, Equatable {
     public var nextGenre: String?
     public var bodyLevelDb: Double?
     public var tempoPrior: Double?
+    public var lockAtPace: Bool
 
     public init(nowMs: Int = 0, playedMs: Int? = nil, repeatOne: Bool = false, stopAtEndOfSong: Bool = false, pace: Double = 1,
                 skipSilence: Bool = false, currentGenre: String? = nil, nextGenre: String? = nil, bodyLevelDb: Double? = nil,
-                tempoPrior: Double? = nil) {
+                tempoPrior: Double? = nil, lockAtPace: Bool = false) {
         self.nowMs = nowMs
         self.playedMs = playedMs ?? nowMs
         self.repeatOne = repeatOne
@@ -103,18 +147,39 @@ public struct TransitionContext: Sendable, Equatable {
         self.nextGenre = nextGenre
         self.bodyLevelDb = bodyLevelDb
         self.tempoPrior = tempoPrior
+        self.lockAtPace = lockAtPace
     }
 }
 
 /// How to move from one song to the next. At startMs into the outgoing song the incoming song
 /// starts playing from entryMs, and over overlapMs the volumes follow `automixOutGain` /
-/// `automixInGain` with curve weight k, both lowered by headroomDb. With a filterStrength above 0
-/// the filter sweeps run through the overlap and are bypassed once it ends. beatMatchRate, when
-/// set, is the incoming song's playback rate through the blend. beatMs and beatAnchorMs, when
-/// set, are the outgoing song's beat length and one of its beats in song time: the blend is
-/// locked to the bar and the low-pass steps on the beat. `late` marks a blend placed at the end
-/// because there was no time or data to choose a better place. `reason` says why this plan was
-/// chosen.
+/// `automixInGain` with curve weight k (or, for a fixed crossfade's chosen curve, `fadeGains`,
+/// and for an intro `introOutGain` / `introInGain`), both lowered by headroomDb. With a
+/// filterStrength above 0 the filter sweeps run through the overlap and are bypassed once it
+/// ends. beatMatchRate, when set, is the incoming song's playback rate through the blend. beatMs
+/// and beatAnchorMs, when set, are the outgoing song's beat length and one of its beats in song
+/// time: the blend is locked to the bar and the low-pass steps on the beat. `late` marks a blend
+/// placed at the end because there was no time or data to choose a better place. `reason` says
+/// why this plan was chosen.
+///
+/// An intro's shape is in shares of the overlap: the outgoing song holds its level until
+/// holdShare, then fades out; the incoming one rises over riseShare, then holds. Any other kind
+/// whose incoming song enters before its first sound holds too: the outgoing song at its own
+/// level and the incoming one silent until holdShare, where that sound comes, then the curve
+/// over the rest. Both are 0 otherwise. `latestEndMs` is the latest the blend may end in the
+/// outgoing song's time: where its sound ends (at most `endMarginMs` before its end) for a
+/// planned blend, the end a late blend was placed against, the song's length for a fixed
+/// crossfade and for a gapless join. `lateMoveBars` is how many whole bars of the outgoing song a
+/// player that starts the plan late may move it later as it is, `lateMoveUnbounded` when any
+/// number may (a plan with no bar grid, a matched rate or two equal tempos); past that the player
+/// plans again from where it is. Every plan sets it.
+///
+/// Counted from startMs in the outgoing song's time, both songs are clearly heard together from
+/// `bothHeardStartMs` to `bothHeardEndMs` (both 0 when they never are), and their beats meet at
+/// `lockMs`. `driftGap` is how fast the beats part from there, the share their tempos are apart,
+/// 0 when they cannot drift (a matched rate, equal tempos) or are not lined up; `driftAtEndMs` is
+/// how far apart they get in song time while both are heard. Heard at a speed s, the beats are
+/// that far apart over s: `dropCutAtMs` says where a speed lowered to s puts them too far apart.
 public struct TransitionPlan: Sendable, Equatable {
     public var startMs: Int
     public var entryMs: Int
@@ -130,10 +195,21 @@ public struct TransitionPlan: Sendable, Equatable {
     public var reason: String
     /// A fixed crossfade's chosen curve, followed in place of the curve weight k when set.
     public var curve: FadeCurve?
+    public var holdShare: Double
+    public var riseShare: Double
+    public var latestEndMs: Int
+    public var lateMoveBars: Int
+    public var bothHeardStartMs: Int
+    public var bothHeardEndMs: Int
+    public var lockMs: Double
+    public var driftGap: Double
+    public var driftAtEndMs: Double
 
+    /// `latestEndMs` left out is the plan's own end.
     public init(startMs: Int, entryMs: Int, overlapMs: Int, kind: TransitionKind, k: Double, filterStrength: Double,
                 beatMatchRate: Double?, beatMs: Double?, beatAnchorMs: Double?, late: Bool, headroomDb: Double, reason: String,
-                curve: FadeCurve? = nil) {
+                curve: FadeCurve? = nil, holdShare: Double = 0, riseShare: Double = 0, latestEndMs: Int? = nil, lateMoveBars: Int,
+                bothHeardStartMs: Int = 0, bothHeardEndMs: Int = 0, lockMs: Double = 0, driftGap: Double = 0, driftAtEndMs: Double = 0) {
         self.startMs = startMs
         self.entryMs = entryMs
         self.overlapMs = overlapMs
@@ -147,6 +223,15 @@ public struct TransitionPlan: Sendable, Equatable {
         self.headroomDb = headroomDb
         self.reason = reason
         self.curve = curve
+        self.holdShare = holdShare
+        self.riseShare = riseShare
+        self.latestEndMs = latestEndMs ?? startMs + overlapMs
+        self.lateMoveBars = lateMoveBars
+        self.bothHeardStartMs = bothHeardStartMs
+        self.bothHeardEndMs = bothHeardEndMs
+        self.lockMs = lockMs
+        self.driftGap = driftGap
+        self.driftAtEndMs = driftAtEndMs
     }
 
     public var barLocked: Bool { beatMs != nil }
@@ -155,14 +240,20 @@ public struct TransitionPlan: Sendable, Equatable {
         overlapMs <= 0 ? 1 : min(max((outgoingMs - Double(startMs)) / Double(overlapMs), 0), 1)
     }
 
+    /// Each song's volume at `t` through the blend: an intro's hold and rise, else the curve
+    /// after any held start.
     public func outGain(_ t: Double) -> Double {
-        if let curve { return fadeGains(curve, t, overlapMs: overlapMs).out }
-        return automixOutGain(t, k)
+        if kind == .intro { return introOutGain(t, holdShare) }
+        let along = pastHold(t, holdShare)
+        if let curve { return fadeGains(curve, along, overlapMs: Double(overlapMs) * (1 - holdShare)).out }
+        return automixOutGain(along, k)
     }
 
     public func inGain(_ t: Double) -> Double {
-        if let curve { return fadeGains(curve, t, overlapMs: overlapMs).incoming }
-        return automixInGain(t, k)
+        if kind == .intro { return introInGain(t, riseShare) }
+        let along = pastHold(t, holdShare)
+        if let curve { return fadeGains(curve, along, overlapMs: Double(overlapMs) * (1 - holdShare)).incoming }
+        return automixInGain(along, k)
     }
 
     /// The outgoing song's beats inside the blend as places through it (0 to 1). A beat within a
@@ -192,20 +283,42 @@ public struct TransitionPlan: Sendable, Equatable {
     }
 }
 
+/// Where, counted from the plan's start, a speed lowered to `speed` while the blend is `fromMs`
+/// along first puts its two songs' beats heard over `blendDriftLimitMs` apart while both are still
+/// clearly heard: the first moment at or after `fromMs` in [bothHeardStartMs, bothHeardEndMs]
+/// where driftGap * |t - lockMs| passes `blendDriftLimitMs` * speed (`fromMs` itself when they
+/// are already that far apart there, else the moment after the lock point where the offset
+/// reaches the limit, when the stretch goes on past it). Nil when no such moment comes, and the
+/// blend plays on as planned.
+public func dropCutAtMs(_ plan: TransitionPlan, _ speed: Double, _ fromMs: Double) -> Double? {
+    if plan.bothHeardEndMs <= 0 { return nil }
+    return blendDropCutAtMs(bothHeardStartMs: Double(plan.bothHeardStartMs), bothHeardEndMs: Double(plan.bothHeardEndMs),
+                            lockMs: plan.lockMs, driftGap: plan.driftGap, pace: speed, fromMs: fromMs)
+}
+
 /// Plans the move from the playing song to the next one. `tail` is the analysis of the end of
 /// the playing song (analyzeTail) and `head` of the start of the next one (analyzeHead), either
 /// nil when it is not ready. Every rule of crossfadeLength still holds: when it gives no
-/// crossfade the songs play gaplessly. With smart transitions off the plan is the equal-power
-/// crossfade (fixedCrossfadePlan); for a song under 35 s or in a genre that should not be mixed,
-/// the fixed crossfade with the plain curve. Without the tail, or when no start is left at least
-/// `preRollMs` ahead, the plan is a late one: the blend at the end, with the curve and the
-/// filters but no bar lock.
+/// crossfade the songs play gaplessly. With smart transitions off the plan is the fixed crossfade
+/// (fixedCrossfadePlan) on the settings' curve; for a song under 35 s or in a genre that should
+/// not be mixed, the fixed crossfade with the plain curve. Without the tail, or when no start is
+/// left at least `preRollMs` ahead, the plan is a late one: the blend at the end.
+///
+/// When both songs' tempos are trusted (each confident, the outgoing one agreeing with the whole
+/// song's, and the beats able to stay locked at this pace) every plan is locked to the outgoing
+/// song's bars, the incoming song entering on its own grid, and a rate matches tempos up to
+/// `beatMatchLargestGap` apart. Without a rate, wherever both songs are clearly heard their beats
+/// stay within `blendDriftLimitMs` times the pace of each other: a blend starts later or becomes a
+/// short cut until they do, or the songs join gaplessly. With both tempos confident but no lock, a
+/// blend where both songs are clearly heard cannot be kept on the beat at all, so only one where
+/// they never are is planned. A plan with a rate whose next song is too short to ease back to its
+/// own speed is planned again without the rate.
 public func planTransition(current: FadeSong, next: FadeSong?, tail: SectionAnalysis?, head: SectionAnalysis?,
                            settings: AutomixSettings, context: TransitionContext = TransitionContext()) -> TransitionPlan {
     let plain = crossfadeLength(current, next, fadeMs: settings.maxOverlapMs, repeatOne: context.repeatOne,
                                 stopAtEndOfSong: context.stopAtEndOfSong)
     guard plain != 0, let next else {
-        return gaplessPlan(current, gaplessReason(current, next, settings.maxOverlapMs, context.repeatOne, context.stopAtEndOfSong))
+        return gaplessPlan(current.durationMs, gaplessReason(current, next, settings.maxOverlapMs, context.repeatOne, context.stopAtEndOfSong))
     }
     let lenA = current.durationMs
     let lenB = next.durationMs
@@ -216,142 +329,567 @@ public func planTransition(current: FadeSong, next: FadeSong?, tail: SectionAnal
     if lenA < shortestAutomixSongMs || lenB < shortestAutomixSongMs {
         return crossfadePlan(lenA, plain, "a song under \(shortestAutomixSongMs / 1000) s")
     }
+    let matched = planPass(lenA, lenB, tail, head, settings, context, withRate: true)
+    guard let rate = matched.beatMatchRate else { return matched }
+    // The incoming song spends overlap * rate of its own time in the blend and needs the settle
+    // after it to ease back to its own speed.
+    if Double(lenB - matched.entryMs) > Double(matched.overlapMs) * rate + beatMatchSettleMs + 1_000 { return matched }
+    return planPass(lenA, lenB, tail, head, settings, context, withRate: false)
+}
 
+/// One pass of the planner, with a rate when `withRate` allows one.
+private func planPass(_ lenA: Int, _ lenB: Int, _ tail: SectionAnalysis?, _ head: SectionAnalysis?, _ settings: AutomixSettings,
+                      _ context: TransitionContext, withRate: Bool) -> TransitionPlan {
     let limit = min(Double(settings.maxOverlapMs), Double(min(lenA, lenB)) / 2.0)
     let sweeps = settings.filterSweeps ? filterStrength : 0.0
     let headFeatures = head?.features.soundStartMs != nil ? head?.features : nil
     let headEntry = headFeatures?.soundStartMs ?? 0
-    let canLock = context.pace == 1.0 && !context.skipSilence
     let fixedEnd = Double(lenA - endMarginMs)
 
     guard let tail else {
-        return latePlan(lenA, fixedEnd, limit, context.nowMs, headEntry, nil, head, sweeps, "no analysis of this song's end")
+        return loosePlan(lenA, fixedEnd, limit, Double(context.nowMs), headEntry, nil, head, sweeps, "no analysis of this song's end")
     }
     let measured = context.bodyLevelDb.map(tail.withBodyLevel) ?? tail
     let a = measured.features
     guard let soundEndA = a.soundEndMs, let outroA = a.outroStartMs else {
-        return latePlan(lenA, fixedEnd, limit, context.nowMs, headEntry, nil, head, sweeps, "this song's end is silent")
+        return loosePlan(lenA, fixedEnd, limit, Double(context.nowMs), headEntry, nil, head, sweeps, "this song's end is silent")
     }
 
     let latestEnd = Double(min(soundEndA, lenA - endMarginMs))
     let outroStart = min(Double(outroA), latestEnd)
     var tempoA = a.tempo?.confident == true ? a.tempo : nil
+    var dropped = false
     if let found = tempoA, let prior = context.tempoPrior, prior > 0 {
         // The end must keep the tempo the whole song has.
         let moved = found.inOctaveOf(prior)
-        tempoA = abs(moved.bpm / prior - 1) <= 0.04 ? moved : nil
+        if abs(moved.bpm / prior - 1) <= 0.04 {
+            tempoA = moved
+        } else {
+            tempoA = nil
+            dropped = true
+        }
     }
     let tempoB = headFeatures?.tempo?.confident == true ? headFeatures?.tempo : nil
-    let lockA = canLock && tempoB != nil ? tempoA : nil
+    let canLock = (context.pace == 1.0 || context.lockAtPace) && !context.skipSilence
+    let confident = tempoA != nil && tempoB != nil
+    let lockA = confident && canLock ? tempoA : nil
     let lockB = lockA != nil ? tempoB : nil
     let ratio: Double? = if let lockA, let lockB { foldTempoRatio(lockA.bpm / lockB.bpm) } else { nil }
+    let gap = ratio.map { abs($0 - 1) } ?? 0
+    var rate: Double?
+    if let ratio, withRate, settings.beatMatch, gap > 0, gap <= beatMatchLargestGap { rate = min(max(ratio, 0.94), 1.06) }
 
+    // The entry of a locked plan is on the incoming song's own grid, at or before its first sound.
     let soundStartB = Double(headEntry)
-    var entry = soundStartB
-    if let lockB {
-        let beat = lockB.nearestBeat(entry)
-        if abs(beat - entry) <= entrySnapMs { entry = max(0, beat) }
+    let (entry, leadIn) = lockB.map { gridEntry($0, soundStartB, downbeats: rate != nil) } ?? (soundStartB, 0)
+    return PlanPass(
+        lenA: lenA, limit: limit, sweeps: sweeps, measured: measured, head: head, headFeatures: headFeatures, settings: settings,
+        context: context, latestEnd: latestEnd, outroStart: outroStart, dropped: dropped, lockA: lockA, ratio: ratio, gap: gap,
+        rate: rate, entry: entry, lead: leadIn / (rate ?? 1), leadHold: leadIn > 0 ? soundStartB / (rate ?? 1) : 0,
+        blind: confident && !canLock
+    ).plan()
+}
+
+/// The incoming song's entry on its own grid: its last downbeat (with a rate) or beat at or
+/// before its first sound, so none of its sound is cut. When that falls before the song's start
+/// the song enters at 0, and the second value is how far into the song its first grid point
+/// lies: the outgoing song's start moves that much earlier, so that point lands on the outgoing
+/// song's line.
+private func gridEntry(_ b: Tempo, _ soundStartMs: Double, downbeats: Bool) -> (Double, Double) {
+    let step = downbeats ? b.barMs : b.beatMs
+    let anchor = downbeats ? b.downbeatMs : b.firstBeatMs
+    let last = anchor + ((soundStartMs - anchor) / step + 1e-9).rounded(.down) * step
+    return last >= -gridAtStartMs ? (max(0, last), 0) : (0, last + step)
+}
+
+/// A place a blend or intro may go: from startMs over overlapMs in the outgoing song's time, its
+/// beats meeting the incoming song's at lockMs (the start, or later by the incoming song's
+/// lead-in). An intro holds and rises over its shares; any other shape holds until holdShare,
+/// then follows curve weight `k`, or when that is nil the curve its own length takes.
+private struct Shape {
+    var startMs: Double
+    var lockMs: Double
+    var overlapMs: Double
+    var onBar: Bool
+    var intro = false
+    var holdShare = 0.0
+    var riseShare = 0.0
+    var k: Double?
+
+    var endMs: Double { startMs + overlapMs }
+
+    func shifted(_ ms: Double) -> Shape {
+        var moved = self
+        moved.startMs += ms
+        moved.lockMs += ms
+        return moved
+    }
+}
+
+private struct PlanPass {
+    let lenA: Int
+    let limit: Double
+    let sweeps: Double
+    let measured: SectionAnalysis
+    let head: SectionAnalysis?
+    let headFeatures: SectionFeatures?
+    let settings: AutomixSettings
+    let context: TransitionContext
+    let latestEnd: Double
+    let outroStart: Double
+    /// The outgoing song's tempo was not the whole song's.
+    let dropped: Bool
+    /// The outgoing song's grid when the plan is locked to it.
+    let lockA: Tempo?
+    let ratio: Double?
+    let gap: Double
+    let rate: Double?
+    let entry: Double
+    /// From a locked shape's start to where the two grids meet, in the outgoing song's time.
+    let lead: Double
+    /// With a lead, from a shape's start to the incoming song's first sound, in the outgoing
+    /// song's time: the blend holds until then.
+    let leadHold: Double
+    /// Both tempos confident with no lock: only a shape where both songs are never clearly heard
+    /// together is planned.
+    let blind: Bool
+
+    let a: SectionFeatures
+    /// How fast the incoming song plays through the blend.
+    let speedB: Double
+    /// The beats drift apart through the blend and must be kept within the limit wherever both
+    /// songs are clearly heard.
+    let bounded: Bool
+    let driftLimit: Double
+    /// Where the song will count as played, at the current pace of listening.
+    let lo: Double
+    let phraseAnchor: Double?
+
+    init(lenA: Int, limit: Double, sweeps: Double, measured: SectionAnalysis, head: SectionAnalysis?, headFeatures: SectionFeatures?,
+         settings: AutomixSettings, context: TransitionContext, latestEnd: Double, outroStart: Double, dropped: Bool, lockA: Tempo?,
+         ratio: Double?, gap: Double, rate: Double?, entry: Double, lead: Double, leadHold: Double, blind: Bool) {
+        self.lenA = lenA
+        self.limit = limit
+        self.sweeps = sweeps
+        self.measured = measured
+        self.head = head
+        self.headFeatures = headFeatures
+        self.settings = settings
+        self.context = context
+        self.latestEnd = latestEnd
+        self.outroStart = outroStart
+        self.dropped = dropped
+        self.lockA = lockA
+        self.ratio = ratio
+        self.gap = gap
+        self.rate = rate
+        self.entry = entry
+        self.lead = lead
+        self.leadHold = leadHold
+        self.blind = blind
+        a = measured.features
+        speedB = rate ?? 1
+        bounded = lockA != nil && rate == nil && gap > 0
+        driftLimit = blendDriftLimitMs * context.pace
+        let countsAsPlayed = context.nowMs + max(0, min(lenA / 2, countsAsPlayedMs) - context.playedMs)
+        lo = max(
+            max(earliestStartShare * Double(lenA), Double(earliestStartMs), Double(countsAsPlayed)),
+            latestEnd - Double(longestEarlyExitMs),
+            Double(measured.envelope.startMs),
+            Double(context.nowMs + preRollMs))
+        phraseAnchor = lockA.map { $0.downbeatMs + roundHalfUp((outroStart - $0.downbeatMs) / $0.barMs) * $0.barMs }
     }
 
-    var bars = 0
-    var overlap: Double
-    if let lockA, let ratio {
-        bars = abs(ratio - 1) > 0.08 ? 2 : 4
-        overlap = Double(bars) * lockA.barMs
-    } else {
-        overlap = latestEnd - outroStart
+    /// A blend from `start` over `overlap`, its beats meeting at `lock`, holding through the
+    /// incoming song's silent lead-in.
+    func blend(_ start: Double, _ lock: Double, _ overlap: Double, onBar: Bool) -> Shape {
+        Shape(startMs: start, lockMs: lock, overlapMs: overlap, onBar: onBar, holdShare: leadHold > 0 ? min(1, leadHold / overlap) : 0)
     }
-    // The next song's quiet start plays under the end of this one, so the blend lasts at least
-    // until the next song is near its full level.
-    let quietStart = headFeatures?.introEndMs.map { max(0, Double($0) - entry) } ?? 0
-    let lengthened = quietStart > overlap
-    if lengthened {
-        if let lockA, bars > 0 {
-            bars = Int((quietStart / lockA.barMs - 1e-9).rounded(.up))
+
+    func plan() -> TransitionPlan {
+        var bars = 0
+        var overlap: Double
+        if let lockA, ratio != nil {
+            bars = gap > 0.08 ? 2 : 4
             overlap = Double(bars) * lockA.barMs
         } else {
-            overlap = quietStart
+            overlap = latestEnd - outroStart
         }
-    }
-    overlap = min(max(overlap, Double(shortestBlendMs)), limit)
-    if let lockA, bars > 0, overlap < Double(bars) * lockA.barMs {
-        // Cut back to whole bars that fit, when that is still long enough.
-        bars = Int((limit / lockA.barMs + 1e-9).rounded(.down))
-        let whole = Double(bars) * lockA.barMs
-        if bars >= 1 && whole >= Double(shortestBlendMs) { overlap = whole } else { bars = 0 }
-    }
-    overlap = (overlap + 0.5).rounded(.down)
+        // The next song's quiet start, in the outgoing song's time.
+        let quiet = headFeatures?.introEndMs.map { max(0, Double($0) - entry) / speedB } ?? 0
+        if quiet > fitted(overlap, bars) && quiet >= Double(introShortestMs) && !dropped, let intro = planIntro(quiet) {
+            return intro
+        }
+        // Without an intro the blend lasts at least until the next song is near its full level.
+        let lengthened = quiet > overlap
+        if lengthened {
+            if let lockA, bars > 0 {
+                bars = Int((quiet / lockA.barMs - 1e-9).rounded(.up))
+                overlap = Double(bars) * lockA.barMs
+            } else {
+                overlap = quiet
+            }
+        }
+        overlap = fitted(overlap, bars)
 
-    // Where the song will count as played, at the current pace of listening.
-    let countsAsPlayed = context.nowMs + max(0, min(lenA / 2, countsAsPlayedMs) - context.playedMs)
-    let lo = max(
-        max(earliestStartShare * Double(lenA), Double(earliestStartMs), Double(countsAsPlayed)),
-        latestEnd - Double(longestEarlyExitMs),
-        Double(tail.envelope.startMs),
-        Double(context.nowMs + preRollMs))
-    let hi = latestEnd - overlap
-    if hi < lo {
-        return latePlan(lenA, latestEnd, overlap, context.nowMs, headEntry, measured, head, sweeps,
-                        "no start left before \(automixSeconds(Int(hi)))")
+        let hi = latestEnd - overlap
+        if hi < lo { return latePlan(Double(context.nowMs), overlap, "no start left before \(automixSeconds(Int(hi)))") }
+
+        // Bar lines when the blend is locked to the bar, otherwise a fixed step back from the
+        // latest start.
+        let shapes: [Shape] = if let lockA {
+            lockA.barsBetween(lo + lead, hi + lead).map { blend($0 - lead, $0, overlap, onBar: true) }
+        } else {
+            steps(lo, hi).map { blend($0, $0, overlap, onBar: false) }
+        }
+        guard let last = shapes.last else { return latePlan(lo, overlap, "no bar line left before \(automixSeconds(Int(hi)))") }
+        var all = shapes
+        if lockA != nil, !shapes.contains(where: { kept($0) <= Double(keptMusicLimitMs) }), let longer = stretched(last) { all.append(longer) }
+        let allowed = all.compactMap { allow($0, lo) }
+        if allowed.isEmpty { return gaplessPlan(lenA, unheardReason()) }
+        return blendPlan(bestOf(allowed) { blendScore($0) }, lengthened)
     }
 
-    // Bar lines when the blend is locked to the bar, otherwise a fixed step back from the latest start.
-    let barLines = lockA?.barsBetween(lo, hi) ?? []
-    let onBars = !barLines.isEmpty
-    var candidates = barLines
-    if candidates.isEmpty {
-        var at = hi
-        while at >= lo - 1e-6 {
-            candidates.append(at)
+    /// A blend's overlap kept between `shortestBlendMs` and the limit, in whole bars when it was
+    /// planned in `bars` of them and whole bars fit.
+    func fitted(_ overlap: Double, _ bars: Int) -> Double {
+        var length = min(max(overlap, Double(shortestBlendMs)), limit)
+        if let lockA, bars > 0, length < Double(bars) * lockA.barMs {
+            // Cut back to whole bars that fit, when that is still long enough.
+            let fit = Int((limit / lockA.barMs + 1e-9).rounded(.down))
+            let whole = Double(fit) * lockA.barMs
+            if fit >= 1 && whole >= Double(shortestBlendMs) { length = whole }
+        }
+        return (length + 0.5).rounded(.down)
+    }
+
+    func steps(_ from: Double, _ to: Double) -> [Double] {
+        var out: [Double] = []
+        var at = to
+        while at >= from - 1e-6 {
+            out.append(at)
             at -= Double(startStepMs)
         }
-        candidates.reverse()
+        return out.reversed()
     }
-    let phraseAnchor = lockA.map { $0.downbeatMs + roundHalfUp((outroStart - $0.downbeatMs) / $0.barMs) * $0.barMs }
-    let fullDb = a.bodyDb - 3
 
-    var bestStart = candidates[candidates.count - 1]
-    var bestScore = -Double.infinity
-    for start in candidates {
-        var score = -0.08 * (latestEnd - (start + overlap)) / 1000
-        if outroStart < latestEnd - 1000 { score -= 0.15 * abs(start - outroStart) / 1000 }
-        if a.boundariesMs.contains(where: { abs(Double($0) - start) <= 250 }) { score += 1.0 }
-        if let lockA, let phraseAnchor, onBars {
+    /// Full-level music the outgoing song loses after the shape ends.
+    func kept(_ s: Shape) -> Double { measured.msAtLeast(s.endMs, latestEnd, a.bodyDb - keptMusicBelowBodyDb) }
+
+    /// The last bar-line blend stretched to end exactly at the latest end, from its bar line or,
+    /// over the limit, from the next one.
+    func stretched(_ last: Shape) -> Shape? {
+        guard let bar = lockA?.barMs else { return nil }
+        var shape = blend(last.startMs, last.lockMs, latestEnd - last.startMs, onBar: true)
+        if shape.overlapMs > limit {
+            let lock = last.lockMs + bar
+            shape = blend(lock - lead, lock, latestEnd - (lock - lead), onBar: true)
+        }
+        return shape.overlapMs >= Double(shortestBlendMs) ? shape : nil
+    }
+
+    /// A blend candidate as it may be planned: capped to the drift bound, only with both songs
+    /// never heard together when the beats cannot be lined up, or as it is.
+    func allow(_ s: Shape, _ earliest: Double) -> Shape? {
+        if bounded { return cap(s, earliest) }
+        if blind { return stretch(s) == nil ? s : nil }
+        return s
+    }
+
+    /// The candidate's end kept and its start moved later by whole bars until the beats stay
+    /// within the bound; once that would leave under `shortestBlendMs`, a cut from the earliest
+    /// beat of A that keeps them within it. Nil when no cut does.
+    func cap(_ s: Shape, _ earliest: Double) -> Shape? {
+        guard let bar = lockA?.barMs else { return s }
+        var shape = s
+        while true {
+            if meets(shape) { return shape }
+            let lock = shape.lockMs + bar
+            let start = lock - lead
+            if shape.endMs - start < Double(shortestBlendMs) { break }
+            shape = blend(start, lock, s.endMs - start, onBar: shape.onBar)
+        }
+        return cut(s.endMs, earliest)
+    }
+
+    /// A cut ending at `end`, starting on a beat of A no earlier than `earliest`, from
+    /// `shortestBlendMs` down to `shortestFadeMs` long: the longest whose beats stay within the
+    /// bound.
+    func cut(_ end: Double, _ earliest: Double) -> Shape? {
+        guard let grid = lockA else { return nil }
+        let from = max(earliest, end - Double(shortestBlendMs))
+        let to = end - Double(shortestFadeMs)
+        for beat in grid.beatsBetween(from + lead, to + lead) {
+            let shape = blend(beat - lead, beat, end - (beat - lead), onBar: onBarLine(beat))
+            if meets(shape) { return shape }
+        }
+        return nil
+    }
+
+    func onBarLine(_ ms: Double) -> Bool {
+        guard let grid = lockA else { return false }
+        let bars = (ms - grid.downbeatMs) / grid.barMs
+        return abs(bars - roundHalfUp(bars)) < 1e-6
+    }
+
+    func meets(_ s: Shape) -> Bool {
+        if bounded { return offset(s) <= driftLimit }
+        if blind { return stretch(s) == nil }
+        return true
+    }
+
+    /// How far apart the beats are, in song time, where they are furthest apart while both songs
+    /// are clearly heard: they meet at the lock point and drift apart by the tempo gap either side
+    /// of it.
+    func offset(_ s: Shape) -> Double {
+        guard let heard = stretch(s) else { return 0 }
+        return gap * max(0, max(heard.1 - s.lockMs, s.lockMs - heard.0))
+    }
+
+    /// The first and last moments, in the outgoing song's time, where both songs are within
+    /// `bothHeardBelowBodyDb` of their bodies through the shape, with its gains and the overlap's
+    /// headroom; nil when they never are.
+    func stretch(_ s: Shape) -> (Double, Double)? {
+        guard let b = head, headFeatures != nil, s.overlapMs > 0 else { return nil }
+        let k = s.k ?? curveOf(kindOf(s.overlapMs, measured, head, s.startMs, entry))
+        let room = pow(10, -overlapHeadroomDb / 20)
+        let aFloor = a.bodyDb - bothHeardBelowBodyDb
+        let bFloor = b.features.bodyDb - bothHeardBelowBodyDb
+        var first = Double.nan
+        var last = Double.nan
+        let count = Int((s.overlapMs / heardStepMs).rounded(.down))
+        for i in 0...count {
+            let since = Double(i) * heardStepMs
+            let t = since / s.overlapMs
+            let out = s.intro ? introOutGain(t, s.holdShare) : automixOutGain(pastHold(t, s.holdShare), k)
+            let into = s.intro ? introInGain(t, s.riseShare) : automixInGain(pastHold(t, s.holdShare), k)
+            if out <= 0 || into <= 0 { continue }
+            let at = s.startMs + since
+            if measured.levelAt(at) + 20 * log10(out * room) < aFloor { continue }
+            if b.levelAt(entry + since * speedB) + 20 * log10(into * room) < bFloor { continue }
+            if first.isNaN { first = at }
+            last = at
+        }
+        return first.isNaN ? nil : (first, last)
+    }
+
+    /// The best scoring shape; the later one wins a tie. Shapes that keep over
+    /// `keptMusicLimitMs` of full-level music are left out while any other is left.
+    func bestOf(_ shapes: [Shape], _ score: (Shape) -> Double) -> Shape {
+        let keeping = shapes.filter { kept($0) <= Double(keptMusicLimitMs) }
+        let pool = keeping.isEmpty ? shapes : keeping
+        var best = pool[pool.count - 1]
+        var bestScore = -Double.infinity
+        for s in pool {
+            let value = score(s)
+            if value >= bestScore {
+                bestScore = value
+                best = s
+            }
+        }
+        return best
+    }
+
+    /// The terms every shape shares: ending early, music cut, a section boundary where the beats
+    /// meet, and the bar and phrase it starts on.
+    func sharedScore(_ s: Shape) -> Double {
+        var score = -0.08 * (latestEnd - s.endMs) / 1000
+        if a.boundariesMs.contains(where: { abs(Double($0) - s.lockMs) <= 250 }) { score += 1 }
+        if let grid = lockA, let phraseAnchor, s.onBar {
             score += 0.6
-            let barsBack = Int(roundHalfUp((phraseAnchor - start) / lockA.barMs))
+            let barsBack = Int(roundHalfUp((phraseAnchor - s.lockMs) / grid.barMs))
             if barsBack % 8 == 0 { score += 0.8 }
         }
-        score -= 1.5 * measured.shareAtLeast(start, start + overlap, fullDb)
-        if score >= bestScore {
-            bestScore = score
-            bestStart = start
-        }
+        return score - keptMusicWeight * kept(s) / 1000
     }
 
-    var rate: Double?
-    if settings.beatMatch, lockA != nil, let lockB, let ratio {
-        let gap = abs(ratio - 1)
-        if gap >= 0.005 && gap <= 0.04 {
-            rate = min(max(ratio, 0.94), 1.06)
-            entry = max(0, lockB.downbeatFrom(soundStartB - entrySnapMs))
-        }
+    func blendScore(_ s: Shape) -> Double {
+        var score = sharedScore(s)
+        if outroStart < latestEnd - 1000 { score -= 0.15 * abs(s.lockMs - outroStart) / 1000 }
+        return score - 1.5 * measured.shareAtLeast(s.startMs, s.endMs, a.bodyDb - 3)
     }
 
-    let kind = kindOf(overlap, measured, head, bestStart, entry)
-    let start = Int((bestStart + 0.5).rounded(.down))
-    let entryMs = Int((entry + 0.5).rounded(.down))
-    var reason = kind.rawValue.lowercased()
-    reason += " at \(automixSeconds(start)) over \(automixSeconds(Int(overlap)))"
-    if bars > 0, let lockA { reason += " (\(bars) bars of \(automixDecimals(lockA.displayBpm, 1)) BPM)" }
-    reason += ", next song from \(automixSeconds(entryMs))"
-    if lengthened { reason += " (full from \(automixSeconds(Int(entry + quietStart))))" }
-    reason += ", outro at \(automixSeconds(Int(outroStart)))"
-    reason += ", latest end \(automixSeconds(Int(latestEnd)))"
-    if head == nil { reason += ", no analysis of the next song's start" }
-    if let rate { reason += ", rate \(automixDecimals(rate, 3))" }
-    return TransitionPlan(startMs: start, entryMs: entryMs, overlapMs: Int(overlap), kind: kind, k: curveOf(kind),
-                          filterStrength: sweeps, beatMatchRate: rate, beatMs: lockA?.beatMs, beatAnchorMs: lockA?.firstBeatMs,
-                          late: false, headroomDb: overlapHeadroomDb, reason: reason)
+    func blendPlan(_ s: Shape, _ lengthened: Bool) -> TransitionPlan {
+        let kind = kindOf(s.overlapMs, measured, head, s.startMs, entry)
+        let startMs = Int(roundHalfUp(s.startMs))
+        let overlapMs = Int(roundHalfUp(s.endMs)) - startMs
+        let entryMs = Int(roundHalfUp(entry))
+        var reason = kind.rawValue.lowercased()
+        reason += " at \(automixSeconds(startMs)) over \(automixSeconds(overlapMs))"
+        reason += barsWords(overlapMs)
+        reason += ", next song from \(automixSeconds(entryMs))"
+        if lengthened, let full = headFeatures?.introEndMs { reason += " (full from \(automixSeconds(full)))" }
+        reason += ", outro at \(automixSeconds(Int(outroStart)))"
+        reason += ", latest end \(automixSeconds(Int(latestEnd)))"
+        if head == nil { reason += ", no analysis of the next song's start" }
+        if let rate { reason += ", rate \(automixDecimals(rate, 3))" }
+        return finish(
+            TransitionPlan(startMs: startMs, entryMs: entryMs, overlapMs: overlapMs, kind: kind, k: curveOf(kind), filterStrength: sweeps,
+                           beatMatchRate: rate, beatMs: lockA?.beatMs, beatAnchorMs: lockA?.firstBeatMs, late: false,
+                           headroomDb: overlapHeadroomDb, reason: reason, holdShare: leadHoldShare(overlapMs),
+                           latestEndMs: Int(roundHalfUp(latestEnd)), lateMoveBars: 0),
+            s.lockMs)
+    }
+
+    /// The share of a blend `overlapMs` long held through the incoming song's silent lead-in.
+    func leadHoldShare(_ overlapMs: Int) -> Double { leadHold > 0 ? min(1, leadHold / Double(overlapMs)) : 0 }
+
+    /// " (N bars of X BPM)" when the overlap is whole bars of a locked plan.
+    func barsWords(_ overlapMs: Int) -> String {
+        guard let grid = lockA else { return "" }
+        let bars = roundHalfUp(Double(overlapMs) / grid.barMs)
+        guard bars >= 1 && abs(Double(overlapMs) - bars * grid.barMs) <= 1 else { return "" }
+        return " (\(Int(bars)) bars of \(automixDecimals(grid.displayBpm, 1)) BPM)"
+    }
+
+    /// The next song's quiet start played under the end of this one: the outgoing song holds,
+    /// then fades over two bars (or `introFadeMs` unlocked, at most half the quiet start) centered
+    /// on where the next song is full, a bar line from where the beats meet when locked; the next
+    /// song rises over a bar (`introRiseMs` unlocked). Nil when no start is left or the beats
+    /// allow none, and the lengthened blend is planned instead.
+    func planIntro(_ quiet: Double) -> TransitionPlan? {
+        let bar = lockA?.barMs
+        let rise = bar ?? Double(introRiseMs)
+        let fade = min(bar.map { Double(introFadeBars) * $0 } ?? Double(introFadeMs), quiet / 2)
+        let longest = Double(settings.longestIntroMs)
+        let fullAt: Double = if let bar {
+            lead + min(((quiet - lead) / bar - 1e-9).rounded(.up), ((longest - fade / 2 - lead) / bar + 1e-9).rounded(.down)) * bar
+        } else {
+            min(quiet, longest - fade / 2)
+        }
+        let hold = fullAt - fade / 2
+        if hold <= 0 { return nil }
+        let capped = fullAt < quiet - 1e-6
+        let overlap = (fullAt + fade / 2 + 0.5).rounded(.down)
+        func intro(_ start: Double, _ lock: Double, _ length: Double) -> Shape {
+            Shape(startMs: start, lockMs: lock, overlapMs: length, onBar: bar != nil, intro: true,
+                  holdShare: hold / length, riseShare: min(rise, length / 4) / length)
+        }
+        let hi = latestEnd - overlap
+        if hi < lo { return nil }
+        let shapes: [Shape] = if let lockA {
+            lockA.barsBetween(lo + lead, hi + lead).map { intro($0 - lead, $0, overlap) }
+        } else {
+            steps(lo, hi).map { intro($0, $0, overlap) }
+        }
+        guard let last = shapes.last else { return nil }
+        var all = shapes
+        if let bar, !shapes.contains(where: { kept($0) <= Double(keptMusicLimitMs) }) {
+            // Only the outgoing song's fade end moves, to the latest end.
+            let length = latestEnd - last.startMs
+            if length <= longest {
+                all.append(intro(last.startMs, last.lockMs, length))
+            } else {
+                // Over the longest intro: one bar later, keeping where the next song is full from
+                // the start, when the fade left is still at least half the planned one.
+                let lock = last.lockMs + bar
+                let start = lock - lead
+                if latestEnd - start - hold >= fade / 2 { all.append(intro(start, lock, latestEnd - start)) }
+            }
+        }
+        let allowed = all.filter { meets($0) }
+        if allowed.isEmpty { return nil }
+        let best = bestOf(allowed) { s in
+            var score = sharedScore(s)
+            if outroStart < latestEnd - 1000 { score -= 0.15 * abs(s.startMs + hold - outroStart) / 1000 }
+            return score
+        }
+        let startMs = Int(roundHalfUp(best.startMs))
+        let overlapMs = Int(roundHalfUp(best.endMs)) - startMs
+        let entryMs = Int(roundHalfUp(entry))
+        var reason = "intro at \(automixSeconds(startMs)) over \(automixSeconds(overlapMs))"
+        reason += barsWords(overlapMs)
+        reason += ", next song from \(automixSeconds(entryMs))"
+        reason += " (full from \(automixSeconds(headFeatures?.introEndMs ?? entryMs))"
+        if capped { reason += ", capped" }
+        reason += "), outro at \(automixSeconds(Int(outroStart)))"
+        reason += ", latest end \(automixSeconds(Int(latestEnd)))"
+        if let rate { reason += ", rate \(automixDecimals(rate, 3))" }
+        return finish(
+            TransitionPlan(startMs: startMs, entryMs: entryMs, overlapMs: overlapMs, kind: .intro, k: curveOf(.intro), filterStrength: 0,
+                           beatMatchRate: rate, beatMs: lockA?.beatMs, beatAnchorMs: lockA?.firstBeatMs, late: false,
+                           headroomDb: overlapHeadroomDb, reason: reason, holdShare: hold / Double(overlapMs),
+                           riseShare: min(rise, Double(overlapMs) / 4) / Double(overlapMs), latestEndMs: Int(roundHalfUp(latestEnd)),
+                           lateMoveBars: 0),
+            best.lockMs)
+    }
+
+    /// The blend at the end, ending at the latest end, when no planned start is left after
+    /// `earliest`. Locked: from A's first bar line at or after the later of `earliest` and a full
+    /// `overlap` before the end, capped to the drift bound like a planned blend. Otherwise as it
+    /// always was, and with the beats unable to line up only when both songs are never heard
+    /// together.
+    func latePlan(_ earliest: Double, _ overlap: Double, _ why: String) -> TransitionPlan {
+        guard let grid = lockA else {
+            var plan = loosePlan(lenA, latestEnd, overlap, earliest, Int(roundHalfUp(entry)), measured, head, sweeps, why)
+            if plan.kind == .gapless {
+                plan.lateMoveBars = lateMoveUnbounded
+                return plan
+            }
+            if blind && stretch(shapeOf(plan, Double(plan.startMs))) != nil { return gaplessPlan(lenA, unheardReason()) }
+            return finish(plan, Double(plan.startMs))
+        }
+        let from = max(earliest, latestEnd - overlap)
+        let lock = grid.downbeatFrom(from + lead)
+        let start = lock - lead
+        let length = latestEnd - start
+        let placed: Shape? = if !bounded {
+            length >= Double(shortestFadeMs) ? blend(start, lock, length, onBar: true) : nil
+        } else if length >= Double(shortestBlendMs) {
+            cap(blend(start, lock, length, onBar: true), from)
+        } else {
+            cut(latestEnd, from)
+        }
+        guard let shape = placed else { return gaplessPlan(lenA, "too late to blend: \(why)") }
+        let kind = kindOf(shape.overlapMs, measured, head, shape.startMs, entry)
+        let startMs = Int(roundHalfUp(shape.startMs))
+        let overlapMs = Int(roundHalfUp(shape.endMs)) - startMs
+        let entryMs = Int(roundHalfUp(entry))
+        let matched = rate.map { ", rate \(automixDecimals($0, 3))" } ?? ""
+        let reason = "late \(kind.rawValue.lowercased()) at \(automixSeconds(startMs)) over \(automixSeconds(overlapMs)), next song from "
+            + "\(automixSeconds(entryMs))\(matched): \(why)"
+        return finish(
+            TransitionPlan(startMs: startMs, entryMs: entryMs, overlapMs: overlapMs, kind: kind, k: curveOf(kind), filterStrength: sweeps,
+                           beatMatchRate: rate, beatMs: grid.beatMs, beatAnchorMs: grid.firstBeatMs, late: true,
+                           headroomDb: overlapHeadroomDb, reason: reason, holdShare: leadHoldShare(overlapMs),
+                           latestEndMs: Int(roundHalfUp(latestEnd)), lateMoveBars: 0),
+            shape.lockMs)
+    }
+
+    func unheardReason() -> String { bounded ? "the beats would drift apart" : "the beats cannot be lined up" }
+
+    func shapeOf(_ plan: TransitionPlan, _ lock: Double) -> Shape {
+        Shape(startMs: Double(plan.startMs), lockMs: lock, overlapMs: Double(plan.overlapMs), onBar: false, intro: plan.kind == .intro,
+              holdShare: plan.holdShare, riseShare: plan.riseShare, k: plan.k)
+    }
+
+    /// The plan with how far a late start may move it, where both songs are heard together, where
+    /// its beats meet and how far they part.
+    func finish(_ plan: TransitionPlan, _ lock: Double) -> TransitionPlan {
+        let shape = shapeOf(plan, lock)
+        let heard = stretch(shape)
+        var done = plan
+        done.lateMoveBars = lateMoveBarsOf(shape, plan)
+        done.bothHeardStartMs = heard.map { Int(roundHalfUp($0.0 - Double(plan.startMs))) } ?? 0
+        done.bothHeardEndMs = heard.map { Int(roundHalfUp($0.1 - Double(plan.startMs))) } ?? 0
+        done.lockMs = lock - Double(plan.startMs)
+        done.driftGap = bounded ? gap : 0
+        done.driftAtEndMs = bounded ? offset(shape) : 0
+        return done
+    }
+
+    /// The most whole bars the plan may move later and still end by the latest end with its beats
+    /// within the bound there; unbounded when the bound does not depend on where it sits. None
+    /// for a plan whose beats could not be lined up, kept only where both songs are never heard
+    /// together, which a move could change.
+    func lateMoveBarsOf(_ shape: Shape, _ plan: TransitionPlan) -> Int {
+        if blind { return 0 }
+        guard bounded, let bar = lockA?.barMs else { return lateMoveUnbounded }
+        let end = Double(plan.startMs + plan.overlapMs)
+        var bars = 0
+        while end + Double(bars + 1) * bar <= Double(plan.latestEndMs) + 1e-6 && meets(shape.shifted(Double(bars + 1) * bar)) { bars += 1 }
+        return bars
+    }
 }
 
 /// A tempo ratio folded by halving or doubling into 0.707 to 1.414, so a song at half or double
@@ -377,31 +915,32 @@ private func curveOf(_ kind: TransitionKind) -> Double {
     case .cut: cutCurve
     case .lift: liftCurve
     case .blend: blendCurve
+    // An intro's shape has no curve weight.
+    case .intro: 0
     default: crossfadeCurve
     }
 }
 
-/// The blend at the end: ending at latestEnd, over `overlap` or whatever is left after nowMs, with
-/// the curve and filters but no bar lock. Too little left to blend plays gaplessly.
-private func latePlan(_ lenA: Int, _ latestEnd: Double, _ overlap: Double, _ nowMs: Int, _ entryMs: Int, _ tail: SectionAnalysis?,
-                      _ head: SectionAnalysis?, _ sweeps: Double, _ why: String) -> TransitionPlan {
-    let start = max(Double(nowMs), latestEnd - overlap)
+/// The blend at the end with no bar lock: ending at latestEnd, over `overlap` or whatever is left
+/// after `earliest`, with the curve and filters. Too little left to blend plays gaplessly.
+private func loosePlan(_ lenA: Int, _ latestEnd: Double, _ overlap: Double, _ earliest: Double, _ entryMs: Int, _ tail: SectionAnalysis?,
+                       _ head: SectionAnalysis?, _ sweeps: Double, _ why: String) -> TransitionPlan {
+    let start = max(earliest, latestEnd - overlap)
     let length = (latestEnd - start + 0.5).rounded(.down)
-    if length < Double(shortestFadeMs) {
-        return gaplessPlan(FadeSong(albumId: nil, albumOrder: nil, durationMs: lenA), "too late to blend: \(why)")
-    }
+    if length < Double(shortestFadeMs) { return gaplessPlan(lenA, "too late to blend: \(why)") }
     let kind = kindOf(length, tail, head, start, Double(entryMs))
     let startMs = Int((start + 0.5).rounded(.down))
     return TransitionPlan(
         startMs: startMs, entryMs: entryMs, overlapMs: Int(length), kind: kind, k: curveOf(kind), filterStrength: sweeps,
         beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: true, headroomDb: overlapHeadroomDb,
-        reason: "late \(kind.rawValue.lowercased()) at \(automixSeconds(startMs)) over \(automixSeconds(Int(length))), next song from \(automixSeconds(entryMs)): \(why)")
+        reason: "late \(kind.rawValue.lowercased()) at \(automixSeconds(startMs)) over \(automixSeconds(Int(length))), next song from \(automixSeconds(entryMs)): \(why)",
+        latestEndMs: Int((latestEnd + 0.5).rounded(.down)), lateMoveBars: lateMoveUnbounded)
 }
 
-private func gaplessPlan(_ current: FadeSong, _ reason: String) -> TransitionPlan {
-    TransitionPlan(startMs: max(0, current.durationMs), entryMs: 0, overlapMs: 0, kind: .gapless, k: crossfadeCurve,
-                   filterStrength: 0, beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false, headroomDb: 0,
-                   reason: "gapless: \(reason)")
+private func gaplessPlan(_ lenA: Int, _ reason: String) -> TransitionPlan {
+    TransitionPlan(startMs: max(0, lenA), entryMs: 0, overlapMs: 0, kind: .gapless, k: crossfadeCurve, filterStrength: 0,
+                   beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false, headroomDb: 0, reason: "gapless: \(reason)",
+                   latestEndMs: max(0, lenA), lateMoveBars: lateMoveUnbounded)
 }
 
 /// The fixed crossfade at the end of the song: no filters, on the chosen curve. Equal power is
@@ -414,13 +953,14 @@ public func fixedCrossfadePlan(lenA: Int, length: Int, why: String, curve: FadeC
                           beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false,
                           headroomDb: curve == .mixOnly ? mixOnlyHeadroomDb : 0,
                           reason: "crossfade at \(automixSeconds(start)) over \(automixSeconds(length)): \(why)\(named)",
-                          curve: curve == .equalPower ? nil : curve)
+                          curve: curve == .equalPower ? nil : curve, latestEndMs: lenA, lateMoveBars: lateMoveUnbounded)
 }
 
 private func crossfadePlan(_ lenA: Int, _ length: Int, _ why: String) -> TransitionPlan {
     TransitionPlan(startMs: lenA - length, entryMs: 0, overlapMs: length, kind: .crossfade, k: crossfadeCurve, filterStrength: 0,
                    beatMatchRate: nil, beatMs: nil, beatAnchorMs: nil, late: false, headroomDb: overlapHeadroomDb,
-                   reason: "crossfade at \(automixSeconds(lenA - length)) over \(automixSeconds(length)): \(why)")
+                   reason: "crossfade at \(automixSeconds(lenA - length)) over \(automixSeconds(length)): \(why)",
+                   latestEndMs: lenA, lateMoveBars: lateMoveUnbounded)
 }
 
 private func gaplessReason(_ current: FadeSong, _ next: FadeSong?, _ fadeMs: Int, _ repeatOne: Bool, _ stopAtEndOfSong: Bool) -> String {

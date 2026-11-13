@@ -7,7 +7,7 @@ let scoutBudgetMs = 20_000
 
 /// How much of a song the scout listens to: the end of the playing song and the start of the next.
 let tailScoutMs = 60_000
-let headScoutMs = 30_000
+let headScoutMs = automixHeadMs
 
 let playbackLog = Logger(subsystem: "app.winters.octo", category: "playback")
 

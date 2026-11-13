@@ -13,10 +13,18 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
     }
 
-    static let filterVectorSamples = 512
+    @Test func theFileHoldsEveryPartChecked() throws {
+        let vectors = try #require(JSONSerialization.jsonObject(with: Data(automixVectorsJSON.utf8)) as? [String: Any])
+        for part in ["sections", "plans", "gains", "introGains", "filters", "steppedLowPass", "biquads", "tempoTrust", "rates", "dropCuts"] {
+            #expect(((vectors[part] as? [Any])?.count ?? 0) > 0, "\(part)")
+        }
+        let plans = vectors["plans"] as! [[String: Any]]
+        #expect(plans.contains { ($0["expected"] as! [String: Any]).str("kind") == "intro" })
+        #expect(plans.contains { $0["headBodyLevelDb"] is NSNumber })
+        #expect((vectors["sections"] as! [[String: Any]]).contains { $0["bodyLevelDb"] is NSNumber })
+    }
 
-    /// Period scores on and either side of the threshold a tempo must reach to be trusted.
-    static let trustCases: [(Double, Bool)] = [(0.4, true), (0.399, true), (0.401, true), (9.0, false), (0.4, false), (0.401, false)]
+    static let filterVectorSamples = 512
 
     func check(_ vectors: [String: Any]) -> [String] {
         var failures: [String] = []
@@ -34,16 +42,33 @@ import Testing
 
         let songs = (vectors["songs"] as! [String: Any]).mapValues { songOf($0 as! [String: Any]) }
         var analyses: [String: SectionAnalysis] = [:]
+        // Heads measured against a whole song's body, by song and body level.
+        var againstBody: [String: SectionAnalysis] = [:]
 
-        for section in vectors["sections"] as! [[String: Any]] {
+        // Every section is rendered and analyzed at once, each on a thread of its own; the checks
+        // below run in order.
+        let sections = vectors["sections"] as! [[String: Any]]
+        let asked = sections.map { s in
+            (song: songs[s.str("song")]!, tail: s.str("part") == "tail", tag: s.numOrNil("tagBpm"), bodyDb: s.numOrNil("bodyLevelDb"),
+             fromMs: s.num("fromMs"), toMs: s.num("toMs"))
+        }
+        let made = Analyses(asked.count)
+        DispatchQueue.concurrentPerform(iterations: asked.count) { i in
+            let a = asked[i]
+            let envelope = a.song.envelope(a.fromMs, a.toMs)
+            made.put(i, a.tail ? analyzeTail(envelope, tagBpm: a.tag) : analyzeHead(envelope, tagBpm: a.tag, bodyLevelDb: a.bodyDb))
+        }
+        let analyzed = made.all
+
+        for (index, section) in sections.enumerated() {
             let name = section.str("song")
             let part = section.str("part")
             let tag = section.numOrNil("tagBpm")
-            let what = tag == nil ? "\(name) \(part)" : "\(name) \(part) tagged \(tag!)"
-            let song = songs[name]!
-            let envelopeIn = song.envelope(section.num("fromMs"), section.num("toMs"))
-            let analysis = part == "tail" ? analyzeTail(envelopeIn, tagBpm: tag) : analyzeHead(envelopeIn, tagBpm: tag)
-            if tag == nil { analyses["\(name)/\(part)"] = analysis }
+            let bodyDb = section.numOrNil("bodyLevelDb")
+            let what = if let tag { "\(name) \(part) tagged \(tag)" } else if let bodyDb { "\(name) \(part) against a body of \(bodyDb) dB" } else { "\(name) \(part)" }
+            let analysis = analyzed[index]
+            if tag == nil && bodyDb == nil { analyses["\(name)/\(part)"] = analysis }
+            if tag == nil, let bodyDb, part == "head" { againstBody["\(name)@\(bodyDb)"] = analysis }
             let envelope = analysis.envelope
             if envelope.size != section.int("hops") { failures.append("\(what): \(envelope.size) hops") }
             if envelope.startMs != section.int("startMs") { failures.append("\(what): starts at \(envelope.startMs)") }
@@ -90,13 +115,22 @@ import Testing
         for c in vectors["plans"] as! [[String: Any]] {
             let name = c.str("name")
             let settings = c["settings"] as! [String: Any]
+            let headBody = c.numOrNil("headBodyLevelDb")
+            let head: SectionAnalysis? = if c.bool("headMissing") {
+                nil
+            } else if let headBody {
+                againstBody["\(c.str("b"))@\(headBody)"]!
+            } else {
+                analyses["\(c.str("b"))/head"]!
+            }
             let plan = planTransition(
                 current: fadeSongOf(c["current"] as! [String: Any]),
                 next: fadeSongOf(c["next"] as! [String: Any]),
                 tail: c.bool("tailMissing") ? nil : analyses["\(c.str("a"))/tail"]!,
-                head: c.bool("headMissing") ? nil : analyses["\(c.str("b"))/head"]!,
-                settings: AutomixSettings(maxOverlapMs: settings.int("maxOverlapMs"), smart: settings.bool("smart"),
-                                          filterSweeps: settings.bool("filterSweeps"), beatMatch: settings.bool("beatMatch")),
+                head: head,
+                settings: AutomixSettings(maxOverlapMs: settings.int("maxOverlapMs"), longestIntroMs: settings.int("longestIntroMs"),
+                                          smart: settings.bool("smart"), filterSweeps: settings.bool("filterSweeps"),
+                                          beatMatch: settings.bool("beatMatch")),
                 context: contextOf(c["context"] as! [String: Any]))
             let e = c["expected"] as! [String: Any]
             let what = "plan \(name)"
@@ -111,12 +145,28 @@ import Testing
             near("\(what) beatAnchorMs", e.numOrNil("beatAnchorMs"), plan.beatAnchorMs, t("ms"))
             near("\(what) headroomDb", e.num("headroomDb"), plan.headroomDb, t("curve"))
             if e.bool("late") != plan.late { failures.append("\(what): late \(plan.late)") }
+            near("\(what) holdShare", e.num("holdShare"), plan.holdShare, t("curve"))
+            near("\(what) riseShare", e.num("riseShare"), plan.riseShare, t("curve"))
+            near("\(what) latestEndMs", e.num("latestEndMs"), Double(plan.latestEndMs), t("ms"))
+            if e.int("lateMoveBars") != plan.lateMoveBars { failures.append("\(what): lateMoveBars \(plan.lateMoveBars), expected \(e.int("lateMoveBars"))") }
+            near("\(what) bothHeardStartMs", e.num("bothHeardStartMs"), Double(plan.bothHeardStartMs), t("ms"))
+            near("\(what) bothHeardEndMs", e.num("bothHeardEndMs"), Double(plan.bothHeardEndMs), t("ms"))
+            near("\(what) lockMs", e.num("lockMs"), plan.lockMs, t("ms") / 10)
+            near("\(what) driftGap", e.num("driftGap"), plan.driftGap, t("rate"))
+            near("\(what) driftAtEndMs", e.num("driftAtEndMs"), plan.driftAtEndMs, t("ms") / 10)
+            near("\(what) dropCutAtHalfSpeedMs", e.numOrNil("dropCutAtHalfSpeedMs"), dropCutAtMs(plan, 0.5, 0), t("ms"))
+            if e.str("reason") != plan.reason { failures.append("\(what): reason \"\(plan.reason)\", expected \"\(e.str("reason"))\"") }
         }
 
         for g in vectors["gains"] as! [[String: Any]] {
             let time = g.num("t"), k = g.num("k")
             near("out gain at \(time) k \(k)", g.num("out"), automixOutGain(time, k), t("curve"))
             near("in gain at \(time) k \(k)", g.num("in"), automixInGain(time, k), t("curve"))
+        }
+        for g in vectors["introGains"] as! [[String: Any]] {
+            let time = g.num("t"), hold = g.num("holdShare"), rise = g.num("riseShare")
+            near("intro out gain at \(time) holding to \(hold)", g.num("out"), introOutGain(time, hold), t("curve"))
+            near("intro in gain at \(time) rising to \(rise)", g.num("in"), introInGain(time, rise), t("curve"))
         }
         for f in vectors["filters"] as! [[String: Any]] {
             let time = f.num("t"), s = f.num("strength")
@@ -152,6 +202,16 @@ import Testing
             let actual = beatMatchRateAt(r.num("rate"), r.num("sinceEntryMs"), r.num("overlapMs"))
             near("rate at \(r.num("sinceEntryMs"))", r.num("value"), actual, t("curve"))
         }
+        for d in vectors["dropCuts"] as! [[String: Any]] {
+            var plan = fixedCrossfadePlan(lenA: 200_000, length: 8_000, why: "test")
+            plan.bothHeardStartMs = d.int("bothHeardStartMs")
+            plan.bothHeardEndMs = d.int("bothHeardEndMs")
+            plan.lockMs = d.num("lockMs")
+            plan.driftGap = d.num("driftGap")
+            let speed = d.num("speed"), from = d.num("fromMs")
+            let what = "drop cut over \(plan.bothHeardStartMs) to \(plan.bothHeardEndMs), lock \(plan.lockMs), gap \(plan.driftGap), speed \(speed) from \(from)"
+            near(what, d.numOrNil("cutAtMs"), dropCutAtMs(plan, speed, from), t("curve"))
+        }
         return failures
     }
 
@@ -185,12 +245,25 @@ import Testing
         TransitionContext(nowMs: o.int("nowMs"), playedMs: o.int("playedMs"), repeatOne: o.bool("repeatOne"),
                           stopAtEndOfSong: o.bool("stopAtEndOfSong"), pace: o.num("pace"), skipSilence: o.bool("skipSilence"),
                           currentGenre: o["currentGenre"] as? String, nextGenre: o["nextGenre"] as? String,
-                          bodyLevelDb: o.numOrNil("bodyLevelDb"), tempoPrior: o.numOrNil("tempoPrior"))
+                          bodyLevelDb: o.numOrNil("bodyLevelDb"), tempoPrior: o.numOrNil("tempoPrior"),
+                          lockAtPace: (o["lockAtPace"] as? NSNumber)?.boolValue ?? false)
     }
 
     func fadeSongOf(_ o: [String: Any]) -> FadeSong {
         FadeSong(albumId: o["albumId"] as? String, albumOrder: (o["albumOrder"] as? NSNumber)?.intValue, durationMs: o.int("durationMs"))
     }
+}
+
+/// Analyses made on several threads at once, each in its own place.
+private final class Analyses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var made: [SectionAnalysis?]
+
+    init(_ count: Int) { made = Array(repeating: nil, count: count) }
+
+    func put(_ index: Int, _ analysis: SectionAnalysis) { lock.withLock { made[index] = analysis } }
+
+    var all: [SectionAnalysis] { lock.withLock { made.map { $0! } } }
 }
 
 fileprivate extension Dictionary where Key == String, Value == Any {

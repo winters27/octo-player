@@ -52,6 +52,34 @@ public func automixInGain(_ t: Double, _ k: Double) -> Double {
     return max(0, 1 - out * out).squareRoot()
 }
 
+/// Where a blend whose start is held is along its curve at `t` (0 to 1): the outgoing song alone
+/// at its own level until `holdShare`, while the incoming one's first sound is still to come,
+/// then the curve over the rest of the overlap. Below 0 while held, where every curve gives the
+/// outgoing song 1 and the incoming one 0.
+public func pastHold(_ t: Double, _ holdShare: Double) -> Double {
+    if holdShare <= 0 { return t }
+    if holdShare >= 1 { return -1 }
+    return (t - holdShare) / (1 - holdShare)
+}
+
+/// The outgoing song's volume at `t` through an intro (0 to 1): full until `holdShare`, then an
+/// equal-power fade to nothing at the end.
+public func introOutGain(_ t: Double, _ holdShare: Double) -> Double {
+    let p = clamp01(t)
+    let hold = clamp01(holdShare)
+    if p <= hold { return 1 }
+    return clamp01(cos((p - hold) / (1 - hold) * Double.pi / 2))
+}
+
+/// The incoming song's volume through an intro: rising as sin(pi/2 * t / riseShare) to full by
+/// `riseShare`, then full, so its quiet start plays at its own level.
+public func introInGain(_ t: Double, _ riseShare: Double) -> Double {
+    let p = clamp01(t)
+    let rise = clamp01(riseShare)
+    if p >= rise { return 1 }
+    return clamp01(sin(Double.pi / 2 * p / rise))
+}
+
 /// How the two volumes cross in a plain crossfade, the one played with smart transitions off.
 public enum FadeCurve: String, StoredChoice, Codable {
     /// Steady loudness between two different songs: the squares of the volumes add up to one.
@@ -110,6 +138,12 @@ public let mixOnlyHeadroomDb = 3.0
 /// `curve`. Every curve starts at (1, 0), ends at (0, 1) and never goes above 1. Equal power is
 /// the same as the planned curves with no S weight.
 public func fadeGains(_ curve: FadeCurve, _ t: Double, overlapMs: Int) -> (out: Double, incoming: Double) {
+    fadeGains(curve, t, overlapMs: Double(overlapMs))
+}
+
+/// The same over an overlap that need not be whole milliseconds, such as what is left of a blend
+/// after its held start.
+public func fadeGains(_ curve: FadeCurve, _ t: Double, overlapMs: Double) -> (out: Double, incoming: Double) {
     let p = clamp01(t)
     switch curve {
     case .equalPower:
@@ -123,7 +157,7 @@ public func fadeGains(_ curve: FadeCurve, _ t: Double, overlapMs: Int) -> (out: 
         return (clamp01(evenLoudnessGain(p)), clamp01(evenLoudnessGain(1 - p)))
     case .mixOnly:
         // The quick fades take their real length, up to half the overlap each.
-        let ramp = overlapMs > 0 ? min(0.5, mixOnlyRampMs / Double(overlapMs)) : 0.5
+        let ramp = overlapMs > 0 ? min(0.5, mixOnlyRampMs / overlapMs) : 0.5
         let out = p >= 1 ? 0 : p <= 1 - ramp ? 1 : cos((p - (1 - ramp)) / ramp * Double.pi / 2)
         let into = p >= ramp ? 1 : sin(p / ramp * Double.pi / 2)
         return (clamp01(out), clamp01(into))

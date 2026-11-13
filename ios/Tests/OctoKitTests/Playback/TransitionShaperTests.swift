@@ -8,7 +8,8 @@ import Testing
     func plan(start: Int = 1_000, entry: Int = 0, overlap: Int = 1_000, k: Double = 0.4, strength: Double = 0, headroomDb: Double = 0,
               beatMs: Double? = nil, beatAnchorMs: Double? = nil, rate: Double? = nil) -> TransitionPlan {
         TransitionPlan(startMs: start, entryMs: entry, overlapMs: overlap, kind: .blend, k: k, filterStrength: strength,
-                       beatMatchRate: rate, beatMs: beatMs, beatAnchorMs: beatAnchorMs, late: false, headroomDb: headroomDb, reason: "test")
+                       beatMatchRate: rate, beatMs: beatMs, beatAnchorMs: beatAnchorMs, late: false, headroomDb: headroomDb, reason: "test",
+                       lateMoveBars: 0)
     }
 
     /// `frames` mono frames at a fixed level, as 16-bit sound read into floats.

@@ -73,6 +73,27 @@ import Testing
         #expect(scouted.barLocked == served.barLocked)
     }
 
+    @Test func aProfileOfAnyRevisionReadsTheSame() throws {
+        // The server says which pass of its analysis made a profile; a profile with or without it,
+        // and with fields this player does not know, reads the same.
+        let plain = try #require(TransitionProfile.of(fixture()))
+        let brace = try #require(transitionProfileJSON.firstIndex(of: "{"))
+        for extra in [#""revision": 2, "#, #""revision": 1, "#, #""later": {"parts": [1, 2]}, "#] {
+            var text = transitionProfileJSON
+            text.insert(contentsOf: extra, at: text.index(after: brace))
+            var answer = try TransitionProfileAnswer.parse(text)
+            answer.id = "nd-1"
+            answer.ready = true
+            #expect(answer.version == profileVersion, "\(extra)")
+            let profile = try #require(TransitionProfile.of(answer), "\(extra)")
+            #expect(profile.durationMs == plain.durationMs, "\(extra)")
+            #expect(profile.head.levels == plain.head.levels, "\(extra)")
+            #expect(profile.tail.levels == plain.tail.levels, "\(extra)")
+            #expect(profile.head.features == plain.head.features, "\(extra)")
+            #expect(profile.tail.features == plain.tail.features, "\(extra)")
+        }
+    }
+
     @Test func aProfileThePlayerCannotReadIsNone() {
         let ready = fixture()
         var notReady = ready

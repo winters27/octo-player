@@ -5,7 +5,8 @@ import Testing
 @Suite struct AutomixTimingTest {
     func plan(start: Int = 180_000, entry: Int = 4_000, overlap: Int = 8_000, rate: Double? = nil, beatMs: Double? = 500) -> TransitionPlan {
         TransitionPlan(startMs: start, entryMs: entry, overlapMs: overlap, kind: .blend, k: blendCurve, filterStrength: filterStrength,
-                       beatMatchRate: rate, beatMs: beatMs, beatAnchorMs: beatMs.map { _ in 0 }, late: false, headroomDb: 1, reason: "test")
+                       beatMatchRate: rate, beatMs: beatMs, beatAnchorMs: beatMs.map { _ in 0 }, late: false, headroomDb: 1, reason: "test",
+                       lateMoveBars: 0)
     }
 
     @Test func theRunUpStartsSoTheEntryLandsOnTheStart() {
@@ -176,6 +177,22 @@ import Testing
         #expect(plan.startMs == 188_000)
         #expect(settings.atSpeed(1) == settings)
         #expect(settings.atSpeed(0.5).maxOverlapMs == 4_000)
+    }
+
+    @Test func theLongestIntroIsInSongTimeLikeTheLongestBlend() {
+        let settings = AutomixSettings(maxOverlapMs: automixLongestBlendMs)
+        #expect(settings.longestIntroMs == automixLongestIntroMs)
+        let slow = settings.atSpeed(0.5)
+        #expect(slow.maxOverlapMs == 4_000)
+        #expect(slow.longestIntroMs == 8_000)
+        let fast = settings.atSpeed(1.5)
+        #expect(fast.maxOverlapMs == 12_000)
+        #expect(fast.longestIntroMs == 24_000)
+        // Everything else stays as it was.
+        var plain = slow
+        plain.maxOverlapMs = settings.maxOverlapMs
+        plain.longestIntroMs = settings.longestIntroMs
+        #expect(plain == settings)
     }
 }
 

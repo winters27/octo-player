@@ -108,10 +108,21 @@ struct SyntheticSong {
         return builder.build()
     }
 
-    /// The last 60 s and the first 30 s, as the player scouts them.
+    /// The last 60 s and the first 45 s, as the player scouts them.
     func tail() -> SectionAnalysis { analyzeTail(envelope(max(0, Double(lengthMs) - 60_000), Double(lengthMs))) }
 
-    func head() -> SectionAnalysis { analyzeHead(envelope(0, min(30_000, Double(lengthMs)))) }
+    func head() -> SectionAnalysis { analyzeHead(headEnvelope()) }
+
+    /// The whole song's body level, as a profile made from the whole file measures it.
+    func wholeBodyDb() -> Double? { bodyLevelOf(envelope(0, Double(lengthMs))) }
+
+    /// The first 45 s measured against the whole song's body, as a profile holds them; `bodyDb`
+    /// stands in for that body.
+    func profileHead(_ bodyDb: Double?) -> SectionAnalysis { analyzeHead(headEnvelope(), bodyLevelDb: bodyDb) }
+
+    func profileHead() -> SectionAnalysis { profileHead(wholeBodyDb()) }
+
+    private func headEnvelope() -> SectionEnvelope { envelope(0, min(Double(automixHeadMs), Double(lengthMs))) }
 }
 
 /// The made-up songs and song pairs the automix tests and automix-vectors.json share.
@@ -133,8 +144,25 @@ enum AutomixCases {
         ]
     }
 
-    static let songNames = ["silence-tail", "fade-out", "hot-end", "beat-120", "beat-120-b", "beat-100", "beat-118", "beat-128",
-                            "plain-b", "quiet-intro"]
+    /// A kick on every bar from `barMs` and a click on every beat from `beatMs` over a pad at
+    /// `padDb`, sounding from fromMs to toMs: a steady level with a clear beat. Pieces with the
+    /// same grid join on the beat.
+    private static func steady(_ fromMs: Double, _ toMs: Double, _ bpm: Double, _ beatMs: Double, barMs: Double? = nil,
+                               padDb: Double = -14) -> [SongLayer] {
+        pad(fromMs, toMs, padDb) + [
+            SongLayer("pulse", fromMs, toMs, hz: 60, db: padDb + 4, bpm: bpm, firstMs: barMs ?? beatMs, every: 4, decayMs: 80),
+            SongLayer("pulse", fromMs, toMs, hz: 2_000, db: padDb - 4, bpm: bpm, firstMs: beatMs, every: 1, decayMs: 10),
+        ]
+    }
+
+    /// A steady beat from `beatMs` whose first `quietMs` are 24 dB under the rest.
+    private static func quietStart(_ lengthMs: Double, _ bpm: Double, _ quietMs: Double, beatMs: Double = 0) -> [SongLayer] {
+        steady(0, quietMs, bpm, beatMs, padDb: -38) + steady(quietMs, lengthMs, bpm, beatMs)
+    }
+
+    private static func song(_ rate: Int, _ lengthMs: Int, _ layers: [SongLayer]) -> SyntheticSong {
+        SyntheticSong(rate: rate, channels: 1, lengthMs: lengthMs, layers: layers)
+    }
 
     static let songs: [String: SyntheticSong] = [
         // 8 s of silence after the music stops.
@@ -152,6 +180,57 @@ enum AutomixCases {
         "plain-b": SyntheticSong(rate: 44_100, channels: 2, lengthMs: 180_000, layers: pad(1_500, 180_000, -14)),
         // 6 s of a quiet pad 24 dB under the body, then full level.
         "quiet-intro": SyntheticSong(rate: 44_100, channels: 2, lengthMs: 180_000, layers: pad(0, 6_000, -38) + pad(6_000, 180_000, -14)),
+        // 35 s of the quiet pad, then full level: most of a head is intro.
+        "long-intro": song(44_100, 180_000, pad(0, 35_000, -38) + pad(35_000, 180_000, -14)),
+        // A minute of the quiet pad, past the end of any head.
+        "endless-intro": song(44_100, 200_000, pad(0, 60_000, -38) + pad(60_000, 200_000, -14)),
+        // A steady 100 BPM beat (2.4 s bars from 0) at full level from the first sample to the last.
+        "steady-100": song(44_100, 202_000, steady(0, 202_000, 100, 0)),
+        // The same at 101 BPM, 1% faster.
+        "steady-101": song(44_100, 202_000, steady(0, 202_000, 101, 0)),
+        // 101 BPM at full level until 190 s, then 12 dB under it: an outro where the song is no
+        // longer clearly heard.
+        "steady-101-outro": song(44_100, 202_000, steady(0, 190_000, 101, 0) + steady(190_000, 202_000, 101, 0, padDb: -26)),
+        // 100 BPM at full level until 180 s, 14 dB under it until 192 s, then 7 dB under it to the end.
+        "steady-100-steps": song(44_100, 202_000, steady(0, 180_000, 100, 0) + steady(180_000, 192_000, 100, 0, padDb: -28)
+            + steady(192_000, 202_000, 100, 0, padDb: -21)),
+        // 100 BPM, 4.5 dB louder from 170.4 s to 189.6 s: two section boundaries well before the
+        // last bars, full level throughout.
+        "steady-100-sections": song(44_100, 201_850, steady(0, 170_400, 100, 0, padDb: -18.5) + steady(170_400, 189_600, 100, 0)
+            + steady(189_600, 201_850, 100, 0, padDb: -18.5)),
+        // 100 BPM with a quiet start of about 4.4 s and of about 10.75 s.
+        "quiet-100-short": song(44_100, 180_000, quietStart(180_000, 100, 4_650)),
+        "quiet-100": song(44_100, 180_000, quietStart(180_000, 100, 11_000)),
+        // 106 BPM, 5.7% from 100, with a quiet start of about 9.5 s.
+        "quiet-106": song(44_100, 180_000, quietStart(180_000, 106, 9_750)),
+        // 100 BPM from 1.5 s, its beats at 1150 + 600 n and its bars at 1750 + 2400 n: its first
+        // sound comes 350 ms after a beat, and its last bar line before that falls before the
+        // song's start.
+        "steady-100-late": song(44_100, 180_000, steady(1_500, 180_000, 100, 1_150, barMs: 1_750)),
+        // 100 BPM from the first sample, its beats at 300 + 600 n: its last beat before its first
+        // sound falls before the song's start.
+        "steady-100-early": song(44_100, 180_000, steady(0, 180_000, 100, 300)),
+        // Short songs at tempos 0.3%, 3%, 7.1%, 10%, 20% and 40% slower than 100 BPM, full level
+        // throughout.
+        "steady-99.7": song(22_050, 40_000, steady(0, 40_000, 100 / 1.003, 0)),
+        "steady-97": song(22_050, 40_000, steady(0, 40_000, 100 / 1.03, 0)),
+        "steady-93": song(22_050, 40_000, steady(0, 40_000, 100 / 1.071, 0)),
+        "steady-91": song(22_050, 40_000, steady(0, 40_000, 100 / 1.1, 0)),
+        "steady-83": song(22_050, 40_000, steady(0, 40_000, 100 / 1.2, 0)),
+        "steady-71": song(22_050, 40_000, steady(0, 40_000, 100 / 1.4, 0)),
+        // 10% slower than 100 BPM at full level from the first sample, its beats from 600 ms: B is
+        // heard well before its beats meet A's.
+        "steady-91-lead": song(22_050, 40_000, steady(0, 40_000, 100 / 1.1, 600)),
+        // 100 BPM with a quiet start of about 10.75 s, its beats from 100 ms.
+        "quiet-100-lead": song(44_100, 180_000, quietStart(180_000, 100, 11_000, beatMs: 100)),
+        // 100 BPM from 0.5 s, its beats at 300 + 600 n and its bars at 900 + 2400 n: with a rate it
+        // enters at 0, silent until 0.5 s.
+        "steady-100-lead": song(44_100, 180_000, steady(500, 180_000, 100, 300, barMs: 900)),
+        // 35 s at 95.24 BPM (beats every 630 ms from 15.9 s, bars from 15.27 s): silent for 16 s,
+        // quiet until 27 s, then full level. Too short to ease back from a 5% rate after a long
+        // intro.
+        "short-quiet": song(44_100, 35_000, steady(16_000, 27_000, 60_000.0 / 630, 15_900, barMs: 15_270, padDb: -38)
+            + steady(27_000, 35_000, 60_000.0 / 630, 15_900, barMs: 15_270)),
     ]
 
     struct Pair {
@@ -163,19 +242,27 @@ enum AutomixCases {
         var context = TransitionContext()
         var tailMissing = false
         var headMissing = false
+        /// The outgoing song as the queue lists it, when shorter than its sound.
+        var aLengthMs: Int?
+        /// The next song's head measured against its whole body, as a profile holds it.
+        var headAgainstBody = false
 
-        var current: FadeSong { FadeSong(albumId: sameAlbumInOrder ? "album" : "a", albumOrder: 1, durationMs: songs[a]!.lengthMs) }
+        var current: FadeSong {
+            FadeSong(albumId: sameAlbumInOrder ? "album" : "a", albumOrder: 1, durationMs: aLengthMs ?? songs[a]!.lengthMs)
+        }
+
         var next: FadeSong { FadeSong(albumId: sameAlbumInOrder ? "album" : "b", albumOrder: 2, durationMs: songs[b]!.lengthMs) }
     }
 
     private static let eight = AutomixSettings(maxOverlapMs: 8_000)
+    private static let matched = AutomixSettings(maxOverlapMs: 8_000, beatMatch: true)
 
     static let pairs: [Pair] = [
         Pair(name: "trailing-silence", a: "silence-tail", b: "plain-b", settings: eight),
         Pair(name: "fade-out", a: "fade-out", b: "plain-b", settings: eight),
         Pair(name: "hot-end", a: "hot-end", b: "plain-b", settings: eight),
         Pair(name: "quiet-intro", a: "hot-end", b: "quiet-intro", settings: eight),
-        Pair(name: "quiet-intro-capped", a: "hot-end", b: "quiet-intro", settings: AutomixSettings(maxOverlapMs: 4_000)),
+        Pair(name: "quiet-intro-capped", a: "hot-end", b: "quiet-intro", settings: AutomixSettings(maxOverlapMs: 4_000, longestIntroMs: 6_000)),
         Pair(name: "same-tempo", a: "beat-120", b: "beat-120-b", settings: eight),
         Pair(name: "same-tempo-long", a: "beat-120", b: "beat-120-b", settings: AutomixSettings(maxOverlapMs: 16_000)),
         Pair(name: "same-tempo-short", a: "beat-120", b: "beat-120-b", settings: AutomixSettings(maxOverlapMs: 5_000)),
@@ -205,6 +292,56 @@ enum AutomixCases {
         Pair(name: "whole-song-level", a: "fade-out", b: "plain-b", settings: eight, context: TransitionContext(bodyLevelDb: -24)),
         Pair(name: "tempo-prior", a: "beat-120", b: "beat-120-b", settings: eight, context: TransitionContext(tempoPrior: 60)),
         Pair(name: "tempo-prior-off", a: "beat-120", b: "beat-120-b", settings: eight, context: TransitionContext(tempoPrior: 100)),
+        // Kept music: early exits at section boundaries lose full-level music.
+        Pair(name: "kept-music", a: "steady-100-sections", b: "steady-100", settings: eight),
+        // Off-grid ends: the latest end 1.9 s (and 1.5 s, 1.1 s) past the last bar line a
+        // whole-bar plan can end on.
+        Pair(name: "off-grid-end", a: "steady-100", b: "steady-100", settings: AutomixSettings(maxOverlapMs: 9_200), aLengthMs: 201_350),
+        Pair(name: "off-grid-end-over", a: "steady-100", b: "steady-100", settings: eight, aLengthMs: 201_350),
+        Pair(name: "off-grid-intro", a: "steady-100", b: "quiet-100", settings: eight, aLengthMs: 200_950),
+        Pair(name: "off-grid-intro-capped", a: "steady-100", b: "quiet-100", settings: eight, aLengthMs: 201_350),
+        Pair(name: "off-grid-intro-short-fade", a: "steady-100", b: "quiet-100-short",
+             settings: AutomixSettings(maxOverlapMs: 2_400, longestIntroMs: 6_000), aLengthMs: 201_750),
+        Pair(name: "off-grid-cut", a: "steady-100", b: "steady-93", settings: eight, aLengthMs: 201_350),
+        // Rate first and the entry on the next song's grid.
+        Pair(name: "rate-small-gap", a: "steady-100", b: "steady-99.7", settings: matched),
+        Pair(name: "entry-on-beat", a: "steady-101", b: "steady-100-late", settings: eight),
+        Pair(name: "entry-on-downbeat", a: "steady-101", b: "steady-100-late", settings: matched),
+        Pair(name: "entry-before-start", a: "steady-101", b: "steady-100-early", settings: eight),
+        // The drift cap with both songs at full level.
+        Pair(name: "drift-1", a: "steady-101", b: "steady-100", settings: eight),
+        Pair(name: "drift-3", a: "steady-100", b: "steady-97", settings: eight),
+        Pair(name: "drift-7", a: "steady-100", b: "steady-93", settings: eight),
+        Pair(name: "drift-10", a: "steady-100", b: "steady-91", settings: eight),
+        Pair(name: "drift-20", a: "steady-100", b: "steady-83", settings: eight),
+        Pair(name: "drift-40", a: "steady-100", b: "steady-71", settings: eight),
+        Pair(name: "drift-outro", a: "steady-101-outro", b: "steady-93", settings: eight),
+        Pair(name: "drift-desktop-pace", a: "steady-100", b: "steady-97", settings: eight, context: TransitionContext(pace: 1.25, lockAtPace: true)),
+        Pair(name: "drift-phone-pace", a: "steady-101-outro", b: "steady-100", settings: matched, context: TransitionContext(pace: 1.25)),
+        Pair(name: "pace-steady", a: "steady-101", b: "steady-100", settings: matched, context: TransitionContext(skipSilence: true)),
+        Pair(name: "drift-late-matched", a: "steady-100", b: "steady-97", settings: matched, context: TransitionContext(nowMs: 196_000)),
+        Pair(name: "drift-late-capped", a: "steady-100", b: "steady-93", settings: eight, context: TransitionContext(nowMs: 196_000)),
+        Pair(name: "drift-late-cut", a: "steady-100", b: "steady-97", settings: eight, context: TransitionContext(nowMs: 200_500)),
+        Pair(name: "drift-short-window", a: "steady-100", b: "steady-100", settings: eight, context: TransitionContext(nowMs: 191_450)),
+        Pair(name: "late-move-count", a: "steady-100-steps", b: "steady-97", settings: eight),
+        // The next song heard before the lock point decides the bound.
+        Pair(name: "drift-before-lock", a: "steady-100", b: "steady-91-lead", settings: eight),
+        // A lead-in: an intro's fade still centered on a bar line, and a matched cut held until
+        // the next song's first sound.
+        Pair(name: "intro-lead", a: "steady-100", b: "quiet-100-lead", settings: eight, aLengthMs: 199_950),
+        Pair(name: "lead-held-cut", a: "steady-101", b: "steady-100-lead", settings: AutomixSettings(maxOverlapMs: 2_400, beatMatch: true)),
+        // Rate room: a 5% rate the next song is too short to ease back from.
+        Pair(name: "rate-room", a: "steady-100", b: "short-quiet", settings: matched),
+        // Intros.
+        Pair(name: "intro-matched", a: "steady-100", b: "quiet-106", settings: matched),
+        Pair(name: "intro-unmatched", a: "steady-100", b: "quiet-106", settings: eight),
+        Pair(name: "intro-short-drift", a: "steady-101", b: "quiet-100-short", settings: AutomixSettings(maxOverlapMs: 2_400)),
+        Pair(name: "intro-drift", a: "steady-101", b: "quiet-100", settings: eight),
+        Pair(name: "intro-later-start", a: "steady-101-outro", b: "quiet-100", settings: eight),
+        Pair(name: "intro-tempo-dropped", a: "steady-100", b: "quiet-100", settings: eight, context: TransitionContext(tempoPrior: 140)),
+        Pair(name: "intro-phone-pace", a: "beat-120", b: "quiet-intro", settings: matched, context: TransitionContext(pace: 1.25)),
+        Pair(name: "intro-phone-pace-confident", a: "steady-100", b: "quiet-100", settings: matched, context: TransitionContext(pace: 1.25)),
+        Pair(name: "intro-cap", a: "hot-end", b: "long-intro", settings: eight, headAgainstBody: true),
     ]
 
     private static let cache = AnalysisCache()
@@ -213,9 +350,18 @@ enum AutomixCases {
 
     static func head(_ song: String) -> SectionAnalysis { cache.get("head:\(song)") { songs[song]!.head() } }
 
+    /// The whole song's body level as the vectors file holds it, to four places.
+    static func wholeBodyDb(_ song: String) -> Double { ((songs[song]!.wholeBodyDb()! * 10_000) + 0.5).rounded(.down) / 10_000 }
+
+    /// The head measured against the whole song's body, as a profile holds it.
+    static func profileHead(_ song: String) -> SectionAnalysis {
+        cache.get("profile-head:\(song)") { songs[song]!.profileHead(wholeBodyDb(song)) }
+    }
+
     static func plan(_ pair: Pair) -> TransitionPlan {
-        planTransition(current: pair.current, next: pair.next, tail: pair.tailMissing ? nil : tail(pair.a),
-                       head: pair.headMissing ? nil : head(pair.b), settings: pair.settings, context: pair.context)
+        let start: SectionAnalysis? = pair.headMissing ? nil : pair.headAgainstBody ? profileHead(pair.b) : head(pair.b)
+        return planTransition(current: pair.current, next: pair.next, tail: pair.tailMissing ? nil : tail(pair.a), head: start,
+                              settings: pair.settings, context: pair.context)
     }
 
     static func pair(_ name: String) -> Pair { pairs.first { $0.name == name }! }

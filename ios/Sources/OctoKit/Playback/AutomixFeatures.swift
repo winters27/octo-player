@@ -161,7 +161,8 @@ public struct SectionFeatures: Sendable, Equatable {
     public var boundariesMs: [Int]
     public var tempo: Tempo?
     /// Where the song first comes within 6 dB of its body level: the end of a quiet intro, or
-    /// the sound start when it starts at full level.
+    /// the sound start when it starts at full level. A head whose sound never gets there has its
+    /// intro end at the head's end.
     public var introEndMs: Int?
 
     public init(bodyDb: Double, gateDb: Double, soundStartMs: Int?, soundEndMs: Int?, outroStartMs: Int?,
@@ -213,6 +214,26 @@ public final class SectionAnalysis: @unchecked Sendable {
         var at = 0
         for i in from..<to where body[i] >= thresholdDb { at += 1 }
         return Double(at) / Double(to - from)
+    }
+
+    /// How long from fromMs to toMs the 400 ms level is at or above thresholdDb, in milliseconds.
+    public func msAtLeast(_ fromMs: Double, _ toMs: Double, _ thresholdDb: Double) -> Double {
+        toMs <= fromMs ? 0 : shareAtLeast(fromMs, toMs, thresholdDb) * (toMs - fromMs)
+    }
+
+    /// The 400 ms level at a moment in dBFS; `silentDb` outside the envelope.
+    public func levelAt(_ ms: Double) -> Double {
+        let i = envelope.indexAt(ms)
+        return i < 0 || i >= envelope.size ? Double(silentDb) : body[i]
+    }
+
+    /// The same section with its quiet intro running to the section's end when the sound starts
+    /// but never comes near the body inside it.
+    func withIntroToTheEnd() -> SectionAnalysis {
+        if features.soundStartMs == nil || features.introEndMs != nil { return self }
+        var moved = features
+        moved.introEndMs = envelope.endMs
+        return SectionAnalysis(envelope: envelope, features: moved, prefix: prefix, body: body, sound: sound, outro: outro)
     }
 
     /// The same section measured against a body level known from elsewhere, such as the whole
@@ -267,9 +288,15 @@ public final class SectionAnalysis: @unchecked Sendable {
     }
 }
 
-/// The features of the start of a song.
-public func analyzeHead(_ envelope: SectionEnvelope, tagBpm: Double? = nil) -> SectionAnalysis {
-    SectionAnalysis.of(envelope, tagBpm: tagBpm, bodyPercentile: headBodyPercentile)
+/// How much of the start of a song its head covers: as much as a scout reads and a profile holds.
+public let automixHeadMs = 45_000
+
+/// The features of the start of a song. `bodyLevelDb`, the whole song's body level when it is
+/// known (a profile made from the whole song), stands in for the start's own; a scouted start
+/// measures its own. When the sound starts but never comes within `outroBelowBodyDb` of the body
+/// inside the section, the quiet intro lasts at least that long, so it ends at the section's end.
+public func analyzeHead(_ envelope: SectionEnvelope, tagBpm: Double? = nil, bodyLevelDb: Double? = nil) -> SectionAnalysis {
+    SectionAnalysis.of(envelope, tagBpm: tagBpm, bodyLevelDb: bodyLevelDb, bodyPercentile: headBodyPercentile).withIntroToTheEnd()
 }
 
 /// The features of the end of a song. Without a body level from the whole song, the tail's own
