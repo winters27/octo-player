@@ -83,13 +83,20 @@ fun introOutGain(t: Double, holdShare: Double): Double {
 }
 
 // The incoming song's volume through an intro: rising as sin(pi/2 * t /
-// riseShare) to full by `riseShare`, then full, so its quiet start plays at
-// its own level.
-fun introInGain(t: Double, riseShare: Double): Double {
+// riseShare) to `level` by `riseShare`, then `level` until `holdShare`, so
+// its quiet start plays under the outgoing song at that much of its own
+// level; past the hold it comes up as the outgoing song's power leaves,
+// sqrt(level^2 + (1 - level^2) * (1 - out^2)) with `out` the outgoing
+// song's introOutGain, to its own level at the end. At level 1 it is full
+// from `riseShare` on.
+fun introInGain(t: Double, riseShare: Double, holdShare: Double, level: Double): Double {
     val p = t.coerceIn(0.0, 1.0)
     val rise = riseShare.coerceIn(0.0, 1.0)
-    if (p >= rise) return 1.0
-    return sin(PI / 2 * p / rise).coerceIn(0.0, 1.0)
+    val g = level.coerceIn(0.0, 1.0)
+    if (p < rise) return (sin(PI / 2 * p / rise) * g).coerceIn(0.0, 1.0)
+    if (p <= holdShare.coerceIn(0.0, 1.0)) return g
+    val out = introOutGain(p, holdShare)
+    return sqrt(g * g + (1 - g * g) * (1 - out * out))
 }
 
 // Moves from `from` to `to` on a log scale as u goes from 0 to 1.

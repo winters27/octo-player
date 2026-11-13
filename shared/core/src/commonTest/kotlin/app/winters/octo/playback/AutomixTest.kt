@@ -954,25 +954,46 @@ class AutomixTest {
     }
 
     @Test
-    fun anIntroPlaysOnlyWhereItsQuietStartStaysWellUnderTheOutgoingSong() {
-        // The two quiet starts against the outgoing song at the same moments
-        // (bars lined up): 7 dB and 5 dB under it.
-        val a = AutomixCases.tail("steady-100")
-        fun under(song: String): Double {
+    fun anIntroLowersTheNextSongThroughTheHoldUntilItStaysWellUnderTheOutgoingSong() {
+        // The quiet starts against the outgoing song at the same moments
+        // (bars lined up): 7 dB under it, 5 dB under it and at its level.
+        fun under(outgoing: String, fromMs: Double, song: String): Double {
+            val a = AutomixCases.tail(outgoing)
             val b = AutomixCases.head(song)
-            val apart = (300 until 1_000).map { b.levelAt(it * 10.0) - a.levelAt(180_000 + it * 10.0) }.sorted()
+            val apart = (300 until 1_000).map { b.levelAt(it * 10.0) - a.levelAt(fromMs + it * 10.0) }.sorted()
             return apart[apart.size / 2]
         }
-        assertEquals(-7.0, under("under-100"), 0.5)
-        assertEquals(-5.0, under("near-100"), 0.5)
-        // 7 dB under through the hold: the intro.
+        assertEquals(-7.0, under("steady-100", 180_000.0, "under-100"), 0.5)
+        assertEquals(-5.0, under("steady-100", 180_000.0, "near-100"), 0.5)
+        assertEquals(0.0, under("steady-100", 180_000.0, "level-100"), 0.5)
+        fun trimDb(plan: TransitionPlan) = -20 * kotlin.math.log10(plan.introLevel)
+        // 7 dB under: the intro at the next song's own level.
         val quiet = plan("intro-under-line")
         assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
-        // 5 dB under: together they would be clearly louder than the
-        // outgoing song alone, so the blend lengthened into the quiet start.
+        assertEquals(1.0, quiet.introLevel, 0.0)
+        // 5 dB under: lowered about 1 dB, so it stays 6 dB under.
         val near = plan("intro-over-line")
-        assertTrue(near.reason, near.kind != TransitionKind.INTRO && near.kind != TransitionKind.GAPLESS)
-        assertTrue(near.reason, near.reason.contains("(full from"))
+        assertEquals(near.reason, TransitionKind.INTRO, near.kind)
+        assertEquals(1.0, trimDb(near), 0.5)
+        // At the outgoing song's level: lowered about 6 dB and held there,
+        // then brought up as the outgoing song fades.
+        val level = plan("intro-trimmed")
+        assertEquals(level.reason, TransitionKind.INTRO, level.kind)
+        assertEquals(6.0, trimDb(level), 0.5)
+        assertTrue(level.reason, level.reason.contains(", next song lowered "))
+        assertEquals(level.introLevel, level.inGain(level.holdShare / 2), 0.0)
+        assertEquals(1.0, level.inGain(1.0), 1e-9)
+        // At its own level the next song would be clearly heard from its rise
+        // on, together with the outgoing song held at its own; lowered, it is
+        // not heard with it before the hold ends.
+        assertTrue(level.reason, level.bothHeardStartMs >= level.holdShare * level.overlapMs - 1)
+        // Under an outgoing song near silence it would have to come down over
+        // INTRO_TRIM_CAP_DB: no intro, the blend lengthened into the quiet
+        // start.
+        assertTrue(under("faint-100", 72_000.0, "level-100") + INTRO_UNDER_OUTGOING_DB > INTRO_TRIM_CAP_DB)
+        val faint = plan("intro-trim-capped")
+        assertTrue(faint.reason, faint.kind != TransitionKind.INTRO && faint.kind != TransitionKind.GAPLESS)
+        assertTrue(faint.reason, faint.reason.contains("(full from"))
     }
 
     @Test
@@ -1143,13 +1164,39 @@ class AutomixTest {
     @Test
     fun anIntroRaisesTheIncomingSongQuicklyThenHoldsIt() {
         val rise = 1_000.0 / 13_500
-        assertEquals(0.0, introInGain(0.0, rise), 0.0)
-        assertEquals(0.0, introInGain(-0.1, rise), 0.0)
-        assertEquals(sin(PI / 4), introInGain(rise / 2, rise), 1e-12)
-        assertEquals(sin(PI / 2 * 0.2), introInGain(rise * 0.2, rise), 1e-12)
-        for (t in listOf(rise, 0.2, 0.5, 0.9, 1.0, 1.2)) assertEquals("at $t", 1.0, introInGain(t, rise), 0.0)
+        val hold = 10_500.0 / 13_500
+        assertEquals(0.0, introInGain(0.0, rise, hold, 1.0), 0.0)
+        assertEquals(0.0, introInGain(-0.1, rise, hold, 1.0), 0.0)
+        assertEquals(sin(PI / 4), introInGain(rise / 2, rise, hold, 1.0), 1e-12)
+        assertEquals(sin(PI / 2 * 0.2), introInGain(rise * 0.2, rise, hold, 1.0), 1e-12)
+        for (t in listOf(rise, 0.2, 0.5, 0.9, 1.0, 1.2)) assertEquals("at $t", 1.0, introInGain(t, rise, hold, 1.0), 0.0)
         // No rise is full at once.
-        assertEquals(1.0, introInGain(0.0, 0.0), 0.0)
+        assertEquals(1.0, introInGain(0.0, 0.0, hold, 1.0), 0.0)
+    }
+
+    @Test
+    fun aLoweredIntroHoldsTheIncomingSongThereThenBringsItUpAsTheOutgoingSongLeaves() {
+        val rise = 1_000.0 / 13_500
+        val hold = 10_500.0 / 13_500
+        val level = 0.5
+        assertEquals(sin(PI / 4) * level, introInGain(rise / 2, rise, hold, level), 1e-12)
+        for (t in listOf(rise, 0.3, hold)) assertEquals("at $t", level, introInGain(t, rise, hold, level), 0.0)
+        // Past the hold the incoming song comes up as the outgoing song's
+        // power leaves, to its own level at the end.
+        for (t in listOf(hold + 0.02, hold + (1 - hold) / 2, 0.95)) {
+            val out = introOutGain(t, hold)
+            val expected = sqrt(level * level + (1 - level * level) * (1 - out * out))
+            assertEquals("at $t", expected, introInGain(t, rise, hold, level), 1e-12)
+        }
+        assertEquals(1.0, introInGain(1.0, rise, hold, level), 1e-12)
+        var last = 0.0
+        for (step in 0..400) {
+            val gain = introInGain(step / 400.0, rise, hold, level)
+            assertTrue("at $step", gain >= last - 1e-12)
+            last = gain
+        }
+        // At level 1 nothing changes: full from the rise on.
+        for (t in listOf(rise, 0.5, hold + 0.1, 1.0)) assertEquals("at $t", 1.0, introInGain(t, rise, hold, 1.0), 0.0)
     }
 
     @Test
@@ -1158,7 +1205,7 @@ class AutomixTest {
         for (step in 0..100) {
             val t = step / 100.0
             assertEquals("out at $t", introOutGain(t, plan.holdShare), plan.outGain(t), 0.0)
-            assertEquals("in at $t", introInGain(t, plan.riseShare), plan.inGain(t), 0.0)
+            assertEquals("in at $t", introInGain(t, plan.riseShare, plan.holdShare, plan.introLevel), plan.inGain(t), 0.0)
         }
         assertEquals(1.0, plan.outGain(0.7), 0.0)
         assertEquals(1.0, plan.inGain(0.5), 0.0)

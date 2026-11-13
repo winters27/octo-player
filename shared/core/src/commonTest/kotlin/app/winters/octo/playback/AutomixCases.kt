@@ -156,6 +156,14 @@ object AutomixCases {
         "under-100" to SyntheticSong(
             22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -21.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -8.0),
         ),
+        // 100 BPM with a quiet start of 11 s, 8 dB under its own body but at
+        // steady-100's level: an intro lowers it about 6 dB through the hold.
+        "level-100" to SyntheticSong(
+            22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -14.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -6.0),
+        ),
+        // 100 BPM 28 dB under steady-100 throughout: next to it level-100's
+        // quiet start would have to come down 34 dB.
+        "faint-100" to SyntheticSong(22_050, 1, 100_000, steady(0.0, 100_000.0, 100.0, 0.0, padDb = -42.0)),
     )
 
     data class Pair(
@@ -275,10 +283,14 @@ object AutomixCases {
         Pair("intro-phone-pace", "beat-120", "quiet-intro", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-phone-pace-confident", "steady-100", "quiet-100", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-cap", "hot-end", "long-intro", eight, headAgainstBody = true),
-        // An intro only where its quiet start stays 6 dB under the outgoing
-        // song: 7 dB under is planned, 5 dB under gives the blend.
+        // An intro's quiet start kept 6 dB under the outgoing song: 7 dB under
+        // plays at its own level, 5 dB under is lowered about 1 dB and one at
+        // the outgoing song's level about 6 dB; one that would need over
+        // INTRO_TRIM_CAP_DB gives the blend.
         Pair("intro-under-line", "steady-100", "under-100", eight),
         Pair("intro-over-line", "steady-100", "near-100", eight),
+        Pair("intro-trimmed", "steady-100", "level-100", eight),
+        Pair("intro-trim-capped", "faint-100", "level-100", eight),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()
