@@ -53,6 +53,8 @@ import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ServerSync
 import app.winters.octo.sound.AlbumRun
 import app.winters.octo.sound.AudioSession
+import app.winters.octo.sound.DeckMixer
+import app.winters.octo.sound.DeckMixers
 import app.winters.octo.sound.DeckSound
 import app.winters.octo.sound.OctoRenderersFactory
 import app.winters.octo.sound.SoundEngine
@@ -207,6 +209,8 @@ class OctoPlaybackService : MediaLibraryService() {
     // session holds, which is the phone's or, while casting, the one that
     // drives the TV or speaker.
     private lateinit var local: OctoPlayer
+    // The one mix output both decks play into, released after them.
+    private var mix: DeckMixer? = null
     private lateinit var player: OutputSwitch
     // The queue, kept whole in Room while the player holds a window of it.
     private lateinit var window: QueueWindow
@@ -240,20 +244,25 @@ class OctoPlaybackService : MediaLibraryService() {
         // memory of the last album for Smart ReplayGain, since a crossfade
         // hands the next song to the other deck.
         val albums = AlbumRun()
-        // While crossfade is on, each deck's sound processor stays in the
-        // path so a blend can be shaped there.
+        // Each deck's sound processor, read for what a song sounds like.
         val sounds = HashMap<ExoPlayer, DeckSound>()
         // Each deck's buffering, told how long a stream waits before it starts.
         val loads = ArrayList<OctoLoadControl>()
-        fun deck(): ExoPlayer {
-            val renderers = OctoRenderersFactory(this, { sound.playing.value }, albums, crossfadeOn::get)
+        // Both decks play into one mix output, the only audio track: it sums
+        // them, shapes the blends on the frame and limits the sum. Made
+        // before the decks, its events reach the player through `relay`.
+        val relay = MixRelay()
+        val mixer = DeckMixers.create(this, deckAudioAttributes(), audioSession.id, relay).also { mix = it }
+        fun deck(slot: Int): ExoPlayer {
+            val renderers = OctoRenderersFactory(this, { sound.playing.value }, albums, crossfadeOn::get, mixer, slot)
             val control = OctoLoadControl().also(loads::add)
             return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id, control)
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }
         }
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
         val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
-        local = OctoPlayer(this, deck(), deck(), sounds::get, scout, profiles, realLengths)
+        local = OctoPlayer(this, deck(0), deck(1), sounds::get, scout, profiles, realLengths, mixer)
+        relay.to = local.mixListener
         player = OutputSwitch(local) { if (::window.isInitialized) window else null }
         window = QueueWindow(
             player = player,
@@ -409,6 +418,8 @@ class OctoPlaybackService : MediaLibraryService() {
         casting.release()
         session?.release()
         player.release()
+        mix?.release()
+        mix = null
         audioSession.close()
         session = null
         scope.cancel()
@@ -691,7 +702,8 @@ class OctoPlaybackService : MediaLibraryService() {
             val entry = player.currentMediaItem?.let { it.entryId ?: it.mediaId }
             if (entry != null && streamChangedIn(error) && reopened != entry) {
                 reopened = entry
-                scope.launch { player.prepare() }
+                // On the phone it goes on by song time, nothing heard twice.
+                scope.launch { if (player.isRemote) player.prepare() else local.reopen() }
                 return
             }
             // A file kept before sign-in pages were refused can be one: it is
