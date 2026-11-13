@@ -4,8 +4,10 @@ import app.winters.octo.testing.OldSqlite
 import app.winters.octo.testing.counted
 import app.winters.octo.testing.openTestCatalog
 import app.winters.octo.testing.testMerge
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
 
 // What a save writes, and when. An everyday copy whose songs moved place
 // (one taken out ahead of them) rewrites only the songs that changed, and
@@ -32,23 +35,39 @@ class SwapWritesTest {
     private fun <T> run(block: suspend () -> T): T = runBlocking { withTimeout(60_000) { block() } }
 
     // Each save's steps, by name, with the rows each wrote over its groups.
-    private class Steps : GroupHooks() {
+    // With `holdClear`, the first stage clear stops after its first page
+    // until `nextStaged`, or a second at most, as a clear on a busy phone
+    // runs late.
+    private class Steps(private val holdClear: Boolean = false) : GroupHooks() {
         val cleared: MutableList<Long> = Collections.synchronizedList(ArrayList())
+        val nextStaged = CompletableDeferred<Unit>()
+        private val held = AtomicBoolean(false)
+
+        override suspend fun stageClearPage(sourceId: String) {
+            if (holdClear && held.compareAndSet(false, true)) withTimeoutOrNull(1_000) { nextStaged.await() }
+        }
 
         override fun stageCleared(sourceId: String, rows: Long, millis: Long) {
             cleared += rows
         }
     }
 
-    private suspend fun swapIn(merge: CatalogMerge, copy: SourceCatalog, generation: Long) {
+    // A copy staged as a server copy starts its stage: once the copy swapped
+    // in last has left the stage, whose clear takes the source's rows of
+    // every generation. `staged` hears that the copy is staged.
+    private suspend fun swapIn(merge: CatalogMerge, copy: SourceCatalog, generation: Long, staged: () -> Unit = {}) {
+        merge.awaitStageClear(server)
         db.stage(copy, generation)
+        staged()
         merge.rebuild()
         merge.awaitStage(server, generation)
     }
 
+    // The first copy's stage clear runs late, and the next copy still keeps
+    // every row it was staged with.
     @Test
     fun anEverydayCopyRewritesOnlyTheSongsThatChanged() = run {
-        val steps = Steps()
+        val steps = Steps(holdClear = true)
         val merge = db.testMerge(server, steps)
         val first = library(server, 300)
         swapIn(merge, first, generation = 1)
@@ -56,7 +75,7 @@ class SwapWritesTest {
         val next = first.copy(
             tracks = first.tracks.drop(10).map { if (it.id in retitled) it.copy(title = it.title + " (Live)") else it },
         )
-        swapIn(merge, next, generation = 2)
+        swapIn(merge, next, generation = 2) { steps.nextStaged.complete(Unit) }
         val everyday = steps.steps.last()
         assertEquals("$everyday", 3L, everyday["update source_track"])
         assertEquals("$everyday", 290L, everyday["update seq of source_track"])
@@ -67,6 +86,7 @@ class SwapWritesTest {
         }
         assertEquals(290L, db.longOf("SELECT COUNT(*) FROM track"))
         assertEquals(3L, db.longOf("SELECT COUNT(*) FROM track WHERE title LIKE '% (Live)'"))
+        merge.awaitStageClear(server)
     }
 
     @Test
