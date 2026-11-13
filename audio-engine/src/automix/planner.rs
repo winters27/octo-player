@@ -60,6 +60,15 @@ pub const INTRO_FADE_MS: i64 = 3_000;
 /// an intro (one bar when locked).
 pub const INTRO_RISE_MS: i64 = 1_000;
 
+/// An intro plays only where the incoming song, with its rise, stays at
+/// least `INTRO_UNDER_OUTGOING_DB` under the outgoing song held at its own
+/// level, at the same moments, for `INTRO_UNDER_OUTGOING_SHARE` of the hold
+/// where it sounds: the two together are then never clearly louder than the
+/// outgoing song alone, and a short break in the outgoing song, where the
+/// incoming one plays alone, does not count.
+pub const INTRO_UNDER_OUTGOING_DB: f64 = 6.0;
+pub const INTRO_UNDER_OUTGOING_SHARE: f64 = 0.95;
+
 /// Music at full level the outgoing song would lose after a blend's end:
 /// above `KEPT_MUSIC_LIMIT_MS` the start is left out, and each second below
 /// it costs `KEPT_MUSIC_WEIGHT`. Full level is within
@@ -844,6 +853,38 @@ impl PlanPass<'_> {
         heard
     }
 
+    // Whether an intro's incoming song stays INTRO_UNDER_OUTGOING_DB under
+    // the outgoing song through the hold, walked as the both-heard stretch
+    // is: at each step where the incoming song, with its rise, sounds above
+    // its silence gate, its 400 ms level less the outgoing song's at the
+    // same moment, the INTRO_UNDER_OUTGOING_SHARE percentile of those (the
+    // lower of two neighbors). True when it never sounds there.
+    fn under_outgoing(&self, s: &Shape) -> bool {
+        let Some(b) = self.head else { return true };
+        let hold = s.hold_share * s.overlap_ms;
+        let gate = b.features.gate_db;
+        let count = (hold / HEARD_STEP_MS).floor() as i64;
+        let mut apart: Vec<f64> = Vec::new();
+        for i in 0..count {
+            let since = i as f64 * HEARD_STEP_MS;
+            let into = intro_in_gain(since / s.overlap_ms, s.rise_share);
+            if into <= 0.0 {
+                continue;
+            }
+            let level = b.level_at(self.entry + since * self.speed_b) + 20.0 * into.log10();
+            if level <= gate {
+                continue;
+            }
+            apart.push(level - self.measured.level_at(s.start_ms + since));
+        }
+        if apart.is_empty() {
+            return true;
+        }
+        apart.sort_by(f64::total_cmp);
+        apart[(INTRO_UNDER_OUTGOING_SHARE * (apart.len() - 1) as f64).floor() as usize]
+            <= -INTRO_UNDER_OUTGOING_DB
+    }
+
     // The best scoring shape; the later one wins a tie. Shapes that cut over
     // KEPT_MUSIC_LIMIT_MS of the outgoing song's full-level music are left
     // out; `None` when no other is left.
@@ -948,9 +989,11 @@ impl PlanPass<'_> {
     // outgoing song holds, then fades over two bars (or INTRO_FADE_MS
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
-    // next song rises over a bar (INTRO_RISE_MS unlocked). `None` when no
-    // start is left, the beats allow none or every one left would cut the
-    // outgoing song short, and the lengthened blend is planned instead.
+    // next song rises over a bar (INTRO_RISE_MS unlocked). Only starts where
+    // the next song stays under the outgoing one through the hold
+    // (`under_outgoing`) are planned. `None` when no start is left, the
+    // beats or levels allow none or every one left would cut the outgoing
+    // song short, and the lengthened blend is planned instead.
     fn plan_intro(&self, quiet: f64) -> Option<TransitionPlan> {
         let bar = self.lock_a.map(|a| a.bar_ms());
         let rise = bar.unwrap_or(INTRO_RISE_MS as f64);
@@ -1014,7 +1057,8 @@ impl PlanPass<'_> {
                 }
             }
         }
-        let allowed: Vec<Shape> = all.into_iter().filter(|s| self.meets(s)).collect();
+        let allowed: Vec<Shape> =
+            all.into_iter().filter(|s| self.meets(s) && self.under_outgoing(s)).collect();
         if allowed.is_empty() {
             return None;
         }
