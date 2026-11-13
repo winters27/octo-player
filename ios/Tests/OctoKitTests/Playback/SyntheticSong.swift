@@ -160,6 +160,20 @@ enum AutomixCases {
         steady(0, quietMs, bpm, beatMs, padDb: -38) + steady(quietMs, lengthMs, bpm, beatMs)
     }
 
+    /// 100 BPM (2.4 s bars from 0), its pad at each level from each time on: `steps` are
+    /// (fromMs, padDb), the first from 0, the last to lengthMs.
+    private static func levels(_ lengthMs: Double, _ steps: Double...) -> [SongLayer] {
+        stride(from: 0, to: steps.count, by: 2).flatMap { i in
+            steady(steps[i], i + 2 < steps.count ? steps[i + 2] : lengthMs, 100, 0, padDb: steps[i + 1])
+        }
+    }
+
+    /// A steady beat whose first 10 s are 8 dB under the rest: a quiet start that is still clearly
+    /// heard.
+    private static func audibleStart(_ bpm: Double) -> [SongLayer] {
+        steady(0, 10_000, bpm, 0, padDb: -22) + steady(10_000, 45_000, bpm, 0)
+    }
+
     private static func song(_ rate: Int, _ lengthMs: Int, _ layers: [SongLayer]) -> SyntheticSong {
         SyntheticSong(rate: rate, channels: 1, lengthMs: lengthMs, layers: layers)
     }
@@ -186,6 +200,28 @@ enum AutomixCases {
         "endless-intro": song(44_100, 200_000, pad(0, 60_000, -38) + pad(60_000, 200_000, -14)),
         // A steady 100 BPM beat (2.4 s bars from 0) at full level from the first sample to the last.
         "steady-100": song(44_100, 202_000, steady(0, 202_000, 100, 0)),
+        // 100 BPM at full level to the end but for one stretch 14 dB under it, where it is not
+        // clearly heard: 3 s from 72.6 s, 16.4 s from 70 s and 13.6 s from 82.4 s, ending 24.15 s,
+        // 13.35 s and 3.75 s before the latest end a blend may reach (99.75 s).
+        "dip-far": song(22_050, 100_000, levels(100_000, 0, -14, 72_600, -28, 75_600, -14)),
+        "dip-mid": song(22_050, 100_000, levels(100_000, 0, -14, 70_000, -28, 86_400, -14)),
+        "dip-near": song(22_050, 100_000, levels(100_000, 0, -14, 82_400, -28, 96_000, -14)),
+        // 100 BPM, 14 dB under its body from 80 s to 96 s, then 8 dB under it (clearly heard, under
+        // full level) until 99.1 s, then full to the end: a blend ending before that cuts under a
+        // second of full-level music.
+        "dip-short": song(22_050, 100_000, levels(100_000, 0, -14, 80_000, -28, 96_000, -22, 99_100, -14)),
+        // Tempos 25% and 12.3% from 100 BPM at full level from the first sample.
+        "steady-133": song(22_050, 45_000, steady(0, 45_000, 400.0 / 3, 0)),
+        "steady-114": song(22_050, 45_000, steady(0, 45_000, 114, 0)),
+        // Tempos 23.6%, 20% and 18.3% from 100 BPM with a quiet start that is still clearly heard.
+        "audible-131": song(22_050, 45_000, audibleStart(130.9)),
+        "audible-83": song(22_050, 45_000, audibleStart(250.0 / 3)),
+        "audible-85": song(22_050, 45_000, audibleStart(84.5)),
+        // 100 BPM with a quiet start of 11 s, 11 dB and 13 dB under its own body but 5 dB and 7 dB
+        // under steady-100: just over and just under the line an intro must keep under the
+        // outgoing song.
+        "near-100": song(22_050, 45_000, steady(0, 11_000, 100, 0, padDb: -19) + steady(11_000, 45_000, 100, 0, padDb: -8)),
+        "under-100": song(22_050, 45_000, steady(0, 11_000, 100, 0, padDb: -21) + steady(11_000, 45_000, 100, 0, padDb: -8)),
         // The same at 101 BPM, 1% faster.
         "steady-101": song(44_100, 202_000, steady(0, 202_000, 101, 0)),
         // 101 BPM at full level until 190 s, then 12 dB under it: an outro where the song is no
@@ -342,6 +378,19 @@ enum AutomixCases {
         Pair(name: "intro-phone-pace", a: "beat-120", b: "quiet-intro", settings: matched, context: TransitionContext(pace: 1.25)),
         Pair(name: "intro-phone-pace-confident", a: "steady-100", b: "quiet-100", settings: matched, context: TransitionContext(pace: 1.25)),
         Pair(name: "intro-cap", a: "hot-end", b: "long-intro", settings: eight, headAgainstBody: true),
+        // Kept music over the beats: tempos 12% to 25% apart with the outgoing song at full level to
+        // the end, where only places in its quiet stretch keep the beats apart. Each cuts seconds of
+        // music, so the songs join gaplessly; one cutting under a second is planned.
+        Pair(name: "kept-cut-25", a: "dip-far", b: "steady-133", settings: eight),
+        Pair(name: "kept-intro-24", a: "dip-mid", b: "audible-131", settings: eight),
+        Pair(name: "kept-intro-20", a: "dip-mid", b: "audible-83", settings: eight),
+        Pair(name: "kept-blend-12", a: "dip-near", b: "steady-114", settings: eight),
+        Pair(name: "kept-intro-18", a: "dip-near", b: "audible-85", settings: eight),
+        Pair(name: "kept-short-cut", a: "dip-short", b: "steady-114", settings: eight),
+        // An intro only where its quiet start stays 6 dB under the outgoing song: 7 dB under is
+        // planned, 5 dB under gives the blend.
+        Pair(name: "intro-under-line", a: "steady-100", b: "under-100", settings: eight),
+        Pair(name: "intro-over-line", a: "steady-100", b: "near-100", settings: eight),
     ]
 
     private static let cache = AnalysisCache()

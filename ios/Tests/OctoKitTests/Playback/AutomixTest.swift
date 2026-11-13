@@ -724,10 +724,46 @@ import Testing
         #expect(Double(capped.entryMs) + fadeMiddle >= Double(introEnd) - 2_400 / 2.0, "\(fadeMiddle)")
         #expect(capped.overlapMs <= automixLongestIntroMs, "\(capped.reason)")
         // With a fade of half the quiet start, so short that a bar later it would be under half the
-        // planned fade: no capped twin, the intro ends on its bar.
+        // planned fade: no capped twin. The intro left ends on its bar, 1.2 s of full-level music
+        // before the latest end, so it is not planned; the blend ends at the latest end.
         let short = self.plan("off-grid-intro-short-fade")
-        #expect(short.kind == .intro, "\(short.reason)")
-        #expect(near(Double(short.latestEndMs - short.startMs - short.overlapMs), 1_200, 40))
+        #expect(short.kind != .intro && short.kind != .gapless, "\(short.reason)")
+        #expect(short.latestEndMs == short.startMs + short.overlapMs)
+    }
+
+    @Test func aPlaceThatCutsTheSongShortIsNeverPlannedEvenWhenItIsTheOnlyOneLeft() {
+        // Tempos 12% to 25% apart, the outgoing song at full level to the end: only blends and
+        // intros in its quiet stretch keep the beats apart, and each would cut seconds of its
+        // music. The songs join gaplessly at its end instead.
+        for name in ["kept-cut-25", "kept-intro-24", "kept-intro-20", "kept-blend-12", "kept-intro-18"] {
+            let p = plan(name)
+            #expect(p.kind == .gapless, "\(name): \(p.reason)")
+            #expect(p.startMs == AutomixCases.pair(name).current.durationMs, "\(name)")
+            #expect(p.reason == "gapless: every blend left would cut the song short", "\(name)")
+        }
+        // Where the places that keep the beats apart cut under a second of the full-level music, one
+        // of them is still planned.
+        let short = plan("kept-short-cut")
+        let tail = AutomixCases.tail("dip-short")
+        let end = Double(short.startMs + short.overlapMs)
+        #expect(short.kind != .gapless && end < Double(short.latestEndMs) - 500, "\(short.reason)")
+        let cut = tail.msAtLeast(end, Double(short.latestEndMs), tail.features.bodyDb - keptMusicBelowBodyDb)
+        #expect(cut > 500 && cut <= Double(keptMusicLimitMs), "\(cut)")
+        #expect(short.driftAtEndMs <= blendDriftLimitMs, "\(short.reason)")
+    }
+
+    @Test func theIntroLinePairsSitJustUnderAndJustOverTheLine() {
+        // The two quiet starts against the outgoing song at the same moments (bars lined up): 7 dB
+        // and 5 dB under it, either side of `introUnderOutgoingDb`.
+        let a = AutomixCases.tail("steady-100")
+        func under(_ song: String) -> Double {
+            let b = AutomixCases.head(song)
+            let apart = (300..<1_000).map { b.levelAt(Double($0) * 10) - a.levelAt(180_000 + Double($0) * 10) }.sorted()
+            return apart[apart.count / 2]
+        }
+        #expect(near(under("under-100"), -7, 0.5))
+        #expect(near(under("near-100"), -5, 0.5))
+        #expect(-under("under-100") > introUnderOutgoingDb && -under("near-100") < introUnderOutgoingDb)
     }
 
     @Test func aCutOnTheBeatEndsAtAnOffGridLatestEnd() {

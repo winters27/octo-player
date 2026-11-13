@@ -44,6 +44,13 @@ public let introFadeMs = 3_000
 /// when locked).
 public let introRiseMs = 1_000
 
+/// How far an intro's incoming song, with its rise, must stay under the outgoing song held at its
+/// own level, at the same moments, for `introUnderOutgoingShare` of the hold where it sounds, so
+/// the two together are never clearly louder than the outgoing song alone; a short break in the
+/// outgoing song, where the incoming one plays alone, does not count.
+public let introUnderOutgoingDb = 6.0
+public let introUnderOutgoingShare = 0.95
+
 /// Music at full level the outgoing song would lose after a blend's end: above
 /// `keptMusicLimitMs` the start is left out, and each second below it costs `keptMusicWeight`.
 /// Full level is within `keptMusicBelowBodyDb` of the body.
@@ -674,6 +681,30 @@ private struct PlanPass {
             last = at
         }
         return first.isNaN ? nil : (first, last)
+    }
+
+    /// How far an intro's incoming song sits over the outgoing song through the hold, walked as the
+    /// both-heard stretch is: at each step where the incoming song, with its rise, sounds above its
+    /// silence gate, its 400 ms level less the outgoing song's at the same moment, the
+    /// `introUnderOutgoingShare` percentile of those (the lower of two neighbors), in dB. Nil when
+    /// it never sounds there.
+    func introOverOutgoingDb(_ s: Shape) -> Double? {
+        guard let b = head else { return nil }
+        let hold = s.holdShare * s.overlapMs
+        let gate = b.features.gateDb
+        var apart: [Double] = []
+        let count = Int((hold / heardStepMs).rounded(.down))
+        for i in 0..<max(0, count) {
+            let since = Double(i) * heardStepMs
+            let into = introInGain(since / s.overlapMs, s.riseShare)
+            if into <= 0 { continue }
+            let level = b.levelAt(entry + since * speedB) + 20 * log10(into)
+            if level <= gate { continue }
+            apart.append(level - measured.levelAt(s.startMs + since))
+        }
+        if apart.isEmpty { return nil }
+        apart.sort()
+        return apart[Int((introUnderOutgoingShare * Double(apart.count - 1)).rounded(.down))]
     }
 
     /// The best scoring shape; the later one wins a tie. Shapes that cut over `keptMusicLimitMs`
