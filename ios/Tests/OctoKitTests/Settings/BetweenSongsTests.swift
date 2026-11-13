@@ -67,6 +67,11 @@ struct MemoryStore {
         prefs.crossfadeCurve = .sCurve
         #expect(prefs.automix == automixSettingsOf(.crossfade, crossfadeSeconds: 5, crossfadeCurve: .sCurve, filterSweeps: true, matchTempo: true))
         #expect(prefs.crossfadeMs == 5_000)
+        // Automix's longest blend whatever Crossfade's length is, and none for Gapless.
+        prefs.betweenSongs = .automix
+        #expect(prefs.crossfadeMs == automixLongestBlendMs)
+        prefs.betweenSongs = .gapless
+        #expect(prefs.crossfadeMs == 0)
     }
 
     @Test func theChoiceIsStoredByName() {
