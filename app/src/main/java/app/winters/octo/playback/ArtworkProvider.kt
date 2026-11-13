@@ -18,6 +18,8 @@ import app.winters.octo.design.OctoIcons
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
 // Serves cover pictures to other apps that are allowed to see them, like a
@@ -25,6 +27,12 @@ import kotlin.math.roundToInt
 // cover is made once as a small JPEG and kept in the cache; a drawn playlist
 // cover is drawn for each ask (the playlist covers keep their own drawings).
 // Nothing is readable without a grant for its address (see `grantArtwork`).
+//
+// No ask ever waits here: the app's binder threads also carry the system's
+// answers about ducking, so a car loading a grid of covers must never tie
+// them up. A cover kept whole is opened at once; anything else is answered
+// with a pipe whose picture is fetched, drawn and encoded on the provider's
+// own threads and then written in whole.
 //
 //   /512/<ref>               a cover, its reference written out
 //   /512/x/<flags>/<value>   flags: m the "Not in your library" mark,
@@ -34,7 +42,15 @@ import kotlin.math.roundToInt
 //                            g a glyph tile, the value naming its glyph
 //                              and the size it is drawn at
 class ArtworkProvider : ContentProvider() {
-    override fun onCreate() = true
+    // The kinds' glyph tiles are made once, off the binder threads: the
+    // provider can run in a process the player never started.
+    override fun onCreate(): Boolean {
+        val ctx = context ?: return true
+        executor.execute {
+            for (glyph in CarGlyph.entries) runCatching { glyphFile(ctx, glyph) }
+        }
+        return true
+    }
 
     override fun getType(uri: Uri) = "image/jpeg"
 
@@ -43,22 +59,51 @@ class ArtworkProvider : ContentProvider() {
         val segments = uri.pathSegments
         if (segments.size == 4 && segments[1] == "x" && segments[2] == GLYPH_FLAG.toString()) {
             val glyph = CarGlyph.ofAddress(segments[3]) ?: throw FileNotFoundException("No such glyph")
-            return ParcelFileDescriptor.open(glyphFile(ctx, glyph), ParcelFileDescriptor.MODE_READ_ONLY)
+            val file = glyphPath(ctx, glyph)
+            if (isWhole(file)) return open(file)
+            return piped { glyphFile(ctx, glyph).readBytes() }
         }
-        val asked = coverOf(ctx, segments) ?: throw FileNotFoundException("No artwork")
-        return ParcelFileDescriptor.open(coverFile(ctx, asked), ParcelFileDescriptor.MODE_READ_ONLY)
+        val asked = askedOf(segments) ?: throw FileNotFoundException("No artwork")
+        if (asked.handle == null && playlistArtOf(asked.ref) == null) {
+            val file = keptFile(ctx, AskedCover(asked.ref, asked.marked, asked.artist))
+            if (isWhole(file)) return open(file)
+        }
+        return piped {
+            // The handle's reference is a disk read, so it is looked up here.
+            val ref = asked.handle?.let { refs(ctx).refFor(it) } ?: asked.ref
+            if (ref.isEmpty()) null else coverBytes(ctx, AskedCover(ref, asked.marked, asked.artist))
+        }
     }
 
-    // The cover's file. A drawn playlist cover is drawn again for each ask,
-    // over its last drawing, so a cover drawn without one of its pictures is
+    private fun open(file: File): ParcelFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+
+    // A pipe whose picture `make` gives on the provider's threads; with no
+    // picture the reader sees an error.
+    private fun piped(make: () -> ByteArray?): ParcelFileDescriptor {
+        val pipe = pipes.open()
+        executor.execute {
+            val bytes = try {
+                make()
+            } catch (e: Exception) {
+                null
+            }
+            if (bytes == null || bytes.isEmpty()) pipe.fail("No artwork") else feeder().fill(pipe, bytes)
+        }
+        return pipe.reader
+    }
+
+    private fun keptFile(ctx: Context, asked: AskedCover): File =
+        File(File(ctx.cacheDir, "car-art-$ART_SIZE").apply { mkdirs() }, asked.fileName)
+
+    // The cover's picture. A drawn playlist cover is drawn again for each
+    // ask and never kept, so a cover drawn without one of its pictures is
     // never what the next ask gets. A cover that cannot be had is answered
     // with its kind's glyph tile and nothing is kept for it, so the next ask
     // tries it again.
-    private fun coverFile(ctx: Context, asked: AskedCover): File {
+    private fun coverBytes(ctx: Context, asked: AskedCover): ByteArray {
         val drawn = playlistArtOf(asked.ref) != null
-        val dir = File(ctx.cacheDir, if (drawn) "car-drawn-$ART_SIZE" else "car-art-$ART_SIZE").apply { mkdirs() }
-        val file = File(dir, asked.fileName)
-        if (!drawn && isWhole(file)) return file
+        val file = keptFile(ctx, asked)
+        if (!drawn && isWhole(file)) return file.readBytes()
         val noCover = asked.ref == NO_COVER
         val loaded = if (noCover) null else loadCover(ctx, asked.ref, ART_SIZE)
         val bitmap = when {
@@ -67,12 +112,14 @@ class ArtworkProvider : ContentProvider() {
             // The mark for something with no cover sits on its kind's tile,
             // its glyph drawn smaller to stay clear of the mark.
             noCover && asked.marked -> marked(glyphTile(ctx, asked.glyph, MARKED_GLYPH_SHARE), asked.artist)
-            else -> return glyphFile(ctx, asked.glyph)
+            else -> return glyphFile(ctx, asked.glyph).readBytes()
         }
-        if (!isWhole(file)) file.delete()
-        writeWhole(file, jpeg(bitmap))
-        if (!file.isFile) throw FileNotFoundException("No artwork")
-        return file
+        val bytes = jpeg(bitmap)
+        if (!drawn) {
+            if (!isWhole(file)) file.delete()
+            writeWhole(file, bytes)
+        }
+        return bytes
     }
 
     private fun shrink(bitmap: Bitmap): Bitmap {
@@ -91,9 +138,12 @@ class ArtworkProvider : ContentProvider() {
         return copy
     }
 
+    private fun glyphPath(ctx: Context, glyph: CarGlyph): File =
+        File(File(ctx.cacheDir, "car-glyph-$ART_SIZE").apply { mkdirs() }, "${glyph.address}.jpg")
+
     // A glyph tile's file, made once.
     private fun glyphFile(ctx: Context, glyph: CarGlyph): File {
-        val file = File(File(ctx.cacheDir, "car-glyph-$ART_SIZE").apply { mkdirs() }, "${glyph.address}.jpg")
+        val file = glyphPath(ctx, glyph)
         if (!isWhole(file)) {
             file.delete()
             writeWhole(file, jpeg(glyphTile(ctx, glyph)))
@@ -142,13 +192,17 @@ class ArtworkProvider : ContentProvider() {
             }
     }
 
-    private fun coverOf(ctx: Context, segments: List<String>): AskedCover? {
-        if (segments.size == 2) return AskedCover(segments[1], marked = false, artist = false)
+    // An address read without touching the disk: a handle is looked up
+    // later, off the binder thread.
+    private class Asked(val ref: String, val handle: String?, val marked: Boolean, val artist: Boolean)
+
+    private fun askedOf(segments: List<String>): Asked? {
+        if (segments.size == 2) return Asked(segments[1], null, marked = false, artist = false)
         if (segments.size != 4 || segments[1] != "x") return null
         val flags = segments[2]
         val value = segments[3]
-        val ref = if (HANDLE_FLAG in flags) refs(ctx).refFor(value) ?: return null else value
-        return AskedCover(ref, marked = MARK_FLAG in flags, artist = ARTIST_FLAG in flags)
+        val handle = if (HANDLE_FLAG in flags) value else null
+        return Asked(if (handle != null) "" else value, handle, marked = MARK_FLAG in flags, artist = ARTIST_FLAG in flags)
     }
 
     companion object {
@@ -156,6 +210,31 @@ class ArtworkProvider : ContentProvider() {
         private const val ART_SIZE = 512
         private const val ARTIST_FLAG = 'r'
         private const val GLYPH_FLAG = 'g'
+
+        // Above OkHttp's five requests per host, so a grid loads at least
+        // as fast as the binder threads loaded it.
+        private const val COVER_THREADS = 8
+
+        // The provider's threads; tests put in their own.
+        @Volatile internal var executor: Executor = Executors.newFixedThreadPool(COVER_THREADS) { r ->
+            Thread(r, "octo-covers").apply { isDaemon = true }
+        }
+
+        // The pipes covers go through; tests put in their own.
+        @Volatile internal var pipes: CoverPipes = SystemCoverPipes()
+
+        // A picture no one reads in this long fails its pipe.
+        @Volatile internal var pipeDeadlineMs = 10_000L
+
+        @Volatile private var feeding: Pair<CoverPipes, CoverFeeder>? = null
+
+        internal fun feeder(): CoverFeeder {
+            val p = pipes
+            feeding?.takeIf { it.first === p }?.let { return it.second }
+            return synchronized(this) {
+                feeding?.takeIf { it.first === p }?.second ?: CoverFeeder(p, { pipeDeadlineMs }).also { feeding = p to it }
+            }
+        }
 
         // A glyph tile: lighter than a car's list (#242529), its glyph white
         // at 60%. Under the mark, which an artist's picture places in from
