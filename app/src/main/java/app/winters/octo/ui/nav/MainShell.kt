@@ -78,6 +78,7 @@ import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalNowPlayingId
 import app.winters.octo.ui.common.LocalOpenPage
 import app.winters.octo.ui.common.LocalPressSpot
+import app.winters.octo.ui.common.OverlayLayer
 import app.winters.octo.ui.common.PressSpot
 import app.winters.octo.ui.common.pressSpot
 import app.winters.octo.ui.common.NowMark
@@ -391,10 +392,10 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                     }
                 }
                 // While the player is open, what opens over it takes its dark
-                // look; each sheet and menu keeps the look it opened with.
-                OverArt(enabled = playerOpen && hasTrack) {
-                    // Over the player, the menus frost the player rather than the page.
-                    SongMenuHost(songMenu, onOpen = openFromMenu, backdrop = if (playerOpen && hasTrack) playerHaze else haze)
+                // look and frosts the player; each sheet and menu keeps the
+                // look it opened with.
+                OverlayLayer(playerOver = playerOpen && hasTrack, player = playerHaze, page = haze) {
+                    SongMenuHost(songMenu, onOpen = openFromMenu)
                     PlaylistSheetsHost(playlistSheets)
                     DisconnectSheetHost(disconnectPrompt)
                     ChoiceSheetHost(choiceSheet)
