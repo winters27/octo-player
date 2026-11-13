@@ -434,6 +434,50 @@ fn an_outgoing_song_that_ends_inside_its_blend_lets_the_next_one_up_gently() {
     assert!(loudest(&out, climbing + 24_000, out.len() / 2) > 0.99);
 }
 
+// Song A blending at 1 s into B over `fade` frames with `shape`, under
+// `settings`, at `speed`: the sound and where the blend begins in it.
+fn paced_blend_of(
+    a: &[i16],
+    b: &[i16],
+    fade: u64,
+    shape: FadeShape,
+    settings: &SoundSettings,
+    speed: f32,
+) -> (Vec<f32>, usize) {
+    let dir = temp_dir();
+    let (pa, pb) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&pa, RATE, 2, a);
+    write_wav(&pb, RATE, 2, b);
+    let mut mixer = Mixer::new(RATE, 0, settings, Pace { speed, pitch: 1.0 });
+    let mut lane = Lane::new(deck(1, &pa), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &pb);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, fade, next, Loudness::default(), shape);
+    let (out, markers) = render_all(&mut mixer);
+    let begins =
+        markers.iter().find(|m| matches!(m.transition, Some(Transition::Crossfade { .. }))).expect("a blend");
+    (out, begins.frame as usize)
+}
+
+#[test]
+fn a_blend_is_limited_on_every_block_at_speeds_below_one() {
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let shape = FadeShape { k: 0.4, ..Default::default() };
+    for speed in [0.5f32, 0.75] {
+        let (a, b) = (noise(96_000, 5), noise(96_000, 6));
+        let (out, begins) = paced_blend_of(&a, &b, 24_000, shape.clone(), &limiter_off(), speed);
+        // A alone before its blend is left as it is.
+        assert!(loudest(&out, LATENCY, begins - 2_000) > 0.99, "speed {speed}");
+        // Every frame of the blend, half a second of the songs heard over
+        // a second or more, stays under the ceiling.
+        let heard = (24_000.0 / speed as f64) as usize;
+        let through = loudest(&out, begins, begins + heard - 512);
+        assert!(through <= ceiling + 1e-4, "speed {speed}: {through}");
+    }
+}
+
 // A (6 s) blending at 1 s into B (6 s) over `fade` frames with `shape`,
 // under `settings`; at each of `speeds`' output frames the speed is set the
 // way the player sets it. The sound, and where each setting put the cut,

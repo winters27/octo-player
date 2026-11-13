@@ -582,9 +582,12 @@ pub struct Mixer {
     tail_left: usize,
     failures: Vec<(u64, Failure)>,
     last_marker: Option<Marker>,
-    // Whether two songs sounded together in what was mixed since the last
-    // block went to the shaper.
-    blended: bool,
+    // The mix frames, from and up to, through which two songs sounded
+    // together or the incoming one was still coming up after the outgoing
+    // one ended, kept until the output has passed them.
+    blend_windows: VecDeque<(u64, u64)>,
+    // The mix frames the last output block was made from.
+    block_source: (f64, f64),
 }
 
 impl Mixer {
@@ -620,7 +623,8 @@ impl Mixer {
             tail_left: 0,
             failures: Vec::new(),
             last_marker: None,
-            blended: false,
+            blend_windows: VecDeque::new(),
+            block_source: (0.0, 0.0),
         }
     }
 
@@ -846,7 +850,14 @@ impl Mixer {
                 }
                 break;
             }
-            self.shaper.set_blending(std::mem::take(&mut self.blended));
+            // Whether this block holds mix frames of a blend, wherever the
+            // speed stage put them.
+            let (from, to) = self.block_source;
+            let blending = self.blend_windows.iter().any(|&(a, b)| (a as f64) < to && (b as f64) > from);
+            while self.blend_windows.front().is_some_and(|&(_, b)| (b as f64) <= from) {
+                self.blend_windows.pop_front();
+            }
+            self.shaper.set_blending(blending);
             self.shaper.process(&mut self.block, frames);
             out[made * 2..(made + frames) * 2].copy_from_slice(&self.block[..frames * 2]);
             made += frames;
@@ -861,6 +872,7 @@ impl Mixer {
         let (frames, state) = self.mix(n);
         if frames > 0 {
             self.emit_markers(start as f64, frames, 1.0, markers);
+            self.block_source = (start as f64, (start + frames as u64) as f64);
         }
         (frames, state)
     }
@@ -885,7 +897,9 @@ impl Mixer {
         let start = self.mixed as f64 - pending;
         let frames = self.pace.pull(&mut self.block[..n * 2]);
         if frames > 0 {
-            self.emit_markers(start, frames, self.pace.pace().speed as f64, markers);
+            let step = self.pace.pace().speed as f64;
+            self.emit_markers(start, frames, step, markers);
+            self.block_source = (start, start + frames as f64 * step);
             state = MixState::Playing;
         }
         (frames, state)
@@ -940,7 +954,8 @@ impl Mixer {
             self.begin_fade();
             n = wanted;
         }
-        self.blended |= self.fade.is_some() || self.lift.is_some();
+        let blending = self.fade.is_some() || self.lift.is_some();
+        let first = self.mixed;
         // A cut a lowered speed set begins on its frame.
         if self.fade.as_ref().is_some_and(|f| f.cut.is_none() && f.cut_at.is_some_and(|at| f.done >= at)) {
             self.cut_fade();
@@ -1006,6 +1021,12 @@ impl Mixer {
             self.spans = spans;
         }
         self.follow_song_gain();
+        if blending {
+            match self.blend_windows.back_mut() {
+                Some(window) if window.1 >= first => window.1 = self.mixed,
+                _ => self.blend_windows.push_back((first, self.mixed)),
+            }
+        }
         if let Some(fade) = &mut self.fade {
             let old = fade.outgoing.pull(&mut self.b[..frames * 2], &mut self.spans_b);
             self.b[old * 2..frames * 2].fill(0.0);
