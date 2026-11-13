@@ -1788,6 +1788,909 @@
                     "decayMs": 10.0
                 }
             ]
+        },
+        "dip-far": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 100000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 72600.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 72600.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 72600.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 72600.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 72600.0,
+                    "toMs": 75600.0,
+                    "hz": 300.0,
+                    "db": -28.0,
+                    "endDb": -28.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 72600.0,
+                    "toMs": 75600.0,
+                    "hz": 100.0,
+                    "db": -31.0,
+                    "endDb": -31.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 72600.0,
+                    "toMs": 75600.0,
+                    "hz": 60.0,
+                    "db": -24.0,
+                    "endDb": -24.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 72600.0,
+                    "toMs": 75600.0,
+                    "hz": 2000.0,
+                    "db": -32.0,
+                    "endDb": -32.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 75600.0,
+                    "toMs": 100000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 75600.0,
+                    "toMs": 100000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 75600.0,
+                    "toMs": 100000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 75600.0,
+                    "toMs": 100000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "dip-mid": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 100000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 70000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 70000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 70000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 70000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 70000.0,
+                    "toMs": 86400.0,
+                    "hz": 300.0,
+                    "db": -28.0,
+                    "endDb": -28.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 70000.0,
+                    "toMs": 86400.0,
+                    "hz": 100.0,
+                    "db": -31.0,
+                    "endDb": -31.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 70000.0,
+                    "toMs": 86400.0,
+                    "hz": 60.0,
+                    "db": -24.0,
+                    "endDb": -24.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 70000.0,
+                    "toMs": 86400.0,
+                    "hz": 2000.0,
+                    "db": -32.0,
+                    "endDb": -32.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 86400.0,
+                    "toMs": 100000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 86400.0,
+                    "toMs": 100000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 86400.0,
+                    "toMs": 100000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 86400.0,
+                    "toMs": 100000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "dip-near": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 100000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 82400.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 82400.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 82400.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 82400.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 82400.0,
+                    "toMs": 96000.0,
+                    "hz": 300.0,
+                    "db": -28.0,
+                    "endDb": -28.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 82400.0,
+                    "toMs": 96000.0,
+                    "hz": 100.0,
+                    "db": -31.0,
+                    "endDb": -31.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 82400.0,
+                    "toMs": 96000.0,
+                    "hz": 60.0,
+                    "db": -24.0,
+                    "endDb": -24.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 82400.0,
+                    "toMs": 96000.0,
+                    "hz": 2000.0,
+                    "db": -32.0,
+                    "endDb": -32.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 96000.0,
+                    "toMs": 100000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 96000.0,
+                    "toMs": 100000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 96000.0,
+                    "toMs": 100000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 96000.0,
+                    "toMs": 100000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "dip-short": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 100000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 80000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 80000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 80000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 80000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 80000.0,
+                    "toMs": 96000.0,
+                    "hz": 300.0,
+                    "db": -28.0,
+                    "endDb": -28.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 80000.0,
+                    "toMs": 96000.0,
+                    "hz": 100.0,
+                    "db": -31.0,
+                    "endDb": -31.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 80000.0,
+                    "toMs": 96000.0,
+                    "hz": 60.0,
+                    "db": -24.0,
+                    "endDb": -24.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 80000.0,
+                    "toMs": 96000.0,
+                    "hz": 2000.0,
+                    "db": -32.0,
+                    "endDb": -32.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 96000.0,
+                    "toMs": 99100.0,
+                    "hz": 300.0,
+                    "db": -22.0,
+                    "endDb": -22.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 96000.0,
+                    "toMs": 99100.0,
+                    "hz": 100.0,
+                    "db": -25.0,
+                    "endDb": -25.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 96000.0,
+                    "toMs": 99100.0,
+                    "hz": 60.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 96000.0,
+                    "toMs": 99100.0,
+                    "hz": 2000.0,
+                    "db": -26.0,
+                    "endDb": -26.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 99100.0,
+                    "toMs": 100000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 99100.0,
+                    "toMs": 100000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 99100.0,
+                    "toMs": 100000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 99100.0,
+                    "toMs": 100000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 100.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "steady-133": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 45000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 133.33333333333334,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 133.33333333333334,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "steady-114": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 45000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 114.0,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 45000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 114.0,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "audible-131": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 45000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 300.0,
+                    "db": -22.0,
+                    "endDb": -22.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 100.0,
+                    "db": -25.0,
+                    "endDb": -25.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 60.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 130.9,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 2000.0,
+                    "db": -26.0,
+                    "endDb": -26.0,
+                    "bpm": 130.9,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 130.9,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 130.9,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "audible-83": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 45000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 300.0,
+                    "db": -22.0,
+                    "endDb": -22.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 100.0,
+                    "db": -25.0,
+                    "endDb": -25.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 60.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 83.33333333333333,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 2000.0,
+                    "db": -26.0,
+                    "endDb": -26.0,
+                    "bpm": 83.33333333333333,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 83.33333333333333,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 83.33333333333333,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
+        },
+        "audible-85": {
+            "rate": 22050,
+            "channels": 1,
+            "lengthMs": 45000,
+            "layers": [
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 300.0,
+                    "db": -22.0,
+                    "endDb": -22.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 100.0,
+                    "db": -25.0,
+                    "endDb": -25.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 60.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 84.5,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 0.0,
+                    "toMs": 10000.0,
+                    "hz": 2000.0,
+                    "db": -26.0,
+                    "endDb": -26.0,
+                    "bpm": 84.5,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 300.0,
+                    "db": -14.0,
+                    "endDb": -14.0
+                },
+                {
+                    "kind": "tone",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 100.0,
+                    "db": -17.0,
+                    "endDb": -17.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 60.0,
+                    "db": -10.0,
+                    "endDb": -10.0,
+                    "bpm": 84.5,
+                    "firstMs": 0.0,
+                    "every": 4,
+                    "decayMs": 80.0
+                },
+                {
+                    "kind": "pulse",
+                    "fromMs": 10000.0,
+                    "toMs": 45000.0,
+                    "hz": 2000.0,
+                    "db": -18.0,
+                    "endDb": -18.0,
+                    "bpm": 84.5,
+                    "firstMs": 0.0,
+                    "every": 1,
+                    "decayMs": 10.0
+                }
+            ]
         }
     },
     "sections": [
@@ -10341,6 +11244,2436 @@
             }
         },
         {
+            "song": "dip-far",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 40000,
+            "toMs": 100000,
+            "hops": 6000,
+            "startMs": 40000,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -15.2362,
+                    "lowDb": -20.4162,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 81,
+                    "db": -15.3084,
+                    "lowDb": -17.0148,
+                    "onset": 1.0408,
+                    "lowOnset": 0.8908
+                },
+                {
+                    "index": 82,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2495,
+                    "lowOnset": 0.2418
+                },
+                {
+                    "index": 83,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0247,
+                    "lowOnset": 0.0217
+                },
+                {
+                    "index": 84,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1105,
+                    "lowOnset": 0.1104
+                },
+                {
+                    "index": 85,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                },
+                {
+                    "index": 2500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 3500,
+                    "db": -28.7638,
+                    "lowDb": -34.229,
+                    "onset": 0.0235,
+                    "lowOnset": 6.0E-4
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 5000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 5500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -14.5841,
+                "gateDb": -59.5841,
+                "soundStartMs": 40000,
+                "soundEndMs": 100000,
+                "outroStartMs": 100000,
+                "introEndMs": 40000,
+                "boundariesMs": [
+                    72740,
+                    75460
+                ],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.2849,
+                    "consistency": 0.97,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 40210.0,
+                    "downbeatMs": 40810.0
+                }
+            }
+        },
+        {
+            "song": "dip-far",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 1500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2296,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.3554,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "dip-mid",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 40000,
+            "toMs": 100000,
+            "hops": 6000,
+            "startMs": 40000,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -15.2362,
+                    "lowDb": -20.4162,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                },
+                {
+                    "index": 2500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 3000,
+                    "db": -29.1493,
+                    "lowDb": -25.604,
+                    "onset": 0.3039,
+                    "lowOnset": 0.2403
+                },
+                {
+                    "index": 3500,
+                    "db": -28.7638,
+                    "lowDb": -34.229,
+                    "onset": 0.0235,
+                    "lowOnset": 6.0E-4
+                },
+                {
+                    "index": 4000,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4500,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4641,
+                    "db": -15.3084,
+                    "lowDb": -17.0167,
+                    "onset": 1.2854,
+                    "lowOnset": 1.0818
+                },
+                {
+                    "index": 4642,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2657,
+                    "lowOnset": 0.2454
+                },
+                {
+                    "index": 4643,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0671,
+                    "lowOnset": 0.0651
+                },
+                {
+                    "index": 4644,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1057,
+                    "lowOnset": 0.1055
+                },
+                {
+                    "index": 4645,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 5000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 5500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -14.6534,
+                "gateDb": -59.6534,
+                "soundStartMs": 40000,
+                "soundEndMs": 100000,
+                "outroStartMs": 100000,
+                "introEndMs": 40000,
+                "boundariesMs": [
+                    70130,
+                    86220
+                ],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.1591,
+                    "consistency": 0.79,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 40210.0,
+                    "downbeatMs": 40810.0
+                }
+            }
+        },
+        {
+            "song": "dip-mid",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 1500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2296,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.3554,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "dip-near",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 40000,
+            "toMs": 100000,
+            "hops": 6000,
+            "startMs": 40000,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -15.2362,
+                    "lowDb": -20.4162,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                },
+                {
+                    "index": 2500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 3500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4500,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 5000,
+                    "db": -28.765,
+                    "lowDb": -34.2328,
+                    "onset": 0.0235,
+                    "lowOnset": 7.0E-4
+                },
+                {
+                    "index": 5500,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 5601,
+                    "db": -15.3084,
+                    "lowDb": -17.0167,
+                    "onset": 1.2854,
+                    "lowOnset": 1.0818
+                },
+                {
+                    "index": 5602,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2657,
+                    "lowOnset": 0.2454
+                },
+                {
+                    "index": 5603,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0671,
+                    "lowOnset": 0.0651
+                },
+                {
+                    "index": 5604,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1057,
+                    "lowOnset": 0.1055
+                },
+                {
+                    "index": 5605,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                }
+            ],
+            "features": {
+                "bodyDb": -14.6251,
+                "gateDb": -59.6251,
+                "soundStartMs": 40000,
+                "soundEndMs": 100000,
+                "outroStartMs": 100000,
+                "introEndMs": 40000,
+                "boundariesMs": [
+                    82540,
+                    95820
+                ],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.1634,
+                    "consistency": 0.83,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 40210.0,
+                    "downbeatMs": 40810.0
+                }
+            }
+        },
+        {
+            "song": "dip-near",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 1500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2296,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.3554,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "dip-short",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 40000,
+            "toMs": 100000,
+            "hops": 6000,
+            "startMs": 40000,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -15.2362,
+                    "lowDb": -20.4162,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 81,
+                    "db": -15.3084,
+                    "lowDb": -17.0148,
+                    "onset": 1.0408,
+                    "lowOnset": 0.8908
+                },
+                {
+                    "index": 82,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2495,
+                    "lowOnset": 0.2418
+                },
+                {
+                    "index": 83,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0247,
+                    "lowOnset": 0.0217
+                },
+                {
+                    "index": 84,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1105,
+                    "lowOnset": 0.1104
+                },
+                {
+                    "index": 85,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                },
+                {
+                    "index": 2500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 3500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 4000,
+                    "db": -29.2362,
+                    "lowDb": -25.6724,
+                    "onset": 0.3105,
+                    "lowOnset": 0.247
+                },
+                {
+                    "index": 4500,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 5000,
+                    "db": -28.765,
+                    "lowDb": -34.2328,
+                    "onset": 0.0235,
+                    "lowOnset": 7.0E-4
+                },
+                {
+                    "index": 5500,
+                    "db": -29.2362,
+                    "lowDb": -34.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -14.7198,
+                "gateDb": -59.7198,
+                "soundStartMs": 40000,
+                "soundEndMs": 100000,
+                "outroStartMs": 100000,
+                "introEndMs": 40000,
+                "boundariesMs": [
+                    80140,
+                    95870
+                ],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.1891,
+                    "consistency": 0.76,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 40210.0,
+                    "downbeatMs": 40810.0
+                }
+            }
+        },
+        {
+            "song": "dip-short",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                },
+                {
+                    "index": 1500,
+                    "db": -14.7638,
+                    "lowDb": -20.229,
+                    "onset": 0.1066,
+                    "lowOnset": 0.0012
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2296,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 100.0,
+                    "confidence": 2.3554,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 600.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "steady-133",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.2361,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2348,
+                    "lowDb": -20.2305,
+                    "onset": 0.0035,
+                    "lowOnset": 0.0034
+                },
+                {
+                    "index": 2000,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                }
+            ],
+            "features": {
+                "bodyDb": -14.576,
+                "gateDb": -59.576,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 133.3333,
+                    "confidence": 2.2426,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 450.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "steady-133",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.2361,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2348,
+                    "lowDb": -20.2305,
+                    "onset": 0.0035,
+                    "lowOnset": 0.0034
+                },
+                {
+                    "index": 2000,
+                    "db": -15.0066,
+                    "lowDb": -19.6056,
+                    "onset": 0.0122,
+                    "lowOnset": 0.0122
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2197,
+                    "lowDb": -20.188,
+                    "onset": 0.0365,
+                    "lowOnset": 0.0365
+                }
+            ],
+            "features": {
+                "bodyDb": -15.0422,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 133.3333,
+                    "confidence": 2.2426,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 450.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "steady-114",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1500,
+                    "db": -15.4709,
+                    "lowDb": -20.4727,
+                    "onset": 0.0135,
+                    "lowOnset": 0.0135
+                },
+                {
+                    "index": 2000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.7719,
+                    "lowDb": -20.2472,
+                    "onset": 0.1138,
+                    "lowOnset": 0.0083
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                }
+            ],
+            "features": {
+                "bodyDb": -14.6014,
+                "gateDb": -59.6014,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 114.001,
+                    "confidence": 2.2031,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 526.311,
+                    "firstBeatMs": 7.2494,
+                    "downbeatMs": 7.2494
+                }
+            }
+        },
+        {
+            "song": "steady-114",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -10.4957,
+                    "lowDb": -12.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1,
+                    "db": -15.3084,
+                    "lowDb": -17.0171,
+                    "onset": 1.3264,
+                    "lowOnset": 1.104
+                },
+                {
+                    "index": 2,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2615,
+                    "lowOnset": 0.2393
+                },
+                {
+                    "index": 3,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0904,
+                    "lowOnset": 0.0881
+                },
+                {
+                    "index": 4,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1045,
+                    "lowOnset": 0.1044
+                },
+                {
+                    "index": 5,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 1500,
+                    "db": -15.4709,
+                    "lowDb": -20.4727,
+                    "onset": 0.0135,
+                    "lowOnset": 0.0135
+                },
+                {
+                    "index": 2000,
+                    "db": -14.765,
+                    "lowDb": -20.2328,
+                    "onset": 0.1068,
+                    "lowOnset": 0.0014
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -14.7719,
+                    "lowDb": -20.2472,
+                    "onset": 0.1138,
+                    "lowOnset": 0.0083
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -10.4957,
+                    "lowDb": -12.4998,
+                    "onset": 0.4374,
+                    "lowOnset": 0.3295
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2009,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 0,
+                "boundariesMs": [],
+                "tempo": {
+                    "bpm": 114.001,
+                    "confidence": 2.2031,
+                    "consistency": 1.0,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 526.311,
+                    "firstBeatMs": 7.2494,
+                    "downbeatMs": 7.2494
+                }
+            }
+        },
+        {
+            "song": "audible-131",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2362,
+                    "lowDb": -28.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2139,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1101,
+                    "db": -14.4151,
+                    "lowDb": -16.7038,
+                    "onset": 1.0539,
+                    "lowOnset": 0.8965
+                },
+                {
+                    "index": 1102,
+                    "db": -9.9693,
+                    "lowDb": -12.4892,
+                    "onset": 0.3057,
+                    "lowOnset": 0.296
+                },
+                {
+                    "index": 1103,
+                    "db": -17.0711,
+                    "lowDb": -16.7706,
+                    "onset": 0.0981,
+                    "lowOnset": 0.0978
+                },
+                {
+                    "index": 1104,
+                    "db": -11.9892,
+                    "lowDb": -14.924,
+                    "onset": 0.0693,
+                    "lowOnset": 0.0688
+                },
+                {
+                    "index": 1105,
+                    "db": -13.8003,
+                    "lowDb": -15.8055,
+                    "onset": 0.0101,
+                    "lowOnset": 0.0098
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2421,
+                    "lowDb": -20.1842,
+                    "onset": 0.0312,
+                    "lowOnset": 0.0312
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 5.0E-4,
+                    "lowOnset": 5.0E-4
+                },
+                {
+                    "index": 3500,
+                    "db": -15.7034,
+                    "lowDb": -20.2458,
+                    "onset": 0.0011,
+                    "lowOnset": 0.001
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -14.6112,
+                "gateDb": -59.6112,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9640,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 130.9063,
+                    "confidence": 1.9662,
+                    "consistency": 0.8384,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 458.3432,
+                    "firstBeatMs": 8.4811,
+                    "downbeatMs": 8.4811
+                }
+            }
+        },
+        {
+            "song": "audible-131",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2362,
+                    "lowDb": -28.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2139,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1101,
+                    "db": -14.4151,
+                    "lowDb": -16.7038,
+                    "onset": 1.0539,
+                    "lowOnset": 0.8965
+                },
+                {
+                    "index": 1102,
+                    "db": -9.9693,
+                    "lowDb": -12.4892,
+                    "onset": 0.3057,
+                    "lowOnset": 0.296
+                },
+                {
+                    "index": 1103,
+                    "db": -17.0711,
+                    "lowDb": -16.7706,
+                    "onset": 0.0981,
+                    "lowOnset": 0.0978
+                },
+                {
+                    "index": 1104,
+                    "db": -11.9892,
+                    "lowDb": -14.924,
+                    "onset": 0.0693,
+                    "lowOnset": 0.0688
+                },
+                {
+                    "index": 1105,
+                    "db": -13.8003,
+                    "lowDb": -15.8055,
+                    "onset": 0.0101,
+                    "lowOnset": 0.0098
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2421,
+                    "lowDb": -20.1842,
+                    "onset": 0.0312,
+                    "lowOnset": 0.0312
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 5.0E-4,
+                    "lowOnset": 5.0E-4
+                },
+                {
+                    "index": 3500,
+                    "db": -15.7034,
+                    "lowDb": -20.2458,
+                    "onset": 0.0011,
+                    "lowOnset": 0.001
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2249,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9590,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 130.9063,
+                    "confidence": 1.9662,
+                    "consistency": 0.8384,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 458.3432,
+                    "firstBeatMs": 8.4811,
+                    "downbeatMs": 8.4811
+                }
+            }
+        },
+        {
+            "song": "audible-83",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2362,
+                    "lowDb": -28.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2139,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1153,
+                    "db": -15.3084,
+                    "lowDb": -17.0148,
+                    "onset": 1.0408,
+                    "lowOnset": 0.8908
+                },
+                {
+                    "index": 1154,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2495,
+                    "lowOnset": 0.2418
+                },
+                {
+                    "index": 1155,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0247,
+                    "lowOnset": 0.0217
+                },
+                {
+                    "index": 1156,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1105,
+                    "lowOnset": 0.1104
+                },
+                {
+                    "index": 1157,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2348,
+                    "lowDb": -20.2305,
+                    "onset": 0.0035,
+                    "lowOnset": 0.0034
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2268,
+                    "lowDb": -20.2346,
+                    "onset": 0.0156,
+                    "lowOnset": 0.0156
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -14.7566,
+                "gateDb": -59.7566,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9640,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 83.3333,
+                    "confidence": 2.2933,
+                    "consistency": 0.8413,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 720.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "audible-83",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2362,
+                    "lowDb": -28.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2139,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1153,
+                    "db": -15.3084,
+                    "lowDb": -17.0148,
+                    "onset": 1.0408,
+                    "lowOnset": 0.8908
+                },
+                {
+                    "index": 1154,
+                    "db": -9.9191,
+                    "lowDb": -12.4377,
+                    "onset": 0.2495,
+                    "lowOnset": 0.2418
+                },
+                {
+                    "index": 1155,
+                    "db": -16.4508,
+                    "lowDb": -16.1165,
+                    "onset": 0.0247,
+                    "lowOnset": 0.0217
+                },
+                {
+                    "index": 1156,
+                    "db": -12.7122,
+                    "lowDb": -15.8213,
+                    "onset": 0.1105,
+                    "lowOnset": 0.1104
+                },
+                {
+                    "index": 1157,
+                    "db": -13.0242,
+                    "lowDb": -15.4479,
+                    "onset": 0.0116,
+                    "lowOnset": 0.0114
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2348,
+                    "lowDb": -20.2305,
+                    "onset": 0.0035,
+                    "lowOnset": 0.0034
+                },
+                {
+                    "index": 2000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2268,
+                    "lowDb": -20.2346,
+                    "onset": 0.0156,
+                    "lowOnset": 0.0156
+                },
+                {
+                    "index": 4000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2316,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9610,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 83.3333,
+                    "confidence": 2.2933,
+                    "consistency": 0.8413,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 720.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "audible-85",
+            "part": "tail",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2351,
+                    "lowDb": -28.2342,
+                    "onset": 0.0048,
+                    "lowOnset": 0.0046
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2134,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1137,
+                    "db": -14.2138,
+                    "lowDb": -16.5342,
+                    "onset": 1.0431,
+                    "lowOnset": 0.8834
+                },
+                {
+                    "index": 1138,
+                    "db": -10.0037,
+                    "lowDb": -12.5218,
+                    "onset": 0.3186,
+                    "lowOnset": 0.3077
+                },
+                {
+                    "index": 1139,
+                    "db": -17.1795,
+                    "lowDb": -16.9471,
+                    "onset": 0.1288,
+                    "lowOnset": 0.1284
+                },
+                {
+                    "index": 1140,
+                    "db": -11.8377,
+                    "lowDb": -14.7452,
+                    "onset": 0.0616,
+                    "lowOnset": 0.0612
+                },
+                {
+                    "index": 1141,
+                    "db": -14.0049,
+                    "lowDb": -15.8969,
+                    "onset": 0.0096,
+                    "lowOnset": 0.0093
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 1.0E-4,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -13.7547,
+                    "lowDb": -17.7105,
+                    "onset": 0.005,
+                    "lowOnset": 0.0049
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -14.8412,
+                    "lowDb": -19.6596,
+                    "onset": 0.0094,
+                    "lowOnset": 0.0094
+                }
+            ],
+            "features": {
+                "bodyDb": -14.7624,
+                "gateDb": -59.7624,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9640,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 84.507,
+                    "confidence": 2.2635,
+                    "consistency": 0.8281,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 710.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
+            "song": "audible-85",
+            "part": "head",
+            "tagBpm": null,
+            "bodyLevelDb": null,
+            "fromMs": 0,
+            "toMs": 45000,
+            "hops": 4500,
+            "startMs": 0,
+            "probes": [
+                {
+                    "index": 0,
+                    "db": -18.4957,
+                    "lowDb": -20.4703,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 500,
+                    "db": -23.2351,
+                    "lowDb": -28.2342,
+                    "onset": 0.0048,
+                    "lowOnset": 0.0046
+                },
+                {
+                    "index": 1000,
+                    "db": -15.2362,
+                    "lowDb": -20.6745,
+                    "onset": 0.2134,
+                    "lowOnset": 0.1603
+                },
+                {
+                    "index": 1137,
+                    "db": -14.2138,
+                    "lowDb": -16.5342,
+                    "onset": 1.0431,
+                    "lowOnset": 0.8834
+                },
+                {
+                    "index": 1138,
+                    "db": -10.0037,
+                    "lowDb": -12.5218,
+                    "onset": 0.3186,
+                    "lowOnset": 0.3077
+                },
+                {
+                    "index": 1139,
+                    "db": -17.1795,
+                    "lowDb": -16.9471,
+                    "onset": 0.1288,
+                    "lowOnset": 0.1284
+                },
+                {
+                    "index": 1140,
+                    "db": -11.8377,
+                    "lowDb": -14.7452,
+                    "onset": 0.0616,
+                    "lowOnset": 0.0612
+                },
+                {
+                    "index": 1141,
+                    "db": -14.0049,
+                    "lowDb": -15.8969,
+                    "onset": 0.0096,
+                    "lowOnset": 0.0093
+                },
+                {
+                    "index": 1500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 1.0E-4,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 2000,
+                    "db": -13.7547,
+                    "lowDb": -17.7105,
+                    "onset": 0.005,
+                    "lowOnset": 0.0049
+                },
+                {
+                    "index": 2500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3000,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 3500,
+                    "db": -15.2362,
+                    "lowDb": -20.2342,
+                    "onset": 0.0,
+                    "lowOnset": 0.0
+                },
+                {
+                    "index": 4000,
+                    "db": -14.8412,
+                    "lowDb": -19.6596,
+                    "onset": 0.0094,
+                    "lowOnset": 0.0094
+                }
+            ],
+            "features": {
+                "bodyDb": -15.2306,
+                "gateDb": -60.0,
+                "soundStartMs": 0,
+                "soundEndMs": 45000,
+                "outroStartMs": 45000,
+                "introEndMs": 9610,
+                "boundariesMs": [
+                    9910
+                ],
+                "tempo": {
+                    "bpm": 84.507,
+                    "confidence": 2.2635,
+                    "consistency": 0.8281,
+                    "steady": true,
+                    "confident": true,
+                    "beatMs": 710.0,
+                    "firstBeatMs": 10.0,
+                    "downbeatMs": 10.0
+                }
+            }
+        },
+        {
             "song": "beat-120",
             "part": "head",
             "tagBpm": 61.0,
@@ -13560,6 +16893,378 @@
             }
         },
         {
+            "name": "kept-cut-25",
+            "a": "dip-far",
+            "b": "steady-133",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 100000,
+                "entryMs": 0,
+                "overlapMs": 0,
+                "kind": "gapless",
+                "k": 0.4,
+                "filterStrength": 0.0,
+                "beatMatchRate": null,
+                "beatMs": null,
+                "beatAnchorMs": null,
+                "late": false,
+                "headroomDb": 0.0,
+                "reason": "gapless: every blend left would cut the song short",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 100000,
+                "lateMoveBars": 2147483647,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 0.0,
+                "driftGap": 0.0,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
+            "name": "kept-intro-24",
+            "a": "dip-mid",
+            "b": "audible-131",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 100000,
+                "entryMs": 0,
+                "overlapMs": 0,
+                "kind": "gapless",
+                "k": 0.4,
+                "filterStrength": 0.0,
+                "beatMatchRate": null,
+                "beatMs": null,
+                "beatAnchorMs": null,
+                "late": false,
+                "headroomDb": 0.0,
+                "reason": "gapless: every blend left would cut the song short",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 100000,
+                "lateMoveBars": 2147483647,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 0.0,
+                "driftGap": 0.0,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
+            "name": "kept-intro-20",
+            "a": "dip-mid",
+            "b": "audible-83",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 100000,
+                "entryMs": 0,
+                "overlapMs": 0,
+                "kind": "gapless",
+                "k": 0.4,
+                "filterStrength": 0.0,
+                "beatMatchRate": null,
+                "beatMs": null,
+                "beatAnchorMs": null,
+                "late": false,
+                "headroomDb": 0.0,
+                "reason": "gapless: every blend left would cut the song short",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 100000,
+                "lateMoveBars": 2147483647,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 0.0,
+                "driftGap": 0.0,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
+            "name": "kept-blend-12",
+            "a": "dip-near",
+            "b": "steady-114",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 100000,
+                "entryMs": 0,
+                "overlapMs": 0,
+                "kind": "gapless",
+                "k": 0.4,
+                "filterStrength": 0.0,
+                "beatMatchRate": null,
+                "beatMs": null,
+                "beatAnchorMs": null,
+                "late": false,
+                "headroomDb": 0.0,
+                "reason": "gapless: every blend left would cut the song short",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 100000,
+                "lateMoveBars": 2147483647,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 0.0,
+                "driftGap": 0.0,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
+            "name": "kept-intro-18",
+            "a": "dip-near",
+            "b": "audible-85",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 100000,
+                "entryMs": 0,
+                "overlapMs": 0,
+                "kind": "gapless",
+                "k": 0.4,
+                "filterStrength": 0.0,
+                "beatMatchRate": null,
+                "beatMs": null,
+                "beatAnchorMs": null,
+                "late": false,
+                "headroomDb": 0.0,
+                "reason": "gapless: every blend left would cut the song short",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 100000,
+                "lateMoveBars": 2147483647,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 0.0,
+                "driftGap": 0.0,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
+            "name": "kept-short-cut",
+            "a": "dip-short",
+            "b": "steady-114",
+            "current": {
+                "albumId": "a",
+                "albumOrder": 1,
+                "durationMs": 100000
+            },
+            "next": {
+                "albumId": "b",
+                "albumOrder": 2,
+                "durationMs": 45000
+            },
+            "settings": {
+                "maxOverlapMs": 8000,
+                "longestIntroMs": 16000,
+                "smart": true,
+                "filterSweeps": true,
+                "beatMatch": false
+            },
+            "context": {
+                "nowMs": 0,
+                "playedMs": 0,
+                "repeatOne": false,
+                "stopAtEndOfSong": false,
+                "pace": 1.0,
+                "skipSilence": false,
+                "currentGenre": null,
+                "nextGenre": null,
+                "bodyLevelDb": null,
+                "tempoPrior": null,
+                "lockAtPace": false
+            },
+            "tailMissing": false,
+            "headMissing": false,
+            "headBodyLevelDb": null,
+            "expected": {
+                "startMs": 93603,
+                "entryMs": 0,
+                "overlapMs": 4800,
+                "kind": "lift",
+                "k": 0.55,
+                "filterStrength": 0.7,
+                "beatMatchRate": null,
+                "beatMs": 600.0,
+                "beatAnchorMs": 40210.0,
+                "late": false,
+                "headroomDb": 1.0,
+                "reason": "lift at 93.60 s over 4.80 s (2 bars of 100.0 BPM), next song from 0.00 s, outro at 99.75 s, latest end 99.75 s",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
+                "latestEndMs": 99750,
+                "lateMoveBars": 0,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
+                "lockMs": 7.0,
+                "driftGap": 0.122815,
+                "driftAtEndMs": 0.0,
+                "dropCutAtHalfSpeedMs": null
+            }
+        },
+        {
             "name": "off-grid-end",
             "a": "steady-100",
             "b": "steady-100",
@@ -13845,24 +17550,24 @@
             "headMissing": false,
             "headBodyLevelDb": null,
             "expected": {
-                "startMs": 194400,
+                "startMs": 199200,
                 "entryMs": 0,
-                "overlapMs": 5888,
-                "kind": "intro",
-                "k": 0.0,
-                "filterStrength": 0.0,
+                "overlapMs": 2300,
+                "kind": "cut",
+                "k": 0.75,
+                "filterStrength": 0.7,
                 "beatMatchRate": null,
                 "beatMs": 600.0,
                 "beatAnchorMs": 142200.0,
                 "late": false,
                 "headroomDb": 1.0,
-                "reason": "intro at 194.40 s over 5.88 s, next song from 0.00 s (full from 4.35 s), outro at 201.50 s, latest end 201.50 s",
-                "holdShare": 0.6305197010869565,
-                "riseShare": 0.25,
+                "reason": "cut at 199.20 s over 2.30 s, next song from 0.00 s, outro at 201.50 s, latest end 201.50 s",
+                "holdShare": 0.0,
+                "riseShare": 0.0,
                 "latestEndMs": 201500,
                 "lateMoveBars": 2147483647,
-                "bothHeardStartMs": 4500,
-                "bothHeardEndMs": 5340,
+                "bothHeardStartMs": 0,
+                "bothHeardEndMs": 0,
                 "lockMs": 0.0,
                 "driftGap": 0.0,
                 "driftAtEndMs": 0.0,

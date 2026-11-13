@@ -291,11 +291,13 @@ fun dropCutAtMs(plan: TransitionPlan, speed: Double, fromMs: Double): Double? {
 // BEAT_MATCH_LARGEST_GAP apart. Without a rate, wherever both songs are
 // clearly heard their beats stay within DRIFT_LIMIT_MS times the pace of
 // each other: a blend starts later or becomes a short cut until they do, or
-// the songs join gaplessly. With both tempos confident but no lock, a blend
-// where both songs are clearly heard cannot be kept on the beat at all, so
-// only one where they never are is planned. A plan with a rate whose next
-// song is too short to ease back to its own speed is planned again without
-// the rate.
+// the songs join gaplessly. A place that would cut over KEPT_MUSIC_LIMIT_MS
+// of the outgoing song's full-level music is never planned; with none left
+// the songs join gaplessly too. With both tempos confident but no lock, a
+// blend where both songs are clearly heard cannot be kept on the beat at
+// all, so only one where they never are is planned. A plan with a rate
+// whose next song is too short to ease back to its own speed is planned
+// again without the rate.
 fun planTransition(
     current: FadeSong,
     next: FadeSong?,
@@ -536,7 +538,7 @@ private class PlanPass(
         if (lockA != null && shapes.none { kept(it) <= KEPT_MUSIC_LIMIT_MS }) stretched(shapes.last())?.let { all += it }
         val allowed = all.mapNotNull { allow(it, lo) }
         if (allowed.isEmpty()) return gaplessPlan(lenA, unheardReason())
-        val best = best(allowed) { blendScore(it) }
+        val best = best(allowed) { blendScore(it) } ?: return gaplessPlan(lenA, "every blend left would cut the song short")
         return blendPlan(best, lengthened)
     }
 
@@ -660,11 +662,12 @@ private class PlanPass(
         return if (first.isNaN()) null else first to last
     }
 
-    // The best scoring shape; the later one wins a tie. Shapes that keep
-    // over KEPT_MUSIC_LIMIT_MS of full-level music are left out while any
-    // other is left.
-    private fun best(shapes: List<Shape>, score: (Shape) -> Double): Shape {
-        val pool = shapes.filter { kept(it) <= KEPT_MUSIC_LIMIT_MS }.ifEmpty { shapes }
+    // The best scoring shape; the later one wins a tie. Shapes that cut over
+    // KEPT_MUSIC_LIMIT_MS of the outgoing song's full-level music are left
+    // out; null when no other is left.
+    private fun best(shapes: List<Shape>, score: (Shape) -> Double): Shape? {
+        val pool = shapes.filter { kept(it) <= KEPT_MUSIC_LIMIT_MS }
+        if (pool.isEmpty()) return null
         var best = pool.last()
         var bestScore = Double.NEGATIVE_INFINITY
         for (s in pool) {
@@ -753,8 +756,8 @@ private class PlanPass(
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
     // next song rises over a bar (INTRO_RISE_MS unlocked). Null when no
-    // start is left or the beats allow none, and the lengthened blend is
-    // planned instead.
+    // start is left, the beats allow none or every one left would cut the
+    // outgoing song short, and the lengthened blend is planned instead.
     private fun planIntro(quiet: Double): TransitionPlan? {
         val bar = lockA?.barMs
         val rise = bar ?: INTRO_RISE_MS.toDouble()
@@ -803,7 +806,7 @@ private class PlanPass(
             var score = sharedScore(s)
             if (outroStart < latestEnd - 1000) score -= 0.15 * abs(s.startMs + hold - outroStart) / 1000
             score
-        }
+        } ?: return null
         val startMs = roundHalfUp(best.startMs).toLong()
         val overlapMs = roundHalfUp(best.endMs).toLong() - startMs
         val entryMs = roundHalfUp(entry).toLong()

@@ -31,6 +31,18 @@ object AutomixCases {
     private fun quietStart(lengthMs: Double, bpm: Double, quietMs: Double, beatMs: Double = 0.0) =
         steady(0.0, quietMs, bpm, beatMs, padDb = -38.0) + steady(quietMs, lengthMs, bpm, beatMs)
 
+    // 100 BPM (2.4 s bars from 0), its pad at each level from each time on:
+    // `steps` are (fromMs, padDb), the first from 0, the last to lengthMs.
+    private fun levels(lengthMs: Double, vararg steps: Double): List<SongLayer> =
+        (steps.indices step 2).flatMap { i ->
+            val to = if (i + 2 < steps.size) steps[i + 2] else lengthMs
+            steady(steps[i], to, 100.0, 0.0, padDb = steps[i + 1])
+        }
+
+    // A steady beat whose first 10 s are 8 dB under the rest: a quiet start
+    // that is still clearly heard.
+    private fun audibleStart(bpm: Double) = steady(0.0, 10_000.0, bpm, 0.0, padDb = -22.0) + steady(10_000.0, 45_000.0, bpm, 0.0)
+
     val songs: Map<String, SyntheticSong> = linkedMapOf(
         // 8 s of silence after the music stops.
         "silence-tail" to SyntheticSong(44_100, 2, 200_000, pad(0.0, 192_000.0, -14.0)),
@@ -112,6 +124,29 @@ object AutomixCases {
             steady(16_000.0, 27_000.0, 60_000.0 / 630, 15_900.0, barMs = 15_270.0, padDb = -38.0) +
                 steady(27_000.0, 35_000.0, 60_000.0 / 630, 15_900.0, barMs = 15_270.0),
         ),
+        // 100 BPM at full level to the end but for one stretch 14 dB under
+        // it, where it is not clearly heard: 3 s from 72.6 s, 16.4 s from 70
+        // s and 13.6 s from 82.4 s, ending 24.15 s, 13.35 s and 3.75 s before
+        // the latest end a blend may reach (99.75 s).
+        "dip-far" to SyntheticSong(22_050, 1, 100_000, levels(100_000.0, 0.0, -14.0, 72_600.0, -28.0, 75_600.0, -14.0)),
+        "dip-mid" to SyntheticSong(22_050, 1, 100_000, levels(100_000.0, 0.0, -14.0, 70_000.0, -28.0, 86_400.0, -14.0)),
+        "dip-near" to SyntheticSong(22_050, 1, 100_000, levels(100_000.0, 0.0, -14.0, 82_400.0, -28.0, 96_000.0, -14.0)),
+        // 100 BPM, 14 dB under its body from 80 s to 96 s, then 8 dB under
+        // it (clearly heard, under full level) until 99.1 s, then full to
+        // the end: a blend ending before that cuts under a second of
+        // full-level music.
+        "dip-short" to SyntheticSong(
+            22_050, 1, 100_000, levels(100_000.0, 0.0, -14.0, 80_000.0, -28.0, 96_000.0, -22.0, 99_100.0, -14.0),
+        ),
+        // Tempos 25% and 12.3% from 100 BPM at full level from the first
+        // sample.
+        "steady-133" to SyntheticSong(22_050, 1, 45_000, steady(0.0, 45_000.0, 400.0 / 3, 0.0)),
+        "steady-114" to SyntheticSong(22_050, 1, 45_000, steady(0.0, 45_000.0, 114.0, 0.0)),
+        // Tempos 23.6%, 20% and 18.3% from 100 BPM with a quiet start that
+        // is still clearly heard.
+        "audible-131" to SyntheticSong(22_050, 1, 45_000, audibleStart(130.9)),
+        "audible-83" to SyntheticSong(22_050, 1, 45_000, audibleStart(250.0 / 3)),
+        "audible-85" to SyntheticSong(22_050, 1, 45_000, audibleStart(84.5)),
     )
 
     data class Pair(
@@ -171,6 +206,16 @@ object AutomixCases {
         Pair("tempo-prior-off", "beat-120", "beat-120-b", eight, context = TransitionContext(tempoPrior = 100.0)),
         // Kept music: early exits at section boundaries lose full-level music.
         Pair("kept-music", "steady-100-sections", "steady-100", eight),
+        // Kept music over the beats: tempos 12% to 25% apart with the
+        // outgoing song at full level to the end, where only places in its
+        // quiet stretch keep the beats apart. Each cuts seconds of music, so
+        // the songs join gaplessly; one cutting under a second is planned.
+        Pair("kept-cut-25", "dip-far", "steady-133", eight),
+        Pair("kept-intro-24", "dip-mid", "audible-131", eight),
+        Pair("kept-intro-20", "dip-mid", "audible-83", eight),
+        Pair("kept-blend-12", "dip-near", "steady-114", eight),
+        Pair("kept-intro-18", "dip-near", "audible-85", eight),
+        Pair("kept-short-cut", "dip-short", "steady-114", eight),
         // Off-grid ends: the latest end 1.9 s (and 1.5 s, 1.1 s) past the
         // last bar line a whole-bar plan can end on.
         Pair("off-grid-end", "steady-100", "steady-100", AutomixSettings(maxOverlapMs = 9_200), aLengthMs = 201_350),

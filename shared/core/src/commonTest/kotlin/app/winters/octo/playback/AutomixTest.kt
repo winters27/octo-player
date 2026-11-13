@@ -747,6 +747,29 @@ class AutomixTest {
     }
 
     @Test
+    fun aPlaceThatCutsTheSongShortIsNeverPlannedEvenWhenItIsTheOnlyOneLeft() {
+        // Tempos 12% to 25% apart, the outgoing song at full level to the
+        // end: only blends and intros in its quiet stretch keep the beats
+        // apart, and each would cut seconds of its music. The songs join
+        // gaplessly at its end instead.
+        for (name in listOf("kept-cut-25", "kept-intro-24", "kept-intro-20", "kept-blend-12", "kept-intro-18")) {
+            val p = plan(name)
+            assertEquals("$name: ${p.reason}", TransitionKind.GAPLESS, p.kind)
+            assertEquals(name, AutomixCases.pair(name).current.durationMs, p.startMs)
+            assertEquals(name, "gapless: every blend left would cut the song short", p.reason)
+        }
+        // Where the places that keep the beats apart cut under a second of
+        // the full-level music, one of them is still planned.
+        val short = plan("kept-short-cut")
+        val tail = AutomixCases.tail("dip-short")
+        val end = (short.startMs + short.overlapMs).toDouble()
+        assertTrue(short.reason, short.kind != TransitionKind.GAPLESS && end < short.latestEndMs - 500)
+        val cut = tail.msAtLeast(end, short.latestEndMs.toDouble(), tail.features.bodyDb - KEPT_MUSIC_BELOW_BODY_DB)
+        assertTrue("$cut", cut > 500 && cut <= KEPT_MUSIC_LIMIT_MS)
+        assertTrue(short.reason, short.driftAtEndMs <= DRIFT_LIMIT_MS)
+    }
+
+    @Test
     fun aBlendEndingOffTheBarStretchesToTheLatestEnd() {
         // The last bar line a whole-bar blend can end on is 1.9 s before the
         // latest end: the blend keeps its bar-line start and runs to it.
@@ -789,11 +812,12 @@ class AutomixTest {
         assertTrue("$fadeMiddle", capped.entryMs + fadeMiddle >= introEnd - 2_400 / 2.0)
         assertTrue(capped.reason, capped.overlapMs <= AUTOMIX_LONGEST_INTRO_MS)
         // With a fade of half the quiet start, so short that a bar later it
-        // would be under half the planned fade: no capped twin, the intro
-        // ends on its bar.
+        // would be under half the planned fade: no capped twin. The intro
+        // left ends on its bar, 1.2 s of full-level music before the latest
+        // end, so it is not planned; the blend ends at the latest end.
         val short = plan("off-grid-intro-short-fade")
-        assertEquals(short.reason, TransitionKind.INTRO, short.kind)
-        assertEquals(1_200.0, (short.latestEndMs - short.startMs - short.overlapMs).toDouble(), 40.0)
+        assertTrue(short.reason, short.kind != TransitionKind.INTRO && short.kind != TransitionKind.GAPLESS)
+        assertEquals(short.latestEndMs, short.startMs + short.overlapMs)
     }
 
     @Test
