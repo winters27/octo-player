@@ -619,11 +619,13 @@ class DeckMixer(
     }
 
     // A deck's pause, taken by the session at once even while nothing is
-    // mixed: it carries the last mixed frame.
+    // mixed: it is posted just before the point the session has reached,
+    // since the session takes only inputs before the point it advances to.
     private fun postPaused(deck: BlendDeck, settled: Long) {
         if (session.state == BlendState.IDLE) return
-        postInput(deck, BlendInput.PAUSED, max(0L, mixPoint - 1), settled)
-        advanceSession(max(mixPoint, sessionPoint))
+        val at = max(mixPoint, sessionPoint)
+        postInput(deck, BlendInput.PAUSED, max(0L, at - 1), settled)
+        advanceSession(at)
     }
 
     private var pendingPause: BlendDeck? = null
