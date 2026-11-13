@@ -115,10 +115,11 @@ class CrossfaderMixTest {
     fun aNextSongThatFailsInTheSpareIsLoadedOnceAndReachedByThePlayingSongsOwnAdvance() {
         // The next song cannot be decoded (as an expired link fails).
         val rig = PlayerRig(listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1, failAtMs = 0)))
-        rig.play("a", "b", settings = crossfade)
-        assertTrue(rig.runUntil(9_000) { rig.decks[0].playerError != null })
         // Made once for the playing deck's queue and once for the spare's
         // one load: never loaded into the spare again.
+        rig.sources.most["b"] = 2
+        rig.play("a", "b", settings = crossfade)
+        assertTrue(rig.runUntil(9_000) { rig.decks[0].playerError != null })
         assertEquals(2, rig.sources.made["b"])
         assertFalse(rig.events.any { it.kind == BlendEventKind.PROPOSED })
         assertEquals(emptyList<String>(), rig.breaksOf(1))
@@ -276,11 +277,55 @@ class CrossfaderMixTest {
         rig.runFor(2_000)
         assertEquals(0.97f, rig.decks[1].playbackParameters.speed, 1e-6f)
         rig.player.play()
+        // Just after the resume it has eased only for the song time heard
+        // since, nothing for the paused stretch.
+        rig.runFor(100)
+        assertEquals(0.97f, rig.decks[1].playbackParameters.speed, 0.004f)
         assertTrue(
             "${rig.told()} at ${rig.decks[1].playbackParameters.speed}, blending ${rig.player.isBlending}, " +
                 "${rig.decks[1].currentPosition} ms, playing ${rig.decks[1].isPlaying}",
             rig.runUntil(7_000) { rig.decks[1].playbackParameters.speed == 1f },
         )
+    }
+
+    // A blend over 3 s, ending 2 s before the old song does, held in step by
+    // a lock at its start with a 10% drift gap: at a new pace the drift
+    // passes its limit 40 ms times the pace over the gap into the blend
+    // (500 ms at 1.25), and the blend is cut there.
+    private val locked: Planner = { current, _, _, _, _, _ ->
+        TransitionPlan(
+            current.durationMs - 5_000, 0, 3_000, TransitionKind.BLEND, BLEND_CURVE, 0.0, null, null, null, false, 0.0, "rig",
+            latestEndMs = current.durationMs, lateMoveBars = LATE_MOVE_UNBOUNDED,
+            bothHeardStartMs = 0, bothHeardEndMs = 3_000, lockMs = 0.0, driftGap = 0.1,
+        )
+    }
+
+    // How long the blend lasts on the output, from the handover to its end,
+    // with the listener's speed set to `speed` at the handover (left as it
+    // is for none).
+    private fun blendOutputMs(speed: Float?): Long {
+        val rig = PlayerRig(listOf(PcmSong("a", 9_000), PcmSong("b", 6_000, sign = -1)), planner = locked)
+        var endAt = -1L
+        rig.mix.onEvent = { e ->
+            val end = e.kind == BlendEventKind.BLEND_END || e.kind == BlendEventKind.CANCELLED
+            if (end && endAt < 0) endAt = rig.mix.sched.now
+            rig.player.mixListener.onBlendEvent(e)
+        }
+        rig.play("a", "b", settings = AutomixSettings(maxOverlapMs = 3_000))
+        assertTrue(handedOver(rig))
+        val from = rig.mix.sched.now
+        speed?.let { rig.player.playbackParameters = PlaybackParameters(it) }
+        assertTrue(rig.told(), rig.runUntil(6_000) { endAt >= 0 })
+        return (endAt - from) / 1_000_000
+    }
+
+    @Test
+    fun aSpeedChangeMidALockedBlendReachesTheMixerWhichCutsItShort() {
+        val left = blendOutputMs(null)
+        val faster = blendOutputMs(1.25f)
+        // Cut once the new pace is heard: over a second sooner, where playing
+        // the rest of it at 1.25 saves only a fifth of what is left.
+        assertTrue("$faster ms at 1.25 for $left ms left alone", faster < left - 1_000)
     }
 
     @Test

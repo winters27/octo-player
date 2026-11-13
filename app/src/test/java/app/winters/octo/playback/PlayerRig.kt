@@ -105,6 +105,11 @@ class PcmSources(songs: List<PcmSong>, private val failing: Set<String> = emptyS
     // How many times each song's source was made.
     val made = HashMap<String, Int>()
 
+    // The most times a song's source may be made: one more fails the test
+    // where it is made (a load that repeats inside one turn never lets the
+    // test look).
+    val most = HashMap<String, Int>()
+
     override fun setDrmSessionManagerProvider(drmSessionManagerProvider: DrmSessionManagerProvider): MediaSource.Factory = this
 
     override fun setLoadErrorHandlingPolicy(loadErrorHandlingPolicy: LoadErrorHandlingPolicy): MediaSource.Factory = this
@@ -127,7 +132,9 @@ class PcmSources(songs: List<PcmSong>, private val failing: Set<String> = emptyS
             .setSeekable(true)
             .setMediaItem(mediaItem)
             .build()
-        made[song.id] = (made[song.id] ?: 0) + 1
+        val times = (made[song.id] ?: 0) + 1
+        made[song.id] = times
+        most[song.id]?.let { if (times > it) throw AssertionError("${song.id} made $times times, at most $it") }
         if (song.id in failing) {
             return object : FakeMediaSource(FakeTimeline(window), format) {
                 override fun prepareSourceInternal(mediaTransferListener: androidx.media3.datasource.TransferListener?) {}
@@ -288,7 +295,7 @@ class PlayerRig(
     private val failAtUs: (String?) -> Long = { id -> songs.firstOrNull { it.id == id }?.failAtMs?.takeIf { it >= 0 }?.let { it * 1_000 } ?: -1 }
     val renderers = listOf(PcmRenderers(context, mix, 0, failAtUs), PcmRenderers(context, mix, 1, failAtUs))
     val decks: List<ExoPlayer> = renderers.map { r ->
-        buildDeck(context, sources, r, 7, OctoLoadControl(), PlaybackLooperProvider(Looper.getMainLooper()))
+        buildDeck(context, sources, r, 7, OctoLoadControl(), PlaybackLooperProvider(Looper.getMainLooper()), releaseTimeoutMs = 0)
     }
     val player = OctoPlayer(context, decks[0], decks[1], soundOf = { d -> renderers[decks.indexOf(d)].sound }, mixer = mix.mixer, times = times, planner = planner)
 
@@ -462,12 +469,14 @@ class PlayerRig(
     fun anyOf(sign: Int): Boolean = heardSongs().any { it.first == sign }
 
     // Lets go of what the rig holds, so the next test has the room: the
-    // decks stop (their taps' workers end), the mixer lets its outputs go.
+    // decks are released (their taps' workers end), the mixer lets its
+    // outputs go.
     fun close() {
-        decks.forEach {
-            it.stop()
-            it.clearMediaItems()
-        }
+        // Released, the decks let go of what they registered with the test's
+        // app, which outlives the test and would keep them, and everything
+        // they reach, to the end of the run. Their release finishes on the
+        // next step, since their playback thread is this one.
+        player.release()
         runFor(5)
         mix.mixLoop.post { mix.mixer.release() }
         mix.sched.runFor(1.0)
