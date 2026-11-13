@@ -47,12 +47,13 @@ class PlayHistory internal constructor(
     private val clock: () -> Long,
     // How long the shelves stay shared after the last look.
     private val keepMillis: Long = 5_000,
+    // Where the shelves are shared while anyone looks.
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     @Inject constructor(store: ListeningStore, totals: PlayTotals, merge: CatalogMerge, db: CatalogDatabase) :
         this(store, totals, merge, db, PLAY_PAGE, System::currentTimeMillis)
 
     private val dao = db.playTotalsDao()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     internal var hooks = PlayWalkHooks()
 

@@ -18,9 +18,16 @@ import app.winters.octo.listening.today.recentHistory as todayRecentHistory
 import app.winters.octo.listening.today.withServerAlbumPlays as todayWithServerAlbumPlays
 import app.winters.octo.listening.today.withServerPlays as todayWithServerPlays
 import app.winters.octo.ui.home.today.homeRediscovery as todayRediscovery
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 
@@ -31,13 +38,33 @@ internal const val DAY = 24L * 60 * 60 * 1000
 internal const val HOME = "server:h"
 internal const val OTHER = "server:o"
 
-// A test's body, ended if it takes longer than `seconds`.
-internal fun timed(seconds: Long = 10, block: suspend () -> Unit) = runBlocking { withTimeout(seconds * 1000) { block() } }
+// The totals rigs made while a timed body runs, which it stops as it ends;
+// null outside one.
+private var rigsMade: MutableList<TotalsRig>? = null
+private val rigsLock = Any()
+
+// A test's body, ended if it takes longer than `seconds`. The totals rigs
+// made in it stop sharing their shelves as it ends, and a read the shelves
+// were running ends before it returns.
+internal fun timed(seconds: Long = 10, block: suspend () -> Unit) = runBlocking {
+    val made = ArrayList<TotalsRig>()
+    val outer = synchronized(rigsLock) { rigsMade.also { rigsMade = made } }
+    try {
+        withTimeout(seconds * 1000) { block() }
+    } finally {
+        val rigs = synchronized(rigsLock) {
+            rigsMade = outer
+            made.toList()
+        }
+        withContext(NonCancellable) { withTimeout(seconds * 1000) { rigs.forEach { it.stop() } } }
+    }
+}
 
 // The totals and their readers over a test library, with the account in
 // use, the free space and the page size given. The shelves stop being
-// shared as soon as no one looks, so none of their reads outlives the
-// test's database.
+// shared as soon as no one looks, and a read they were running then ends
+// before the test closes its database: a timed body stops the rigs made
+// in it, and a rig's other owner stops it (stop).
 internal class TotalsRig(
     val db: CatalogDatabase,
     val merge: CatalogMerge,
@@ -51,8 +78,19 @@ internal class TotalsRig(
     @Volatile var space = space
     val totals = PlayTotals(db, merge, { this.space }, this.account, {}, page)
     val store = ListeningStore(MemoryPrefs(), this.account, db.listeningDao())
-    val history = PlayHistory(store, totals, merge, db, page, clock = { now }, keepMillis = keepMillis)
+
+    // Where the history shares its shelves: the rig's own, so stop ends it.
+    private val sharing = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val history = PlayHistory(store, totals, merge, db, page, clock = { now }, keepMillis = keepMillis, scope = sharing)
     val dao = db.playTotalsDao()
+
+    init {
+        synchronized(rigsLock) { rigsMade?.add(this) }
+    }
+
+    // Stops sharing the shelves and waits for a read they were running to
+    // end; the shelves give nothing after it.
+    suspend fun stop() = sharing.coroutineContext.job.cancelAndJoin()
 
     // Starts the totals and waits for their first rebuild.
     suspend fun started(): TotalsRig = apply {

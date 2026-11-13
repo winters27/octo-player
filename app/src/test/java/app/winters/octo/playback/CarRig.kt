@@ -109,10 +109,13 @@ internal class CarRig(
         else -> node
     }
 
-    // A live list's watch tidies up as it stops, so it stops before the
-    // database closes.
+    // A live list's watch tidies up as it stops, and a shelves read the car
+    // asked for may still run, so both end before the database closes.
     override fun close() {
-        runBlocking { scope.coroutineContext[Job]!!.cancelAndJoin() }
+        runBlocking {
+            scope.coroutineContext[Job]!!.cancelAndJoin()
+            totals.stop()
+        }
         db.close()
         server?.close()
         drains.deleteRecursively()
