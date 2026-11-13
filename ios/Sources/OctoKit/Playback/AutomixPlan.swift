@@ -48,9 +48,11 @@ public let introRiseMs = 1_000
 /// until it stays at least `introUnderOutgoingDb` under the outgoing song held at its own level, at
 /// the same moments, for `introUnderOutgoingShare` of the hold where it sounds: the two together are
 /// then never clearly louder than the outgoing song alone, and a short break in the outgoing song,
-/// where the incoming one plays alone, does not count. An intro that would need it lowered by over
+/// where the incoming one plays alone, does not count. The levels are flat ones of the channels'
+/// mean; heard with the ear's weighting and in stereo the incoming song can sit a few dB nearer the
+/// outgoing one, which the margin leaves room for. An intro that would need it lowered by over
 /// `introTrimCapDb` is not planned.
-public let introUnderOutgoingDb = 6.0
+public let introUnderOutgoingDb = 8.0
 public let introUnderOutgoingShare = 0.95
 public let introTrimCapDb = 30.0
 

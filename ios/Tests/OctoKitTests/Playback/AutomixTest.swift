@@ -765,19 +765,18 @@ import Testing
         #expect(near(under("steady-100", 180_000, "near-100"), -5, 0.5))
         #expect(near(under("steady-100", 180_000, "level-100"), 0, 0.5))
         func trimDb(_ plan: TransitionPlan) -> Double { -20 * log10(plan.introLevel) }
-        // 7 dB under: the intro at the next song's own level.
+        // 7 dB and 5 dB under: lowered by what each lacks of `introUnderOutgoingDb`.
         let quiet = plan("intro-under-line")
         #expect(quiet.kind == .intro, "\(quiet.reason)")
-        #expect(quiet.introLevel == 1)
-        // 5 dB under: lowered about 1 dB, so it stays 6 dB under.
+        #expect(near(trimDb(quiet), max(0, introUnderOutgoingDb - 7), 0.5), "\(quiet.introLevel)")
         let near5 = plan("intro-over-line")
         #expect(near5.kind == .intro, "\(near5.reason)")
-        #expect(near(trimDb(near5), 1, 0.5), "\(near5.introLevel)")
-        // At the outgoing song's level: lowered about 6 dB and held there, then brought up as the
-        // outgoing song fades.
+        #expect(near(trimDb(near5), introUnderOutgoingDb - 5, 0.5), "\(near5.introLevel)")
+        // At the outgoing song's level: lowered by the whole of it and held there, then brought up as
+        // the outgoing song fades.
         let level = plan("intro-trimmed")
         #expect(level.kind == .intro, "\(level.reason)")
-        #expect(near(trimDb(level), 6, 0.5), "\(level.introLevel)")
+        #expect(near(trimDb(level), introUnderOutgoingDb, 0.5), "\(level.introLevel)")
         #expect(level.reason.contains(", next song lowered "), "\(level.reason)")
         #expect(level.inGain(level.holdShare / 2) == level.introLevel)
         #expect(near(level.inGain(1), 1, 1e-9))
