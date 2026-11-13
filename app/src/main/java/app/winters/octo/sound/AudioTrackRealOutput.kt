@@ -179,7 +179,13 @@ object DeckMixers {
         val build = HandlerThread("octo-mix-build", Process.THREAD_PRIORITY_AUDIO).also { it.start() }
         val gate = HandlerThread("octo-mix-gate", Process.THREAD_PRIORITY_AUDIO).also { it.start() }
         val main = Handler(Looper.getMainLooper())
-        val mixer = DeckMixer(
+        lateinit var mixer: DeckMixer
+        val devices = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = mixer.devicesChanged()
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = mixer.devicesChanged()
+        }
+        mixer = DeckMixer(
             mixRate = rate,
             sessionId = sessionId,
             loop = HandlerMixLoop(clock, mix.looper),
@@ -190,15 +196,15 @@ object DeckMixers {
             toMain = { main.post(it) },
             listener = listener,
             tuning = tuning,
-        )
-        audio.registerAudioDeviceCallback(
-            object : AudioDeviceCallback() {
-                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = mixer.devicesChanged()
-
-                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = mixer.devicesChanged()
+            onReleased = {
+                // Each thread runs what it already holds, then ends.
+                audio.unregisterAudioDeviceCallback(devices)
+                gate.quitSafely()
+                mix.quitSafely()
+                build.quitSafely()
             },
-            Handler(mix.looper),
         )
+        audio.registerAudioDeviceCallback(devices, Handler(mix.looper))
         return mixer
     }
 }

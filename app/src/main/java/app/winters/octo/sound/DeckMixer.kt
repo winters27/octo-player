@@ -98,6 +98,9 @@ class DeckMixer(
     private val pcmTargetFrames: (Int) -> Int = ::mediaPcmTargetFrames,
     // Route measures kept between real outputs, by device key.
     private val routes: MutableMap<String, RouteMeasure> = HashMap(),
+    // Runs on the builder thread once the mixer has released everything:
+    // whoever made the mixer's threads ends them here.
+    private val onReleased: () -> Unit = {},
 ) {
     val commitWord = CommitWord()
 
@@ -462,7 +465,10 @@ class DeckMixer(
             done.countDown()
         }
         if (!loop.isCurrent()) done.await(2, TimeUnit.SECONDS)
-        builderLoop.post { builder.release() }
+        builderLoop.post {
+            builder.release()
+            onReleased()
+        }
         return done.count == 0L
     }
 
