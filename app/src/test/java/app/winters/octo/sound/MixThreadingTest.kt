@@ -137,6 +137,47 @@ class MixThreadingTest {
         override fun write(audioData: ByteBuffer, sizeInBytes: Int, writeMode: Int): Int = ERROR_DEAD_OBJECT
     }
 
+    // An AudioTrack whose size in use follows setBufferSizeInFrames, as a
+    // device's does.
+    private class SizedTrack : AudioTrack(
+        android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).build(),
+        AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(48_000).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build(),
+        48_000 * 8 / 2,
+        MODE_STREAM,
+        AudioManager.AUDIO_SESSION_ID_GENERATE,
+    ) {
+        private var size = 24_000
+
+        override fun setBufferSizeInFrames(bufferSizeInFrames: Int): Int {
+            size = minOf(bufferSizeInFrames, 24_000)
+            return size
+        }
+
+        override fun getBufferSizeInFrames(): Int = size
+    }
+
+    @Test
+    fun aRealOutputsBufferIsTheOneItWasBuiltWithWhateverSizeIsInUse() {
+        val build = thread("build")
+        val mix = thread("mix")
+        val out = on(build) {
+            AudioTrackRealOutput(AudioTrackAudioOutput(SizedTrack(), config(), object : AudioTrackAudioOutput.CapabilityChangeListener {
+                override fun onRoutedDeviceChanged(device: AudioDeviceInfo) {}
+
+                override fun onRecoverableWriteError() {}
+            }, Clock.DEFAULT))
+        }
+        on(mix) {
+            assertEquals(24_000, out.bufferFrames)
+            // API 29 and 30's start size, then the whole buffer put back.
+            out.setBufferSize(2_400)
+            assertEquals(24_000, out.bufferFrames)
+            out.setBufferSize(out.bufferFrames)
+            out.release()
+        }
+        assertTrue("$crashes", crashes.isEmpty())
+    }
+
     private fun config(): OutputConfig =
         OutputConfig.Builder()
             .setEncoding(C.ENCODING_PCM_FLOAT)
