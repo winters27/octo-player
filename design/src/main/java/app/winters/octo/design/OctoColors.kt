@@ -3,6 +3,7 @@ package app.winters.octo.design
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
+import app.winters.octo.theme.errorWordsFor
 
 // Mixes two colors channel by channel, the way a stylesheet does.
 fun mix(from: Color, to: Color, amount: Float) = Color(
@@ -80,10 +81,19 @@ object OctoColors {
 
     val Error = Color(0xFFEF4444)
 
+    // An error note's words and glyph: one red for light themes and one for
+    // dark, each reading at 4.5:1 on every surface of its themes.
+    val ErrorWords: Color @Composable @ReadOnlyComposable get() = Color(errorWordsFor(LocalOctoSurfaces.current.light))
+
     // The accent's family, each derived from the accent by the theme:
 
     // A standard button's resting fill.
     val AccentTonal: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.tonal
+
+    // The quiet Optional tag after a field's name: the accent's words on the
+    // accent's tonal fill.
+    val TagWords: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.accent
+    val TagFill: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.tonal
 
     // A selected list row, still the quieter pill, with the selected words on it.
     val AccentSelected: Color @Composable @ReadOnlyComposable get() = LocalOctoAccent.current.selected
