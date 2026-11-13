@@ -30,6 +30,10 @@ public enum BlendInput: String, Sendable, CaseIterable {
     case endReached
     /// An engine restart re-placed a decided start that has not played yet: the value is the new S.
     case restarted
+    /// A's decoded end is known (its stream's last frame of the song is in hand, its next pass or
+    /// its stream's end after it): the value is the output frame just past A's last frame of the
+    /// song. Posted at the frame where it became known.
+    case decodedEnd
 }
 
 /// Idle; armed (the run-up); mixing; held (B stopped inside A's hold, waiting to be placed on a
@@ -303,13 +307,14 @@ public func blendArmAtMs(startMs: Double, preRollLeadMs: Double, proposalLeadMs:
 }
 
 /// After a drop of the pace to `pace`: the first moment at or after `fromMs`, inside the
-/// both-heard stretch, where the beats would be more than `blendDriftLimitMs` times the pace apart
-/// (their offset is `driftGap` times the distance from the lock); nil when there is none. All in
-/// the blend's time.
-public func blendDropCutAtMs(bothHeardStartMs: Double, bothHeardEndMs: Double, lockMs: Double, driftGap: Double,
-                             pace: Double, fromMs: Double) -> Double? {
+/// both-heard stretch and never before `holdEndMs` (the outgoing song keeps its own level through
+/// a hold), where the beats would be more than `blendDriftLimitMs` times the pace apart (their
+/// offset is `driftGap` times the distance from the lock); nil when there is none. All in the
+/// blend's time.
+public func blendDropCutAtMs(bothHeardStartMs: Double, bothHeardEndMs: Double, holdEndMs: Double, lockMs: Double,
+                             driftGap: Double, pace: Double, fromMs: Double) -> Double? {
     if driftGap <= 0 { return nil }
-    let from = max(bothHeardStartMs, fromMs)
+    let from = max(bothHeardStartMs, holdEndMs, fromMs)
     if from > bothHeardEndMs { return nil }
     let within = blendDriftLimitMs * pace / driftGap
     if from < lockMs - within || from > lockMs + within { return from }

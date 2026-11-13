@@ -209,8 +209,9 @@ import Testing
             plan.bothHeardEndMs = d.int("bothHeardEndMs")
             plan.lockMs = d.num("lockMs")
             plan.driftGap = d.num("driftGap")
+            plan.holdShare = d.num("holdEndMs") / 8_000
             let speed = d.num("speed"), from = d.num("fromMs")
-            let what = "drop cut over \(plan.bothHeardStartMs) to \(plan.bothHeardEndMs), lock \(plan.lockMs), gap \(plan.driftGap), speed \(speed) from \(from)"
+            let what = "drop cut over \(plan.bothHeardStartMs) to \(plan.bothHeardEndMs), hold to \(d.num("holdEndMs")), lock \(plan.lockMs), gap \(plan.driftGap), speed \(speed) from \(from)"
             near(what, d.numOrNil("cutAtMs"), dropCutAtMs(plan, speed, from), t("curve"))
         }
         return failures
@@ -247,7 +248,8 @@ import Testing
                           stopAtEndOfSong: o.bool("stopAtEndOfSong"), pace: o.num("pace"), skipSilence: o.bool("skipSilence"),
                           currentGenre: o["currentGenre"] as? String, nextGenre: o["nextGenre"] as? String,
                           bodyLevelDb: o.numOrNil("bodyLevelDb"), tempoPrior: o.numOrNil("tempoPrior"),
-                          lockAtPace: (o["lockAtPace"] as? NSNumber)?.boolValue ?? false)
+                          lockAtPace: (o["lockAtPace"] as? NSNumber)?.boolValue ?? false,
+                          incomingGainDb: o.num("incomingGainDb"))
     }
 
     func fadeSongOf(_ o: [String: Any]) -> FadeSong {

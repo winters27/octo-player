@@ -72,6 +72,9 @@ public final class BlendSession: @unchecked Sendable {
     private var endFrame: Int64 = -1
     private var heldNextAt: Int64 = -1
 
+    /// The output frame just past A's last frame of its song, once known.
+    private var decodedEnd: Int64 = -1
+
     /// B's song time since entry over the rate (in A's ms) is `runMs` at `runFrom`, growing with
     /// the frames after it unless B is stopped.
     private var runFrom: Int64 = 0
@@ -219,6 +222,7 @@ public final class BlendSession: @unchecked Sendable {
         endAt = -1
         endFrame = -1
         heldNextAt = -1
+        decodedEnd = -1
         runFrom = 0
         runMs = 0
         stopped = false
@@ -310,8 +314,9 @@ public final class BlendSession: @unchecked Sendable {
         speed = pace
         msPerFrame = pace * 1_000 / Double(timing.sampleRate)
         if startFrame < 0 || state == .ended { return }
-        dropCutMs = blendDropCutAtMs(bothHeardStartMs: bothHeardStartMs, bothHeardEndMs: bothHeardEndMs, lockMs: lockMs,
-                                     driftGap: driftGap, pace: pace, fromMs: blendAt(switchFrame))
+        dropCutMs = blendDropCutAtMs(bothHeardStartMs: bothHeardStartMs, bothHeardEndMs: bothHeardEndMs,
+                                     holdEndMs: holdShare * overlapMs, lockMs: lockMs, driftGap: driftGap,
+                                     pace: pace, fromMs: blendAt(switchFrame))
     }
 
     /// The Crossfader stopped A: the generation retires.
@@ -397,13 +402,19 @@ public final class BlendSession: @unchecked Sendable {
         retire()
     }
 
-    /// Head-timed rules: the late start while armed; the proposal, then the commit or the cancel
-    /// at the deadline once a start is decided.
+    /// Head-timed rules: A's real end, then the late start while armed; the proposal, then the
+    /// commit or the cancel at the deadline once a start is decided.
     private func headRules() {
         if state == .armed {
             if !outgoingMs.isNaN && word.state(of: generation) == .initial {
                 let predicted = point + Self.frames((startMs - outgoingMs) / msPerFrame)
-                if predicted - head < timing.proposalLeadFrames { lateStart(predicted, at: point) }
+                if decodedEnd >= 0 && predicted >= decodedEnd {
+                    // A's song ends before the start: A plays on into its next song, never a
+                    // start it does not reach.
+                    cancelBeforeStart(point, .aMovedOn)
+                } else if predicted - head < timing.proposalLeadFrames {
+                    lateStart(predicted, at: point)
+                }
             }
             return
         }
@@ -445,6 +456,7 @@ public final class BlendSession: @unchecked Sendable {
         }
         if deck == .b { return }
         switch input {
+        case .decodedEnd: decodedEnd = value
         case .startAt: startAt(frame, value)
         case .movedOn:
             holdForAnswer(frame)
@@ -463,6 +475,10 @@ public final class BlendSession: @unchecked Sendable {
     /// A's frame at the start is known at bus frame `s`.
     private func startAt(_ frame: Int64, _ s: Int64) {
         guard word.state(of: generation) == .initial else { return }
+        if decodedEnd >= 0 && decodedEnd <= s {
+            cancelBeforeStart(frame, .aMovedOn)
+            return
+        }
         if s - head < timing.proposalLeadFrames {
             lateStart(s, at: frame)
             return
@@ -488,11 +504,16 @@ public final class BlendSession: @unchecked Sendable {
     /// A start that can no longer be decided the proposal lead ahead of the head moves to A's
     /// first bar line (or, with no bar grid, the first frame) that far ahead, while the plan's bar
     /// budget and its latest end allow (with no bar grid, any budget but 0 and the latest end);
-    /// otherwise B does not start.
+    /// otherwise B does not start. A move past A's known end is no move: A plays on into its next
+    /// song.
     private func lateStart(_ predicted: Int64, at: Int64) {
         let nowMs = startMs + Double(head + timing.proposalLeadFrames - predicted) * msPerFrame
         let bars = locked ? max(1, ((nowMs - startMs) / barMs).rounded(.up)) : 0
         let target = locked ? startMs + bars * barMs : nowMs
+        if decodedEnd >= 0 && predicted + Self.frames((target - startMs) / msPerFrame) >= decodedEnd {
+            cancelBeforeStart(at, .aMovedOn)
+            return
+        }
         let fits = locked
             ? bars <= Double(allowedBars())
             : lateMoveBars != 0 && target + overlapMs + extensionMs <= latestEndMs
@@ -637,28 +658,32 @@ public final class BlendSession: @unchecked Sendable {
         anchorFrame + Self.frames((blendMs + extensionMs - anchorSongMs) / msPerFrame)
     }
 
-    /// B is ready again before the deadline: its next frame lands a whole number of bars after its
-    /// stop, past the placement horizon (at the horizon with no bar grid), and A's blend time runs
-    /// again there.
+    /// B is ready again before the deadline: its next frame lands the fewest whole bars after its
+    /// stop that reach past the placement horizon (at the horizon with no bar grid), and A's blend
+    /// time runs again there. A placement past the deadline is the deadline passing, and B, ready,
+    /// comes in by the clean cut.
     private func place(_ ready: Int64) {
         let earliest = max(ready + timing.placementHorizonFrames, soonest)
         let at: Int64
         let added: Double
+        var bars: Int64 = 0
         if locked {
             let bar = barMs / msPerFrame
-            var bars = max(1, (Double(earliest - holdFrom) / bar).rounded(.up))
-            var placed = holdFrom + Self.frames(bars * bar)
-            if placed < earliest {
-                bars += 1
-                placed = holdFrom + Self.frames(bars * bar)
-            }
-            at = placed
-            added = bars * barMs
-            movedBars += Int(bars)
+            bars = max(1, Int64((Double(earliest - holdFrom) / bar).rounded(.up)))
+            while bars > 1 && holdFrom + Self.frames(Double(bars - 1) * bar) >= earliest { bars -= 1 }
+            while holdFrom + Self.frames(Double(bars) * bar) < earliest { bars += 1 }
+            at = holdFrom + Self.frames(Double(bars) * bar)
+            added = Double(bars) * barMs
         } else {
             at = earliest
             added = Double(at - holdFrom) * msPerFrame
         }
+        if at > deadline {
+            deadlinePassed(ready)
+            cut(ready)
+            return
+        }
+        movedBars += Int(bars)
         extensionMs += added
         action(.placeB, at)
         action(.unfreezeA, at, ms: extensionMs)

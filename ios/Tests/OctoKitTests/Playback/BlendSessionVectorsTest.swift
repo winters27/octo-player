@@ -69,7 +69,8 @@ import Testing
     @Test func dropCuts() {
         for c in file.list("dropCut") {
             let at = blendDropCutAtMs(bothHeardStartMs: c.num("bothHeardStartMs"), bothHeardEndMs: c.num("bothHeardEndMs"),
-                                      lockMs: c.num("lockMs"), driftGap: c.num("driftGap"), pace: c.num("pace"), fromMs: c.num("fromMs"))
+                                      holdEndMs: c.num("holdEndMs"), lockMs: c.num("lockMs"), driftGap: c.num("driftGap"),
+                                      pace: c.num("pace"), fromMs: c.num("fromMs"))
             let expect = (c.present("expect") as? NSNumber)?.doubleValue
             if let expect {
                 #expect(at.map { abs($0 - expect) <= 1e-9 } == true, "from \(c.num("fromMs")): \(String(describing: at))")

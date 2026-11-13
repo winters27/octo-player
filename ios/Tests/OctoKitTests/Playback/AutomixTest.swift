@@ -210,9 +210,14 @@ import Testing
                                    settings: AutomixSettings(maxOverlapMs: 8_000))
         #expect(short.lateMoveBars == lateMoveUnbounded)
         // A rate keeps the beats together wherever the blend sits.
-        for name in ["beat-match", "intro-matched", "drift-late-matched"] {
+        for name in ["beat-match", "drift-late-matched"] {
             #expect(plan(name).beatMatchRate != nil, "\(name)")
             #expect(plan(name).lateMoveBars == lateMoveUnbounded, "\(name)")
+        }
+        // An intro's move must also keep its trim, so it is never unbounded.
+        for pair in AutomixCases.pairs {
+            let p = AutomixCases.plan(pair)
+            if p.kind == .intro { #expect(p.lateMoveBars != lateMoveUnbounded, "\(pair.name): \(p.reason)") }
         }
         // Two equal tempos never drift apart either.
         let tail = AutomixCases.tail("beat-120")
@@ -765,18 +770,25 @@ import Testing
         #expect(near(under("steady-100", 180_000, "near-100"), -5, 0.5))
         #expect(near(under("steady-100", 180_000, "level-100"), 0, 0.5))
         func trimDb(_ plan: TransitionPlan) -> Double { -20 * log10(plan.introLevel) }
-        // 7 dB and 5 dB under: lowered by what each lacks of `introUnderOutgoingDb`.
-        let quiet = plan("intro-under-line")
-        #expect(quiet.kind == .intro, "\(quiet.reason)")
-        #expect(near(trimDb(quiet), max(0, introUnderOutgoingDb - 7), 0.5), "\(quiet.introLevel)")
-        let near5 = plan("intro-over-line")
-        #expect(near5.kind == .intro, "\(near5.reason)")
-        #expect(near(trimDb(near5), introUnderOutgoingDb - 5, 0.5), "\(near5.introLevel)")
-        // At the outgoing song's level: lowered by the whole of it and held there, then brought up as
-        // the outgoing song fades.
+        // Where the incoming song is the quieter, the overlap's rule keeps it this far under the
+        // outgoing song at every step of the hold (the two summed, with the headroom,
+        // `introExcessLimitDb` from the louder alone); the hold's rule keeps it `introUnderOutgoingDb`
+        // under.
+        let overlapUnder = -10 * log10(pow(10, (introExcessLimitDb + overlapHeadroomDb) / 10) - 1)
+        // At the outgoing song's level: lowered by the larger of the two and held there, then brought
+        // up as the outgoing song fades.
         let level = plan("intro-trimmed")
         #expect(level.kind == .intro, "\(level.reason)")
-        #expect(near(trimDb(level), introUnderOutgoingDb, 0.5), "\(level.introLevel)")
+        #expect(near(trimDb(level), max(introUnderOutgoingDb, overlapUnder), 0.5), "\(level.introLevel)")
+        // 7 dB and 5 dB under: lowered at least by what each lacks of the hold's margin, and less than
+        // the one at the level. The overlap's rule lowers them further for the fade, where the next
+        // song comes up through the outgoing one's level while that still plays near its own.
+        let quiet = plan("intro-under-line")
+        #expect(quiet.kind == .intro, "\(quiet.reason)")
+        #expect(trimDb(quiet) >= introUnderOutgoingDb - 7 - 0.5 && trimDb(quiet) < trimDb(level), "\(quiet.introLevel)")
+        let near5 = plan("intro-over-line")
+        #expect(near5.kind == .intro, "\(near5.reason)")
+        #expect(trimDb(near5) >= introUnderOutgoingDb - 5 - 0.5 && trimDb(near5) < trimDb(level), "\(near5.introLevel)")
         #expect(level.reason.contains(", next song lowered "), "\(level.reason)")
         #expect(level.inGain(level.holdShare / 2) == level.introLevel)
         #expect(near(level.inGain(1), 1, 1e-9))
@@ -908,7 +920,8 @@ import Testing
         // the next song's own time.
         #expect(near(fullAt - plan.lockMs, 5 * bar, 30))
         #expect(Double(introEnd - plan.entryMs) <= 4 * bar, "\(introEnd)")
-        #expect(plan.lateMoveBars == lateMoveUnbounded)
+        // It ends 150 ms before the latest end, short of a bar: no move.
+        #expect(plan.lateMoveBars == 0)
     }
 
     @Test func anIntroWhoseBeatsWouldBeHeardApartIsRefused() {
