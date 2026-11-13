@@ -167,6 +167,7 @@ class SettingsLockedTest {
             assertNull(opened.get())
             disk.refuseReads.clear()
             s.click(SETTINGS_TRY_AGAIN)
+            assertTrue("Try again opened the file", opened.get() != null)
             assertEquals(real, opened.get()!!.current)
         }
     }

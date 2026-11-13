@@ -183,8 +183,9 @@ class BetweenSongsSettingsTest {
     fun thePrePassRunsOnlyWithoutAVersion() {
         val versioned = JsonObject(mapOf("settingsVersion" to JsonPrimitive(2)))
         assertEquals(null, migratedBetweenSongs(versioned))
-        val old = migratedBetweenSongs(JsonObject(emptyMap()))!!
-        assertTrue(old.untouched)
+        val old = migratedBetweenSongs(JsonObject(emptyMap()))
+        assertTrue("a file without a version is read as an older one", old != null)
+        assertTrue(old!!.untouched)
         assertEquals("Automix", old.json.playback().getValue("betweenSongs").jsonPrimitive.content)
     }
 }
