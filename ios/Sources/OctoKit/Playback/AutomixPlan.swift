@@ -44,12 +44,15 @@ public let introFadeMs = 3_000
 /// when locked).
 public let introRiseMs = 1_000
 
-/// How far an intro's incoming song, with its rise, must stay under the outgoing song held at its
-/// own level, at the same moments, for `introUnderOutgoingShare` of the hold where it sounds, so
-/// the two together are never clearly louder than the outgoing song alone; a short break in the
-/// outgoing song, where the incoming one plays alone, does not count.
+/// Through an intro's hold the incoming song, with its rise, is lowered (the plan's `introLevel`)
+/// until it stays at least `introUnderOutgoingDb` under the outgoing song held at its own level, at
+/// the same moments, for `introUnderOutgoingShare` of the hold where it sounds: the two together are
+/// then never clearly louder than the outgoing song alone, and a short break in the outgoing song,
+/// where the incoming one plays alone, does not count. An intro that would need it lowered by over
+/// `introTrimCapDb` is not planned.
 public let introUnderOutgoingDb = 6.0
 public let introUnderOutgoingShare = 0.95
+public let introTrimCapDb = 30.0
 
 /// Music at full level the outgoing song would lose after a blend's end: above
 /// `keptMusicLimitMs` the start is left out, and each second below it costs `keptMusicWeight`.
@@ -170,7 +173,9 @@ public struct TransitionContext: Sendable, Equatable {
 /// why this plan was chosen.
 ///
 /// An intro's shape is in shares of the overlap: the outgoing song holds its level until
-/// holdShare, then fades out; the incoming one rises over riseShare, then holds. Any other kind
+/// holdShare, then fades out; the incoming one rises over riseShare to introLevel (1, or lower so
+/// it stays under the outgoing song), holds there, and comes up to its own level as the outgoing
+/// song fades. Any other kind
 /// whose incoming song enters before its first sound holds too: the outgoing song at its own
 /// level and the incoming one silent until holdShare, where that sound comes, then the curve
 /// over the rest. Both are 0 otherwise. `latestEndMs` is the latest the blend may end in the
@@ -204,6 +209,8 @@ public struct TransitionPlan: Sendable, Equatable {
     public var curve: FadeCurve?
     public var holdShare: Double
     public var riseShare: Double
+    /// The incoming song's gain through an intro's hold (1 for every other kind).
+    public var introLevel: Double
     public var latestEndMs: Int
     public var lateMoveBars: Int
     public var bothHeardStartMs: Int
@@ -215,8 +222,9 @@ public struct TransitionPlan: Sendable, Equatable {
     /// `latestEndMs` left out is the plan's own end.
     public init(startMs: Int, entryMs: Int, overlapMs: Int, kind: TransitionKind, k: Double, filterStrength: Double,
                 beatMatchRate: Double?, beatMs: Double?, beatAnchorMs: Double?, late: Bool, headroomDb: Double, reason: String,
-                curve: FadeCurve? = nil, holdShare: Double = 0, riseShare: Double = 0, latestEndMs: Int? = nil, lateMoveBars: Int,
-                bothHeardStartMs: Int = 0, bothHeardEndMs: Int = 0, lockMs: Double = 0, driftGap: Double = 0, driftAtEndMs: Double = 0) {
+                curve: FadeCurve? = nil, holdShare: Double = 0, riseShare: Double = 0, introLevel: Double = 1, latestEndMs: Int? = nil,
+                lateMoveBars: Int, bothHeardStartMs: Int = 0, bothHeardEndMs: Int = 0, lockMs: Double = 0, driftGap: Double = 0,
+                driftAtEndMs: Double = 0) {
         self.startMs = startMs
         self.entryMs = entryMs
         self.overlapMs = overlapMs
@@ -232,6 +240,7 @@ public struct TransitionPlan: Sendable, Equatable {
         self.curve = curve
         self.holdShare = holdShare
         self.riseShare = riseShare
+        self.introLevel = introLevel
         self.latestEndMs = latestEndMs ?? startMs + overlapMs
         self.lateMoveBars = lateMoveBars
         self.bothHeardStartMs = bothHeardStartMs
@@ -257,7 +266,7 @@ public struct TransitionPlan: Sendable, Equatable {
     }
 
     public func inGain(_ t: Double) -> Double {
-        if kind == .intro { return introInGain(t, riseShare) }
+        if kind == .intro { return introInGain(t, riseShare, holdShare, introLevel) }
         let along = pastHold(t, holdShare)
         if let curve { return fadeGains(curve, along, overlapMs: Double(overlapMs) * (1 - holdShare)).incoming }
         return automixInGain(along, k)
@@ -413,8 +422,9 @@ private func gridEntry(_ b: Tempo, _ soundStartMs: Double, downbeats: Bool) -> (
 
 /// A place a blend or intro may go: from startMs over overlapMs in the outgoing song's time, its
 /// beats meeting the incoming song's at lockMs (the start, or later by the incoming song's
-/// lead-in). An intro holds and rises over its shares; any other shape holds until holdShare,
-/// then follows curve weight `k`, or when that is nil the curve its own length takes.
+/// lead-in). An intro holds and rises over its shares, the incoming song at `level` through the
+/// hold; any other shape holds until holdShare, then follows curve weight `k`, or when that is nil
+/// the curve its own length takes.
 private struct Shape {
     var startMs: Double
     var lockMs: Double
@@ -424,6 +434,7 @@ private struct Shape {
     var holdShare = 0.0
     var riseShare = 0.0
     var k: Double?
+    var level = 1.0
 
     var endMs: Double { startMs + overlapMs }
 
@@ -672,7 +683,7 @@ private struct PlanPass {
             let since = Double(i) * heardStepMs
             let t = since / s.overlapMs
             let out = s.intro ? introOutGain(t, s.holdShare) : automixOutGain(pastHold(t, s.holdShare), k)
-            let into = s.intro ? introInGain(t, s.riseShare) : automixInGain(pastHold(t, s.holdShare), k)
+            let into = s.intro ? introInGain(t, s.riseShare, s.holdShare, s.level) : automixInGain(pastHold(t, s.holdShare), k)
             if out <= 0 || into <= 0 { continue }
             let at = s.startMs + since
             if measured.levelAt(at) + 20 * log10(out * room) < aFloor { continue }
@@ -683,28 +694,32 @@ private struct PlanPass {
         return first.isNaN ? nil : (first, last)
     }
 
-    /// How far an intro's incoming song sits over the outgoing song through the hold, walked as the
-    /// both-heard stretch is: at each step where the incoming song, with its rise, sounds above its
-    /// silence gate, its 400 ms level less the outgoing song's at the same moment, the
-    /// `introUnderOutgoingShare` percentile of those (the lower of two neighbors), in dB. Nil when
-    /// it never sounds there.
-    func introOverOutgoingDb(_ s: Shape) -> Double? {
-        guard let b = head else { return nil }
+    /// The level an intro's incoming song plays at through the hold, so it stays
+    /// `introUnderOutgoingDb` under the outgoing song there, walked as the both-heard stretch is: at
+    /// each step where the incoming song, at its own level with its rise, sounds above its silence
+    /// gate, its 400 ms level less the outgoing song's at the same moment; the
+    /// `introUnderOutgoingShare` percentile of those (the lower of two neighbors) sets how far it is
+    /// lowered, 1 when it is already that far under or never sounds there. Nil when that takes over
+    /// `introTrimCapDb`.
+    func underOutgoing(_ s: Shape) -> Double? {
+        guard let b = head else { return 1 }
         let hold = s.holdShare * s.overlapMs
         let gate = b.features.gateDb
         var apart: [Double] = []
         let count = Int((hold / heardStepMs).rounded(.down))
         for i in 0..<max(0, count) {
             let since = Double(i) * heardStepMs
-            let into = introInGain(since / s.overlapMs, s.riseShare)
+            let into = introInGain(since / s.overlapMs, s.riseShare, s.holdShare, 1)
             if into <= 0 { continue }
             let level = b.levelAt(entry + since * speedB) + 20 * log10(into)
             if level <= gate { continue }
             apart.append(level - measured.levelAt(s.startMs + since))
         }
-        if apart.isEmpty { return nil }
+        if apart.isEmpty { return 1 }
         apart.sort()
-        return apart[Int((introUnderOutgoingShare * Double(apart.count - 1)).rounded(.down))]
+        let trim = apart[Int((introUnderOutgoingShare * Double(apart.count - 1)).rounded(.down))] + introUnderOutgoingDb
+        if trim <= 0 { return 1 }
+        return trim > introTrimCapDb ? nil : pow(10, -trim / 20)
     }
 
     /// The best scoring shape; the later one wins a tie. Shapes that cut over `keptMusicLimitMs`
@@ -779,9 +794,10 @@ private struct PlanPass {
     /// The next song's quiet start played under the end of this one: the outgoing song holds,
     /// then fades over two bars (or `introFadeMs` unlocked, at most half the quiet start) centered
     /// on where the next song is full, a bar line from where the beats meet when locked; the next
-    /// song rises over a bar (`introRiseMs` unlocked). Nil when no start is left, the beats allow
-    /// none or every one left would cut the outgoing song short, and the lengthened blend is
-    /// planned instead.
+    /// song rises over a bar (`introRiseMs` unlocked), lowered through the hold as far as each start
+    /// needs to stay under the outgoing song (`underOutgoing`). Nil when no start is left, the beats
+    /// or levels allow none or every one left would cut the outgoing song short, and the lengthened
+    /// blend is planned instead.
     func planIntro(_ quiet: Double) -> TransitionPlan? {
         let bar = lockA?.barMs
         let rise = bar ?? Double(introRiseMs)
@@ -822,7 +838,12 @@ private struct PlanPass {
                 if latestEnd - start - hold >= fade / 2 { all.append(intro(start, lock, latestEnd - start)) }
             }
         }
-        let allowed = all.filter { meets($0) }
+        let allowed = all.compactMap { s -> Shape? in
+            guard let level = underOutgoing(s) else { return nil }
+            var lowered = s
+            lowered.level = level
+            return lowered
+        }.filter { meets($0) }
         if allowed.isEmpty { return nil }
         guard let best = bestOf(allowed, { s in
             var score = sharedScore(s)
@@ -839,13 +860,14 @@ private struct PlanPass {
         if capped { reason += ", capped" }
         reason += "), outro at \(automixSeconds(Int(outroStart)))"
         reason += ", latest end \(automixSeconds(Int(latestEnd)))"
+        if best.level < 1 { reason += ", next song lowered \(automixDecimals(-20 * log10(best.level), 1)) dB" }
         if let rate { reason += ", rate \(automixDecimals(rate, 3))" }
         return finish(
             TransitionPlan(startMs: startMs, entryMs: entryMs, overlapMs: overlapMs, kind: .intro, k: curveOf(.intro), filterStrength: 0,
                            beatMatchRate: rate, beatMs: lockA?.beatMs, beatAnchorMs: lockA?.firstBeatMs, late: false,
                            headroomDb: overlapHeadroomDb, reason: reason, holdShare: hold / Double(overlapMs),
-                           riseShare: min(rise, Double(overlapMs) / 4) / Double(overlapMs), latestEndMs: Int(roundHalfUp(latestEnd)),
-                           lateMoveBars: 0),
+                           riseShare: min(rise, Double(overlapMs) / 4) / Double(overlapMs), introLevel: best.level,
+                           latestEndMs: Int(roundHalfUp(latestEnd)), lateMoveBars: 0),
             best.lockMs)
     }
 
@@ -895,7 +917,7 @@ private struct PlanPass {
 
     func shapeOf(_ plan: TransitionPlan, _ lock: Double) -> Shape {
         Shape(startMs: Double(plan.startMs), lockMs: lock, overlapMs: Double(plan.overlapMs), onBar: false, intro: plan.kind == .intro,
-              holdShare: plan.holdShare, riseShare: plan.riseShare, k: plan.k)
+              holdShare: plan.holdShare, riseShare: plan.riseShare, k: plan.k, level: plan.introLevel)
     }
 
     /// The plan with how far a late start may move it, where both songs are heard together, where

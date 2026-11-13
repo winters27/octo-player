@@ -752,18 +752,44 @@ import Testing
         #expect(short.driftAtEndMs <= blendDriftLimitMs, "\(short.reason)")
     }
 
-    @Test func theIntroLinePairsSitJustUnderAndJustOverTheLine() {
-        // The two quiet starts against the outgoing song at the same moments (bars lined up): 7 dB
-        // and 5 dB under it, either side of `introUnderOutgoingDb`.
-        let a = AutomixCases.tail("steady-100")
-        func under(_ song: String) -> Double {
+    @Test func anIntroLowersTheNextSongThroughTheHoldUntilItStaysWellUnderTheOutgoingSong() {
+        // The quiet starts against the outgoing song at the same moments (bars lined up): 7 dB under
+        // it, 5 dB under it and at its level.
+        func under(_ outgoing: String, _ fromMs: Double, _ song: String) -> Double {
+            let a = AutomixCases.tail(outgoing)
             let b = AutomixCases.head(song)
-            let apart = (300..<1_000).map { b.levelAt(Double($0) * 10) - a.levelAt(180_000 + Double($0) * 10) }.sorted()
+            let apart = (300..<1_000).map { b.levelAt(Double($0) * 10) - a.levelAt(fromMs + Double($0) * 10) }.sorted()
             return apart[apart.count / 2]
         }
-        #expect(near(under("under-100"), -7, 0.5))
-        #expect(near(under("near-100"), -5, 0.5))
-        #expect(-under("under-100") > introUnderOutgoingDb && -under("near-100") < introUnderOutgoingDb)
+        #expect(near(under("steady-100", 180_000, "under-100"), -7, 0.5))
+        #expect(near(under("steady-100", 180_000, "near-100"), -5, 0.5))
+        #expect(near(under("steady-100", 180_000, "level-100"), 0, 0.5))
+        func trimDb(_ plan: TransitionPlan) -> Double { -20 * log10(plan.introLevel) }
+        // 7 dB under: the intro at the next song's own level.
+        let quiet = plan("intro-under-line")
+        #expect(quiet.kind == .intro, "\(quiet.reason)")
+        #expect(quiet.introLevel == 1)
+        // 5 dB under: lowered about 1 dB, so it stays 6 dB under.
+        let near5 = plan("intro-over-line")
+        #expect(near5.kind == .intro, "\(near5.reason)")
+        #expect(near(trimDb(near5), 1, 0.5), "\(near5.introLevel)")
+        // At the outgoing song's level: lowered about 6 dB and held there, then brought up as the
+        // outgoing song fades.
+        let level = plan("intro-trimmed")
+        #expect(level.kind == .intro, "\(level.reason)")
+        #expect(near(trimDb(level), 6, 0.5), "\(level.introLevel)")
+        #expect(level.reason.contains(", next song lowered "), "\(level.reason)")
+        #expect(level.inGain(level.holdShare / 2) == level.introLevel)
+        #expect(near(level.inGain(1), 1, 1e-9))
+        // At its own level the next song would be clearly heard from its rise on, together with the
+        // outgoing song held at its own; lowered, it is not heard with it before the hold ends.
+        #expect(Double(level.bothHeardStartMs) >= level.holdShare * Double(level.overlapMs) - 1, "\(level.reason)")
+        // Under an outgoing song near silence it would have to come down over `introTrimCapDb`: no
+        // intro, the blend lengthened into the quiet start.
+        #expect(under("faint-100", 72_000, "level-100") + introUnderOutgoingDb > introTrimCapDb)
+        let faint = plan("intro-trim-capped")
+        #expect(faint.kind != .intro && faint.kind != .gapless, "\(faint.reason)")
+        #expect(faint.reason.contains("(full from"), "\(faint.reason)")
     }
 
     @Test func aCutOnTheBeatEndsAtAnOffGridLatestEnd() {
@@ -1060,13 +1086,38 @@ import Testing
 
     @Test func anIntroRaisesTheIncomingSongQuicklyThenHoldsIt() {
         let rise = 1_000.0 / 13_500
-        #expect(introInGain(0, rise) == 0)
-        #expect(introInGain(-0.1, rise) == 0)
-        #expect(near(introInGain(rise / 2, rise), sin(Double.pi / 4), 1e-12))
-        #expect(near(introInGain(rise * 0.2, rise), sin(Double.pi / 2 * 0.2), 1e-12))
-        for t in [rise, 0.2, 0.5, 0.9, 1, 1.2] { #expect(introInGain(t, rise) == 1, "at \(t)") }
+        let hold = 10_500.0 / 13_500
+        #expect(introInGain(0, rise, hold, 1) == 0)
+        #expect(introInGain(-0.1, rise, hold, 1) == 0)
+        #expect(near(introInGain(rise / 2, rise, hold, 1), sin(Double.pi / 4), 1e-12))
+        #expect(near(introInGain(rise * 0.2, rise, hold, 1), sin(Double.pi / 2 * 0.2), 1e-12))
+        for t in [rise, 0.2, 0.5, 0.9, 1, 1.2] { #expect(introInGain(t, rise, hold, 1) == 1, "at \(t)") }
         // No rise is full at once.
-        #expect(introInGain(0, 0) == 1)
+        #expect(introInGain(0, 0, hold, 1) == 1)
+    }
+
+    @Test func aLoweredIntroHoldsTheIncomingSongThereThenBringsItUpAsTheOutgoingSongLeaves() {
+        let rise = 1_000.0 / 13_500
+        let hold = 10_500.0 / 13_500
+        let level = 0.5
+        #expect(near(introInGain(rise / 2, rise, hold, level), sin(Double.pi / 4) * level, 1e-12))
+        for t in [rise, 0.3, hold] { #expect(introInGain(t, rise, hold, level) == level, "at \(t)") }
+        // Past the hold the incoming song comes up as the outgoing song's power leaves, to its own
+        // level at the end.
+        for t in [hold + 0.02, hold + (1 - hold) / 2, 0.95] {
+            let out = introOutGain(t, hold)
+            let expected = (level * level + (1 - level * level) * (1 - out * out)).squareRoot()
+            #expect(near(introInGain(t, rise, hold, level), expected, 1e-12), "at \(t)")
+        }
+        #expect(near(introInGain(1, rise, hold, level), 1, 1e-12))
+        var last = 0.0
+        for step in 0...400 {
+            let gain = introInGain(Double(step) / 400, rise, hold, level)
+            #expect(gain >= last - 1e-12, "at \(step)")
+            last = gain
+        }
+        // At level 1 nothing changes: full from the rise on.
+        for t in [rise, 0.5, hold + 0.1, 1] { #expect(introInGain(t, rise, hold, 1) == 1, "at \(t)") }
     }
 
     @Test func anIntroPlanPlaysWithTheIntroGains() {
@@ -1074,7 +1125,7 @@ import Testing
         for step in 0...100 {
             let t = Double(step) / 100
             #expect(plan.outGain(t) == introOutGain(t, plan.holdShare), "out at \(t)")
-            #expect(plan.inGain(t) == introInGain(t, plan.riseShare), "in at \(t)")
+            #expect(plan.inGain(t) == introInGain(t, plan.riseShare, plan.holdShare, plan.introLevel), "in at \(t)")
         }
         #expect(plan.outGain(0.7) == 1)
         #expect(plan.inGain(0.5) == 1)

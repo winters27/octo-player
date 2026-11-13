@@ -71,13 +71,19 @@ public func introOutGain(_ t: Double, _ holdShare: Double) -> Double {
     return clamp01(cos((p - hold) / (1 - hold) * Double.pi / 2))
 }
 
-/// The incoming song's volume through an intro: rising as sin(pi/2 * t / riseShare) to full by
-/// `riseShare`, then full, so its quiet start plays at its own level.
-public func introInGain(_ t: Double, _ riseShare: Double) -> Double {
+/// The incoming song's volume through an intro: rising as sin(pi/2 * t / riseShare) to `level` by
+/// `riseShare`, then `level` until `holdShare`, so its quiet start plays under the outgoing song at
+/// that much of its own level; past the hold it comes up as the outgoing song's power leaves,
+/// sqrt(level^2 + (1 - level^2) * (1 - out^2)) with `out` the outgoing song's `introOutGain`, to its
+/// own level at the end. At level 1 it is full from `riseShare` on.
+public func introInGain(_ t: Double, _ riseShare: Double, _ holdShare: Double, _ level: Double) -> Double {
     let p = clamp01(t)
     let rise = clamp01(riseShare)
-    if p >= rise { return 1 }
-    return clamp01(sin(Double.pi / 2 * p / rise))
+    let g = clamp01(level)
+    if p < rise { return clamp01(sin(Double.pi / 2 * p / rise) * g) }
+    if p <= clamp01(holdShare) { return g }
+    let out = introOutGain(p, holdShare)
+    return (g * g + (1 - g * g) * (1 - out * out)).squareRoot()
 }
 
 /// How the two volumes cross in a plain crossfade, the one played with smart transitions off.

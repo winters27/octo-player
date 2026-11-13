@@ -222,6 +222,12 @@ enum AutomixCases {
         // outgoing song.
         "near-100": song(22_050, 45_000, steady(0, 11_000, 100, 0, padDb: -19) + steady(11_000, 45_000, 100, 0, padDb: -8)),
         "under-100": song(22_050, 45_000, steady(0, 11_000, 100, 0, padDb: -21) + steady(11_000, 45_000, 100, 0, padDb: -8)),
+        // 100 BPM with a quiet start of 11 s, 8 dB under its own body but at steady-100's level: an
+        // intro lowers it about 6 dB through the hold.
+        "level-100": song(22_050, 45_000, steady(0, 11_000, 100, 0, padDb: -14) + steady(11_000, 45_000, 100, 0, padDb: -6)),
+        // 100 BPM 28 dB under steady-100 throughout: next to it level-100's quiet start would have to
+        // come down 34 dB.
+        "faint-100": song(22_050, 100_000, steady(0, 100_000, 100, 0, padDb: -42)),
         // The same at 101 BPM, 1% faster.
         "steady-101": song(44_100, 202_000, steady(0, 202_000, 101, 0)),
         // 101 BPM at full level until 190 s, then 12 dB under it: an outro where the song is no
@@ -387,10 +393,13 @@ enum AutomixCases {
         Pair(name: "kept-blend-12", a: "dip-near", b: "steady-114", settings: eight),
         Pair(name: "kept-intro-18", a: "dip-near", b: "audible-85", settings: eight),
         Pair(name: "kept-short-cut", a: "dip-short", b: "steady-114", settings: eight),
-        // An intro only where its quiet start stays 6 dB under the outgoing song: 7 dB under is
-        // planned, 5 dB under gives the blend.
+        // An intro's quiet start kept 6 dB under the outgoing song: 7 dB under plays at its own
+        // level, 5 dB under is lowered about 1 dB and one at the outgoing song's level about 6 dB;
+        // one that would need over `introTrimCapDb` gives the blend.
         Pair(name: "intro-under-line", a: "steady-100", b: "under-100", settings: eight),
         Pair(name: "intro-over-line", a: "steady-100", b: "near-100", settings: eight),
+        Pair(name: "intro-trimmed", a: "steady-100", b: "level-100", settings: eight),
+        Pair(name: "intro-trim-capped", a: "faint-100", b: "level-100", settings: eight),
     ]
 
     private static let cache = AnalysisCache()

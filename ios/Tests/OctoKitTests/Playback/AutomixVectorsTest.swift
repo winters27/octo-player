@@ -147,6 +147,7 @@ import Testing
             if e.bool("late") != plan.late { failures.append("\(what): late \(plan.late)") }
             near("\(what) holdShare", e.num("holdShare"), plan.holdShare, t("curve"))
             near("\(what) riseShare", e.num("riseShare"), plan.riseShare, t("curve"))
+            near("\(what) introLevel", e.num("introLevel"), plan.introLevel, t("level"))
             near("\(what) latestEndMs", e.num("latestEndMs"), Double(plan.latestEndMs), t("ms"))
             if e.int("lateMoveBars") != plan.lateMoveBars { failures.append("\(what): lateMoveBars \(plan.lateMoveBars), expected \(e.int("lateMoveBars"))") }
             near("\(what) bothHeardStartMs", e.num("bothHeardStartMs"), Double(plan.bothHeardStartMs), t("ms"))
@@ -164,9 +165,9 @@ import Testing
             near("in gain at \(time) k \(k)", g.num("in"), automixInGain(time, k), t("curve"))
         }
         for g in vectors["introGains"] as! [[String: Any]] {
-            let time = g.num("t"), hold = g.num("holdShare"), rise = g.num("riseShare")
+            let time = g.num("t"), hold = g.num("holdShare"), rise = g.num("riseShare"), level = g.num("level")
             near("intro out gain at \(time) holding to \(hold)", g.num("out"), introOutGain(time, hold), t("curve"))
-            near("intro in gain at \(time) rising to \(rise)", g.num("in"), introInGain(time, rise), t("curve"))
+            near("intro in gain at \(time) rising to \(rise) at \(level)", g.num("in"), introInGain(time, rise, hold, level), t("curve"))
         }
         for f in vectors["filters"] as! [[String: Any]] {
             let time = f.num("t"), s = f.num("strength")
