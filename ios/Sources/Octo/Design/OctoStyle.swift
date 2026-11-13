@@ -19,6 +19,7 @@ struct OctoTone: ShapeStyle, Sendable, Hashable {
         case complement, third, offTrack, highlight
         case glazeFilm, glazeSelected
         case inkPrimary, inkSecondary, inkTertiary, inkQuaternary, inkQuinary
+        case errorWords, tagWords, tagFill
     }
 
     let role: Role
@@ -70,6 +71,9 @@ extension ResolvedPalette {
         case .inkTertiary: inkTertiary
         case .inkQuaternary: inkQuaternary
         case .inkQuinary: inkQuinary
+        case .errorWords: errorWords
+        case .tagWords: tagWords
+        case .tagFill: tagFill
         }
     }
 
@@ -139,6 +143,12 @@ enum OctoColor {
     /// Secondary, muted and accent words on a selected row.
     static let selectedWords = OctoTone(.selectedWords)
     static let error = Color(OctoPalette.error)
+    /// An error note's words and glyph: one red for light themes and one for dark, each reading at
+    /// 4.5:1 on every surface of its themes.
+    static let errorWords = OctoTone(.errorWords)
+    /// The quiet Optional tag after a field's name: the accent's words on the accent's tonal fill.
+    static let tagWords = OctoTone(.tagWords)
+    static let tagFill = OctoTone(.tagFill)
     /// A standard button's resting fill.
     static let accentTonal = OctoTone(.accentTonal)
     /// A selected list row.
