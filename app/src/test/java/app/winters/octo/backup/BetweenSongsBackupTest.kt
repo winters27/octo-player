@@ -100,16 +100,19 @@ class BetweenSongsBackupTest {
     @Test
     fun aBackupCarriesTheVersionTheStoredChoiceAndTheMirrors() = runBlocking {
         fun player(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject.getValue("player").jsonObject
+        fun JsonObject.number(key: String) = this[key]?.jsonPrimitive?.int
+        fun JsonObject.text(key: String) = this[key]?.jsonPrimitive?.content
+        fun JsonObject.mirrors() = this["crossfade"]?.jsonPrimitive?.boolean to this["smartTransitions"]?.jsonPrimitive?.boolean
         val untouched = player(backupFrom(MemoryPrefs()))
-        assertEquals(2, untouched.getValue("settingsVersion").jsonPrimitive.int)
+        assertEquals(2, untouched.number("settingsVersion"))
         assertNull(untouched["betweenSongs"])
-        assertEquals(true to true, untouched.getValue("crossfade").jsonPrimitive.boolean to untouched.getValue("smartTransitions").jsonPrimitive.boolean)
+        assertEquals(true to true, untouched.mirrors())
         val mirrors = mapOf("Gapless" to (false to false), "Crossfade" to (true to false), "Automix" to (true to true))
         for ((choice, mirror) in mirrors) {
             val written = player(backupFrom(MemoryPrefs(storedPrefs(mapOf("between_songs" to choice)))))
-            assertEquals(2, written.getValue("settingsVersion").jsonPrimitive.int)
-            assertEquals(choice, written.getValue("betweenSongs").jsonPrimitive.content)
-            assertEquals(choice, mirror, written.getValue("crossfade").jsonPrimitive.boolean to written.getValue("smartTransitions").jsonPrimitive.boolean)
+            assertEquals(choice, 2, written.number("settingsVersion"))
+            assertEquals(choice, written.text("betweenSongs"))
+            assertEquals(choice, mirror, written.mirrors())
         }
     }
 
