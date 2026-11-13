@@ -63,16 +63,25 @@ pub const INTRO_RISE_MS: i64 = 1_000;
 /// Through an intro's hold the incoming song, with its rise, is lowered (the
 /// plan's `intro_level`) until it stays at least `INTRO_UNDER_OUTGOING_DB`
 /// under the outgoing song held at its own level, at the same moments, for
-/// `INTRO_UNDER_OUTGOING_SHARE` of the hold where it sounds: the two
-/// together are then never clearly louder than the outgoing song alone, and
-/// a short break in the outgoing song, where the incoming one plays alone,
-/// does not count. The levels are flat ones of the channels' mean; heard
-/// with the ear's weighting and in stereo the incoming song can sit a few dB
-/// nearer the outgoing one, which the margin leaves room for. An intro that
-/// would need it lowered by over `INTRO_TRIM_CAP_DB` is not planned.
+/// `INTRO_UNDER_OUTGOING_SHARE` of the hold where it sounds: a short break in
+/// the outgoing song, where the incoming one plays alone, does not count.
+/// Then, over the whole overlap with the planned gains and the overlap's
+/// headroom, the two together must at every step stay under the louder of
+/// the two songs alone, by `-INTRO_EXCESS_LIMIT_DB` at least (the flat power
+/// sum's excess), and it is lowered further until they do. The levels are
+/// flat ones of the channels' mean, each song's as its deck plays it
+/// (`TransitionContext::incoming_gain_db`); heard with the ear's weighting
+/// and in stereo the incoming song can sit a few dB nearer the outgoing one,
+/// which the margins leave room for. An intro that would need it lowered by
+/// over `INTRO_TRIM_CAP_DB` is not planned.
 pub const INTRO_UNDER_OUTGOING_DB: f64 = 8.0;
 pub const INTRO_UNDER_OUTGOING_SHARE: f64 = 0.95;
+pub const INTRO_EXCESS_LIMIT_DB: f64 = -0.5;
 pub const INTRO_TRIM_CAP_DB: f64 = 30.0;
+
+/// How many times the trim the overlap needs is halved between the hold's
+/// and `INTRO_TRIM_CAP_DB`.
+const INTRO_TRIM_STEPS: usize = 14;
 
 /// Music at full level the outgoing song would lose after a blend's end:
 /// above `KEPT_MUSIC_LIMIT_MS` the start is left out, and each second below
@@ -173,7 +182,10 @@ impl PlanSettings {
 /// beat, and so does a pace other than 1 unless `lock_at_pace` says the
 /// player changes the speed of both songs together after they are mixed:
 /// either turns off bar lock and tempo matching. `pace` is also the speed
-/// the beats are heard at.
+/// the beats are heard at. `incoming_gain_db` is the incoming song's deck
+/// gain less the outgoing song's, in dB, as the decks apply them
+/// (ReplayGain, preamp, the untagged fallback): an intro's trim compares
+/// the two songs as they are heard.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransitionContext {
     pub now_ms: i64,
@@ -187,6 +199,7 @@ pub struct TransitionContext {
     pub body_level_db: Option<f64>,
     pub tempo_prior: Option<f64>,
     pub lock_at_pace: bool,
+    pub incoming_gain_db: f64,
 }
 
 impl Default for TransitionContext {
@@ -203,6 +216,7 @@ impl Default for TransitionContext {
             body_level_db: None,
             tempo_prior: None,
             lock_at_pace: false,
+            incoming_gain_db: 0.0,
         }
     }
 }
@@ -252,8 +266,10 @@ pub struct TransitionPlan {
     pub latest_end_ms: i64,
     /// The most whole bars of the outgoing song the plan may move later,
     /// with its shape kept, and still keep the two songs' beats together:
-    /// [`LATE_MOVE_UNBOUNDED`] when that holds wherever the blend sits, 0
-    /// when it may not move at all.
+    /// [`LATE_MOVE_UNBOUNDED`] when that holds wherever the blend sits (never
+    /// an intro, whose trim must hold where it moves to: with no bar grid it
+    /// is 1 when any move to the latest end may be made), 0 when it may not
+    /// move at all.
     pub late_move_bars: i32,
     /// Counted from `start_ms` in the outgoing song's time, both songs are
     /// clearly heard together from `both_heard_start_ms` to
@@ -294,11 +310,12 @@ impl TransitionPlan {
     }
 
     /// Where, from `start_ms`, a speed lowered to `speed` while the blend is
-    /// `from_ms` along first puts its beats too far apart (see
-    /// [`drop_cut_at_ms`]).
+    /// `from_ms` along first puts its beats too far apart, never inside the
+    /// hold (see [`drop_cut_at_ms`]).
     pub fn drop_cut_at_ms(&self, speed: f64, from_ms: f64) -> Option<f64> {
         let heard = (self.both_heard_start_ms as f64, self.both_heard_end_ms as f64);
-        drop_cut_at_ms(heard, self.lock_ms, self.drift_gap, speed, from_ms)
+        let hold_end = self.hold_share * self.overlap_ms as f64;
+        drop_cut_at_ms(heard, hold_end, self.lock_ms, self.drift_gap, speed, from_ms)
     }
 
     pub fn out_gain(&self, t: f64) -> f64 {
@@ -663,10 +680,12 @@ impl PlanPass<'_> {
             .head_features
             .and_then(|f| f.intro_end_ms)
             .map_or(0.0, |end| (end as f64 - self.entry).max(0.0) / self.speed_b);
-        if quiet > self.fitted(overlap, bars) && quiet >= INTRO_SHORTEST_MS as f64 && !self.dropped {
-            if let Some(intro) = self.plan_intro(quiet) {
-                return intro;
-            }
+        if quiet > self.fitted(overlap, bars)
+            && quiet >= INTRO_SHORTEST_MS as f64
+            && !self.dropped
+            && let Some(intro) = self.plan_intro(quiet)
+        {
+            return intro;
         }
         // Without an intro the blend lasts at least until the next song is
         // near its full level.
@@ -708,7 +727,11 @@ impl PlanPass<'_> {
         {
             all.push(stretched);
         }
-        let allowed: Vec<Shape> = all.iter().filter_map(|s| self.allow(s, self.lo)).collect();
+        let fading: Vec<Shape> = all.into_iter().filter(|s| self.fades(s)).collect();
+        if fading.is_empty() {
+            return gapless_plan(self.len_a, "the next song's silent start leaves no time to fade");
+        }
+        let allowed: Vec<Shape> = fading.iter().filter_map(|s| self.allow(s, self.lo)).collect();
         if allowed.is_empty() {
             return gapless_plan(self.len_a, self.unheard_reason());
         }
@@ -741,6 +764,13 @@ impl PlanPass<'_> {
         self.measured.ms_at_least(s.end_ms(), self.latest_end, self.a.body_db - KEPT_MUSIC_BELOW_BODY_DB)
     }
 
+    // Whether a blend fades the outgoing song out over at least
+    // SHORTEST_FADE_MS after any hold through the incoming song's silent
+    // lead-in, rather than holding it to the end and dropping it there.
+    fn fades(&self, s: &Shape) -> bool {
+        s.intro || (1.0 - s.hold_share) * s.overlap_ms >= SHORTEST_FADE_MS as f64 - 1e-6
+    }
+
     // The last bar-line blend stretched to end exactly at the latest end,
     // from its bar line or, over the limit, from the next one.
     fn stretched(&self, last: &Shape) -> Option<Shape> {
@@ -769,13 +799,13 @@ impl PlanPass<'_> {
     // The candidate's end kept and its start moved later by whole bars
     // until the beats stay within the bound; once that would leave under
     // SHORTEST_BLEND_MS, a cut from the earliest beat of A that keeps them
-    // within it. `None` when no cut does.
+    // within it. Every one fades A out (`fades`). `None` when no cut does.
     fn cap(&self, s: &Shape, earliest: f64) -> Option<Shape> {
         let Some(a) = self.lock_a else { return Some(*s) };
         let bar = a.bar_ms();
         let mut shape = *s;
         loop {
-            if self.meets(&shape) {
+            if self.meets(&shape) && self.fades(&shape) {
                 return Some(shape);
             }
             let lock = shape.lock_ms + bar;
@@ -798,7 +828,7 @@ impl PlanPass<'_> {
         grid.beats_between(from + self.lead, to + self.lead)
             .into_iter()
             .map(|beat| self.blend(beat - self.lead, beat, end - (beat - self.lead), self.on_bar_line(beat)))
-            .find(|shape| self.meets(shape))
+            .find(|shape| self.meets(shape) && self.fades(shape))
     }
 
     fn on_bar_line(&self, ms: f64) -> bool {
@@ -866,16 +896,71 @@ impl PlanPass<'_> {
         heard
     }
 
-    // The level an intro's incoming song plays at through the hold, so it
-    // stays INTRO_UNDER_OUTGOING_DB under the outgoing song there, walked as
-    // the both-heard stretch is: at each step where the incoming song, at
-    // its own level with its rise, sounds above its silence gate, its 400 ms
-    // level less the outgoing song's at the same moment; the
+    // The level an intro's incoming song plays at through the hold: the
+    // hold's own (`hold_level`), lowered further while the mix's excess over
+    // the louder song alone passes INTRO_EXCESS_LIMIT_DB somewhere in the
+    // overlap (`excess`), to the highest level that keeps it within that,
+    // found by halving the trim between the hold's and INTRO_TRIM_CAP_DB
+    // INTRO_TRIM_STEPS times. `None` when that takes over INTRO_TRIM_CAP_DB.
+    fn under_outgoing(&self, s: &Shape) -> Option<f64> {
+        let held = self.hold_level(s)?;
+        if self.excess(s, held) <= INTRO_EXCESS_LIMIT_DB {
+            return Some(held);
+        }
+        let mut lo = -20.0 * held.log10();
+        let mut hi = INTRO_TRIM_CAP_DB;
+        if self.excess(s, 10f64.powf(-hi / 20.0)) > INTRO_EXCESS_LIMIT_DB {
+            return None;
+        }
+        for _ in 0..INTRO_TRIM_STEPS {
+            let mid = (lo + hi) / 2.0;
+            if self.excess(s, 10f64.powf(-mid / 20.0)) > INTRO_EXCESS_LIMIT_DB {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(10f64.powf(-hi / 20.0))
+    }
+
+    // How far an intro's mix stands over the louder of its two songs alone,
+    // the incoming one at `level` through the hold: at each step of the
+    // overlap where either song sounds above its silence gate, the flat
+    // power sum of both with their planned gains and the overlap's headroom,
+    // less the louder song's own level there, each as its deck plays it; the
+    // loudest step. Negative infinity when no step counts.
+    fn excess(&self, s: &Shape, level: f64) -> f64 {
+        let Some(b) = self.head else { return f64::NEG_INFINITY };
+        let room = 10f64.powf(-OVERLAP_HEADROOM_DB / 20.0);
+        let mut most = f64::NEG_INFINITY;
+        let count = (s.overlap_ms / HEARD_STEP_MS).floor() as i64;
+        for i in 0..=count {
+            let since = i as f64 * HEARD_STEP_MS;
+            let t = since / s.overlap_ms;
+            let outgoing = self.measured.level_at(s.start_ms + since);
+            let own = b.level_at(self.entry + since * self.speed_b);
+            if outgoing <= self.a.gate_db && own <= b.features.gate_db {
+                continue;
+            }
+            let incoming = own + self.context.incoming_gain_db;
+            let out = intro_out_gain(t, s.hold_share) * room;
+            let into = intro_in_gain(t, s.rise_share, s.hold_share, level) * room;
+            let sum = 10f64.powf(outgoing / 10.0) * out * out + 10f64.powf(incoming / 10.0) * into * into;
+            most = most.max(10.0 * sum.max(1e-30).log10() - outgoing.max(incoming));
+        }
+        most
+    }
+
+    // The level that keeps an intro's incoming song INTRO_UNDER_OUTGOING_DB
+    // under the outgoing song through the hold, walked as the both-heard
+    // stretch is: at each step where the incoming song, at its own level
+    // with its rise, sounds above its silence gate, its 400 ms level as its
+    // deck plays it less the outgoing song's at the same moment; the
     // INTRO_UNDER_OUTGOING_SHARE percentile of those (the lower of two
     // neighbors) sets how far it is lowered, 1 when it is already that far
     // under or never sounds there. `None` when that takes over
     // INTRO_TRIM_CAP_DB.
-    fn under_outgoing(&self, s: &Shape) -> Option<f64> {
+    fn hold_level(&self, s: &Shape) -> Option<f64> {
         let Some(b) = self.head else { return Some(1.0) };
         let hold = s.hold_share * s.overlap_ms;
         let gate = b.features.gate_db;
@@ -891,7 +976,7 @@ impl PlanPass<'_> {
             if level <= gate {
                 continue;
             }
-            apart.push(level - self.measured.level_at(s.start_ms + since));
+            apart.push(level + self.context.incoming_gain_db - self.measured.level_at(s.start_ms + since));
         }
         if apart.is_empty() {
             return Some(1.0);
@@ -1010,7 +1095,8 @@ impl PlanPass<'_> {
     // outgoing song holds, then fades over two bars (or INTRO_FADE_MS
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
-    // next song rises over a bar (INTRO_RISE_MS unlocked), lowered through
+    // next song rises over a bar (INTRO_RISE_MS unlocked; a quarter of the
+    // overlap or the hold when shorter), lowered through
     // the hold as far as each start needs to stay under the outgoing song
     // (`under_outgoing`). `None` when no start is left, the beats or levels
     // allow none or every one left would cut the outgoing song short, and
@@ -1043,7 +1129,7 @@ impl PlanPass<'_> {
             on_bar: bar.is_some(),
             intro: true,
             hold_share: hold / length,
-            rise_share: rise.min(length / 4.0) / length,
+            rise_share: rise.min(length / 4.0).min(hold) / length,
             k: None,
             level: 1.0,
         };
@@ -1127,7 +1213,7 @@ impl PlanPass<'_> {
             reason,
             curve: FadeCurve::EqualPower,
             hold_share: hold / overlap_ms as f64,
-            rise_share: rise.min(overlap_ms as f64 / 4.0) / overlap_ms as f64,
+            rise_share: rise.min(overlap_ms as f64 / 4.0).min(hold) / overlap_ms as f64,
             intro_level: best.level,
             latest_end_ms: round_half_up(self.latest_end) as i64,
             late_move_bars: 0,
@@ -1174,7 +1260,7 @@ impl PlanPass<'_> {
         let start = lock - self.lead;
         let length = self.latest_end - start;
         let shape = if !self.bounded {
-            (length >= SHORTEST_FADE_MS as f64).then(|| self.blend(start, lock, length, true))
+            Some(self.blend(start, lock, length, true)).filter(|s| self.fades(s))
         } else if length >= SHORTEST_BLEND_MS as f64 {
             self.cap(&self.blend(start, lock, length, true), from)
         } else {
@@ -1247,22 +1333,62 @@ impl PlanPass<'_> {
     // latest end with its beats within the bound there; unbounded when the
     // bound does not depend on where it sits. None for a plan whose beats
     // could not be lined up, kept only where both songs are never heard
-    // together, which a move could change.
+    // together, which a move could change. An intro is never unbounded: a
+    // move must also leave its incoming song needing no deeper trim than
+    // planned (`trim_holds`). With a bar grid it counts those bars; with
+    // none, where the player moves it any amount up to the latest end, it is
+    // 1 when there is room and every START_STEP_MS step there (and the
+    // latest end itself) keeps that, else 0.
     fn late_move_bars(&self, shape: &Shape, plan: &TransitionPlan) -> i32 {
         if self.blind {
             return 0;
         }
-        let Some(bar) = self.lock_a.map(|a| a.bar_ms()).filter(|_| self.bounded) else {
+        let bar = self.lock_a.map(|a| a.bar_ms());
+        let end = (plan.start_ms + plan.overlap_ms) as f64;
+        let latest = plan.latest_end_ms as f64;
+        if shape.intro {
+            let keeps = |ms: f64| {
+                let moved = shape.shifted(ms);
+                self.meets(&moved) && self.trim_holds(&moved)
+            };
+            let Some(bar) = bar else {
+                let room = latest - end;
+                if room <= 1e-6 {
+                    return 0;
+                }
+                let mut ms = START_STEP_MS as f64;
+                while ms < room - 1e-6 {
+                    if !keeps(ms) {
+                        return 0;
+                    }
+                    ms += START_STEP_MS as f64;
+                }
+                return i32::from(keeps(room));
+            };
+            let mut bars = 0;
+            while end + (bars + 1) as f64 * bar <= latest + 1e-6 && keeps((bars + 1) as f64 * bar) {
+                bars += 1;
+            }
+            return bars;
+        }
+        let Some(bar) = bar.filter(|_| self.bounded) else {
             return LATE_MOVE_UNBOUNDED;
         };
-        let end = (plan.start_ms + plan.overlap_ms) as f64;
         let mut bars = 0;
-        while end + (bars + 1) as f64 * bar <= plan.latest_end_ms as f64 + 1e-6
+        while end + (bars + 1) as f64 * bar <= latest + 1e-6
             && self.meets(&shape.shifted((bars + 1) as f64 * bar))
         {
             bars += 1;
         }
         bars
+    }
+
+    // Whether an intro's shape, at the level it was planned with, needs no
+    // deeper trim where it sits: the hold's level is no lower, and the mix's
+    // excess over the louder song alone is within INTRO_EXCESS_LIMIT_DB.
+    fn trim_holds(&self, s: &Shape) -> bool {
+        self.hold_level(s).is_some_and(|held| held >= s.level - 1e-9)
+            && self.excess(s, s.level) <= INTRO_EXCESS_LIMIT_DB
     }
 }
 
@@ -1322,14 +1448,23 @@ pub fn transition_gains(
 /// `gap * |t - lock_ms|` passes `DRIFT_LIMIT_MS * speed` (`from_ms` itself
 /// when they are already that far apart there, else the moment after the
 /// lock point where the offset reaches the limit, when the stretch goes on
-/// past it). `None` when no such moment comes, and the blend plays on as
-/// planned.
-pub fn drop_cut_at_ms(heard: (f64, f64), lock_ms: f64, gap: f64, speed: f64, from_ms: f64) -> Option<f64> {
+/// past it). The outgoing song keeps its own level through a hold (an
+/// intro's, or the incoming song's silent lead-in), so the moment is never
+/// before `hold_end_ms`. `None` when no such moment comes, and the blend
+/// plays on as planned.
+pub fn drop_cut_at_ms(
+    heard: (f64, f64),
+    hold_end_ms: f64,
+    lock_ms: f64,
+    gap: f64,
+    speed: f64,
+    from_ms: f64,
+) -> Option<f64> {
     let (start, end) = heard;
     if gap <= 0.0 || end <= 0.0 {
         return None;
     }
-    let from = from_ms.max(start);
+    let from = from_ms.max(start).max(hold_end_ms);
     if from > end {
         return None;
     }

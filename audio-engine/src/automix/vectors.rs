@@ -94,6 +94,7 @@ fn context_of(o: &Value) -> TransitionContext {
         body_level_db: num_or_none(o, "bodyLevelDb"),
         tempo_prior: num_or_none(o, "tempoPrior"),
         lock_at_pace: o.get("lockAtPace").and_then(Value::as_bool).unwrap_or(false),
+        incoming_gain_db: num(o, "incomingGainDb"),
     }
 }
 
@@ -370,24 +371,18 @@ fn check(vectors: &Value) -> Vec<String> {
         if flag(e, "late") != plan.late {
             c.fail(format!("{what}: late {}", plan.late));
         }
-        // Checked once the file carries them.
-        if let Some(latest_end) = num_or_none(e, "latestEndMs") {
-            c.near(
-                &format!("{what} latestEndMs"),
-                Some(latest_end),
-                Some(plan.latest_end_ms as f64),
-                t("ms"),
-            );
-        }
+        c.near(
+            &format!("{what} latestEndMs"),
+            Some(num(e, "latestEndMs")),
+            Some(plan.latest_end_ms as f64),
+            t("ms"),
+        );
         for (key, actual) in [("holdShare", plan.hold_share), ("riseShare", plan.rise_share)] {
-            if let Some(expected) = num_or_none(e, key) {
-                c.near(&format!("{what} {key}"), Some(expected), Some(actual), t("curve"));
-            }
+            c.near(&format!("{what} {key}"), Some(num(e, key)), Some(actual), t("curve"));
         }
         c.near(&format!("{what} introLevel"), Some(num(e, "introLevel")), Some(plan.intro_level), t("level"));
-        if let Some(bars) = e.get("lateMoveBars").and_then(Value::as_i64)
-            && bars != plan.late_move_bars as i64
-        {
+        let bars = int(e, "lateMoveBars");
+        if bars != plan.late_move_bars as i64 {
             c.fail(format!("{what}: lateMoveBars {}, expected {bars}", plan.late_move_bars));
         }
         c.near(
@@ -436,7 +431,7 @@ fn check(vectors: &Value) -> Vec<String> {
             t("curve"),
         );
     }
-    for g in vectors.get("introGains").and_then(Value::as_array).into_iter().flatten() {
+    for g in list(vectors, "introGains") {
         let (time, hold, rise, level) =
             (num(g, "t"), num(g, "holdShare"), num(g, "riseShare"), num(g, "level"));
         let (out, gain_in) = intro_gains(time, hold, rise, level);
@@ -524,7 +519,7 @@ fn check(vectors: &Value) -> Vec<String> {
         let heard = (num(d, "bothHeardStartMs"), num(d, "bothHeardEndMs"));
         let (lock, gap, speed, from) =
             (num(d, "lockMs"), num(d, "driftGap"), num(d, "speed"), num(d, "fromMs"));
-        let actual = planner::drop_cut_at_ms(heard, lock, gap, speed, from);
+        let actual = planner::drop_cut_at_ms(heard, num(d, "holdEndMs"), lock, gap, speed, from);
         c.near(&format!("drop cut for {d}"), num_or_none(d, "cutAtMs"), actual, t("curve"));
     }
     c.failures

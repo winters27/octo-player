@@ -462,6 +462,50 @@ fn an_outgoing_song_that_ends_inside_its_blend_lets_the_next_one_up_gently() {
     assert!(loudest(&out, climbing + 24_000, out.len() / 2) > 0.99);
 }
 
+#[test]
+fn an_outgoing_song_that_runs_out_before_its_blend_is_followed_without_one() {
+    // A's sound ends at 0.8 s, before the blend planned at 1 s: B follows it
+    // at once at its own level, a gapless join, never a near-silent start.
+    let dir = temp_dir();
+    let (pa, pb) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&pa, RATE, 2, &(0..38_400).flat_map(|_| [8_192, 0]).collect::<Vec<i16>>());
+    write_wav(&pb, RATE, 2, &(0..96_000).flat_map(|_| [0, 8_192]).collect::<Vec<i16>>());
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let lane = Lane::new(deck(1, &pa), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &pb);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, 48_000, next, Loudness::default(), FadeShape { k: 0.4, ..Default::default() });
+    let (mut out, mut markers, mut block) = (Vec::new(), Vec::new(), vec![0.0; 1024]);
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        out.extend_from_slice(&block[..n * 2]);
+        assert!(!mixer.is_fading(), "no blend");
+        // Once B plays, nothing follows it.
+        if let Some(lane) = mixer.lane_mut()
+            && lane.current().key() == 2
+        {
+            lane.last = true;
+        }
+        if state == MixState::Ended && n == 0 {
+            break;
+        }
+        if n == 0 {
+            assert!(Instant::now() < until, "mixer stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let joined = 38_400 + LATENCY;
+    let join = markers.iter().find(|m| m.key == 2).expect("marker for B");
+    assert_eq!((join.frame, join.transition), (joined as u64, Some(Transition::Gapless)));
+    assert_eq!(out[(joined - 1) * 2], 0.25, "A to its last frame");
+    for i in joined..joined + 96_000 {
+        assert_eq!((out[i * 2], out[i * 2 + 1]), (0.0, 0.25), "B alone at its own level at {i}");
+    }
+    assert_eq!(out.len() / 2, joined + 96_000);
+}
+
 // Song A blending at 1 s into B over `fade` frames with `shape`, under
 // `settings`, at `speed`: the sound and where the blend begins in it.
 fn paced_blend_of(
@@ -600,6 +644,35 @@ fn a_lowered_speed_cuts_an_intro_only_once_its_hold_is_over() {
     // Then A goes over 20 ms, while B comes up to its own level.
     assert_eq!(out[blend_frame(96_000 + 960 + 256) * 2], 0.0);
     assert!((out[blend_frame(96_000 + 960 + 12_000 + 512) * 2 + 1] - 0.25).abs() < 1e-6);
+}
+
+#[test]
+fn a_lowered_speed_never_cuts_inside_an_intros_hold() {
+    // A 4 s intro: A at its own level for 3 s; both heard together from
+    // 0.5 s to 3.75 s, the beats meeting at 3.5 s and parting by 1%. At half
+    // speed 20 ms is the limit, 2 s either side of the lock: slowed 0.5 s in,
+    // the beats are past it at once, but A keeps its hold, and from the
+    // hold's end they stay within it to the stretch's end, so no cut comes.
+    let intro = FadeShape {
+        kind: crate::automix::TransitionKind::Intro,
+        hold_share: 0.75,
+        rise_share: 0.1,
+        both_heard_ms: (500.0, 3_750.0),
+        lock_ms: 3_500.0,
+        drift_gap: 0.01,
+        ..Default::default()
+    };
+    let slowed = [(blend_frame(24_000), 0.5)];
+    let (out, cuts) = blend_with_speeds(
+        &steady_left(),
+        &steady_right(),
+        192_000,
+        intro,
+        &SoundSettings::default(),
+        &slowed,
+    );
+    assert_eq!(cuts, vec![None]);
+    assert_eq!(out[blend_frame(143_000) * 2], 0.25, "A held at its own level");
 }
 
 // A 2 s blend whose two songs are heard together for its first 1.5 s, the

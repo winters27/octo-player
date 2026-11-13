@@ -85,20 +85,22 @@ pub fn intro_out_gain(t: f64, hold_share: f64) -> f64 {
 }
 
 /// The incoming song's volume at `t` through an intro: up from nothing on a
-/// quarter sine over `rise_share` to `level`, then `level` until
-/// `hold_share`, so its quiet start plays under the outgoing song at that
-/// much of its own level; past the hold it comes up as the outgoing song's
-/// power leaves, `sqrt(level^2 + (1 - level^2) * (1 - out^2))` with `out`
-/// the outgoing song's [`intro_out_gain`], to its own level at the end. At
-/// level 1 it is full from `rise_share` on.
+/// quarter sine over the rise (`rise_share`, ending by `hold_share` at the
+/// latest) to `level`, then `level` until `hold_share`, so its quiet start
+/// plays under the outgoing song at that much of its own level; past the
+/// hold it comes up as the outgoing song's power leaves,
+/// `sqrt(level^2 + (1 - level^2) * (1 - out^2))` with `out` the outgoing
+/// song's [`intro_out_gain`], to its own level at the end. At level 1 it is
+/// full from the rise's end on.
 pub fn intro_in_gain(t: f64, rise_share: f64, hold_share: f64, level: f64) -> f64 {
     let p = t.clamp(0.0, 1.0);
-    let rise = rise_share.clamp(0.0, 1.0);
+    let hold = hold_share.clamp(0.0, 1.0);
+    let rise = rise_share.clamp(0.0, hold);
     let g = level.clamp(0.0, 1.0);
     if p < rise {
         return (PI / 2.0 * p / rise).sin() * g;
     }
-    if p <= hold_share.clamp(0.0, 1.0) {
+    if p <= hold {
         return g;
     }
     let out = intro_out_gain(p, hold_share);

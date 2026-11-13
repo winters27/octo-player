@@ -162,9 +162,10 @@ impl TransitionPlan {
     /// line the incoming song up: the blend ends where it would have, starts
     /// at `now_ms` at the earliest, keeps its entry, curve and filters, and
     /// drops its bar lock and tempo matching, so it may move by any number
-    /// of bars and its beats are no longer lined up. A blend held through
-    /// the incoming song's silent lead-in holds as long from its new start.
-    /// `None` when too little is left to blend.
+    /// of bars (an intro by none) and its beats are no longer lined up. A
+    /// blend held through the incoming song's silent lead-in holds as long
+    /// from its new start. `None` when too little is left to blend, or to
+    /// fade the outgoing song out over SHORTEST_FADE_MS after such a hold.
     pub fn late_from(&self, now_ms: i64) -> Option<Self> {
         let end = self.start_ms + self.overlap_ms;
         let start_ms = self.start_ms.max(now_ms);
@@ -172,10 +173,15 @@ impl TransitionPlan {
         if overlap_ms < SHORTEST_FADE_MS as i64 {
             return None;
         }
-        let hold_share = match self.kind {
-            TransitionKind::Intro => self.hold_share,
-            _ => (self.hold_share * self.overlap_ms as f64 / overlap_ms as f64).min(1.0),
+        let intro = self.kind == TransitionKind::Intro;
+        let hold_share = if intro {
+            self.hold_share
+        } else {
+            (self.hold_share * self.overlap_ms as f64 / overlap_ms as f64).min(1.0)
         };
+        if !intro && (1.0 - hold_share) * (overlap_ms as f64) < SHORTEST_FADE_MS as f64 - 1e-6 {
+            return None;
+        }
         Some(TransitionPlan {
             start_ms,
             overlap_ms,
@@ -184,7 +190,7 @@ impl TransitionPlan {
             beat_ms: None,
             beat_anchor_ms: None,
             late: true,
-            late_move_bars: LATE_MOVE_UNBOUNDED,
+            late_move_bars: if intro { 0 } else { LATE_MOVE_UNBOUNDED },
             both_heard_start_ms: 0,
             both_heard_end_ms: 0,
             lock_ms: 0.0,

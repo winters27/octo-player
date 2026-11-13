@@ -796,7 +796,8 @@ impl Mixer {
     /// Follows the listener's speed through the blend under way: where, at
     /// `speed`, its two songs' beats would first be heard further apart
     /// than the planner allows while both are still heard together (see
-    /// `automix::drop_cut_at_ms`), the blend is cut ([`Mixer::cut_fade`]); a
+    /// `automix::drop_cut_at_ms`), the blend is cut ([`Mixer::cut_fade`]),
+    /// never inside a hold, where the outgoing song is at its own level; a
     /// speed where they never would clears a cut still to come. Returns the
     /// frame of the blend the cut falls on.
     pub fn follow_speed(&mut self, speed: f64) -> Option<u64> {
@@ -806,7 +807,9 @@ impl Mixer {
             return None;
         }
         let along_ms = fade.done as f64 * 1_000.0 / rate;
-        let at_ms = drop_cut_at_ms(fade.both_heard_ms, fade.lock_ms, fade.drift_gap, speed, along_ms);
+        let hold_end_ms = fade.hold_share.clamp(0.0, 1.0) * fade.frames as f64 * 1_000.0 / rate;
+        let at_ms =
+            drop_cut_at_ms(fade.both_heard_ms, hold_end_ms, fade.lock_ms, fade.drift_gap, speed, along_ms);
         fade.cut_at = at_ms.map(|ms| (ms * rate / 1_000.0).ceil() as u64);
         fade.cut_at
     }
@@ -1196,6 +1199,21 @@ impl Mixer {
             return;
         }
         let from = old.current().key();
+        // A song whose sound ran out before the blend's start, nothing of it
+        // left in its rate stage either, has nothing to blend: the next one
+        // becomes the lane at its own level, a gapless join.
+        let easing_left = self
+            .rated
+            .as_ref()
+            .is_some_and(|r| r.key == from && (r.available() > 0 || r.stretch.pending() > 0));
+        if old.ran_dry() && !easing_left {
+            self.failures.extend(old.take_failures());
+            self.lift = None;
+            self.rated = None;
+            self.lane = Some(Lane::new(plan.deck, plan.loudness, &self.settings.replay_gain, self.rate));
+            self.next_transition = Some(Transition::Gapless);
+            return;
+        }
         // A song whose sound stopped short of the blend's start begins it as
         // it runs dry.
         let on_time = !old.ran_dry();

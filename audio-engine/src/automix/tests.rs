@@ -250,6 +250,27 @@ fn a_late_plan_keeps_its_end_and_drops_the_bar_lock() {
 }
 
 #[test]
+fn a_late_plan_still_fades_the_outgoing_song_out_after_a_silent_lead_in() {
+    // A 6 s blend from 150 s held 2 s through the next song's silent
+    // lead-in. From 153 s the hold is two thirds of what is left and A
+    // still fades out over 1 s; from 153.6 s only 0.4 s would be left after
+    // the hold to fade A out in, so no late blend is planned.
+    let mut plan = TransitionPlan::fixed_crossfade(200_000, 6_000, "test");
+    plan.start_ms = 150_000;
+    plan.kind = TransitionKind::Blend;
+    plan.hold_share = 2_000.0 / 6_000.0;
+    let late = plan.late_from(153_000).unwrap();
+    assert_eq!(late.overlap_ms, 3_000);
+    assert!((late.hold_share * 3_000.0 - 2_000.0).abs() < 1e-9, "{}", late.hold_share);
+    assert!(plan.late_from(153_600).is_none());
+    // An intro keeps its shares, and its trim was planned for where it sat:
+    // it may not move again.
+    let intro = TransitionPlan { kind: TransitionKind::Intro, ..plan.clone() };
+    let late_intro = intro.late_from(153_600).unwrap();
+    assert_eq!((late_intro.hold_share, late_intro.late_move_bars), (plan.hold_share, 0));
+}
+
+#[test]
 fn the_section_analyzer_finds_a_click_tracks_tempo() {
     let song = SyntheticSong { rate: 44_100, channels: 1, length_ms: 40_000, layers: click(40_000.0, 120.0) };
     let mono = song.render_mono(0.0, 30_000.0);
