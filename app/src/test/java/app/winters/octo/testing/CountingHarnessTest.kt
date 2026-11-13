@@ -3,6 +3,7 @@ package app.winters.octo.testing
 import androidx.room.withTransaction
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.WriteLabels
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
@@ -98,6 +99,24 @@ class CountingHarnessTest {
         assertFalse(written[1].committed)
         assertTrue(written.all { it.heldNanos > 0 })
         assertEquals(12, db.dao().allTrackIds().size)
+        db.close()
+    }
+
+    // Room's own trigger upkeep is bookkeeping: a table's triggers are
+    // dropped at the next watch's start once its last watcher went, and
+    // neither that drop nor the new watch's triggers are the app's.
+    @Test
+    fun roomsTriggerUpkeepIsBookkeeping() = runBlocking {
+        val db = openTestCatalog()
+        db.invalidationTracker.createFlow("album").first()
+        db.counted.reset()
+        db.counted.recording = true
+        db.invalidationTracker.createFlow("track").first()
+        db.counted.recording = false
+        val triggers = db.counted.statements.filter { "room_table_modification_trigger" in it.sql }
+        assertTrue("album's triggers dropped: $triggers", triggers.any { it.sql.contains("DROP TRIGGER", ignoreCase = true) && "_album_" in it.sql })
+        assertTrue("track's triggers made: $triggers", triggers.any { it.sql.contains("CREATE TEMP TRIGGER", ignoreCase = true) && "_track_" in it.sql })
+        assertEquals(emptyList<String>(), db.counted.own.map { it.sql }.filter { "room_table_modification_trigger" in it })
         db.close()
     }
 }

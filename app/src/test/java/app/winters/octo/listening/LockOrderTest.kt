@@ -2,6 +2,7 @@ package app.winters.octo.listening
 
 import androidx.paging.PagingSource
 import app.winters.octo.catalog.HoldKind
+import app.winters.octo.catalog.MERGE_WORK_CLEAR
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.catalog.library
@@ -381,7 +382,8 @@ class LockOrderTest {
     @Test
     fun autoplaysLastTryRunsOnlyItsReadsByIdUnderTheLock() = timed(60) {
         val merge = db.mergedLibrary(80)
-        // The play counts are never rebuilt here, so nothing else reads.
+        // The play counts are never rebuilt here, and each swap's clears end
+        // before the next try, so nothing else reads.
         val rig = RadioRig(db, merge)
         val picker = AutoplayPicker(rig.radio, db, merge, rig.totals.history, app.winters.octo.playback.QueueStore(db))
         val seed = db.dao().tracksByIdsUnordered(listOf(db.query("SELECT id FROM track ORDER BY id LIMIT 1", null).use { it.moveToFirst(); it.getString(0) })).single()
@@ -390,7 +392,13 @@ class LockOrderTest {
         picker.hooks = object : AutoplayHooks() {
             override suspend fun walked(artist: List<String>, genre: List<String>) {
                 walkedInLock = walkedInLock || merge.holdsMergeLock()
-                if (++tries <= 2) db.growAndSwap(merge, 80 + tries)
+                if (++tries <= 2) {
+                    db.growAndSwap(merge, 80 + tries)
+                    // The swap's work rows and stage go in the background,
+                    // outside the merge lock.
+                    merge.awaitClear(MERGE_WORK_CLEAR)
+                    merge.awaitStageClear(DEVICE)
+                }
             }
 
             override suspend fun reading() {

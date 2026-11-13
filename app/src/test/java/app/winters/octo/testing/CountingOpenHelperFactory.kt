@@ -75,11 +75,11 @@ class Counted internal constructor(val sql: String, val boundArgs: Int, val labe
     @Volatile var totalChanges: Long? = null
         internal set
 
-    // Room's own bookkeeping (its table change log, its schema checks) rather
-    // than the app's statements.
+    // Room's own bookkeeping (its table change log and the triggers that
+    // write it, its schema checks) rather than the app's statements.
     val bookkeeping: Boolean
-        get() = "room_table_modification_log" in sql || "room_master_table" in sql || sql.startsWith("PRAGMA") ||
-            sql == CHANGES_SQL || sql == "SELECT last_insert_rowid()"
+        get() = "room_table_modification_log" in sql || "room_table_modification_trigger" in sql || "room_master_table" in sql ||
+            sql.startsWith("PRAGMA") || sql == CHANGES_SQL || sql == "SELECT last_insert_rowid()"
 
     override fun toString() = "read $rowsRead, changed $rowsChanged, bound $boundArgs: $sql"
 }
