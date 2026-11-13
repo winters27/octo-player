@@ -37,7 +37,9 @@ class AudioTrackRealOutput(private val out: AudioTrackAudioOutput) : RealOutput 
 
     val track: AudioTrack get() = out.audioTrack
 
-    override val bufferFrames: Int get() = out.bufferSizeInFrames.toInt()
+    // The buffer as built: the track's size in use changes with
+    // setBufferSize on API 29 and 30.
+    override val bufferFrames: Int = out.bufferSizeInFrames.toInt()
 
     override fun write(samples: FloatArray, offset: Int, frames: Int): Int {
         val need = frames * MIX_FRAME_BYTES
