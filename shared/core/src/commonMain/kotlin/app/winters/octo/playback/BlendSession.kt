@@ -325,7 +325,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         speed = pace
         msPerFrame = pace * 1_000.0 / timing.sampleRate
         if (startFrame < 0 || state == BlendState.ENDED) return
-        dropCutMs = blendDropCutAtMs(bothHeardStartMs, bothHeardEndMs, lockMs, driftGap, pace, blendAt(switchFrame))
+        dropCutMs = blendDropCutAtMs(bothHeardStartMs, bothHeardEndMs, holdShare * overlapMs, lockMs, driftGap, pace, blendAt(switchFrame))
     }
 
     fun outgoingStopped(generation: Long) {
@@ -684,28 +684,33 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // far included.
     private fun frameAtBlend(blendMs: Double): Long = anchorFrame + frames((blendMs + extensionMs - anchorSongMs) / msPerFrame)
 
-    // B is ready again before the deadline: its next frame lands a whole
-    // number of bars after its stop, past the placement horizon (at the
-    // horizon with no bar grid), and A's blend time runs again there.
+    // B is ready again before the deadline: its next frame lands the fewest
+    // whole bars after its stop that reach past the placement horizon (at
+    // the horizon with no bar grid), and A's blend time runs again there.
+    // A placement past the deadline is the deadline passing, and B, ready,
+    // comes in by the clean cut.
     private fun place(ready: Long) {
         val earliest = max(ready + timing.placementHorizonFrames, soonest)
         val at: Long
         val added: Double
+        var bars = 0L
         if (locked) {
             val bar = barMs / msPerFrame
-            var bars = max(1.0, ceil((earliest - holdFrom) / bar))
-            var placed = holdFrom + frames(bars * bar)
-            if (placed < earliest) {
-                bars += 1.0
-                placed = holdFrom + frames(bars * bar)
-            }
-            at = placed
+            bars = max(1L, ceil((earliest - holdFrom) / bar).toLong())
+            while (bars > 1 && holdFrom + frames((bars - 1) * bar) >= earliest) bars--
+            while (holdFrom + frames(bars * bar) < earliest) bars++
+            at = holdFrom + frames(bars * bar)
             added = bars * barMs
-            movedBars += bars.toInt()
         } else {
             at = earliest
             added = (at - holdFrom) * msPerFrame
         }
+        if (at > deadline) {
+            deadlinePassed(ready)
+            cut(ready)
+            return
+        }
+        movedBars += bars.toInt()
         extensionMs += added
         action(BlendActionKind.PLACE_B, at)
         action(BlendActionKind.UNFREEZE_A, at, ms = extensionMs)

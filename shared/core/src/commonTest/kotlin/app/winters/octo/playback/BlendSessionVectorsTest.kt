@@ -138,6 +138,7 @@ class BlendSessionVectorsTest {
             val at = blendDropCutAtMs(
                 case.double("bothHeardStartMs"),
                 case.double("bothHeardEndMs"),
+                case.double("holdEndMs"),
                 case.double("lockMs"),
                 case.double("driftGap"),
                 case.double("pace"),

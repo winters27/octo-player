@@ -305,13 +305,22 @@ fun blendArmAtMs(startMs: Double, preRollLeadMs: Double, proposalLeadMs: Double,
     min(startMs - preRollLeadMs, startMs - (proposalLeadMs + readyLeadMs) * speed)
 
 // After a drop of the pace to `pace`: the first moment at or after
-// `fromMs`, inside the both-heard stretch, where the beats would be more
-// than DRIFT_LIMIT_MS times the pace apart (their offset is driftGap times
-// the distance from the lock); NaN when there is none. All in the blend's
-// time.
-fun blendDropCutAtMs(bothHeardStartMs: Double, bothHeardEndMs: Double, lockMs: Double, driftGap: Double, pace: Double, fromMs: Double): Double {
+// `fromMs`, inside the both-heard stretch and never before `holdEndMs` (the
+// outgoing song keeps its own level through a hold), where the beats would
+// be more than DRIFT_LIMIT_MS times the pace apart (their offset is driftGap
+// times the distance from the lock); NaN when there is none. All in the
+// blend's time.
+fun blendDropCutAtMs(
+    bothHeardStartMs: Double,
+    bothHeardEndMs: Double,
+    holdEndMs: Double,
+    lockMs: Double,
+    driftGap: Double,
+    pace: Double,
+    fromMs: Double,
+): Double {
     if (driftGap <= 0) return Double.NaN
-    val from = max(bothHeardStartMs, fromMs)
+    val from = maxOf(bothHeardStartMs, holdEndMs, fromMs)
     if (from > bothHeardEndMs) return Double.NaN
     val within = DRIFT_LIMIT_MS * pace / driftGap
     return when {

@@ -4,7 +4,10 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.floor
+import kotlin.math.log10
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 import org.junit.Assert.assertEquals
@@ -216,9 +219,14 @@ class AutomixTest {
         val short = planTransition(FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), AutomixCases.tail("hot-end"), AutomixCases.head("plain-b"), AutomixSettings(8_000))
         assertEquals(LATE_MOVE_UNBOUNDED, short.lateMoveBars)
         // A rate keeps the beats together wherever the blend sits.
-        for (name in listOf("beat-match", "intro-matched", "drift-late-matched")) {
+        for (name in listOf("beat-match", "drift-late-matched")) {
             assertNotNull(name, plan(name).beatMatchRate)
             assertEquals(name, LATE_MOVE_UNBOUNDED, plan(name).lateMoveBars)
+        }
+        // An intro's move must also keep its trim, so it is never unbounded.
+        for (pair in AutomixCases.pairs) {
+            val p = AutomixCases.plan(pair)
+            if (p.kind == TransitionKind.INTRO) assertTrue("${pair.name}: ${p.reason}", p.lateMoveBars != LATE_MOVE_UNBOUNDED)
         }
         // Two equal tempos never drift apart either.
         val tail = AutomixCases.tail("beat-120")
@@ -951,7 +959,8 @@ class AutomixTest {
         // point, where it is four in the next song's own time.
         assertEquals(5 * bar, fullAt - plan.lockMs, 30.0)
         assertTrue("$introEnd", introEnd - plan.entryMs <= 4 * bar)
-        assertEquals(LATE_MOVE_UNBOUNDED, plan.lateMoveBars)
+        // It ends 150 ms before the latest end, short of a bar: no move.
+        assertEquals(0, plan.lateMoveBars)
     }
 
     @Test
@@ -968,19 +977,28 @@ class AutomixTest {
         assertEquals(-5.0, under("steady-100", 180_000.0, "near-100"), 0.5)
         assertEquals(0.0, under("steady-100", 180_000.0, "level-100"), 0.5)
         fun trimDb(plan: TransitionPlan) = -20 * kotlin.math.log10(plan.introLevel)
-        // 7 dB and 5 dB under: lowered by what each lacks of
-        // INTRO_UNDER_OUTGOING_DB.
-        val quiet = plan("intro-under-line")
-        assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
-        assertEquals(max(0.0, INTRO_UNDER_OUTGOING_DB - 7), trimDb(quiet), 0.5)
-        val near = plan("intro-over-line")
-        assertEquals(near.reason, TransitionKind.INTRO, near.kind)
-        assertEquals(INTRO_UNDER_OUTGOING_DB - 5, trimDb(near), 0.5)
-        // At the outgoing song's level: lowered by the whole of it and held
-        // there, then brought up as the outgoing song fades.
+        // Where the incoming song is the quieter, the overlap's rule keeps it
+        // this far under the outgoing song at every step of the hold (the
+        // two summed, with the headroom, INTRO_EXCESS_LIMIT_DB from the
+        // louder alone); the hold's rule keeps it INTRO_UNDER_OUTGOING_DB
+        // under.
+        val overlapUnder = -10 * log10(10.0.pow((INTRO_EXCESS_LIMIT_DB + OVERLAP_HEADROOM_DB) / 10) - 1)
+        // At the outgoing song's level: lowered by the larger of the two and
+        // held there, then brought up as the outgoing song fades.
         val level = plan("intro-trimmed")
         assertEquals(level.reason, TransitionKind.INTRO, level.kind)
-        assertEquals(INTRO_UNDER_OUTGOING_DB, trimDb(level), 0.5)
+        assertEquals(max(INTRO_UNDER_OUTGOING_DB, overlapUnder), trimDb(level), 0.5)
+        // 7 dB and 5 dB under: lowered at least by what each lacks of the
+        // hold's margin, and less than the one at the level. The overlap's
+        // rule lowers them further for the fade, where the next song comes
+        // up through the outgoing one's level while that still plays near its
+        // own.
+        val quiet = plan("intro-under-line")
+        assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
+        assertTrue("${trimDb(quiet)}", trimDb(quiet) >= INTRO_UNDER_OUTGOING_DB - 7 - 0.5 && trimDb(quiet) < trimDb(level))
+        val near = plan("intro-over-line")
+        assertEquals(near.reason, TransitionKind.INTRO, near.kind)
+        assertTrue("${trimDb(near)}", trimDb(near) >= INTRO_UNDER_OUTGOING_DB - 5 - 0.5 && trimDb(near) < trimDb(level))
         assertTrue(level.reason, level.reason.contains(", next song lowered "))
         assertEquals(level.introLevel, level.inGain(level.holdShare / 2), 0.0)
         assertEquals(1.0, level.inGain(1.0), 1e-9)
@@ -1080,6 +1098,78 @@ class AutomixTest {
     }
 
     @Test
+    fun theHoldsTrimFollowsALongBreakButNotAShortDropout() {
+        fun trimDb(name: String) = -20 * log10(plan(name).introLevel)
+        val plain = plan("intro-trimmed")
+        // 300 ms of the outgoing song 10 dB down inside the hold: the hold's
+        // 95th percentile leaves it out, where its loudest moment would ask
+        // nearly 5 dB more; the overlap's rule measures the two against the
+        // louder alone, which there is the next song, so it asks nothing more.
+        val dropout = plan("intro-trim-dropout")
+        assertEquals(dropout.reason, plain.startMs, dropout.startMs)
+        assertEquals(trimDb("intro-trimmed"), trimDb("intro-trim-dropout"), 1.5)
+        // 1.5 s down: the hold's trim follows it.
+        val broken = plan("intro-trim-break")
+        assertEquals(broken.reason, plain.startMs, broken.startMs)
+        assertTrue(broken.reason, trimDb("intro-trim-break") > trimDb("intro-trimmed") + 6)
+    }
+
+    @Test
+    fun aQuietStartSilentThroughMostOfTheHoldIsTrimmedForWhereItSounds() {
+        // A quiet start 2 dB over the outgoing song is lowered 10 dB by the
+        // hold's rule; the overlap's, measuring against the louder alone,
+        // asks only about 3. Silent from 0.3 s to 9.2 s, under its gate,
+        // those steps are left out, so its last half second of the hold still
+        // sets the same 10 dB. Counted as far under, they would leave it to
+        // the overlap's rule.
+        fun trimDb(name: String) = -20 * log10(plan(name).introLevel)
+        val full = plan("intro-trim-loud")
+        val gap = plan("intro-trim-gap")
+        assertEquals(full.reason, TransitionKind.INTRO, full.kind)
+        assertEquals(gap.reason, TransitionKind.INTRO, gap.kind)
+        assertEquals(trimDb("intro-trim-loud"), trimDb("intro-trim-gap"), 0.5)
+    }
+
+    @Test
+    fun anIntroMovesLateOnlyWhereItsTrimStillHolds() {
+        // Equal tempos, so the beats would allow any move; the hold ends
+        // where the outgoing song drops 10 dB.
+        val trimmed = plan("intro-trimmed-at-outro")
+        assertEquals(trimmed.reason, TransitionKind.INTRO, trimmed.kind)
+        assertTrue(trimmed.reason, trimmed.introLevel < 1)
+        val room = floor((trimmed.latestEndMs - trimmed.startMs - trimmed.overlapMs) / 2_400.0).toInt()
+        assertTrue("$room", room >= 2)
+        // A bar later the hold runs over the drop, where the next song at its
+        // planned level no longer stays under: no move.
+        assertEquals(0, trimmed.lateMoveBars)
+        // 24 dB under, it stays under through the drop: every bar the room
+        // allows.
+        val quiet = plan("intro-quiet-at-outro")
+        assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
+        val quietRoom = floor((quiet.latestEndMs - quiet.startMs - quiet.overlapMs) / 2_400.0).toInt()
+        assertTrue("$quietRoom", quietRoom >= 1)
+        assertEquals(quietRoom, quiet.lateMoveBars)
+    }
+
+    @Test
+    fun aSilentLeadInFillingEveryBlendGivesTheGaplessJoin() {
+        // Matched, the next song enters at 0 for its first bar line at 2.1 s,
+        // silent until 1.9 s (1881 ms at the 1.01 rate): a 1.8 s cut would
+        // hold A at its own level to the end and drop it there.
+        val p = plan("lead-fills-the-cut")
+        assertEquals(p.reason, TransitionKind.GAPLESS, p.kind)
+    }
+
+    @Test
+    fun everyPlannedBlendFadesTheOutgoingSongOut() {
+        for (pair in AutomixCases.pairs) {
+            val p = AutomixCases.plan(pair)
+            if (p.kind == TransitionKind.GAPLESS || p.kind == TransitionKind.INTRO || p.holdShare <= 0) continue
+            assertTrue("${pair.name}: ${p.reason}", (1 - p.holdShare) * p.overlapMs >= SHORTEST_FADE_MS - 1)
+        }
+    }
+
+    @Test
     fun aLoweredSpeedCutsWhereTheBeatsFirstGetTooFarApart() {
         fun heard(start: Long, end: Long, lock: Double, gap: Double) =
             fixedCrossfadePlan(200_000, 8_000, "test").copy(bothHeardStartMs = start, bothHeardEndMs = end, lockMs = lock, driftGap = gap)
@@ -1109,6 +1199,22 @@ class AutomixTest {
         val cut = dropCutAtMs(seven, 0.5, 0.0)
         assertNotNull(seven.reason, cut)
         assertTrue("$cut", cut!! <= seven.bothHeardEndMs && seven.driftGap * abs(cut - seven.lockMs) >= DRIFT_LIMIT_MS * 0.5 - 1e-6)
+    }
+
+    @Test
+    fun aLoweredSpeedNeverCutsInsideAHold() {
+        // Heard together from 0.5 s to 7.5 s, the beats meeting at 6 s and
+        // 0.25% apart: at quarter speed the limit is 10 ms, reached 4 s from
+        // the lock, so without a hold the outgoing song goes at once.
+        val free = fixedCrossfadePlan(200_000, 8_000, "test").copy(
+            bothHeardStartMs = 500, bothHeardEndMs = 7_500, lockMs = 6_000.0, driftGap = 0.0025,
+        )
+        assertEquals(500.0, dropCutAtMs(free, 0.25, 0.0)!!, 1e-9)
+        // An intro whose hold ends at 3 s, within the limit, and the stretch
+        // ends before the beats part again: only the hold stops the cut.
+        assertNull(dropCutAtMs(free.copy(kind = TransitionKind.INTRO, holdShare = 3_000.0 / 8_000), 0.25, 0.0))
+        // A hold ending at 1.5 s, the beats still apart there: at its end.
+        assertEquals(1_500.0, dropCutAtMs(free.copy(kind = TransitionKind.INTRO, holdShare = 1_500.0 / 8_000), 0.25, 0.0)!!, 1e-9)
     }
 
     // Curves

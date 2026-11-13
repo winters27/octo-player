@@ -116,6 +116,9 @@ object AutomixCases {
         // 100 BPM from 0.5 s, its beats at 300 + 600 n and its bars at
         // 900 + 2400 n: with a rate it enters at 0, silent until 0.5 s.
         "steady-100-lead" to SyntheticSong(44_100, 1, 180_000, steady(500.0, 180_000.0, 100.0, 300.0, barMs = 900.0)),
+        // 100 BPM from 1.9 s, its beats at 300 + 600 n and its bars at
+        // 2100 + 2400 n: with a rate it enters at 0, silent until 1.9 s.
+        "steady-100-long-lead" to SyntheticSong(22_050, 1, 40_000, steady(1_900.0, 40_000.0, 100.0, 300.0, barMs = 2_100.0)),
         // 35 s at 95.24 BPM (beats every 630 ms from 15.9 s, bars from 15.27
         // s): silent for 16 s, quiet until 27 s, then full level. Too short
         // to ease back from a 5% rate after a long intro.
@@ -165,6 +168,33 @@ object AutomixCases {
         // 100 BPM 28 dB under steady-100 throughout: next to it level-100's
         // quiet start would have to come down 34 dB.
         "faint-100" to SyntheticSong(22_050, 1, 100_000, steady(0.0, 100_000.0, 100.0, 0.0, padDb = -42.0)),
+        // 100 BPM with a quiet start of 11 s, 7 dB under its own body and
+        // 2 dB over steady-100; then the same silent from 0.3 s to 9.2 s.
+        "loud-100" to SyntheticSong(
+            22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -12.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -5.0),
+        ),
+        "loud-100-gap" to SyntheticSong(
+            22_050, 1, 45_000,
+            steady(0.0, 300.0, 100.0, 0.0, padDb = -12.0) + steady(9_200.0, 11_000.0, 100.0, 0.0, padDb = -12.0) +
+                steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -5.0),
+        ),
+        // steady-100 dropping 10 dB at 190 s to its end: its outro.
+        "steady-100-outro" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 190_000.0, 100.0, 0.0) + steady(190_000.0, 202_000.0, 100.0, 0.0, padDb = -24.0),
+        ),
+        // steady-100 10 dB down for 300 ms (a dropout) or 1.5 s (a break)
+        // from 192 s, inside the hold of intro-trimmed.
+        "steady-100-dropout" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 192_000.0, 100.0, 0.0) + steady(192_000.0, 192_300.0, 100.0, 0.0, padDb = -24.0) +
+                steady(192_300.0, 202_000.0, 100.0, 0.0),
+        ),
+        "steady-100-break" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 192_000.0, 100.0, 0.0) + steady(192_000.0, 193_500.0, 100.0, 0.0, padDb = -24.0) +
+                steady(193_500.0, 202_000.0, 100.0, 0.0),
+        ),
     )
 
     data class Pair(
@@ -272,6 +302,9 @@ object AutomixCases {
         // matched cut held until the next song's first sound.
         Pair("intro-lead", "steady-100", "quiet-100-lead", eight, aLengthMs = 199_950),
         Pair("lead-held-cut", "steady-101", "steady-100-lead", AutomixSettings(maxOverlapMs = 2_400, beatMatch = true)),
+        // A silent lead-in longer than the longest blend allowed: no blend
+        // would fade the outgoing song out.
+        Pair("lead-fills-the-cut", "steady-101", "steady-100-long-lead", AutomixSettings(maxOverlapMs = 1_800, beatMatch = true)),
         // Rate room: a 5% rate the next song is too short to ease back from.
         Pair("rate-room", "steady-100", "short-quiet", matched),
         // Intros.
@@ -293,6 +326,22 @@ object AutomixCases {
         Pair("intro-over-line", "steady-100", "near-100", eight),
         Pair("intro-trimmed", "steady-100", "level-100", eight),
         Pair("intro-trim-capped", "faint-100", "level-100", eight),
+        // The same starts with the decks' gains apart: the 7 dB under one
+        // played 6 dB hotter than the outgoing song is trimmed by what it
+        // then lacks, the one at its level played 6 dB softer by less.
+        Pair("intro-under-gain-up", "steady-100", "under-100", eight, context = TransitionContext(incomingGainDb = 6.0)),
+        Pair("intro-trimmed-gain-down", "steady-100", "level-100", eight, context = TransitionContext(incomingGainDb = -6.0)),
+        // The hold's percentile against a short dropout and a long break in
+        // the outgoing song, and a quiet start mostly silent through the hold.
+        Pair("intro-trim-dropout", "steady-100-dropout", "level-100", eight),
+        Pair("intro-trim-break", "steady-100-break", "level-100", eight),
+        Pair("intro-trim-loud", "steady-100", "loud-100", eight),
+        Pair("intro-trim-gap", "steady-100", "loud-100-gap", eight),
+        // An intro whose hold ends where the outgoing song drops 10 dB, its
+        // tempo equal: lowered, it may not move onto the drop; 24 dB under,
+        // it may move as far as the room allows.
+        Pair("intro-trimmed-at-outro", "steady-100-outro", "level-100", eight),
+        Pair("intro-quiet-at-outro", "steady-100-outro", "quiet-100", eight),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()

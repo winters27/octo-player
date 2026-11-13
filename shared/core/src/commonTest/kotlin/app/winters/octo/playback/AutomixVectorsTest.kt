@@ -147,6 +147,7 @@ class AutomixVectorsTest {
                     put("bodyLevelDb", c.bodyLevelDb)
                     put("tempoPrior", c.tempoPrior)
                     put("lockAtPace", c.lockAtPace)
+                    put("incomingGainDb", c.incomingGainDb)
                 }
                 put("tailMissing", pair.tailMissing)
                 put("headMissing", pair.headMissing)
@@ -240,6 +241,7 @@ class AutomixVectorsTest {
             for (c in DROP_CASES) addJsonObject {
                 put("bothHeardStartMs", c.startMs)
                 put("bothHeardEndMs", c.endMs)
+                put("holdEndMs", c.holdEndMs)
                 put("lockMs", c.lockMs)
                 put("driftGap", c.gap)
                 put("speed", c.speed)
@@ -250,8 +252,17 @@ class AutomixVectorsTest {
     }
 
     // A both-heard stretch, where the beats meet, how fast they part, the
-    // speed lowered to and how far along the blend is.
-    private data class DropCase(val startMs: Long, val endMs: Long, val lockMs: Double, val gap: Double, val speed: Double, val fromMs: Double)
+    // speed lowered to, how far along the blend is and where its hold ends
+    // (the plan's holdShare of the 8 s overlap).
+    private data class DropCase(
+        val startMs: Long,
+        val endMs: Long,
+        val lockMs: Double,
+        val gap: Double,
+        val speed: Double,
+        val fromMs: Double,
+        val holdEndMs: Double = 0.0,
+    )
 
     // One section the file holds: a song's tail or head, with the song's
     // tag tempo when it has one, and for a head the whole song's body level
@@ -361,7 +372,7 @@ class AutomixVectorsTest {
 
     // A plan carrying only what dropCutAtMs reads.
     private fun dropPlan(c: DropCase) = fixedCrossfadePlan(200_000, 8_000, "test").copy(
-        bothHeardStartMs = c.startMs, bothHeardEndMs = c.endMs, lockMs = c.lockMs, driftGap = c.gap,
+        bothHeardStartMs = c.startMs, bothHeardEndMs = c.endMs, lockMs = c.lockMs, driftGap = c.gap, holdShare = c.holdEndMs / 8_000,
     )
 
     // Checking
@@ -541,7 +552,7 @@ class AutomixVectorsTest {
         for (d in vectors.getValue("dropCuts").jsonArray.map { it.jsonObject }) {
             val c = DropCase(
                 d.getValue("bothHeardStartMs").jsonPrimitive.long, d.getValue("bothHeardEndMs").jsonPrimitive.long,
-                d.num("lockMs"), d.num("driftGap"), d.num("speed"), d.num("fromMs"),
+                d.num("lockMs"), d.num("driftGap"), d.num("speed"), d.num("fromMs"), d.num("holdEndMs"),
             )
             near("drop cut for $c", d.numOrNull("cutAtMs"), dropCutAtMs(dropPlan(c), c.speed, c.fromMs), t("curve"))
         }
@@ -590,6 +601,7 @@ class AutomixVectorsTest {
         bodyLevelDb = o.numOrNull("bodyLevelDb"),
         tempoPrior = o.numOrNull("tempoPrior"),
         lockAtPace = o["lockAtPace"]?.jsonPrimitive?.boolean ?: false,
+        incomingGainDb = o.num("incomingGainDb"),
     )
 
     private fun fadeSongOf(o: JsonObject) = FadeSong(
@@ -603,12 +615,14 @@ class AutomixVectorsTest {
 
         // Intro shapes as (holdShare, riseShare): a 12 s quiet start with a
         // 3 s fade and a 1 s rise; 6 bars at 120 BPM with a 2-bar fade and
-        // a 1-bar rise; a 4 s quiet start with a 2 s fade; a capped 16 s one.
+        // a 1-bar rise; a 4 s quiet start with a 2 s fade; a capped 16 s one;
+        // a rise asked to end past the hold, which ends there.
         val INTRO_SHAPES = listOf(
             10_500.0 / 13_500 to 1_000.0 / 13_500,
             10_000.0 / 14_000 to 2_000.0 / 14_000,
             0.6 to 0.2,
             13_000.0 / 16_000 to 1_000.0 / 16_000,
+            0.1 to 0.25,
         )
 
         // The incoming song's level through each intro's hold: its own, and
@@ -619,7 +633,9 @@ class AutomixVectorsTest {
         // intro's stretch, none within the limit, at once past the moment,
         // before the lock point, after it, at once past it, past the
         // stretch, a stretch ending where the limit is reached, with no
-        // stretch and with no drift.
+        // stretch, with no drift, and a stretch starting inside a hold: at
+        // once with no hold, at the hold's end when the beats are still
+        // apart there, none when the hold ends within the limit.
         val DROP_CASES = listOf(
             DropCase(1_900, 3_500, 0.0, 0.01, 0.5, 500.0),
             DropCase(1_900, 3_500, 0.0, 0.01, 1.0, 500.0),
@@ -631,6 +647,9 @@ class AutomixVectorsTest {
             DropCase(0, 2_000, 0.0, 0.02, 1.0, 0.0),
             DropCase(0, 0, 0.0, 0.02, 0.5, 0.0),
             DropCase(500, 3_000, 200.0, 0.0, 0.5, 0.0),
+            DropCase(500, 7_500, 6_000.0, 0.0025, 0.25, 0.0),
+            DropCase(500, 7_500, 6_000.0, 0.0025, 0.25, 0.0, holdEndMs = 1_500.0),
+            DropCase(500, 7_500, 6_000.0, 0.0025, 0.25, 0.0, holdEndMs = 3_000.0),
         )
 
         // Period scores on and either side of the threshold a tempo must
@@ -655,9 +674,9 @@ class AutomixVectorsTest {
                 "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 45 s); tagBpm, when set, is the song's tag tempo.",
                 "bodyLevelDb, when set on a head, is the whole song's body level (the 75th percentile body of the whole song, as a profile measures it); the head is measured against it instead of its own body. A head whose sound starts but never comes within 6 dB of its body has introEndMs at the head's end.",
                 "plans: run the planner with the tail section of song a and the head section of song b that have neither tagBpm nor bodyLevelDb (null when tailMissing / headMissing; when headBodyLevelDb is set, the head section of song b measured against that body instead) and the given context; settings.longestIntroMs is the longest intro; context.lockAtPace says the beats stay locked at any pace (the player changes the speed of both songs together after mixing them).",
-                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap; any other kind holds until holdShare (the outgoing song at 1, the incoming one at 0, while the incoming song's lead-in is silent), then follows its curve over the rest; both 0 otherwise. introLevel is the incoming song's gain through an intro's hold (1 for every other kind): at each 10 ms step of the hold where the incoming song, at its own level with its rise, is above its gate, its 400 ms level less the outgoing song's at the same moment; with p the 95th percentile of those (sorted, index floor(0.95 * (n - 1))), 10^(-(p + 8) / 20) when p + 8 > 0, else 1; an intro needing over 30 dB is not planned. latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number). From startMs: bothHeardStartMs and bothHeardEndMs are where both songs are within 10 dB of their bodies (with their gains and the 1 dB headroom, walked in 10 ms steps; both 0 when they never are), lockMs where the beats meet; driftGap is the share the tempos are apart (0 with a rate, equal tempos or no lock), driftAtEndMs the largest beat offset in song time while both are heard, dropCutAtHalfSpeedMs what dropCuts gives for a drop to speed 0.5 from the start.",
-                "dropCuts: the first moment t >= fromMs in [bothHeardStartMs, bothHeardEndMs] where driftGap * |t - lockMs| > 40 * speed (the moment the offset passes that, lockMs + 40 * speed / driftGap when it comes after the lock point), or null; null when driftGap is 0 or bothHeardEndMs is 0.",
-                "introGains: the outgoing song's gain is 1 up to holdShare, then out = cos(pi/2 * (t - holdShare) / (1 - holdShare)); the incoming song's is level * sin(pi/2 * t / riseShare) below riseShare, then level up to holdShare, then sqrt(level^2 + (1 - level^2) * (1 - out^2)); t is clamped to 0..1.",
+                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap; any other kind holds until holdShare (the outgoing song at 1, the incoming one at 0, while the incoming song's lead-in is silent), then follows its curve over the rest; both 0 otherwise. introLevel is the incoming song's gain through an intro's hold (1 for every other kind). First the hold's level: at each 10 ms step of the hold where the incoming song, at its own level with its rise, is above its gate, its 400 ms level plus context.incomingGainDb less the outgoing song's at the same moment; with p the 95th percentile of those (sorted, index floor(0.95 * (n - 1))), 10^(-(p + 8) / 20) when p + 8 > 0, else 1. Then the overlap's: at each 10 ms step from 0 to floor(overlapMs / 10) * 10 where either song's own 400 ms level is above its gate, with a the outgoing song's level and b the incoming song's plus incomingGainDb, out and in the intro gains there (in at the level tried) each times 10^(-1/20), e = 10 * log10(10^(a/10) * out^2 + 10^(b/10) * in^2) - max(a, b); when the largest e at the hold's level is over -0.5, the trim in dB is halved 14 times between the hold's and 30, keeping the upper end whose largest e is at most -0.5, and the level is 10^(-trim / 20). An intro needing over 30 dB is not planned. latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number, never for an intro: an intro counts a move only while its shape there at its introLevel keeps both rules, the hold's level no lower and the largest e at most -0.5; with no bar grid it is 1 when every 250 ms step to the latest end and the latest end itself does, 0 when one does not or there is no room). From startMs: bothHeardStartMs and bothHeardEndMs are where both songs are within 10 dB of their bodies (with their gains and the 1 dB headroom, walked in 10 ms steps; both 0 when they never are), lockMs where the beats meet; driftGap is the share the tempos are apart (0 with a rate, equal tempos or no lock), driftAtEndMs the largest beat offset in song time while both are heard, dropCutAtHalfSpeedMs what dropCuts gives for a drop to speed 0.5 from the start, with holdShare times overlapMs as holdEndMs.",
+                "dropCuts: the first moment t >= max(fromMs, holdEndMs) in [bothHeardStartMs, bothHeardEndMs] where driftGap * |t - lockMs| > 40 * speed (the moment the offset passes that, lockMs + 40 * speed / driftGap when it comes after the lock point), or null; null when driftGap is 0 or bothHeardEndMs is 0.",
+                "introGains: the outgoing song's gain is 1 up to holdShare, then out = cos(pi/2 * (t - holdShare) / (1 - holdShare)); the incoming song's is level * sin(pi/2 * t / rise) below rise = min(riseShare, holdShare), then level up to holdShare, then sqrt(level^2 + (1 - level^2) * (1 - out^2)); t is clamped to 0..1.",
                 "tempoTrust: whether a beat grid whose period scores this (confidence: the onsets' autocorrelation at one, two, four and eight beat periods plus half of it at half a period) and whose two halves agree on the beat (steady) is trusted for bar lock.",
                 "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
                 "Times are ms, levels dBFS, rates as multiples of normal speed. tolerances: db for levels, ms for times, bpm, confidenceShare as a share of the expected confidence, curve for gains, k and rates, hzShare as a share of the expected cutoff, onset for onset values, sample for filter coefficients and samples, level for introLevel.",

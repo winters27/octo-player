@@ -190,6 +190,22 @@
       ]
     },
     {
+      "name": "a-speed-drop-never-cuts-inside-the-hold",
+      "about": "Beats lock at 12000 with a gap of 0.0025 over both-heard 1000 to 13000. The pace drops to 0.25 at blend time 4000, inside A's hold (0.6 of 14000, to 8400): the bound is now 10 ms, broken everywhere before lock - 10 / gap = 8000, so without the hold A would be cut at once. A keeps its hold, and from its end the beats stay within the bound to the stretch's end, so there is no cut and the blend runs to its end at 672000 + 10000 * 192 = 2592000.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.6, "latestEndMs": 200000, "outgoingEndMs": 200250, "bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 12000, "driftGap": 0.0025},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "paceChanged", "pace": 0.25, "frame": 672000},
+        {"op": "advance", "to": 2496000, "head": 2472000, "aSongMs": 193500},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 2587200, "value": 2592000},
+        {"op": "advance", "to": 2592000, "head": 2568000, "aSongMs": 194000, "actions": [{"kind": "aEnd", "frame": 2592000}, {"kind": "limiterOff", "frame": 2592000}]},
+        {"op": "advance", "to": 2596800, "head": 2592000, "aSongMs": 194025, "events": [{"kind": "blendEnd", "gen": 1, "frame": 2592000, "ms": 14000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
       "name": "a-hold-extension-delays-the-drop-cut",
       "about": "The drop at blend time 2000 schedules the cut at 9000. B then stalls at blend time 3000, inside the hold, and is placed one bar later (2000 ms, 192000 frames at half speed): the cut lands at 1440000 instead of 1248000, and B's own time there is 9000.",
       "profile": "android",
@@ -287,6 +303,41 @@
         {"op": "post", "deck": "B", "input": "ready", "frame": 744000},
         {"op": "advance", "to": 744480, "head": 720480, "aSongMs": 185510, "actions": [{"kind": "cut", "frame": 744480, "value": 960}, {"kind": "limiterOff", "frame": 745440}], "events": [{"kind": "moved", "gen": 1, "frame": 720000, "ms": 180000, "ms2": 2000}]},
         {"op": "advance", "to": 749280, "head": 744480, "aSongMs": 185610, "events": [{"kind": "blendEnd", "gen": 1, "frame": 744480, "ms": 3000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-placement-lands-on-the-fewest-whole-bars",
+      "about": "A 2000.01 ms bar is 96000.48 frames. B stops at 624000 (room for 3 bars, deadline 912001) and is ready at 815521, so the earliest placement is 816001. Two bars land at 624000 + round(192000.96) = 816001, which is that earliest frame: B is placed there with 4000.02 ms added, never a third bar on because 192001 is a hair over two bars' 192000.96 frames. A's end is posted at 180000 + 14000 + 4000.02 ms, frame 1344001, where B's own time is the unextended 14000.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000.01, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 202000, "outgoingEndMs": 202250},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
+        {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 815521},
+        {"op": "advance", "to": 816001, "head": 792001, "aSongMs": 187000.0208333333, "actions": [{"kind": "placeB", "frame": 816001}, {"kind": "unfreezeA", "frame": 816001, "ms": 4000.02}]},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 1339201, "value": 1344001},
+        {"op": "advance", "to": 1344001, "head": 1320001, "aSongMs": 198000.0208333333, "actions": [{"kind": "aEnd", "frame": 1344001}, {"kind": "limiterOff", "frame": 1344001}], "events": [{"kind": "moved", "gen": 1, "frame": 815521, "ms": 180000, "ms2": 4000.02}]},
+        {"op": "advance", "to": 1348801, "head": 1344001, "aSongMs": 198100.0208333333, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1344001, "ms": 14000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-placement-past-the-budget-takes-the-clean-cut",
+      "about": "The one-bar budget of a-hold-is-capped-at-the-plans-one-bar: the room deadline is 720000. B is ready at 719000, before the deadline's check (720000 less the 480-frame horizon), inside an output step to 720480, so the earliest placement is 720480. The fewest bars landing there are two (816000), past the deadline: A's blend time unfreezes at 720480 (2010 ms on), as the deadline would have, and B, ready, comes in at once by the clean cut there. The budget is never overspent.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
+        {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
+        {"op": "advance", "to": 715200, "head": 691200, "aSongMs": 184900},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 719000},
+        {"op": "advance", "to": 720480, "head": 696480, "aSongMs": 185010, "actions": [{"kind": "unfreezeA", "frame": 720480, "ms": 2010}, {"kind": "cut", "frame": 720480, "value": 960}, {"kind": "limiterOff", "frame": 721440}]},
+        {"op": "advance", "to": 725280, "head": 720480, "aSongMs": 185110, "events": [{"kind": "moved", "gen": 1, "frame": 719000, "ms": 180000, "ms2": 2010}, {"kind": "blendEnd", "gen": 1, "frame": 720480, "ms": 3000}]},
         {"op": "stopped", "gen": 1}
       ]
     },
@@ -1333,13 +1384,15 @@
     {"rate": 1.0, "incomingMs": 40000, "entryMs": 30000, "easeFromMs": 16000, "expect": 1.0}
   ],
   "dropCut": [
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 4000, "expect": 9000},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 1, "fromMs": 4000, "expect": null},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 10000, "expect": 10000},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 8000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 0, "expect": null},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 12000, "driftGap": 0.0025, "pace": 0.25, "fromMs": 0, "expect": 1000},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0, "pace": 0.5, "fromMs": 4000, "expect": null},
-    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 14000, "expect": null}
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 4000, "expect": 9000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 1000, "driftGap": 0.0025, "pace": 1, "fromMs": 4000, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 10000, "expect": 10000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 8000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 0, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 12000, "driftGap": 0.0025, "pace": 0.25, "fromMs": 0, "expect": 1000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 9000, "lockMs": 12000, "driftGap": 0.0025, "pace": 0.25, "fromMs": 0, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 5000, "lockMs": 12000, "driftGap": 0.0025, "pace": 0.25, "fromMs": 0, "expect": 5000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 1000, "driftGap": 0, "pace": 0.5, "fromMs": 4000, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "holdEndMs": 0, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 14000, "expect": null}
   ],
   "commitWords": [
     {"gen": 1, "state": "initial", "word": 4},
