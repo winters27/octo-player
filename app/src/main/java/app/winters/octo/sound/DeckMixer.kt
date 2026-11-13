@@ -329,8 +329,20 @@ class DeckMixer(
 
     internal fun nanoTime(): Long = loop.nanoTime()
 
+    // How far ahead of the head a start must be decided, in ms of output, as
+    // last measured (0 before the first wake).
+    val proposalLeadMs: Double get() = proposalLeadFrames * 1_000.0 / mixRate
+
     // The Crossfader registers a blend.
     fun arm(blend: MixBlend) = post { onArm(blend) }
+
+    // The listener's pace became `pace` during the blend: the session hears
+    // it at the first frame of the outgoing deck that carries it.
+    fun paceChanged(generation: Long, pace: Double) = post {
+        if (generation == blendGen && pace > 0) pacePending = pace
+    }
+
+    private var pacePending = 0.0
 
     // Main's interrupt, after its compare-and-set on the commit word.
     fun disarm(reason: BlendDisarm, generation: Long) = post { onDisarm(reason, generation) }
@@ -680,6 +692,7 @@ class DeckMixer(
         val b = blend ?: return
         blend = null
         blendRegistered = false
+        pacePending = 0.0
         val a = decks[b.outgoingSlot]
         val bd = decks[b.incomingSlot]
         if (a.role == ROLE_A) a.role = ROLE_NONE
@@ -1477,6 +1490,10 @@ class DeckMixer(
         if (d.join?.let { it.done >= it.frames } == true) d.join = null
         val per = if (mark >= 0) view.msPerFrame(mark) else Double.NaN
         val song = if (mark >= 0) view.songMs(mark) + (d.mixIdx - view.ringAt(mark)) * per else Double.NaN
+        if (pacePending > 0 && d.role == ROLE_A && !per.isNaN() && abs(per * mixRate / 1_000.0 - pacePending) <= pacePending * 1e-6) {
+            session.paceChanged(pacePending, g0 + pos)
+            pacePending = 0.0
+        }
         val s = d.shaper
         if (s != null && !song.isNaN() && (d.transition != null || s.shaping)) {
             val at = d.blendMs(song)
