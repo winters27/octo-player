@@ -77,6 +77,8 @@ class SystemIntegration(
     // Where global shortcuts are claimed; the system's own unless a test
     // hands in a pretend one.
     hotkeys: HotkeyBackend? = null,
+    // Where notices go; the system's own unless a test hands in a pretend one.
+    notifications: Notifier? = null,
 ) : AutoCloseable {
     val controls: SystemMediaControls = when (os) {
         DesktopOs.Windows -> NativeMediaControls.load("System media controls") ?: NoMediaControls()
@@ -123,7 +125,7 @@ class SystemIntegration(
     // Whether Octo's icon is in the tray now, to bring a hidden window back from.
     val trayShowing: Boolean get() = trayKeeper?.showing ?: trayAvailable
 
-    private val notifier: Notifier? = when (noticeRoute(os, trayAvailable)) {
+    private val notifier: Notifier? = notifications ?: when (noticeRoute(os, trayAvailable)) {
         NoticeRoute.Desktop -> LinuxNotifier(null)
         NoticeRoute.Tray -> TrayNotifier(trayState)
         null -> null
@@ -190,12 +192,7 @@ class SystemIntegration(
                 notice?.let { (title, text) -> notifier?.show(title, text) }
             }
         }
-        // A settings file another program holds is told once per hold; the
-        // banner over the pages says it too, with Try again.
-        app.scope.launch {
-            val holds = SettingsHoldNotices()
-            app.settings.hold.collect { hold -> holds.noticeFor(hold)?.let { notifier?.show(SETTINGS_NOT_SAVED, it) } }
-        }
+        tellSettingsHolds()
         // A read of the library that fails while the window is in the tray says so.
         app.scope.launch {
             snapshotFlow { app.library }.collectLatest { store ->
@@ -215,6 +212,15 @@ class SystemIntegration(
         }
         listenToMac()
         open(parseLaunchArgs(launchArgs))
+    }
+
+    // A settings file another program holds is told once per hold; the
+    // banner over the pages says it too, with Try again.
+    internal fun tellSettingsHolds() {
+        app.scope.launch {
+            val holds = SettingsHoldNotices()
+            app.settings.hold.collect { hold -> holds.noticeFor(hold)?.let { notifier?.show(SETTINGS_NOT_SAVED, it) } }
+        }
     }
 
     // A later launch handed its command line over. One that only plays
