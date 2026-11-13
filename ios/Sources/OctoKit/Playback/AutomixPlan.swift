@@ -309,7 +309,9 @@ public func dropCutAtMs(_ plan: TransitionPlan, _ speed: Double, _ fromMs: Doubl
 /// song's bars, the incoming song entering on its own grid, and a rate matches tempos up to
 /// `beatMatchLargestGap` apart. Without a rate, wherever both songs are clearly heard their beats
 /// stay within `blendDriftLimitMs` times the pace of each other: a blend starts later or becomes a
-/// short cut until they do, or the songs join gaplessly. With both tempos confident but no lock, a
+/// short cut until they do, or the songs join gaplessly. A place that would cut over
+/// `keptMusicLimitMs` of the outgoing song's full-level music is never planned; with none left the
+/// songs join gaplessly too. With both tempos confident but no lock, a
 /// blend where both songs are clearly heard cannot be kept on the beat at all, so only one where
 /// they never are is planned. A plan with a rate whose next song is too short to ease back to its
 /// own speed is planned again without the rate.
@@ -547,7 +549,8 @@ private struct PlanPass {
         if lockA != nil, !shapes.contains(where: { kept($0) <= Double(keptMusicLimitMs) }), let longer = stretched(last) { all.append(longer) }
         let allowed = all.compactMap { allow($0, lo) }
         if allowed.isEmpty { return gaplessPlan(lenA, unheardReason()) }
-        return blendPlan(bestOf(allowed) { blendScore($0) }, lengthened)
+        guard let best = bestOf(allowed, { blendScore($0) }) else { return gaplessPlan(lenA, "every blend left would cut the song short") }
+        return blendPlan(best, lengthened)
     }
 
     /// A blend's overlap kept between `shortestBlendMs` and the limit, in whole bars when it was
@@ -673,11 +676,11 @@ private struct PlanPass {
         return first.isNaN ? nil : (first, last)
     }
 
-    /// The best scoring shape; the later one wins a tie. Shapes that keep over
-    /// `keptMusicLimitMs` of full-level music are left out while any other is left.
-    func bestOf(_ shapes: [Shape], _ score: (Shape) -> Double) -> Shape {
-        let keeping = shapes.filter { kept($0) <= Double(keptMusicLimitMs) }
-        let pool = keeping.isEmpty ? shapes : keeping
+    /// The best scoring shape; the later one wins a tie. Shapes that cut over `keptMusicLimitMs`
+    /// of the outgoing song's full-level music are left out; nil when no other is left.
+    func bestOf(_ shapes: [Shape], _ score: (Shape) -> Double) -> Shape? {
+        let pool = shapes.filter { kept($0) <= Double(keptMusicLimitMs) }
+        if pool.isEmpty { return nil }
         var best = pool[pool.count - 1]
         var bestScore = -Double.infinity
         for s in pool {
@@ -745,8 +748,9 @@ private struct PlanPass {
     /// The next song's quiet start played under the end of this one: the outgoing song holds,
     /// then fades over two bars (or `introFadeMs` unlocked, at most half the quiet start) centered
     /// on where the next song is full, a bar line from where the beats meet when locked; the next
-    /// song rises over a bar (`introRiseMs` unlocked). Nil when no start is left or the beats
-    /// allow none, and the lengthened blend is planned instead.
+    /// song rises over a bar (`introRiseMs` unlocked). Nil when no start is left, the beats allow
+    /// none or every one left would cut the outgoing song short, and the lengthened blend is
+    /// planned instead.
     func planIntro(_ quiet: Double) -> TransitionPlan? {
         let bar = lockA?.barMs
         let rise = bar ?? Double(introRiseMs)
@@ -789,11 +793,11 @@ private struct PlanPass {
         }
         let allowed = all.filter { meets($0) }
         if allowed.isEmpty { return nil }
-        let best = bestOf(allowed) { s in
+        guard let best = bestOf(allowed, { s in
             var score = sharedScore(s)
             if outroStart < latestEnd - 1000 { score -= 0.15 * abs(s.startMs + hold - outroStart) / 1000 }
             return score
-        }
+        }) else { return nil }
         let startMs = Int(roundHalfUp(best.startMs))
         let overlapMs = Int(roundHalfUp(best.endMs)) - startMs
         let entryMs = Int(roundHalfUp(entry))
