@@ -14,15 +14,20 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 // audio output it builds gets its own shaping step, reading the shared
 // settings. The output always takes 16-bit sound, because the player only
 // runs these steps on 16-bit sound; the shaping turns it into floats itself.
-// `keepActive` keeps the shaping step running with nothing to shape (for
-// crossfade), and `sound` is the latest shaping step, for the crossfade to
-// drive.
+// The deck's sound goes into `mixer` on its `slot`: the shaping labels every
+// stretch with its song time for it, and the mixer is where both decks meet
+// and blends are shaped; speed goes through the shaping steps, never the
+// output. `keepActive` keeps the shaping step running with nothing to shape
+// (for crossfade), and `sound` is the latest shaping step, for the
+// crossfade to read.
 @UnstableApi
-class OctoRenderersFactory(
+open class OctoRenderersFactory(
     context: Context,
     private val settings: () -> SoundSettings,
     private val albums: AlbumRun,
     private val keepActive: () -> Boolean = { false },
+    private val mixer: DeckMixer? = null,
+    private val slot: Int = 0,
 ) : DefaultRenderersFactory(context) {
     @Volatile var sound: DeckSound? = null
         private set
@@ -51,13 +56,46 @@ class OctoRenderersFactory(
         enableFloatOutput: Boolean,
         enableAudioOutputPlaybackParams: Boolean,
     ): AudioSink {
-        val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), settings = settings)
+        val mixer = mixer
+        if (mixer == null) {
+            // A deck on its own (a device test of a decoder): its own output,
+            // nothing blended.
+            val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), settings = settings)
+            sound = shaping
+            val sink = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(false)
+                .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                .setAudioProcessorChain(OctoProcessorChain(shaping))
+                .build()
+            return OctoAudioSink(sink, shaping, albums)
+        }
+        val (sink, shaping) = mixedDeckSink(context, settings, albums, keepActive, mixer, slot)
         sound = shaping
-        val sink = DefaultAudioSink.Builder(context)
-            .setEnableFloatOutput(false)
-            .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-            .setAudioProcessorChain(OctoProcessorChain(shaping))
-            .build()
-        return OctoAudioSink(sink, shaping, albums)
+        return sink
     }
+}
+
+// A deck's audio output into `mixer` on `slot`: Media3's own sink with
+// Octo's chain, whose last step labels every stretch with its song time
+// and stream for the mixer, and the mixer's provider in place of an audio
+// track. Speed goes through the chain, never the output. Also the shaping
+// step, for what the song sounds like.
+@UnstableApi
+private fun mixedDeckSink(
+    context: Context,
+    settings: () -> SoundSettings,
+    albums: AlbumRun,
+    keepActive: () -> Boolean,
+    mixer: DeckMixer,
+    slot: Int,
+): Pair<AudioSink, OctoDspProcessor> {
+    val labels = DeckTimeQueue()
+    val shaping = OctoDspProcessor(keepActive, LiveTapFeed(), labels = labels, settings = settings)
+    val sink = DefaultAudioSink.Builder(context)
+        .setEnableFloatOutput(false)
+        .setEnableAudioOutputPlaybackParameters(false)
+        .setAudioProcessorChain(OctoProcessorChain(shaping))
+        .setAudioOutputProvider(mixer.provider(slot, labels))
+        .build()
+    return OctoAudioSink(sink, shaping, albums) to shaping
 }
