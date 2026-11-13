@@ -398,10 +398,18 @@ class TransitionShaperTest {
         s.process(before, 96_000, 0.0, per)
         assertTrue(s.level < 0.9)
         val ramp = 12_000
+        val start = s.level
         s.disarm(ramp.toLong())
         val after = sweepInput(ramp + 4_800, 96_000)
         val plain = after.copyOf()
-        s.process(after, ramp + 4_800, 96_000 * per, per)
+        // Half way through the 250 ms the volume is half way home.
+        val half = after.copyOfRange(0, ramp)
+        s.process(half, ramp / 2, 96_000 * per, per)
+        assertEquals(start + (1 - start) / 2, s.level, 0.01)
+        half.copyInto(after, 0, 0, ramp)
+        val rest = after.copyOfRange(ramp, after.size)
+        s.process(rest, ramp / 2 + 4_800, (96_000 + ramp / 2) * per, per)
+        rest.copyInto(after, ramp)
         // No step at the start beyond the sine's own.
         val step = abs(after[0] - before[before.size - 2])
         assertTrue("step $step", step < 0.05f)
