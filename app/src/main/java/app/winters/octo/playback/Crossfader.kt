@@ -379,7 +379,7 @@ internal class Crossfader(
                 Log.i("Octo", "automix: the blend moved to ${event.ms.toLong()} ms, ${event.ms2.toLong()} ms longer")
             }
             BlendEventKind.BLEND_END -> if (g == handedOver) finishFade(event.ms)
-            BlendEventKind.CANCELLED -> cancelled(g, event.cause)
+            BlendEventKind.CANCELLED -> canceled(g, event.cause)
             BlendEventKind.FOLLOW_UP_NEEDED -> {
                 val next = if (g == followUpFor) followUpNext else handedOverNext ?: registeredNext
                 if (g == followUpFor) followUpFor = -1
@@ -400,7 +400,7 @@ internal class Crossfader(
             handOver(g)
             mixer.acked(g)
         } else {
-            // The mixer cancelled the start itself (at its floor): the
+            // The mixer canceled the start itself (at its floor): the
             // playing song goes on and the rest of it is planned again.
             forgetRegistration()
             dropPlan()
@@ -409,10 +409,10 @@ internal class Crossfader(
         }
     }
 
-    private fun cancelled(g: Long, cause: BlendCause) {
+    private fun canceled(g: Long, cause: BlendCause) {
         when (g) {
             registered -> {
-                Log.i("Octo", "automix: the blend was cancelled (${cause.name.lowercase()})")
+                Log.i("Octo", "automix: the blend was canceled (${cause.name.lowercase()})")
                 val next = registeredNext
                 forgetRegistration()
                 // A deck's own pause undid it: what the playing song plays
@@ -426,7 +426,7 @@ internal class Crossfader(
         }
     }
 
-    // Forgets the registered generation, its word left cancelled (an undone
+    // Forgets the registered generation, its word left canceled (an undone
     // start the session decided keeps INITIAL otherwise).
     private fun forgetRegistration() {
         if (registered >= 0) mixer?.commitWord?.cancel(registered)
@@ -436,7 +436,7 @@ internal class Crossfader(
     }
 
     // The phase rule's main side: a registered start has its commit word
-    // cancelled before the disarm goes, so every edit handled before this
+    // canceled before the disarm goes, so every edit handled before this
     // lands on the old song; a handed-over one has its old song leave.
     private fun disarm(reason: BlendDisarm) {
         val mixer = mixer ?: return
