@@ -66,9 +66,11 @@ pub const INTRO_RISE_MS: i64 = 1_000;
 /// `INTRO_UNDER_OUTGOING_SHARE` of the hold where it sounds: the two
 /// together are then never clearly louder than the outgoing song alone, and
 /// a short break in the outgoing song, where the incoming one plays alone,
-/// does not count. An intro that would need it lowered by over
-/// `INTRO_TRIM_CAP_DB` is not planned.
-pub const INTRO_UNDER_OUTGOING_DB: f64 = 6.0;
+/// does not count. The levels are flat ones of the channels' mean; heard
+/// with the ear's weighting and in stereo the incoming song can sit a few dB
+/// nearer the outgoing one, which the margin leaves room for. An intro that
+/// would need it lowered by over `INTRO_TRIM_CAP_DB` is not planned.
+pub const INTRO_UNDER_OUTGOING_DB: f64 = 8.0;
 pub const INTRO_UNDER_OUTGOING_SHARE: f64 = 0.95;
 pub const INTRO_TRIM_CAP_DB: f64 = 30.0;
 
