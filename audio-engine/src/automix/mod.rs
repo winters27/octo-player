@@ -141,6 +141,7 @@ impl TransitionPlan {
             curve: FadeCurve::EqualPower,
             hold_share: 0.0,
             rise_share: 0.0,
+            intro_level: 1.0,
             latest_end_ms: len_a_ms,
             late_move_bars: LATE_MOVE_UNBOUNDED,
             both_heard_start_ms: 0,

@@ -106,14 +106,15 @@ pub struct LowPassSteps {
 }
 
 /// How a crossfade sounds. The default is the plain equal-power crossfade.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FadeShape {
-    /// The kind of blend. An intro's gains follow `hold_share` and
-    /// `rise_share` in place of `k` and `curve` (see
-    /// `automix::transition_gains`).
+    /// The kind of blend. An intro's gains follow `hold_share`,
+    /// `rise_share` and `intro_level` (the incoming song's gain through the
+    /// hold) in place of `k` and `curve` (see `automix::transition_gains`).
     pub kind: TransitionKind,
     pub hold_share: f64,
     pub rise_share: f64,
+    pub intro_level: f64,
     /// Gain curve weight: 0 is equal power (see `automix::gains`).
     pub k: f64,
     /// The fixed crossfade's shape; equal power follows `k` (see
@@ -144,6 +145,27 @@ pub struct FadeShape {
     pub drift_gap: f64,
 }
 
+impl Default for FadeShape {
+    fn default() -> FadeShape {
+        FadeShape {
+            kind: TransitionKind::default(),
+            hold_share: 0.0,
+            rise_share: 0.0,
+            intro_level: 1.0,
+            k: 0.0,
+            curve: FadeCurve::default(),
+            filter_strength: 0.0,
+            steps: None,
+            rate: None,
+            silence_gate_db: None,
+            headroom_db: 0.0,
+            both_heard_ms: (0.0, 0.0),
+            lock_ms: 0.0,
+            drift_gap: 0.0,
+        }
+    }
+}
+
 impl FadeShape {
     /// How the mixer runs `plan`, whose outgoing song's body level is
     /// `body_db` when it is known. The silence gate sits that far under the
@@ -159,6 +181,7 @@ impl FadeShape {
             kind: plan.kind,
             hold_share: plan.hold_share,
             rise_share: plan.rise_share,
+            intro_level: plan.intro_level,
             k: plan.k,
             curve: plan.curve,
             filter_strength: plan.filter_strength,
@@ -202,6 +225,7 @@ struct Fade {
     kind: TransitionKind,
     hold_share: f64,
     rise_share: f64,
+    intro_level: f64,
     k: f64,
     curve: FadeCurve,
     // The blend's length in milliseconds of output, for curves with edges
@@ -255,6 +279,7 @@ impl Fade {
             self.k,
             self.hold_share,
             self.rise_share,
+            self.intro_level,
             p,
             self.overlap_ms,
         );
@@ -1197,6 +1222,7 @@ impl Mixer {
             kind: shape.kind,
             hold_share: shape.hold_share,
             rise_share: shape.rise_share,
+            intro_level: shape.intro_level,
             k: shape.k,
             curve: shape.curve,
             overlap_ms: plan.frames as f64 * 1_000.0 / self.rate as f64,

@@ -60,14 +60,17 @@ pub const INTRO_FADE_MS: i64 = 3_000;
 /// an intro (one bar when locked).
 pub const INTRO_RISE_MS: i64 = 1_000;
 
-/// An intro plays only where the incoming song, with its rise, stays at
-/// least `INTRO_UNDER_OUTGOING_DB` under the outgoing song held at its own
-/// level, at the same moments, for `INTRO_UNDER_OUTGOING_SHARE` of the hold
-/// where it sounds: the two together are then never clearly louder than the
-/// outgoing song alone, and a short break in the outgoing song, where the
-/// incoming one plays alone, does not count.
+/// Through an intro's hold the incoming song, with its rise, is lowered (the
+/// plan's `intro_level`) until it stays at least `INTRO_UNDER_OUTGOING_DB`
+/// under the outgoing song held at its own level, at the same moments, for
+/// `INTRO_UNDER_OUTGOING_SHARE` of the hold where it sounds: the two
+/// together are then never clearly louder than the outgoing song alone, and
+/// a short break in the outgoing song, where the incoming one plays alone,
+/// does not count. An intro that would need it lowered by over
+/// `INTRO_TRIM_CAP_DB` is not planned.
 pub const INTRO_UNDER_OUTGOING_DB: f64 = 6.0;
 pub const INTRO_UNDER_OUTGOING_SHARE: f64 = 0.95;
+pub const INTRO_TRIM_CAP_DB: f64 = 30.0;
 
 /// Music at full level the outgoing song would lose after a blend's end:
 /// above `KEPT_MUSIC_LIMIT_MS` the start is left out, and each second below
@@ -236,6 +239,11 @@ pub struct TransitionPlan {
     /// every other kind.
     pub hold_share: f64,
     pub rise_share: f64,
+    /// For an intro, the incoming song's gain through the hold, lowered from
+    /// 1 so it stays under the outgoing song; it comes up to its own level
+    /// as the outgoing song fades (see [`intro_in_gain`]). 1 for every other
+    /// kind.
+    pub intro_level: f64,
     /// The latest the blend may end, in the outgoing song's time: where its
     /// sound ends (short of its end) for a planned blend or a late one, and
     /// the song's length for the fixed crossfades and the gapless join.
@@ -279,7 +287,8 @@ impl TransitionPlan {
     /// Both volumes at `t` through the blend: outgoing, then incoming.
     pub fn gains(&self, t: f64) -> (f64, f64) {
         let (kind, curve, k) = (self.kind, self.curve, self.k);
-        transition_gains(kind, curve, k, self.hold_share, self.rise_share, t, self.overlap_ms as f64)
+        let (hold, rise, level) = (self.hold_share, self.rise_share, self.intro_level);
+        transition_gains(kind, curve, k, hold, rise, level, t, self.overlap_ms as f64)
     }
 
     /// Where, from `start_ms`, a speed lowered to `speed` while the blend is
@@ -550,9 +559,9 @@ fn grid_entry(b: &Tempo, sound_start_ms: f64, downbeats: bool) -> (f64, f64) {
 // A place a blend or intro may go: from `start_ms` over `overlap_ms` in the
 // outgoing song's time, its beats meeting the incoming song's at `lock_ms`
 // (the start, or later by the incoming song's lead-in). An intro holds and
-// rises over its shares; any other shape holds until `hold_share`, then
-// follows curve weight `k`, or when that is `None` the curve its own length
-// takes.
+// rises over its shares, the incoming song at `level` through the hold; any
+// other shape holds until `hold_share`, then follows curve weight `k`, or
+// when that is `None` the curve its own length takes.
 #[derive(Clone, Copy, Debug)]
 struct Shape {
     start_ms: f64,
@@ -563,6 +572,7 @@ struct Shape {
     hold_share: f64,
     rise_share: f64,
     k: Option<f64>,
+    level: f64,
 }
 
 impl Shape {
@@ -627,6 +637,7 @@ impl PlanPass<'_> {
             hold_share: if self.lead_hold > 0.0 { (self.lead_hold / overlap_ms).min(1.0) } else { 0.0 },
             rise_share: 0.0,
             k: None,
+            level: 1.0,
         }
     }
 
@@ -833,7 +844,7 @@ impl PlanPass<'_> {
             let since = i as f64 * HEARD_STEP_MS;
             let t = since / s.overlap_ms;
             let (out, into) = if s.intro {
-                (intro_out_gain(t, s.hold_share), intro_in_gain(t, s.rise_share))
+                (intro_out_gain(t, s.hold_share), intro_in_gain(t, s.rise_share, s.hold_share, s.level))
             } else {
                 let rest = past_hold(t, s.hold_share);
                 (automix_out_gain(rest, k), automix_in_gain(rest, k))
@@ -853,21 +864,24 @@ impl PlanPass<'_> {
         heard
     }
 
-    // Whether an intro's incoming song stays INTRO_UNDER_OUTGOING_DB under
-    // the outgoing song through the hold, walked as the both-heard stretch
-    // is: at each step where the incoming song, with its rise, sounds above
-    // its silence gate, its 400 ms level less the outgoing song's at the
-    // same moment, the INTRO_UNDER_OUTGOING_SHARE percentile of those (the
-    // lower of two neighbors). True when it never sounds there.
-    fn under_outgoing(&self, s: &Shape) -> bool {
-        let Some(b) = self.head else { return true };
+    // The level an intro's incoming song plays at through the hold, so it
+    // stays INTRO_UNDER_OUTGOING_DB under the outgoing song there, walked as
+    // the both-heard stretch is: at each step where the incoming song, at
+    // its own level with its rise, sounds above its silence gate, its 400 ms
+    // level less the outgoing song's at the same moment; the
+    // INTRO_UNDER_OUTGOING_SHARE percentile of those (the lower of two
+    // neighbors) sets how far it is lowered, 1 when it is already that far
+    // under or never sounds there. `None` when that takes over
+    // INTRO_TRIM_CAP_DB.
+    fn under_outgoing(&self, s: &Shape) -> Option<f64> {
+        let Some(b) = self.head else { return Some(1.0) };
         let hold = s.hold_share * s.overlap_ms;
         let gate = b.features.gate_db;
         let count = (hold / HEARD_STEP_MS).floor() as i64;
         let mut apart: Vec<f64> = Vec::new();
         for i in 0..count {
             let since = i as f64 * HEARD_STEP_MS;
-            let into = intro_in_gain(since / s.overlap_ms, s.rise_share);
+            let into = intro_in_gain(since / s.overlap_ms, s.rise_share, s.hold_share, 1.0);
             if into <= 0.0 {
                 continue;
             }
@@ -878,11 +892,15 @@ impl PlanPass<'_> {
             apart.push(level - self.measured.level_at(s.start_ms + since));
         }
         if apart.is_empty() {
-            return true;
+            return Some(1.0);
         }
         apart.sort_by(f64::total_cmp);
-        apart[(INTRO_UNDER_OUTGOING_SHARE * (apart.len() - 1) as f64).floor() as usize]
-            <= -INTRO_UNDER_OUTGOING_DB
+        let trim = apart[(INTRO_UNDER_OUTGOING_SHARE * (apart.len() - 1) as f64).floor() as usize]
+            + INTRO_UNDER_OUTGOING_DB;
+        if trim <= 0.0 {
+            return Some(1.0);
+        }
+        (trim <= INTRO_TRIM_CAP_DB).then(|| 10f64.powf(-trim / 20.0))
     }
 
     // The best scoring shape; the later one wins a tie. Shapes that cut over
@@ -963,6 +981,7 @@ impl PlanPass<'_> {
             curve: FadeCurve::EqualPower,
             hold_share: self.lead_hold_share(overlap_ms),
             rise_share: 0.0,
+            intro_level: 1.0,
             latest_end_ms: round_half_up(self.latest_end) as i64,
             late_move_bars: 0,
             both_heard_start_ms: 0,
@@ -989,11 +1008,11 @@ impl PlanPass<'_> {
     // outgoing song holds, then fades over two bars (or INTRO_FADE_MS
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
-    // next song rises over a bar (INTRO_RISE_MS unlocked). Only starts where
-    // the next song stays under the outgoing one through the hold
-    // (`under_outgoing`) are planned. `None` when no start is left, the
-    // beats or levels allow none or every one left would cut the outgoing
-    // song short, and the lengthened blend is planned instead.
+    // next song rises over a bar (INTRO_RISE_MS unlocked), lowered through
+    // the hold as far as each start needs to stay under the outgoing song
+    // (`under_outgoing`). `None` when no start is left, the beats or levels
+    // allow none or every one left would cut the outgoing song short, and
+    // the lengthened blend is planned instead.
     fn plan_intro(&self, quiet: f64) -> Option<TransitionPlan> {
         let bar = self.lock_a.map(|a| a.bar_ms());
         let rise = bar.unwrap_or(INTRO_RISE_MS as f64);
@@ -1024,6 +1043,7 @@ impl PlanPass<'_> {
             hold_share: hold / length,
             rise_share: rise.min(length / 4.0) / length,
             k: None,
+            level: 1.0,
         };
         let hi = self.latest_end - overlap;
         if hi < self.lo {
@@ -1057,8 +1077,11 @@ impl PlanPass<'_> {
                 }
             }
         }
-        let allowed: Vec<Shape> =
-            all.into_iter().filter(|s| self.meets(s) && self.under_outgoing(s)).collect();
+        let allowed: Vec<Shape> = all
+            .into_iter()
+            .filter_map(|s| self.under_outgoing(&s).map(|level| Shape { level, ..s }))
+            .filter(|s| self.meets(s))
+            .collect();
         if allowed.is_empty() {
             return None;
         }
@@ -1081,6 +1104,9 @@ impl PlanPass<'_> {
         }
         reason += &format!("), outro at {}", seconds(self.outro_start as i64));
         reason += &format!(", latest end {}", seconds(self.latest_end as i64));
+        if best.level < 1.0 {
+            reason += &format!(", next song lowered {} dB", decimals(-20.0 * best.level.log10(), 1));
+        }
         if let Some(r) = self.rate {
             reason += &format!(", rate {}", decimals(r, 3));
         }
@@ -1100,6 +1126,7 @@ impl PlanPass<'_> {
             curve: FadeCurve::EqualPower,
             hold_share: hold / overlap_ms as f64,
             rise_share: rise.min(overlap_ms as f64 / 4.0) / overlap_ms as f64,
+            intro_level: best.level,
             latest_end_ms: round_half_up(self.latest_end) as i64,
             late_move_bars: 0,
             both_heard_start_ms: 0,
@@ -1181,6 +1208,7 @@ impl PlanPass<'_> {
             curve: FadeCurve::EqualPower,
             hold_share: self.lead_hold_share(overlap_ms),
             rise_share: 0.0,
+            intro_level: 1.0,
             latest_end_ms: round_half_up(self.latest_end) as i64,
             late_move_bars: 0,
             both_heard_start_ms: 0,
@@ -1247,6 +1275,7 @@ fn shape_of(plan: &TransitionPlan, lock: f64) -> Shape {
         hold_share: plan.hold_share,
         rise_share: plan.rise_share,
         k: Some(plan.k),
+        level: plan.intro_level,
     }
 }
 
@@ -1262,21 +1291,24 @@ fn steps(from: f64, to: f64) -> Vec<f64> {
 }
 
 /// The outgoing and incoming volumes at `t` (0 to 1) through a blend of
-/// `kind` lasting `overlap_ms`: an intro's hold and rise over its shares
-/// ([`intro_gains`]); any other kind held until `hold_share` (the outgoing
-/// song at 1, the incoming one at 0), then the curve with weight `k` or the
-/// fixed crossfade's `curve` ([`blend_gains`]) over the rest.
+/// `kind` lasting `overlap_ms`: an intro's hold and rise over its shares,
+/// the incoming song at `intro_level` through the hold ([`intro_gains`]);
+/// any other kind held until `hold_share` (the outgoing song at 1, the
+/// incoming one at 0), then the curve with weight `k` or the fixed
+/// crossfade's `curve` ([`blend_gains`]) over the rest.
+#[allow(clippy::too_many_arguments)]
 pub fn transition_gains(
     kind: TransitionKind,
     curve: FadeCurve,
     k: f64,
     hold_share: f64,
     rise_share: f64,
+    intro_level: f64,
     t: f64,
     overlap_ms: f64,
 ) -> (f64, f64) {
     match kind {
-        TransitionKind::Intro => intro_gains(t, hold_share, rise_share),
+        TransitionKind::Intro => intro_gains(t, hold_share, rise_share, intro_level),
         _ => blend_gains(curve, k, past_hold(t, hold_share), overlap_ms * (1.0 - hold_share)),
     }
 }
@@ -1390,6 +1422,7 @@ fn loose_plan(
         curve: FadeCurve::EqualPower,
         hold_share: 0.0,
         rise_share: 0.0,
+        intro_level: 1.0,
         latest_end_ms: (latest_end + 0.5).floor() as i64,
         late_move_bars: LATE_MOVE_UNBOUNDED,
         both_heard_start_ms: 0,
@@ -1417,6 +1450,7 @@ fn gapless_plan(len_a: i64, reason: &str) -> TransitionPlan {
         curve: FadeCurve::EqualPower,
         hold_share: 0.0,
         rise_share: 0.0,
+        intro_level: 1.0,
         latest_end_ms: len_a.max(0),
         late_move_bars: LATE_MOVE_UNBOUNDED,
         both_heard_start_ms: 0,
@@ -1444,6 +1478,7 @@ fn crossfade_plan(len_a: i64, length: i64, why: &str) -> TransitionPlan {
         curve: FadeCurve::EqualPower,
         hold_share: 0.0,
         rise_share: 0.0,
+        intro_level: 1.0,
         latest_end_ms: len_a,
         late_move_bars: LATE_MOVE_UNBOUNDED,
         both_heard_start_ms: 0,

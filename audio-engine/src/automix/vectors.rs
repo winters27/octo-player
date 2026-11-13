@@ -384,6 +384,7 @@ fn check(vectors: &Value) -> Vec<String> {
                 c.near(&format!("{what} {key}"), Some(expected), Some(actual), t("curve"));
             }
         }
+        c.near(&format!("{what} introLevel"), Some(num(e, "introLevel")), Some(plan.intro_level), t("level"));
         if let Some(bars) = e.get("lateMoveBars").and_then(Value::as_i64)
             && bars != plan.late_move_bars as i64
         {
@@ -436,9 +437,10 @@ fn check(vectors: &Value) -> Vec<String> {
         );
     }
     for g in vectors.get("introGains").and_then(Value::as_array).into_iter().flatten() {
-        let (time, hold, rise) = (num(g, "t"), num(g, "holdShare"), num(g, "riseShare"));
-        let (out, gain_in) = intro_gains(time, hold, rise);
-        let what = format!("intro at {time}, hold {hold}, rise {rise}");
+        let (time, hold, rise, level) =
+            (num(g, "t"), num(g, "holdShare"), num(g, "riseShare"), num(g, "level"));
+        let (out, gain_in) = intro_gains(time, hold, rise, level);
+        let what = format!("intro at {time}, hold {hold}, rise {rise}, level {level}");
         c.near(&format!("{what}: out"), Some(num(g, "out")), Some(out), t("curve"));
         c.near(&format!("{what}: in"), Some(num(g, "in")), Some(gain_in), t("curve"));
     }

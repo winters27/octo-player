@@ -107,9 +107,9 @@ fn an_intro_holds_then_fades_and_rises_then_holds() {
         assert!((0.0..=1.0).contains(&out) && (0.0..=1.0).contains(&gain_in), "at {i}");
         (last_out, last_in) = (out, gain_in);
     }
-    assert_eq!(intro_gains(0.3, hold, rise), plan.gains(0.3));
+    assert_eq!(intro_gains(0.3, hold, rise, 1.0), plan.gains(0.3));
     // Shares at their edges: no hold fades from the start, no rise is full at once.
-    assert_eq!((intro_out_gain(0.0, 0.0), intro_in_gain(0.0, 0.0)), (1.0, 1.0));
+    assert_eq!((intro_out_gain(0.0, 0.0), intro_in_gain(0.0, 0.0, 0.0, 1.0)), (1.0, 1.0));
     assert!((intro_out_gain(0.5, 0.0) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
     assert_eq!(intro_out_gain(1.0, 1.0), 1.0);
     // Every other kind keeps its curve, with no rise; a hold there holds the
@@ -121,6 +121,32 @@ fn an_intro_holds_then_fades_and_rises_then_holds() {
         TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, hold_share: 0.5, ..plan.clone() };
     assert_eq!(held.gains(0.25), (1.0, 0.0));
     assert_eq!(held.gains(0.75), gains(0.5, BLEND_CURVE));
+}
+
+#[test]
+fn a_lowered_intro_holds_the_incoming_song_there_then_brings_it_up_as_the_outgoing_song_leaves() {
+    let plan = TransitionPlan { intro_level: 0.5, ..intro_plan() };
+    let (hold, rise) = (plan.hold_share, plan.rise_share);
+    assert!((plan.in_gain(rise / 2.0) - 0.5 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+    assert_eq!((plan.in_gain(rise), plan.in_gain(0.3), plan.in_gain(hold)), (0.5, 0.5, 0.5));
+    // Past the hold the incoming song comes up as the outgoing song's power
+    // leaves, to its own level at the end.
+    for t in [hold + 0.02, hold + (1.0 - hold) / 2.0, 0.95] {
+        let out = plan.out_gain(t);
+        let expected = (0.25 + 0.75 * (1.0 - out * out)).sqrt();
+        assert!((plan.in_gain(t) - expected).abs() < 1e-12, "at {t}");
+    }
+    assert!((plan.in_gain(1.0) - 1.0).abs() < 1e-12);
+    let mut last = 0.0;
+    for i in 0..=400 {
+        let gain = plan.in_gain(i as f64 / 400.0);
+        assert!(gain >= last - 1e-12, "at {i}");
+        last = gain;
+    }
+    // At level 1 nothing changes: full from the rise on.
+    for t in [rise, 0.5, hold + 0.1, 1.0] {
+        assert_eq!(intro_in_gain(t, rise, hold, 1.0), 1.0, "at {t}");
+    }
 }
 
 // The mixer's headroom at `p`: `db` lower through the blend, coming and

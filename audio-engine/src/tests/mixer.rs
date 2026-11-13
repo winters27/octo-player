@@ -788,11 +788,38 @@ fn an_intro_holds_the_outgoing_song_and_brings_the_next_one_up() {
         let t = i as f64 / fade as f64;
         let (a, b) = (out[(fade_start + i) * 2] as f64, out[(fade_start + i) * 2 + 1] as f64);
         assert!((a - 0.25 * intro_out_gain(t, 0.6)).abs() < 1e-6, "A {a} at {i}");
-        assert!((b - 0.25 * intro_in_gain(t, 0.25)).abs() < 1e-6, "B {b} at {i}");
+        assert!((b - 0.25 * intro_in_gain(t, 0.25, 0.6, 1.0)).abs() < 1e-6, "B {b} at {i}");
     }
     // A at its own level through the hold, B at its own from the rise on.
     let held = fade_start + fade as usize / 2;
     assert_eq!((out[held * 2], out[held * 2 + 1]), (0.25, 0.25));
+}
+
+#[test]
+fn a_lowered_intro_plays_the_next_song_at_its_level_through_the_hold() {
+    use crate::automix::{TransitionKind, intro_in_gain, intro_out_gain};
+    let fade = 48_000u64;
+    let shape = FadeShape {
+        kind: TransitionKind::Intro,
+        hold_share: 0.6,
+        rise_share: 0.25,
+        intro_level: 0.5,
+        ..Default::default()
+    };
+    let out = blend_into_silence(shape, 96_000);
+    let fade_start = 48_000 + LATENCY;
+    for i in (0..fade as usize).step_by(499) {
+        let t = i as f64 / fade as f64;
+        let (a, b) = (out[(fade_start + i) * 2] as f64, out[(fade_start + i) * 2 + 1] as f64);
+        assert!((a - 0.25 * intro_out_gain(t, 0.6)).abs() < 1e-6, "A {a} at {i}");
+        assert!((b - 0.25 * intro_in_gain(t, 0.25, 0.6, 0.5)).abs() < 1e-6, "B {b} at {i}");
+    }
+    // A at its own level through the hold, B at half its own; B back at its
+    // own by the end.
+    let held = fade_start + fade as usize / 2;
+    assert_eq!((out[held * 2], out[held * 2 + 1]), (0.25, 0.125));
+    let end = fade_start + fade as usize - 1;
+    assert!((out[end * 2 + 1] as f64 - 0.25).abs() < 1e-3, "B {} at the end", out[end * 2 + 1]);
 }
 
 #[test]
