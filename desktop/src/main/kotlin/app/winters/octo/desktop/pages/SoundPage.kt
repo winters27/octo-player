@@ -3,7 +3,10 @@ package app.winters.octo.desktop.pages
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -22,29 +25,33 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntRect
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.DesktopType
+import app.winters.octo.design.FitOrElse
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
+import app.winters.octo.design.GlazeSegments
 import app.winters.octo.design.MenuRow
 import app.winters.octo.design.MenuSeparator
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
+import app.winters.octo.design.RowHeight
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.settings.BetweenSongsChange
 import app.winters.octo.desktop.settings.PlaybackPrefs
-import app.winters.octo.desktop.sound.DEFAULT_BLEND_SECONDS
 import app.winters.octo.desktop.sound.EqCurve
-import app.winters.octo.desktop.sound.LONGEST_BLEND_SECONDS
-import app.winters.octo.desktop.sound.SHORTEST_BLEND_SECONDS
 import app.winters.octo.desktop.sound.SoundController
+import app.winters.octo.desktop.ui.ChoiceButton
 import app.winters.octo.desktop.ui.windowRect
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.playback.FadeCurve
-import app.winters.octo.playback.curveRowLook
+import app.winters.octo.playback.LONGEST_CROSSFADE_SECONDS
+import app.winters.octo.playback.SHORTEST_CROSSFADE_SECONDS
 import app.winters.octo.playback.detail
 import app.winters.octo.playback.fadeInGain
 import app.winters.octo.playback.fadeOutGain
@@ -163,23 +170,111 @@ internal fun soundLede(app: AppState): String {
     return if (all.sound.perOutput) "These settings are for $device." else "These settings are for every output."
 }
 
-// Crossfade, with its switch on its title, and speed and pitch, for
-// Settings' Playback page, while the sound engine runs. They are the same
-// for every output.
+// Between songs (the choice, and the rows of the one chosen) and speed and
+// pitch, for Settings' Playback page, while the sound engine runs. They
+// are the same for every output. Between songs keeps the id the Crossfade
+// card had.
 @Composable
 internal fun CrossfadeAndSpeed(app: AppState) {
     if (app.sound == null) return
     val all by app.settings.state.collectAsState()
     val playback = all.playback
     fun change(edit: (PlaybackPrefs) -> PlaybackPrefs) = app.settings.update { it.copy(playback = edit(it.playback)) }
-    SettingsCard(
-        "Crossfade",
-        OctoIcons.Crossfade,
-        id = "crossfade",
-        footer = "Songs blend into the next. An album played in order runs straight on.",
-        toggle = TitleSwitch(playback.crossfadeSeconds > 0) { on -> change { it.copy(crossfadeSeconds = if (on) DEFAULT_BLEND_SECONDS else 0) } },
-    ) { CrossfadeRows(app, playback, ::change) }
+    SettingsCard(BETWEEN_SONGS, OctoIcons.Crossfade, id = BETWEEN_SONGS_CARD, footer = "Albums played in order stay gapless.") {
+        BetweenSongsRows(app, playback)
+    }
     SettingsCard("Speed and pitch", OctoIcons.Timer, id = "speed") { SpeedRows(playback, ::change) }
+}
+
+// The Between songs card's title, its id, and the id and stable title of
+// the choice's own row, which search finds by its card.
+internal const val BETWEEN_SONGS = "Between songs"
+internal const val BETWEEN_SONGS_CARD = "crossfade"
+internal const val BETWEEN_SONGS_CHOICE = "choice"
+internal const val BETWEEN_SONGS_CHOICE_STABLE = "[the Between songs choice]"
+
+// The rows under the choice, by their ids in the card, each shown only for
+// the choice it belongs to: Crossfade's length and curve, Automix's Filter
+// sweeps and Match tempo. Gapless has none. Length keeps the id Longest
+// blend had.
+internal enum class UnderBetweenSongs(val id: String, val choice: BetweenSongs) {
+    Length("longest-blend", BetweenSongs.Crossfade),
+    Curve("crossfade-curve", BetweenSongs.Crossfade),
+    FilterSweeps("filter-sweeps", BetweenSongs.Automix),
+    MatchTempo("match-tempo", BetweenSongs.Automix),
+}
+
+// What each choice does, as the row under the choice says it.
+internal val BetweenSongs.choiceDetail: String
+    get() = when (this) {
+        BetweenSongs.Gapless -> "Each song plays straight into the next."
+        BetweenSongs.Crossfade -> "Each song fades into the next over the length you set."
+        BetweenSongs.Automix -> "Songs blend where they meet best, on the beat when they can."
+    }
+
+// The choice, then the rows of the one chosen. A row the choice hides
+// hands an ask for it to the choice, the control that shows it. Every
+// change goes through the store's one Between songs setter.
+@Composable
+private fun BetweenSongsRows(app: AppState, playback: PlaybackPrefs) {
+    val settings = app.settings
+    BetweenSongsChoice(playback.betweenSongs) { settings.editBetweenSongs(BetweenSongsChange.Choose(it)) }
+    UnderBetweenSongs.entries.forEach { row ->
+        if (row.choice != playback.betweenSongs) {
+            HiddenRow(row.id, by = BETWEEN_SONGS_CHOICE)
+            return@forEach
+        }
+        when (row) {
+            UnderBetweenSongs.Length -> LengthRow(playback.crossfadeLength) { settings.editBetweenSongs(BetweenSongsChange.Length(it)) }
+            UnderBetweenSongs.Curve -> CurveRow(app, playback.crossfadeCurve) { settings.editBetweenSongs(BetweenSongsChange.Curve(it)) }
+            UnderBetweenSongs.FilterSweeps -> SwitchRow("Filter sweeps", "The song ending loses its highs and bass as the next one comes in.", playback.filterSweeps) { on ->
+                settings.editBetweenSongs(BetweenSongsChange.FilterSweeps(on))
+            }
+            UnderBetweenSongs.MatchTempo -> SwitchRow("Match tempo", "Songs with a close tempo blend in step. The next song settles back to its own speed after.", playback.matchTempo) { on ->
+                settings.editBetweenSongs(BetweenSongsChange.MatchTempo(on))
+            }
+        }
+    }
+}
+
+// The choice itself: Gapless, Crossfade and Automix as one row of
+// segments, the chosen one in the accent with its check, and what it does
+// said under them. On a window too narrow for the segments they are one
+// button that opens them.
+@Composable
+private fun BetweenSongsChoice(choice: BetweenSongs, onPick: (BetweenSongs) -> Unit) {
+    val choices = BetweenSongs.entries
+    Column(
+        Modifier
+            .settingsRow(BETWEEN_SONGS, stable = BETWEEN_SONGS_CHOICE_STABLE, id = BETWEEN_SONGS_CHOICE)
+            .fillMaxWidth()
+            .heightIn(min = RowHeight.Roomy)
+            .padding(horizontal = RowInset, vertical = Space.L),
+        verticalArrangement = Arrangement.spacedBy(Space.M),
+    ) {
+        FitOrElse(
+            { GlazeSegments(choices, choice, { it.name }, onPick) },
+            { ChoiceButton(choices, choice, { it.name }, onPick, title = BETWEEN_SONGS) },
+        )
+        Txt(choice.choiceDetail, DesktopType.meta, OctoColors.TextMuted, maxLines = Int.MAX_VALUE)
+    }
+}
+
+// Crossfade's length, from 2 to 16 seconds, saved once let go.
+@Composable
+private fun LengthRow(seconds: Int, onChange: (Int) -> Unit) {
+    val shown = seconds.coerceIn(SHORTEST_CROSSFADE_SECONDS, LONGEST_CROSSFADE_SECONDS)
+    val span = (LONGEST_CROSSFADE_SECONDS - SHORTEST_CROSSFADE_SECONDS).toFloat()
+    SliderRow(
+        "Length",
+        "How long the two songs play over each other.",
+        "$shown s",
+        (shown - SHORTEST_CROSSFADE_SECONDS) / span,
+        { x -> onChange(SHORTEST_CROSSFADE_SECONDS + (x * span).roundToInt()) },
+        live = false,
+        wheelStep = 1f / span,
+        id = UnderBetweenSongs.Length.id,
+    )
 }
 
 // Presets first, then the kind of curve, the curve itself, and the level
@@ -438,40 +533,6 @@ private fun readBalance(balance: Float): String {
     }
 }
 
-// How songs blend. With crossfade off they stay in place, dimmed, showing
-// the shortest blend.
-@Composable
-private fun CrossfadeRows(app: AppState, playback: PlaybackPrefs, change: ((PlaybackPrefs) -> PlaybackPrefs) -> Unit) {
-    val seconds = playback.crossfadeSeconds.coerceIn(SHORTEST_BLEND_SECONDS, LONGEST_BLEND_SECONDS)
-    val span = (LONGEST_BLEND_SECONDS - SHORTEST_BLEND_SECONDS).toFloat()
-    SliderRow(
-        "Longest blend",
-        "How long two songs may play over each other.",
-        "$seconds s",
-        (seconds - SHORTEST_BLEND_SECONDS) / span,
-        { x -> change { it.copy(crossfadeSeconds = SHORTEST_BLEND_SECONDS + (x * span).roundToInt()) } },
-        live = false,
-        wheelStep = 1f / span,
-    )
-    CurveRow(app, playback.crossfadeCurve, playback.smartTransitions) { curve -> change { it.copy(crossfadeCurve = curve) } }
-    SwitchRow(
-        "Smart transitions",
-        "Blends start on the beat or as a song winds down. Off, songs fade at the very end.",
-        playback.smartTransitions,
-    ) { on -> change { it.copy(smartTransitions = on) } }
-    if (playback.smartTransitions) {
-        SwitchRow("Filter sweeps", "The ending song thins out as the next comes in.", playback.filterSweeps) { on ->
-            change { it.copy(filterSweeps = on) }
-        }
-        SwitchRow("Match tempo", "Nudges the next song to this one's beat while they blend.", playback.matchTempo) { on ->
-            change { it.copy(matchTempo = on) }
-        }
-    } else {
-        HiddenRow("filter-sweeps", by = "smart-transitions")
-        HiddenRow("match-tempo", by = "smart-transitions")
-    }
-}
-
 // Speed and pitch, and a way back to normal once either has moved.
 @Composable
 private fun SpeedRows(playback: PlaybackPrefs, change: ((PlaybackPrefs) -> PlaybackPrefs) -> Unit) {
@@ -551,18 +612,9 @@ private fun chooseFile(title: String, save: Boolean, suggested: String? = null):
     return File(dialog.directory, name)
 }
 
-// The shape of the crossfade, picked from a menu that draws each one. With
-// smart transitions on they pick the curve, and the row says so and names
-// the switch under it that frees the choice.
+// The shape of Crossfade's fade, picked from a menu that draws each one.
 @Composable
-private fun CurveRow(app: AppState, curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
-    val look = curveRowLook(curve, smart)
-    if (!look.choosable) {
-        SettingRow("Crossfade curve", look.helper, dim = true) {
-            Txt(look.value, DesktopType.meta, OctoColors.TextMuted)
-        }
-        return
-    }
+private fun CurveRow(app: AppState, curve: FadeCurve, onPick: (FadeCurve) -> Unit) {
     var anchor by remember { mutableStateOf(IntRect.Zero) }
     SettingRow("Crossfade curve", curve.detail) {
         Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {

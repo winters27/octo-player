@@ -33,7 +33,7 @@ data class SettingsPageInfo(val key: String, val name: String, val words: String
 // startup card off Windows, so it is named for the window alone there; the
 // Discord page is only in builds with Discord.
 fun settingsPages(windows: Boolean, discord: Boolean): List<SettingsPageInfo> = listOfNotNull(
-    SettingsPageInfo(SettingsKey.Playback, "Playback", "autoplay queue ends library only songs found online crossfade speed pitch tempo blend transitions automix"),
+    SettingsPageInfo(SettingsKey.Playback, "Playback", "autoplay queue ends library only songs found online between songs crossfade speed pitch tempo blend transitions automix"),
     SettingsPageInfo(SettingsKey.Sound, "Sound", "equalizer eq loudness volume balance crossfeed headphone correction output"),
     SettingsPageInfo(SettingsKey.Radio, "Radio", "song radio live radio stations on your server discovery adventure variety tuning"),
     SettingsPageInfo(SettingsKey.Lyrics, "Lyrics", "lyrics online lrclib timing bloom"),

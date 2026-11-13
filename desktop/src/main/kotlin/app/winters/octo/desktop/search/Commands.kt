@@ -6,6 +6,7 @@ import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.settingsPages
+import app.winters.octo.desktop.pages.BETWEEN_SONGS_CARD
 import app.winters.octo.desktop.pages.STATIONS_ON_SERVER
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.pages.addServer
@@ -59,7 +60,7 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     fun setting(title: String, group: String, words: String, page: String, row: String? = null) =
         add(Command(title, group, "open settings $words") { app.openSettings(page, row) })
     settingsPages(app.os == DesktopOs.Windows, discordAppId() != null).forEach { page -> setting(page.name, "Settings", page.words, page.key) }
-    setting("Crossfade", "Settings", "blend transitions automix fade songs together", SettingsKey.Playback, "crossfade")
+    setting("Crossfade", "Settings", "between songs gapless automix blend transitions smart transitions fade songs together", SettingsKey.Playback, BETWEEN_SONGS_CARD)
     setting("Equalizer", "Settings", "eq bass treble presets bands", SettingsKey.Sound, "eq")
     setting("Theme", "Settings", "light mode dark mode night day colors colours palette appearance moss dusk daylight paper match system", SettingsKey.Look, "theme")
     setting("Accent color", "Settings", "colour tint highlight appearance album art cover", SettingsKey.Look)

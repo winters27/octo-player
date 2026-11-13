@@ -2,6 +2,8 @@ package app.winters.octo.desktop.settings
 
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.desktop.system.SystemPrefs
+import app.winters.octo.playback.BetweenSongs
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.sound.EqFilter
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.FilterType
@@ -41,10 +43,10 @@ class SettingsStoreTest {
             servers = listOf(home, SavedServer("https://work.test/", "brandon", id = "w1", label = "Work", signedOut = true)),
             activeServer = "h1",
             appearance = Appearance(ambientGlow = false, glowStrength = 0.8f, ambience = AmbienceStyle.Immersive, ambienceMotion = AmbienceMotion.Full),
-            playback = PlaybackPrefs(volume = 0.3f, crossfadeSeconds = 6, outputDevice = "usb:dac", speed = 1.25f, keepPitch = false, pitchSemitones = -2),
+            playback = PlaybackPrefs(volume = 0.3f, betweenSongs = BetweenSongs.Crossfade, crossfadeLength = 6, outputDevice = "usb:dac", speed = 1.25f, keepPitch = false, pitchSemitones = -2),
             songSort = "Year:desc",
             sidePanel = "queue",
-        )
+        ).mirrored()
         SettingsStore(file()).update { changed }
         assertEquals(changed, SettingsStore(file()).current)
     }
@@ -65,7 +67,17 @@ class SettingsStoreTest {
                 textSize = 115,
                 playlistCovers = PlaylistCoverStyle.Mosaic,
             ),
-            playback = PlaybackPrefs(crossfadeSeconds = 4, speed = 0.75f, keepPitch = false, pitchSemitones = 3, autoplay = false),
+            playback = PlaybackPrefs(
+                betweenSongs = BetweenSongs.Crossfade,
+                crossfadeLength = 4,
+                crossfadeCurve = FadeCurve.SCurve,
+                filterSweeps = false,
+                matchTempo = false,
+                speed = 0.75f,
+                keepPitch = false,
+                pitchSemitones = 3,
+                autoplay = false,
+            ).mirrored(),
             lyrics = LyricsPrefs(online = false),
             listening = ListeningPrefs(reportPlays = false, syncQueue = false),
             system = SystemPrefs(closeToTray = true, nowPlayingNotices = true, miniPlayerOpen = true),

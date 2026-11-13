@@ -4,6 +4,7 @@ import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
 import app.winters.octo.desktop.pages.ACCENT_COLOR
+import app.winters.octo.desktop.pages.BETWEEN_SONGS_CHOICE_STABLE
 import app.winters.octo.desktop.pages.MATCH_THE_SYSTEM
 import app.winters.octo.desktop.pages.THEME_CHOICE
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
@@ -87,11 +88,20 @@ class SettingsGoldenRowsTest {
             "[the loaded correction]", "Import a correction", "Import another", "Export my curve",
         )
 
-        // Rows renamed, old title to new.
-        val Renamed = mapOf("Moving background" to "Moving full player background")
+        // Rows renamed, old title to new. Crossfade's switch on its title is
+        // the Between songs choice now, and Longest blend is Crossfade's
+        // Length.
+        val Renamed = mapOf(
+            "Moving background" to "Moving full player background",
+            "Crossfade" to BETWEEN_SONGS_CHOICE_STABLE,
+            "Longest blend" to "Length",
+        )
 
         // Rows gone on purpose, each with why.
-        val Removed = mapOf("Equalizer, loudness, crossfade and speed" to "Sound is a page of Settings now, so Playback has no link to it")
+        val Removed = mapOf(
+            "Equalizer, loudness, crossfade and speed" to "Sound is a page of Settings now, so Playback has no link to it",
+            "Smart transitions" to "Automix is a Between songs choice of its own now, so its switch is gone",
+        )
 
         // Rows the code still has that the window cannot draw, each with why.
         val NeverInTheWindow = mapOf("No server connected" to "drawn only without a server, and without one the window shows the sign-in page, not Settings")

@@ -136,12 +136,19 @@ val DesktopSettingsIndex: List<SettingsIndexEntry> = index {
         card("Songs found online", listed = false) {
             row(LIBRARY_ONLY_SETTING, listOf("outside", "online", "found", "hide", "only", "my songs", "not in library", "discover"), "Leave songs found online out of albums, search, artists and radio")
         }
-        card("Crossfade", keywords = listOf("fade", "blend", "gapless", "gap", "transition", "mix"), summary = "Each song fades into the next", needs = EngineOnly) {
-            row("Longest blend", listOf("fade", "seconds", "duration", "crossfade length", "gap"), "The most seconds two songs blend for")
+        // Between songs keeps the id the Crossfade card had, and Length the
+        // id Longest blend had; the choice's own row is found by the card.
+        card(
+            BETWEEN_SONGS,
+            id = BETWEEN_SONGS_CARD,
+            keywords = listOf("crossfade", "gapless", "automix", "blend", "mix", "transition", "dj", "smart transitions", "between songs", "fade", "gap", "beat", "outro"),
+            summary = "Gapless, Crossfade or Automix",
+            needs = EngineOnly,
+        ) {
+            row("Length", listOf("fade", "seconds", "duration", "crossfade length", "longest blend", "gap"), "How many seconds a crossfade lasts", id = UnderBetweenSongs.Length.id)
             row("Crossfade curve", listOf("fade", "curve", "shape", "linear", "equal power", "s-curve", "logarithmic", "mix", "dj", "transition"), "How one song fades into the next")
-            row("Smart transitions", listOf("automix", "dj", "mix", "transition", "beat", "outro", "fade"), "Each blend starts where the songs meet best")
-            row("Filter sweeps", listOf("filter", "sweep", "bass", "eq", "dj"), "Songs thin out as they cross")
-            row("Match tempo", listOf("tempo", "bpm", "beat", "beatmatch", "speed"), "The next song nudges its speed to the beat")
+            row("Filter sweeps", listOf("filter", "sweep", "bass", "eq", "dj", "automix"), "Songs thin out as they cross")
+            row("Match tempo", listOf("tempo", "bpm", "beat", "beatmatch", "speed", "automix"), "The next song nudges its speed to the beat")
         }
         card("Speed and pitch", id = "speed", keywords = listOf("tempo", "faster", "slower", "rate"), needs = EngineOnly) {
             row("Speed", listOf("tempo", "pitch", "faster", "slower", "rate"), "How fast music plays")

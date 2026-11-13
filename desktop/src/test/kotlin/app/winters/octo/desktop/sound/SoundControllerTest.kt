@@ -6,9 +6,11 @@ import app.winters.octo.audio.DspSettings
 import app.winters.octo.audio.EqSettings
 import app.winters.octo.audio.ReplayGainSettings
 import app.winters.octo.desktop.audio.SoundTarget
+import app.winters.octo.desktop.settings.BetweenSongsChange
 import app.winters.octo.desktop.settings.SHARED_SOUND
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.SoundPrefs
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.sound.Crossfeed
 import app.winters.octo.sound.CrossfeedPreset
@@ -235,10 +237,10 @@ class SoundControllerTest {
         val target = FakeTarget()
         val settings = SettingsStore(file())
         SoundController(target, settings, scope)
-        assertEquals(0, target.fade)
+        assertEquals("a new install is Automix, its blends 8 s at most", 8_000, target.fade)
         assertEquals(1f to 1f, target.pace)
         val shapes = target.shapes
-        settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 6, speed = 1.25f, keepPitch = true, pitchSemitones = 12)) }
+        settings.update { it.copy(playback = it.playback.copy(betweenSongs = BetweenSongs.Crossfade, crossfadeLength = 6, speed = 1.25f, keepPitch = true, pitchSemitones = 12)) }
         assertEquals(6_000, target.fade)
         assertEquals(1.25f, target.pace.first)
         // Twelve semitones is an octave: twice the pitch. (Held to six.)
@@ -246,20 +248,45 @@ class SoundControllerTest {
         assertEquals("the equalizer is not sent again for a crossfade change", shapes, target.shapes)
     }
 
+    // Each Between songs choice gives the engine its blends: Automix its
+    // planned blends of 8 s at most with 16 s intros and Match tempo,
+    // Crossfade its own length and curve, and Gapless none, whatever length
+    // Crossfade keeps.
     @Test
-    fun transitionsFollowTheCrossfadeSettings() {
+    fun transitionsFollowTheBetweenSongsChoice() {
         val target = FakeTarget()
         val settings = SettingsStore(file())
         SoundController(target, settings, scope)
-        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = true, matchTempo = false, maxOverlapMs = 0u, fadeCurve = EngineFadeCurve.EQUAL_POWER), target.lastAutomix)
-        settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 16, filterSweeps = false, matchTempo = true)) }
+        assertEquals(8_000, target.fade)
+        assertEquals(
+            AutomixSettings(smartTransitions = true, filterSweeps = true, matchTempo = true, maxOverlapMs = 8_000u, fadeCurve = EngineFadeCurve.EQUAL_POWER, longestIntroMs = 16_000u),
+            target.lastAutomix,
+        )
+        settings.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        settings.editBetweenSongs(BetweenSongsChange.Length(16))
+        settings.editBetweenSongs(BetweenSongsChange.FilterSweeps(false))
         assertEquals(16_000, target.fade)
-        assertEquals(AutomixSettings(smartTransitions = true, filterSweeps = false, matchTempo = true, maxOverlapMs = 16_000u, fadeCurve = EngineFadeCurve.EQUAL_POWER), target.lastAutomix)
-        // A value past the longest blend is held to it.
-        settings.update { it.copy(playback = it.playback.copy(crossfadeSeconds = 30, smartTransitions = false)) }
+        assertEquals(
+            AutomixSettings(smartTransitions = false, filterSweeps = false, matchTempo = true, maxOverlapMs = 16_000u, fadeCurve = EngineFadeCurve.EQUAL_POWER, longestIntroMs = 16_000u),
+            target.lastAutomix,
+        )
+        // A length past the longest is held to it.
+        settings.update { it.copy(playback = it.playback.copy(crossfadeLength = 30)) }
         assertEquals(16_000, target.fade)
+        assertEquals(16_000u, target.lastAutomix?.maxOverlapMs)
+        settings.editBetweenSongs(BetweenSongsChange.Length(8))
+        settings.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Gapless))
+        assertEquals("Gapless blends nothing, its 8 s length kept for Crossfade", 0, target.fade)
+        assertEquals(0u, target.lastAutomix?.maxOverlapMs)
         assertEquals(false, target.lastAutomix?.smartTransitions)
-        settings.update { it.copy(playback = it.playback.copy(crossfadeCurve = FadeCurve.MixOnly)) }
+        assertEquals(8, settings.current.playback.crossfadeLength)
+        // Automix picks its own lengths, whatever Crossfade's is.
+        settings.editBetweenSongs(BetweenSongsChange.Length(3))
+        settings.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Automix))
+        assertEquals(8_000, target.fade)
+        assertEquals(8_000u, target.lastAutomix?.maxOverlapMs)
+        assertEquals(true, target.lastAutomix?.smartTransitions)
+        settings.editBetweenSongs(BetweenSongsChange.Curve(FadeCurve.MixOnly))
         assertEquals(EngineFadeCurve.MIX_ONLY, target.lastAutomix?.fadeCurve)
         // A change elsewhere sends nothing new.
         val sent = target.automixSent

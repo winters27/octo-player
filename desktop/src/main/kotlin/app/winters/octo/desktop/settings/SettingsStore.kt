@@ -2,6 +2,8 @@ package app.winters.octo.desktop.settings
 
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.offline.KeepChoices
+import app.winters.octo.playback.BetweenSongs
+import app.winters.octo.playback.DEFAULT_CROSSFADE_SECONDS
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StartAfter
 import app.winters.octo.sound.SoundSettings
@@ -30,6 +32,10 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import java.io.FileOutputStream
 import app.winters.octo.radio.RadioAdventure
@@ -278,11 +284,24 @@ internal fun AppSettings.settledServers(): AppSettings {
     return copy(servers = list, activeServer = kept?.id, server = kept)
 }
 
-// The settings as they are written: `server` a copy of the one in use.
-internal fun AppSettings.mirrored(): AppSettings {
+// The settings as they are written: `server` a copy of the one in use, and
+// the playback fields an older Octo reads in place of the Between songs
+// choice set from it.
+internal fun AppSettings.mirrored(): AppSettings = mirroredServer().mirroredPlayback()
+
+private fun AppSettings.mirroredServer(): AppSettings {
     val active = activeServer?.let { id -> servers.firstOrNull { it.id == id } }
     return if (active == server && (active != null || activeServer == null)) this else copy(server = active, activeServer = active?.id)
 }
+
+internal fun AppSettings.mirroredPlayback(): AppSettings {
+    val written = playback.mirrored()
+    return if (written === playback) this else copy(playback = written)
+}
+
+// The settings as a file is read into the app: servers and themes read the
+// way every app reads them, and the playback mirrors set from the choice.
+internal fun AppSettings.settled(): AppSettings = settledServers().settledThemes().mirroredPlayback()
 
 @Serializable
 data class Appearance(
@@ -368,17 +387,21 @@ data class WashPrefs(
 @Serializable
 data class PlaybackPrefs(
     val volume: Float = 0.8f,
-    // The longest blend, 2 to 16 seconds; 0 is off. Albums played in order
-    // stay gapless.
-    val crossfadeSeconds: Int = 0,
-    // Each blend starts where the music allows rather than at the very end
-    // of the song; with it, filter sweeps over both songs and, when asked
-    // for, the next song's speed nudged to the beat.
-    val smartTransitions: Boolean = true,
+    // What plays between two songs: Gapless, Crossfade or Automix. Albums
+    // played in order stay gapless whatever is chosen.
+    val betweenSongs: BetweenSongs = BetweenSongs.Automix,
+    // Crossfade's length, 2 to 16 seconds.
+    val crossfadeLength: Int = DEFAULT_CROSSFADE_SECONDS,
+    // What an older Octo reads in place of the choice: its longest blend (0
+    // was off) and its smart transitions. Only written, from the choice, by
+    // mirrored(); nothing here reads them.
+    @SerialName("crossfadeSeconds") val legacyCrossfadeSeconds: Int = DEFAULT_CROSSFADE_SECONDS,
+    @SerialName("smartTransitions") val legacySmartTransitions: Boolean = true,
+    // Automix's own two: filter sweeps over both songs, and the next song's
+    // speed nudged to the beat.
     val filterSweeps: Boolean = true,
-    val matchTempo: Boolean = false,
-    // The shape of the crossfade with smart transitions off; smart
-    // transitions pick their own.
+    val matchTempo: Boolean = true,
+    // The shape of Crossfade's fade; Automix picks its own.
     val crossfadeCurve: FadeCurve = FadeCurve.EqualPower,
     // The device picked in the output menu, or null to follow the system.
     val outputDevice: String? = null,
@@ -412,11 +435,35 @@ private val json = Json {
     coerceInputValues = true
 }
 
+// The settings as the file holds them: its version, then every setting.
+internal fun encodeSettings(settings: AppSettings): String {
+    val fields = json.encodeToJsonElement(AppSettings.serializer(), settings).jsonObject
+    val file = buildJsonObject {
+        put(SETTINGS_VERSION_KEY, SETTINGS_VERSION)
+        fields.forEach { (key, value) -> put(key, value) }
+    }
+    return json.encodeToString(JsonObject.serializer(), file)
+}
+
+// A file's settings as the app uses them, and what reading an older file's
+// crossfade settings came to (null for a file that has the choice). Throws
+// SerializationException or IllegalArgumentException for words that are
+// not settings.
+internal class ReadSettings(val settings: AppSettings, val migrated: MigratedFile?)
+
+internal fun decodeSettings(text: String): ReadSettings {
+    val file = json.parseToJsonElement(text) as? JsonObject ?: throw SerializationException("The settings are not an object")
+    val migrated = migratedBetweenSongs(file)
+    return ReadSettings(json.decodeFromJsonElement(AppSettings.serializer(), migrated?.json ?: file).settled(), migrated)
+}
+
 // Reads and writes the settings file. A write goes to a temporary file
 // first, is flushed to the disk, and then replaces the old one in a single
 // move, so neither a crash nor a power cut leaves half a file. A file that
 // is not valid settings is set aside, never deleted, and the app starts
-// from the defaults.
+// from the defaults. A file from before the Between songs choice is read as
+// the choice its crossfade settings come to, and written at once when they
+// chose one (settings still at the old defaults are left as they are).
 //
 // With `writeDelayMs`, changes are kept in memory at once and written a
 // moment later, together, off the caller's thread: a slider dragged for a
@@ -424,7 +471,8 @@ private val json = Json {
 // app ends.
 class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) {
     private val lock = Any()
-    private val _state = MutableStateFlow(read().settledServers().settledThemes())
+    private val opened = read()
+    private val _state = MutableStateFlow(opened.settings)
 
     val state: StateFlow<AppSettings> = _state
 
@@ -440,6 +488,8 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
 
     init {
         if (writer != null) Runtime.getRuntime().addShutdownHook(Thread({ flush() }, "octo-settings-exit"))
+        // An older file whose crossfade settings chose stores that choice.
+        if (opened.migrated?.untouched == false) synchronized(lock) { keep(opened.settings) }
     }
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -448,18 +498,29 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
             val changed = change(before)
             // A change to `server` alone is read the way an older Octo's is.
             val alone = changed.server != before.server && changed.servers == before.servers && changed.activeServer == before.activeServer
-            val next = if (alone) changed.settledServers() else changed.mirrored()
+            val next = if (alone) changed.settledServers().mirroredPlayback() else changed.mirrored()
             if (next == before) return
             _state.value = next
-            if (writer == null) {
-                write(next)
-                return
-            }
-            val waiting = unsaved != null
-            unsaved = next
-            if (!waiting) writer.schedule(::flush, writeDelayMs, TimeUnit.MILLISECONDS)
+            keep(next)
         }
     }
+
+    // Writes `settings` now, or soon with a write delay.
+    private fun keep(settings: AppSettings) {
+        if (writer == null) {
+            write(settings)
+            return
+        }
+        val waiting = unsaved != null
+        unsaved = settings
+        if (!waiting) writer.schedule(::flush, writeDelayMs, TimeUnit.MILLISECONDS)
+    }
+
+    // The one way the Between songs settings change: the Playback page's
+    // card and anything else that sets them. The mirrors an older Octo reads
+    // go with the change. A file from before the choice was read as the
+    // choice it showed, so a first change keeps everything else as shown.
+    fun editBetweenSongs(change: BetweenSongsChange) = update { it.copy(playback = it.playback.edited(change)) }
 
     // Makes `choice` the theme and fills the Day or Night slot of its kind, in
     // one change.
@@ -485,8 +546,9 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
         }
     }
 
-    private fun read(): AppSettings {
-        if (!file.exists()) return AppSettings()
+    private fun read(): ReadSettings {
+        val fresh = ReadSettings(AppSettings().settled(), null)
+        if (!file.exists()) return fresh
         // Another program (a sync tool, a virus scanner) can hold the file
         // for a moment; that is not a broken file.
         var text: String? = null
@@ -499,15 +561,15 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
             }
             if (text != null) break
         }
-        if (text == null) return AppSettings()
+        if (text == null) return fresh
         return try {
-            json.decodeFromString(AppSettings.serializer(), text)
+            decodeSettings(text)
         } catch (e: SerializationException) {
             setAside()
-            AppSettings()
+            fresh
         } catch (e: IllegalArgumentException) {
             setAside()
-            AppSettings()
+            fresh
         }
     }
 
@@ -522,7 +584,7 @@ class SettingsStore(private val file: File, private val writeDelayMs: Long = 0) 
             file.parentFile?.mkdirs()
             val temp = File(file.parentFile, file.name + ".tmp")
             FileOutputStream(temp).use { out ->
-                out.write(json.encodeToString(AppSettings.serializer(), settings).toByteArray(Charsets.UTF_8))
+                out.write(encodeSettings(settings).toByteArray(Charsets.UTF_8))
                 out.fd.sync()
             }
             try {

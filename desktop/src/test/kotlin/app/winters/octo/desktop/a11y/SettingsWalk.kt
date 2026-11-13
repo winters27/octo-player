@@ -50,6 +50,7 @@ import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.desktop.update.FakeReleases
 import app.winters.octo.desktop.update.UpdaterAvailability
 import app.winters.octo.desktop.update.installerFor
+import app.winters.octo.playback.BetweenSongs
 import app.winters.octo.sound.Crossfeed
 import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqFilter
@@ -126,7 +127,9 @@ internal object SettingsWalk {
         appearance = appearance.copy(ambientGlow = true, ambience = AmbienceStyle.Immersive, calmMotion = false, wash = appearance.wash.copy(moving = true)),
         discord = discord.copy(on = true, firstLine = "{title} by {artist}"),
         hotkeys = hotkeys.copy(on = true, keys = mapOf(HotkeyAction.Like.id to "Ctrl+Alt+L")),
-        playback = playback.copy(crossfadeSeconds = 6, smartTransitions = true, speed = 1.25f),
+        // Crossfade, so its length and curve show; the windows as set by
+        // default show Automix's rows.
+        playback = playback.copy(betweenSongs = BetweenSongs.Crossfade, crossfadeLength = 6, speed = 1.25f),
         sound = this.sound.copy(profiles = mapOf(SHARED_SOUND to sound)),
     )
 

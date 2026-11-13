@@ -11,6 +11,8 @@ import app.winters.octo.desktop.settings.SavedCurve
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.SoundPrefs
 import app.winters.octo.playback.Pace
+import app.winters.octo.playback.automixSettingsOf
+import app.winters.octo.playback.crossfadeMsOf
 import app.winters.octo.playback.paceOf
 import app.winters.octo.sound.EqPreset
 import app.winters.octo.sound.EqPresets
@@ -48,26 +50,26 @@ data class EngineSound(
     val pace: Pace,
 )
 
-// The longest blend the crossfade setting allows, and where it starts
-// when crossfade is turned on.
-const val LONGEST_BLEND_SECONDS = 16
-const val SHORTEST_BLEND_SECONDS = 2
-const val DEFAULT_BLEND_SECONDS = 8
-
+// What the engine is told, from the settings and the device playing. The
+// blends come from the Between songs choice as on every app: none for
+// Gapless, Crossfade's own length and curve, or Automix's planned blends
+// with its longest intro.
 fun engineSound(settings: AppSettings, device: String?): EngineSound {
     val sound = soundFor(settings.sound, device)
     val playback = settings.playback
+    val blends = automixSettingsOf(playback.betweenSongs, playback.crossfadeLength, playback.crossfadeCurve, playback.filterSweeps, playback.matchTempo)
     return EngineSound(
         eq = sound.engineEq(),
         replayGain = sound.engineReplayGain(),
         dsp = sound.engineDsp(),
-        crossfadeMs = playback.crossfadeSeconds.coerceIn(0, LONGEST_BLEND_SECONDS) * 1_000,
+        crossfadeMs = crossfadeMsOf(playback.betweenSongs, playback.crossfadeLength).toInt(),
         automix = AutomixSettings(
-            smartTransitions = playback.smartTransitions,
-            filterSweeps = playback.filterSweeps,
-            matchTempo = playback.matchTempo,
-            maxOverlapMs = (playback.crossfadeSeconds.coerceIn(0, LONGEST_BLEND_SECONDS) * 1_000).toUInt(),
-            fadeCurve = playback.crossfadeCurve.engine(),
+            smartTransitions = blends.smart,
+            filterSweeps = blends.filterSweeps,
+            matchTempo = blends.beatMatch,
+            maxOverlapMs = blends.maxOverlapMs.toUInt(),
+            fadeCurve = blends.fadeCurve.engine(),
+            longestIntroMs = blends.longestIntroMs.toUInt(),
         ),
         pace = paceOf(playback.speed, playback.keepPitch, playback.pitchSemitones),
     )

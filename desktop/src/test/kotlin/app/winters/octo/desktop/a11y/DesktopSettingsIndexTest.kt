@@ -43,8 +43,8 @@ class DesktopSettingsIndexTest {
         assertEquals("Accent color", titles("accent").first())
         assertTrue("the colour spelling", "Accent color" in titles("colour"))
         assertTrue("Accent color" in titles("dark"))
-        assertTrue("Crossfade" in titles("gap"))
-        assertTrue("Crossfade" in titles("fade"))
+        assertTrue("Between songs" in titles("gap"))
+        assertTrue("Between songs" in titles("fade"))
         assertTrue("Equalizer" in titles("eq"))
         assertTrue(START_WITH in titles("autostart"))
         assertEquals(emptyList<String>(), titles("   "))
@@ -86,8 +86,8 @@ class DesktopSettingsIndexTest {
         assertFalse("Show what you're playing" in noDiscord || "Discord" in noDiscord)
 
         val noEngine = shown(everything.copy(engine = false))
-        assertTrue("Equalizer" in windows && "Longest blend" in windows && "Nothing to shape" !in windows)
-        assertFalse("Equalizer" in noEngine || "Longest blend" in noEngine || "Speed" in noEngine)
+        assertTrue("Equalizer" in windows && "Length" in windows && "Between songs" in windows && "Nothing to shape" !in windows)
+        assertFalse("Equalizer" in noEngine || "Length" in noEngine || "Between songs" in noEngine || "Speed" in noEngine)
         assertTrue("Nothing to shape" in noEngine)
 
         val plain = shown(everything.copy(family = false))
@@ -128,8 +128,26 @@ class DesktopSettingsIndexTest {
         // Discord and every hidden row shown.
         listOf(
             "Mini player", "Media keys", "Use these keys from any app", "[each global shortcut]", "Show what you're playing", "Friends' list shows",
-            "Bands", "No filters yet", "Preset", "Longest blend", "Movement", "Drift speed", "Use the system title bar", "Now playing notifications",
+            "Bands", "No filters yet", "Preset", "Length", "Crossfade curve", "Filter sweeps", "Match tempo", "Movement", "Drift speed",
+            "Use the system title bar", "Now playing notifications",
         ).forEach { assertTrue("$it was drawn: $seen", it in seen) }
+    }
+
+    // Between songs answers every word people type for it, Smart
+    // transitions among them, which has no entry of its own any more; the
+    // card keeps the Crossfade card's id and Length the Longest blend
+    // row's.
+    @Test
+    fun betweenSongsAnswersItsWordsAndKeepsTheOldIds() {
+        for (words in listOf("smart transitions", "gapless", "automix", "blend", "between songs", "crossfade", "mix", "transition", "dj")) {
+            val hit = searchDesktopSettings(words, everything).firstOrNull { it.entry.title == "Between songs" }
+            assertTrue("\"$words\" finds Between songs: ${titles(words)}", hit != null)
+            assertEquals(SettingsKey.Playback to "crossfade", hit!!.entry.page to hit.entry.row)
+        }
+        assertTrue("no Smart transitions entry is left", DesktopSettingsIndex.none { it.title == "Smart transitions" || it.row?.endsWith("smart-transitions") == true })
+        val length = DesktopSettingsIndex.single { it.title == "Length" }
+        assertEquals("crossfade.longest-blend", length.row)
+        assertEquals("Playback · Between songs", searchDesktopSettings("crossfade length", everything).first { it.entry.title == "Length" }.place)
     }
 
     private companion object {

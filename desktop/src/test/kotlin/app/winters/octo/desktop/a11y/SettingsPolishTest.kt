@@ -36,8 +36,13 @@ import app.winters.octo.desktop.pages.searchDesktopSettings
 import app.winters.octo.desktop.pages.settingsIconSize
 import app.winters.octo.desktop.settings.DesktopOs
 import androidx.compose.runtime.CompositionLocalProvider
+import app.winters.octo.desktop.settings.SHARED_SOUND
+import app.winters.octo.sound.Crossfeed
+import app.winters.octo.sound.CrossfeedPreset
+import app.winters.octo.sound.SoundSettings
 import org.jetbrains.skia.Bitmap
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -59,7 +64,6 @@ class SettingsPolishTest {
         width: Int = 1440,
         height: Int = 900,
         textScale: Float = 1f,
-        crossfade: Int = 6,
         saved: Boolean = false,
         serve: (FakeServer) -> Unit = {},
         updates: ((SettingsStore) -> DesktopUpdates)? = null,
@@ -74,7 +78,8 @@ class SettingsPolishTest {
         saved = saved,
         serve = serve,
         updates = updates,
-        look = { it.copy(playback = it.playback.copy(crossfadeSeconds = crossfade)) },
+        // Crossfeed on with its own values, so its card shows every row.
+        look = { it.copy(sound = it.sound.copy(profiles = mapOf(SHARED_SOUND to SoundSettings(crossfeed = Crossfeed(on = true, preset = CrossfeedPreset.Custom))))) },
         wrap = { content -> CompositionLocalProvider(LocalRowFlashMs provides 60_000L) { content() } },
     )
 
@@ -140,11 +145,11 @@ class SettingsPolishTest {
                 val glaze = s.nodes().filter { it.config.getOrNull(RowId)?.startsWith("$card.") == true }.minOf { it.whole.top }
                 return glaze - top
             }
-            s.open(SettingsKey.Playback)
-            val plain = titleLine("when-the-queue-ends")
-            val switched = titleLine("crossfade")
-            val titleSwitch = s.nodes().first { it.config.getOrNull(SemanticsProperties.ToggleableState) != null && it.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull() == "Crossfade" }
-            val row = s.nodes().first { it.config.getOrNull(RowTitle)?.title == "Smart transitions" }
+            s.open(SettingsKey.Sound)
+            val plain = titleLine("loudness")
+            val switched = titleLine("crossfeed")
+            val titleSwitch = s.nodes().first { it.config.getOrNull(SemanticsProperties.ToggleableState) != null && it.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull() == "Crossfeed" }
+            val row = s.nodes().first { it.config.getOrNull(RowTitle)?.title == "Each output keeps its own sound" }
             val inCard = row.under().first { it.config.getOrNull(SemanticsProperties.HideFromAccessibility) != null }
             assertEquals("the title's switch ends with the rows' switches", inCard.whole.right, titleSwitch.whole.right, 0.5f)
             s.open(SettingsKey.Home)
@@ -154,23 +159,23 @@ class SettingsPolishTest {
         }
     }
 
-    // Crossfade switched off keeps its card and every row, dimmed: nothing
+    // Crossfeed switched off keeps its card and every row, dimmed: nothing
     // in them is a control a screen reader or the keyboard reaches, their
     // names are still read, and the page keeps its height.
     @Test(timeout = 120_000)
     fun aCardSwitchedOffKeepsItsRowsInPlaceAndOutOfReach() {
         scene().use { s ->
-            s.open(SettingsKey.Playback)
+            s.open(SettingsKey.Sound)
             // As a screen reader is given them.
-            fun rows() = s.nodes(merged = true).filter { it.config.getOrNull(RowId)?.startsWith("crossfade.") == true }
+            fun rows() = s.nodes(merged = true).filter { it.config.getOrNull(RowId)?.startsWith("crossfeed.") == true }
             fun tall() = s.page().config[SemanticsProperties.VerticalScrollAxisRange].maxValue() + s.page().boundsInRoot.height
             val before = rows().map { it.config[RowId] }
             val height = tall()
-            assertTrue("crossfade has rows", before.size >= 4)
-            val titleSwitch = s.nodes().first { it.config.getOrNull(SemanticsProperties.ToggleableState) != null && it.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull() == "Crossfade" }
+            assertTrue("crossfeed has rows: $before", before.size >= 3)
+            val titleSwitch = s.nodes().first { it.config.getOrNull(SemanticsProperties.ToggleableState) != null && it.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull() == "Crossfeed" }
             s.onUi { titleSwitch.config[SemanticsActions.OnClick].action?.invoke() }
             s.render(6)
-            assertEquals("crossfade is off", 0, s.app.settings.current.playback.crossfadeSeconds)
+            assertFalse("crossfeed is off", s.app.sound!!.current.value.crossfeed.on)
             assertEquals("every row stays", before, rows().map { it.config[RowId] })
             assertEquals("the page keeps its height", height, tall(), 0.5f)
             val reachable = rows().flatMap { listOf(it) + it.under() }.filter { node ->
@@ -178,17 +183,17 @@ class SettingsPolishTest {
                 c.getOrNull(SemanticsActions.OnClick) != null || c.getOrNull(SemanticsProperties.ToggleableState) != null || c.getOrNull(SemanticsActions.SetProgress) != null
             }
             assertTrue("controls in the rows: ${reachable.map { "${it.name()} ${it.config}" }}", reachable.isEmpty())
-            assertTrue("their names are read", rows().any { row -> row.under().any { it.words() == "Smart transitions" } })
+            assertTrue("their names are read", rows().any { row -> row.under().any { it.words() == "Preset" } })
             // The keyboard walks past them to the next card.
             val area = rows().map { it.boundsInRoot }.reduce { a, b -> Rect(minOf(a.left, b.left), minOf(a.top, b.top), maxOf(a.right, b.right), maxOf(a.bottom, b.bottom)) }
-            var reachedSpeed = false
-            repeat(90) {
+            var reachedNext = false
+            repeat(120) {
                 s.press(Key.Tab)
                 val at = s.focused() ?: return@repeat
                 assertTrue("the keyboard landed in an off row: ${at.name()}", !area.contains(at.boundsInRoot.center) || at.boundsInRoot.width == 0f)
-                if (at.name() == "Speed") reachedSpeed = true
+                if (at.name() == "Import") reachedNext = true
             }
-            assertTrue("the keyboard reaches the card after", reachedSpeed)
+            assertTrue("the keyboard reaches the card after", reachedNext)
         }
     }
 

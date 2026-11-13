@@ -16,10 +16,12 @@ import app.winters.octo.desktop.nav.SettingsKey
 import app.winters.octo.desktop.nav.soundSectionPlace
 import app.winters.octo.desktop.pages.LocalRowFlashMs
 import app.winters.octo.desktop.pages.RowFlash
+import app.winters.octo.desktop.pages.RowId
 import app.winters.octo.desktop.pages.RowTitle
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.settings.AppSettings
+import app.winters.octo.playback.BetweenSongs
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -179,6 +181,38 @@ class SettingsPagesTest {
         }
     }
 
+    // Between songs shows the rows of the choice made, picked from its
+    // segments, and an ask for a row the choice hides lights the choice,
+    // the control that shows it; a row it shows lights itself.
+    @Test(timeout = 120_000)
+    fun betweenSongsShowsItsChoicesRowsAndAHiddenRowLightsTheChoice() {
+        scene(engine = true).use { s ->
+            val under = setOf("Length", "Crossfade curve", "Filter sweeps", "Match tempo")
+            fun shown() = s.stableTitles().filter { it in under }
+            fun pick(name: String) = s.click(s.nodes(merged = true).first { it.name() == name && it.config.getOrNull(SemanticsProperties.Role) == Role.Tab })
+            fun litFor(row: String): String? {
+                s.open(SettingsKey.Playback, row)
+                s.until("$row to light something") { s.lit().isNotEmpty() }
+                return s.lit().single().first.config.getOrNull(RowId)
+            }
+            s.open(SettingsKey.Playback)
+            assertEquals("a new install is on Automix", listOf("Filter sweeps", "Match tempo"), shown())
+            assertTrue("the choice says what it does", s.nodes().any { it.name() == "Songs blend where they meet best, on the beat when they can." })
+            assertEquals("crossfade.choice", litFor("crossfade.longest-blend"))
+            assertEquals("crossfade.match-tempo", litFor("crossfade.match-tempo"))
+            pick("Crossfade")
+            assertEquals(BetweenSongs.Crossfade, s.app.settings.current.playback.betweenSongs)
+            assertEquals(listOf("Length", "Crossfade curve"), shown())
+            assertEquals("crossfade.choice", litFor("crossfade.filter-sweeps"))
+            assertEquals("crossfade.longest-blend", litFor("crossfade.longest-blend"))
+            pick("Gapless")
+            assertEquals(BetweenSongs.Gapless, s.app.settings.current.playback.betweenSongs)
+            assertEquals("Gapless shows nothing more", emptyList<String>(), shown())
+            assertTrue(s.nodes().any { it.name() == "Each song plays straight into the next." })
+            assertEquals("crossfade.choice", litFor("crossfade.crossfade-curve"))
+        }
+    }
+
     @Test(timeout = 120_000)
     fun theSameRowAskedForAgainLightsAgain() {
         scene().use { s ->
@@ -230,7 +264,7 @@ class SettingsPagesTest {
                 assertEquals(place.page, s.app.settingsUi.page)
                 val expected = mapOf(
                     "output" to "Output", "eq" to "Equalizer", "loudness" to "Loudness", "balance" to "Balance",
-                    "crossfeed" to "Crossfeed", "correction" to "Headphone correction", "playback" to "Crossfade",
+                    "crossfeed" to "Crossfeed", "correction" to "Headphone correction", "playback" to "Between songs",
                 ).getValue(old)
                 val lit = s.lit().single().first
                 assertEquals("$old lights its card", listOf(expected), s.headingsIn(lit))
@@ -249,15 +283,15 @@ class SettingsPagesTest {
             s.open(SettingsKey.Playback)
             val headings = s.headings()
             assertTrue(headings.containsAll(listOf("When the queue ends", "Songs found online")))
-            assertFalse(headings.toString(), "Crossfade" in headings || "Speed and pitch" in headings)
+            assertFalse(headings.toString(), "Between songs" in headings || "Speed and pitch" in headings)
         }
         scene(engine = true).use { s ->
             s.open(SettingsKey.Sound)
             assertTrue(s.headings().containsAll(listOf("Output", "Equalizer", "Loudness", "Balance", "Crossfeed", "Headphone correction")))
             assertFalse("Nothing to shape" in s.rowTitles())
             s.open(SettingsKey.Playback)
-            assertTrue(s.headings().containsAll(listOf("When the queue ends", "Songs found online", "Crossfade", "Speed and pitch")))
-            assertTrue("the crossfade switch sits on its title", "Crossfade" in s.rowTitles())
+            assertTrue(s.headings().containsAll(listOf("When the queue ends", "Songs found online", "Between songs", "Speed and pitch")))
+            assertTrue("the choice is the card's first row", "Between songs" in s.rowTitles())
         }
     }
 
