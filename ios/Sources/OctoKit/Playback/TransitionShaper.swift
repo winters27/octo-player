@@ -198,6 +198,18 @@ public final class TransitionShaper {
     private var quietMs = 0.0
     private var faded = false
 
+    /// A disarm in progress: the volume and the filters' share go straight to the song's own over
+    /// the frames left.
+    private var disarmLeft = 0
+    private var gainStep = 0.0
+    private var wetStep = 0.0
+
+    /// The volume applied to the last frame, for checks.
+    public var level: Double { gain }
+
+    /// Whether a transition or what is left of one still changes the sound.
+    public var shaping: Bool { current != nil || gain != 1 || wet != 0 }
+
     public init(sampleRate: Int, channels: Int) {
         self.sampleRate = sampleRate
         self.channels = channels
@@ -213,6 +225,7 @@ public final class TransitionShaper {
     /// already, so a transition armed after its start glides to the curve instead of jumping.
     public func arm(_ transition: DeckTransition?, songMs: Double) {
         if transition === current { return }
+        disarmLeft = 0
         let fresh = current == nil && gain == 1
         current = transition
         faded = false
@@ -225,6 +238,10 @@ public final class TransitionShaper {
     /// Changes `frames` frames in place. The first frame is at `songMs` in its song and each frame
     /// moves the song on `msPerFrame`.
     public func process(_ buffers: [UnsafeMutablePointer<Float>], frames: Int, songMs: Double, msPerFrame: Double) {
+        if disarmLeft > 0 {
+            disarming(buffers, frames)
+            return
+        }
         let transition = current
         if gain == 1 && wet == 0 {
             guard let transition else { return }
@@ -282,10 +299,65 @@ public final class TransitionShaper {
         }
     }
 
+    /// Drops the transition and takes the sound to the song's own volume and no filtering in a
+    /// straight line over `frames`, from wherever the transition left it (the filters run on with
+    /// their last cutoffs while they fade out, so nothing restarts). 0 goes there at once.
+    public func disarm(_ frames: Int) {
+        current = nil
+        faded = false
+        if frames <= 0 || (gain == 1 && wet == 0) {
+            gain = 1
+            wet = 0
+            disarmLeft = 0
+            lowPass.reset()
+            highPass.reset()
+            lowPassOn = false
+            return
+        }
+        disarmLeft = frames
+        gainStep = (1 - gain) / Double(frames)
+        wetStep = wet / Double(frames)
+    }
+
+    private func disarming(_ buffers: [UnsafeMutablePointer<Float>], _ frames: Int) {
+        let channels = min(self.channels, buffers.count)
+        for i in 0..<frames {
+            if disarmLeft > 0 {
+                disarmLeft -= 1
+                if disarmLeft == 0 {
+                    gain = 1
+                    wet = 0
+                } else {
+                    gain += gainStep
+                    wet -= wetStep
+                }
+            }
+            let g = gain
+            for ch in 0..<channels {
+                let x = Double(buffers[ch][i])
+                var y = x
+                if wet > 0 {
+                    var f = highPass.process(x, channel: ch)
+                    if lowPassOn { f = lowPass.process(f, channel: ch) }
+                    y = x + (f - x) * wet
+                }
+                buffers[ch][i] = Float(y * g)
+            }
+        }
+        if disarmLeft == 0 {
+            lowPass.reset()
+            highPass.reset()
+            lowPassOn = false
+        }
+    }
+
     /// Measures the outgoing song in 10 ms steps through the blend, before any volume change, and
-    /// fades it out once it has stayed below its gate for `earlyFadeMs`.
+    /// fades it out once it has stayed below its gate for `earlyFadeMs`. A plan that holds the
+    /// outgoing song (an intro, a silent lead-in) is watched only from the hold's end: a break
+    /// inside the hold never fades it.
     private func watchSilence(_ buffers: [UnsafeMutablePointer<Float>], _ channels: Int, _ from: Int, _ count: Int, _ t: Double, _ gateDb: Double) {
-        if faded || t < 0 || t >= 1 { return }
+        let holdShare = current?.plan.holdShare ?? 0
+        if faded || t < max(0, holdShare) || t >= 1 { return }
         for i in 0..<count {
             var sum = 0.0
             for ch in 0..<channels { sum += Double(buffers[ch][from + i]) }

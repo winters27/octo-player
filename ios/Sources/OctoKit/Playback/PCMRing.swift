@@ -145,6 +145,73 @@ public final class PCMRing: @unchecked Sendable {
         taken.store(t, ordering: .releasing)
     }
 
+    /// Chunks handed over so far, to tell whether the writer delivered anything since a look.
+    public var chunksWritten: Int { written.load(ordering: .acquiring) }
+
+    /// Where a song frame lies ahead of the reader, in the current jump.
+    public enum Ahead: Sendable, Equatable {
+        /// This many frames are read before it (0 when the reader is at or past it).
+        case at(Int)
+        /// The song ends this many frames ahead, before it.
+        case endsBefore(Int)
+        /// It has not been decoded yet.
+        case notYet
+    }
+
+    /// Reader: how far ahead song frame `target` is. A frame inside a stretch left out (a skipped
+    /// silence) counts as the first frame kept after it.
+    public func ahead(ofSongFrame target: Int64) -> Ahead {
+        let current = generation.load(ordering: .acquiring)
+        var t = taken.load(ordering: .relaxed)
+        let w = written.load(ordering: .acquiring)
+        var offset = readOffset
+        var frames = 0
+        while t < w {
+            let slot = t % capacity
+            if generations[slot] == current {
+                let start = songFrames[slot] + Int64(offset)
+                let left = counts[slot] - offset
+                if target <= start { return .at(frames) }
+                if target < start + Int64(left) { return .at(frames + Int(target - start)) }
+                frames += max(0, left)
+                if ends[slot] { return .endsBefore(frames) }
+            }
+            t += 1
+            offset = 0
+        }
+        return .notYet
+    }
+
+    /// Reader: drops the frames before song frame `target` in the current jump, short of the
+    /// song's end. Answers how many were dropped.
+    @discardableResult
+    public func drop(beforeSongFrame target: Int64) -> Int {
+        let current = generation.load(ordering: .acquiring)
+        var t = taken.load(ordering: .relaxed)
+        let w = written.load(ordering: .acquiring)
+        var dropped = 0
+        while t < w {
+            let slot = t % capacity
+            if generations[slot] != current {
+                t += 1
+                readOffset = 0
+                continue
+            }
+            let start = songFrames[slot] + Int64(readOffset)
+            let left = counts[slot] - readOffset
+            if target <= start || ends[slot] && left <= 0 { break }
+            let take = min(left, Int(target - start))
+            readOffset += take
+            dropped += take
+            waiting.subtract(take, ordering: .relaxed)
+            if readOffset < counts[slot] || ends[slot] { break }
+            t += 1
+            readOffset = 0
+        }
+        taken.store(t, ordering: .releasing)
+        return dropped
+    }
+
     /// The song frame the reader is at, from the chunk it reads next, when one is there.
     public func nextSongFrame() -> Int64? {
         let t = taken.load(ordering: .relaxed)

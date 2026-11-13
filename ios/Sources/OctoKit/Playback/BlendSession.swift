@@ -27,6 +27,9 @@ public final class BlendSession: @unchecked Sendable {
     public private(set) var startFrame: Int64 = -1
     /// Inputs, actions and events that found their fixed buffers full.
     public private(set) var lost = 0
+    /// An undone start still waits to hear what the outgoing song plays after its end, so that song
+    /// holds at its end instead of moving on.
+    public var awaitsFollowUp: Bool { askGen >= 0 }
     /// The platform numbers; the caller may change them between calls.
     public var timing: BlendTiming
 

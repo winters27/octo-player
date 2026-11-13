@@ -141,7 +141,8 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
     public var latency: Int { stage?.latency ?? 0 }
 
     /// Runs the armed transition, when it is for this song, on the frames about to be handed on,
-    /// and moves the song time past them.
+    /// and moves the song time past them. The transition runs on the blend's own time: the song
+    /// time less any move of the start and any hold's extension, standing still while frozen.
     private func shapeTransition(_ buffers: [UnsafeMutablePointer<Float>], _ frames: Int) {
         guard frames > 0 else { return }
         let speed = Double(Float(bitPattern: speedBits.load(ordering: .relaxed)))
@@ -152,13 +153,60 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
         transitions = shaping
         // A stream whose song is not known takes the transition too.
         let current = entryId
-        let transition = armed.withLock { found -> DeckTransition? in
+        var transition = armed.withLock { found -> DeckTransition? in
             guard let armedNow = found else { return nil }
             return armedNow.entryId == nil || current == nil || armedNow.entryId == current ? armedNow : nil
         }
-        shaping.arm(transition, songMs: songMs)
-        shaping.process(buffers, frames: frames, songMs: songMs, msPerFrame: msPerFrame)
+        if transition !== blendFor {
+            // A new plan runs on its own time from its start.
+            blendFor = transition
+            startShiftMs = 0
+            extensionMs = 0
+            frozenMs = nil
+            dropped = false
+        }
+        // Disarmed by the blend's rules: not taken up again until another plan is armed.
+        if dropped { transition = nil }
+        let blendMs = frozenMs ?? songMs - startShiftMs - extensionMs
+        shaping.arm(transition, songMs: blendMs)
+        shaping.process(buffers, frames: frames, songMs: blendMs, msPerFrame: frozenMs == nil ? msPerFrame : 0)
     }
+
+    // MARK: The blend's rules, on the render thread
+
+    /// The transition the blend time below belongs to, and whether the blend's rules disarmed it.
+    private var blendFor: DeckTransition?
+    private var dropped = false
+    private var startShiftMs = 0.0
+    private var extensionMs = 0.0
+    private var frozenMs: Double?
+
+    /// The blend time of the next frame handed on.
+    public var blendMs: Double { frozenMs ?? songMs - startShiftMs - extensionMs }
+
+    /// Audio thread: the blend's time stops at the next frame's (the incoming song is held).
+    public func freezeBlend() { frozenMs = blendMs }
+
+    /// Audio thread: the blend's time runs again from the next frame, shifted by `extensionMs` in
+    /// all, so it carries on from where it stopped.
+    public func unfreezeBlend(extensionMs: Double) {
+        frozenMs = nil
+        self.extensionMs = extensionMs
+    }
+
+    /// Audio thread: the plan's start moved by `ms` later.
+    public func moveBlendStart(byMs ms: Double) { startShiftMs = ms }
+
+    /// Audio thread: the transition goes to the song's own level over `frames` frames (at once
+    /// for 0) and is not taken up again until another plan is armed.
+    public func disarmTransition(frames: Int) {
+        dropped = true
+        frozenMs = nil
+        transitions?.disarm(frames)
+    }
+
+    /// Whether the armed transition (or what is left of it) still shapes the sound.
+    public var shaping: Bool { transitions?.shaping ?? false }
 
     /// The song time of the next frame this step hands on.
     public var songMs: Double {

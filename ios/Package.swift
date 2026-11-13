@@ -36,7 +36,10 @@ let package = Package(
         // What the app leaves for its widgets, the links the widgets open it with, and the
         // shapes they draw. Foundation only.
         .target(name: "OctoSystem", dependencies: ["ShareInbox"]),
-        .testTarget(name: "OctoKitTests", dependencies: ["OctoKit", "ShareInbox", "OctoSystem"]),
+        // Counts calls into the C allocator on one thread, for the tests that prove the render
+        // thread's code allocates nothing. Test-only: no product links it.
+        .target(name: "AllocCount", path: "Tests/AllocCount"),
+        .testTarget(name: "OctoKitTests", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "AllocCount"]),
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.
         .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "OctoIntents"], resources: [.copy("CoverArt")]),
