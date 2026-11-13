@@ -437,6 +437,55 @@
       ]
     },
     {
+      "name": "a-decoded-end-before-the-start-cancels-at-once",
+      "about": "A's decoded end is known at 456000 (song time 179500), before the start at 180000: at the first advance after it the predicted start (480000) lies past it, so the plan is cancelled there as A's own advance, before A's next pass is reached.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
+        {"op": "advance", "to": 403200, "head": 379200, "aSongMs": 178400},
+        {"op": "post", "deck": "A", "input": "decodedEnd", "frame": 432000, "value": 456000},
+        {"op": "advance", "to": 436800, "head": 412800, "aSongMs": 179100, "actions": [{"kind": "aDisarm", "frame": 436800}]},
+        {"op": "post", "deck": "A", "input": "movedOn", "frame": 456000},
+        {"op": "advance", "to": 460800, "head": 436800, "aSongMs": 100, "events": [{"kind": "cancelled", "gen": 1, "frame": 436800, "cause": "aMovedOn"}]}
+      ]
+    },
+    {
+      "name": "a-late-move-past-the-decoded-end-cancels",
+      "about": "The rebuffer of the bar-grid vector, with A's decoded end known at 528000 (song time 181000): the late start would move the start to the next bar (182000, frame 576000), past that end, so instead of moving the plan is cancelled as A's own advance.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": "unbounded"},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
+        {"op": "advance", "to": 403200, "head": 379200, "aSongMs": 178400},
+        {"op": "post", "deck": "A", "input": "decodedEnd", "frame": 432000, "value": 528000},
+        {"op": "post", "deck": "A", "input": "dry", "frame": 451152},
+        {"op": "advance", "to": 451200, "head": 436800, "aSongMs": 179400},
+        {"op": "advance", "to": 451200, "head": 451200, "aSongMs": 179400},
+        {"op": "post", "deck": "A", "input": "ready", "frame": 451200},
+        {"op": "advance", "to": 452160, "head": 451200, "aSongMs": 179420},
+        {"op": "advance", "to": 455520, "head": 454560, "aSongMs": 179490, "actions": [{"kind": "aDisarm", "frame": 455520}]},
+        {"op": "advance", "to": 460800, "head": 455520, "aSongMs": 179600, "events": [{"kind": "cancelled", "gen": 1, "frame": 455520, "cause": "aMovedOn"}]}
+      ]
+    },
+    {
+      "name": "a-start-found-past-the-decoded-end-cancels",
+      "about": "A's decoded end (470000) and then A's frame at the start (480000) come in one advance: the start lies past the end, so the plan is cancelled at the start's input as A's own advance and nothing is proposed.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
+        {"op": "advance", "to": 403200, "head": 379200, "aSongMs": 178400},
+        {"op": "post", "deck": "A", "input": "decodedEnd", "frame": 432000, "value": 470000},
+        {"op": "post", "deck": "A", "input": "startAt", "frame": 447000, "value": 480000},
+        {"op": "advance", "to": 451200, "head": 427200, "aSongMs": 179400, "actions": [{"kind": "aDisarm", "frame": 447000}]},
+        {"op": "advance", "to": 460800, "head": 451200, "aSongMs": 50, "events": [{"kind": "cancelled", "gen": 1, "frame": 447000, "cause": "aMovedOn"}]}
+      ]
+    },
+    {
       "name": "floor-cancel-when-the-proposal-is-not-answered",
       "about": "Proposed, main never acks: at the cap floor the audio thread cancels, B's start is undone, incoming not ready is queued at S, and main's late ack fails.",
       "profile": "android",

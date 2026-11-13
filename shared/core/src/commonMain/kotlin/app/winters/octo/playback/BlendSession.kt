@@ -87,6 +87,9 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private var endFrame = -1L
     private var heldNextAt = -1L
 
+    // The output frame just past A's last frame of its song, once known.
+    private var decodedEnd = -1L
+
     // B's song time since entry over the rate (in A's ms) is runMs at
     // runFrom, growing with the frames after it unless B is stopped.
     private var runFrom = 0L
@@ -226,6 +229,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         endAt = -1
         endFrame = -1
         heldNextAt = -1
+        decodedEnd = -1
         runFrom = 0
         runMs = 0.0
         stopped = false
@@ -421,13 +425,20 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         retire()
     }
 
-    // Head-timed rules: the late start while armed; the proposal, then the
-    // commit or the floor's cancel once a start is decided.
+    // Head-timed rules: A's real end, then the late start while armed; the
+    // proposal, then the commit or the floor's cancel once a start is
+    // decided.
     private fun headRules() {
         if (state == BlendState.ARMED) {
             if (!outgoingMs.isNaN() && word.stateOf(generation) == CommitState.INITIAL) {
                 val predicted = point + frames((startMs - outgoingMs) / msPerFrame)
-                if (predicted - head < timing.proposalLeadFrames) lateStart(predicted, point)
+                if (decodedEnd >= 0 && predicted >= decodedEnd) {
+                    // A's song ends before the start: A plays on into its
+                    // next song, never a start it does not reach.
+                    cancelBeforeStart(point, BlendCause.A_MOVED_ON)
+                } else if (predicted - head < timing.proposalLeadFrames) {
+                    lateStart(predicted, point)
+                }
             }
             return
         }
@@ -469,6 +480,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         }
         if (deck == BlendDeck.B) return
         when (input) {
+            BlendInput.DECODED_END -> decodedEnd = value
             BlendInput.START_AT -> startAt(frame, value)
             BlendInput.MOVED_ON -> {
                 holdForAnswer(frame)
@@ -488,6 +500,10 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // A's frame at the start is known at output frame `s`.
     private fun startAt(frame: Long, s: Long) {
         if (word.stateOf(generation) != CommitState.INITIAL) return
+        if (decodedEnd in 0..s) {
+            cancelBeforeStart(frame, BlendCause.A_MOVED_ON)
+            return
+        }
         if (s - head < timing.proposalLeadFrames) {
             lateStart(s, frame)
             return
@@ -514,11 +530,16 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // head moves to A's first bar line (or, with no bar grid, the first
     // frame) that far ahead, while the plan's bar budget and its latest end
     // allow (with no bar grid, any budget but 0 and the latest end);
-    // otherwise B does not start.
+    // otherwise B does not start. A move past A's known end is no move: A
+    // plays on into its next song.
     private fun lateStart(predicted: Long, at: Long) {
         val nowMs = startMs + (head + timing.proposalLeadFrames - predicted) * msPerFrame
         val bars = if (locked) max(1.0, ceil((nowMs - startMs) / barMs)) else 0.0
         val target = if (locked) startMs + bars * barMs else nowMs
+        if (decodedEnd >= 0 && predicted + frames((target - startMs) / msPerFrame) >= decodedEnd) {
+            cancelBeforeStart(at, BlendCause.A_MOVED_ON)
+            return
+        }
         val fits = if (locked) {
             bars <= allowedBars().toDouble()
         } else {

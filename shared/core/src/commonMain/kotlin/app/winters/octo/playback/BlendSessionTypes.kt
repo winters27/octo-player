@@ -40,6 +40,12 @@ enum class BlendInput {
     // An engine restart re-placed a decided start that has not played yet:
     // the value is the new S.
     RESTARTED,
+
+    // A's decoded end is known (its stream's last frame of the song is in
+    // hand, its next pass or its stream's end after it): the value is the
+    // output frame just past A's last frame of the song. Posted at the frame
+    // where it became known.
+    DECODED_END,
 }
 
 // Idle; armed (the run-up); mixing; held (B stopped inside A's hold,
