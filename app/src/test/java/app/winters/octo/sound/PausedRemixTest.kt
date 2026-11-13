@@ -206,35 +206,39 @@ class PausedRemixTest {
 
     @Test
     fun aSkipWhilePausedDropsTheKeptRangeAndPlaysTheNewSong() {
-        val x = blend(finish = true)
-        runUntil(x.rig) { x.ackAt >= 0 }
-        x.rig.runFor(100.0)
-        val p = x.rig.track(0)
-        personPause(x)
-        x.rig.runFor(1_000.0)
-        // Next while paused, on B: a hold, the announced release, the new
-        // song buffered into a new output, and the hold done.
-        val rig = x.rig
-        rig.mixer.holdIfHandedOver(1)
-        rig.mixer.announce(1)
-        x.b.restartAt(0.0)
-        x.b.entry = "next"
-        x.b.signal = { 0.25f }
-        x.b.feed()
-        rig.mixer.holdDone()
-        rig.runFor(500.0)
-        resume(x)
-        rig.runFor(1_500.0)
-        val h = p.head
-        val fresh = rig.builder.built.last()
-        val first = rig.tap.byOutput.getValue(fresh.id).first()
-        assertEquals(h, first)
-        // From h only the new song: never A's old tail, never B's old frames.
-        for (m in h until h + 24_000) {
-            val v = heard(rig, m)
-            assertTrue("mix frame $m: $v", v >= 0f && v <= 0.25f + 1e-6f)
+        // With main's fade finished (A's output released) and before it (A's
+        // output still alive).
+        for (finish in listOf(true, false)) {
+            val x = blend(finish = finish)
+            runUntil(x.rig) { x.ackAt >= 0 }
+            x.rig.runFor(100.0)
+            val p = x.rig.track(0)
+            personPause(x)
+            x.rig.runFor(1_000.0)
+            // Next while paused, on B: a hold, the announced release, the new
+            // song buffered into a new output, and the hold done.
+            val rig = x.rig
+            rig.mixer.holdIfHandedOver(1)
+            rig.mixer.announce(1)
+            x.b.restartAt(0.0)
+            x.b.entry = "next"
+            x.b.signal = { 0.25f }
+            x.b.feed()
+            rig.mixer.holdDone()
+            rig.runFor(500.0)
+            resume(x)
+            rig.runFor(1_500.0)
+            val h = p.head
+            val fresh = rig.builder.built.last()
+            assertTrue("finish $finish: the fresh output was written", rig.tap.byOutput.containsKey(fresh.id))
+            assertEquals(h, rig.tap.byOutput.getValue(fresh.id).first())
+            // From h only the new song: never A's old tail, never B's old frames.
+            for (m in h until h + 24_000) {
+                val v = heard(rig, m)
+                assertTrue("finish $finish, mix frame $m: $v", v >= 0f && v <= 0.25f + 1e-6f)
+            }
+            for (m in h + 960 until h + 24_000) assertEquals("finish $finish: the new song at $m", 0.25f, heard(rig, m), 1e-6f)
         }
-        for (m in h + 960 until h + 24_000) assertEquals("the new song at $m", 0.25f, heard(rig, m), 1e-6f)
     }
 
     @Test

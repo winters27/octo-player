@@ -166,6 +166,7 @@ class PassRestartTest {
         // From the settled head: e0 on with nothing repeated or skipped,
         // then y; x never heard.
         val h = p.head
+        assertTrue("the fresh output was written: ${rig.builder.built.map { "${it.id}/${it.written}" }}", rig.tap.byOutput.containsKey(fresh.id))
         assertEquals(h, rig.tap.byOutput.getValue(fresh.id).first())
         for (m in h + 960 until 96_000) assertEquals("e0 at $m", (m + 1) / 1_000_000f, rig.tap.frames.getValue(m), 1e-7f)
         for (m in 96_000L until 96_000 + 24_000) assertEquals("y at $m (h $h, notes ${rig.tap.notes})", -((m - 96_000 + 1) / 1_000_000f), rig.tap.frames.getValue(m), 1e-7f)
