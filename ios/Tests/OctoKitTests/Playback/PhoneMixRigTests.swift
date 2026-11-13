@@ -455,7 +455,7 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             let aEnd = try #require(rig.stageA.lastSound(), "setup \(n)")
             #expect(aEnd > resumedAt, "setup \(n)")
             #expect(abs(bStart - (aEnd + 1)) <= 3, "setup \(n): A ends at \(aEnd), B starts at \(bStart)")
-            let highest = try #require(rig.stageA.highestFrame(resumedAt..<aEnd + 1), "setup \(n)")
+            let highest = try #require(rig.stageA.highestFrame(resumedAt..<max(resumedAt, aEnd + 1)), "setup \(n)")
             #expect(highest < 480_000 && highest > 480_000 - 1_200, "setup \(n): A's last frame \(highest)")
             // B from its entry, at its rate, past its ramp in.
             let probe = bStart + 1_500
@@ -469,23 +469,29 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
     func aPauseOnceTheIncomingSongHasStartedLeavesItAlone(bFirst: Bool) throws {
         let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94)
         rig.bFirst = bFirst
+        // Shaped as the crossfader arms them: early in the blend B is under its own level.
+        rig.shape(rigPlan())
         rig.arm()
-        rig.run(until: { rig.stageB.firstHeard.map { $0 + 9_600 < rig.nextBus } ?? false })
-        let pausedAt = rig.nextBus
+        // B's first frames are rendered and in its stage, none heard yet: the pause comes before
+        // S is heard, with B already under way.
+        rig.run(until: { rig.mix.stages[1].started })
+        try #require(rig.mix.stages[1].started)
+        #expect(rig.stageB.firstHeard == nil)
         rig.pauseAfterHandover()
         rig.run(48)
         let resumedAt = rig.nextBus
-        // The last of B heard before the resume: what its stage held came out after the pause.
-        let before = try #require(rig.stageB.highestFrame(pausedAt..<resumedAt))
         rig.resume()
         rig.run(100)
-        // Nothing of A once playing again; B carries on from where it paused (past its 10 ms fade
-        // and its ramp back in).
+        // Nothing of A once playing again.
         #expect(rig.stageA.silent(from: resumedAt, to: rig.nextBus))
+        // B plays on alone and, past its 250 ms ramp, at its own level: its frames come out
+        // untouched and run on at its rate.
         let back = try #require(rig.stageB.firstSound(from: resumedAt))
         #expect(back < resumedAt + 4_320 + 2_400)
-        let after = try #require(rig.stageB.frame(at: back + 1_500))
-        #expect(after > before && after - before < 2_600, "B before \(before), after \(after)")
+        let probe = back + 12_000 + 2_400
+        let f = try #require(rig.stageB.frame(at: probe), "B's sample \(rig.stageB.raw[probe]) is not at its own level")
+        let g = try #require(rig.stageB.frame(at: probe + 100))
+        #expect(abs(Double(g - f) - 100 * 0.94) <= 2)
     }
 
     /// The spec's restart row: delays 0 and 4320, and 2400 and 4320, the restart a few thousand
