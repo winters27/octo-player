@@ -113,7 +113,7 @@ struct CopySteps: View {
     private func label(_ step: CopyStep, _ state: StepState) -> some View {
         Text(CopyWords.stepLabel(step, server: server))
             .font(.octoBodySmall)
-            .foregroundStyle(state == .now ? Color.white : (state == .done ? OctoColor.textSecondary : OctoColor.textMuted))
+            .foregroundStyle(state == .now ? OctoColor.textPrimary : (state == .done ? OctoColor.textSecondary : OctoColor.textMuted))
     }
 
     @ViewBuilder
@@ -135,7 +135,7 @@ struct CopyHero: View {
         VStack(spacing: 0) {
             CopyRing(run: run, size: 112)
             Text(CopyWords.title(arriving: true))
-                .font(.octoHeadline).foregroundStyle(.white).multilineTextAlignment(.center)
+                .font(.octoHeadline).foregroundStyle(OctoColor.textPrimary).multilineTextAlignment(.center)
                 .padding(.top, 16)
                 .accessibilityAddTraits(.updatesFrequently)
             Text(CopyWords.heroText(server))
@@ -148,7 +148,7 @@ struct CopyHero: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -163,14 +163,14 @@ struct CopyBanner: View {
         HStack(spacing: 14) {
             CopyRing(run: run, size: 56)
             VStack(alignment: .leading, spacing: 2) {
-                Text(CopyWords.title(arriving: true)).font(.octoBody).foregroundStyle(.white)
+                Text(CopyWords.title(arriving: true)).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                 Text(run.map(CopyWords.description) ?? CopyWords.heroText(server))
                     .font(.octoBodySmall.monospacedDigit()).foregroundStyle(OctoColor.textMuted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(20)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -195,7 +195,7 @@ struct CopyDone: View {
                 .background(Circle().fill(OctoColor.accentTonal))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(CopyWords.doneTitle).font(.octoBody).foregroundStyle(.white)
+                    Text(CopyWords.doneTitle).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                     Spacer(minLength: 8)
                     QuietButton("Dismiss", action: onDismiss)
                 }
@@ -215,7 +215,7 @@ struct CopyDone: View {
             .animation(.octoSpring(0.9, 400), value: settling)
         }
         .padding(20)
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -235,7 +235,7 @@ struct CopyFailed: View {
             if big {
                 VStack(spacing: 0) {
                     CopyRing(run: nil, size: 112, stopped: true)
-                    Text(CopyWords.failedTitle).font(.octoHeadline).foregroundStyle(.white).multilineTextAlignment(.center).padding(.top, 16)
+                    Text(CopyWords.failedTitle).font(.octoHeadline).foregroundStyle(OctoColor.textPrimary).multilineTextAlignment(.center).padding(.top, 16)
                     Text([reason, CopyWords.stoppedAt(step, done: done)].compactMap { $0 }.joined(separator: " "))
                         .font(.octoBodySmall).foregroundStyle(OctoColor.textMuted).multilineTextAlignment(.center).padding(.top, 6)
                     CopySteps(run: nil, server: server, stopped: step).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 20)
@@ -248,7 +248,7 @@ struct CopyFailed: View {
                     HStack(spacing: 14) {
                         CopyRing(run: nil, size: 56, stopped: true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(CopyWords.failedTitle).font(.octoBody).foregroundStyle(.white)
+                            Text(CopyWords.failedTitle).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                             Text([reason, CopyWords.stoppedAt(step, done: done)].compactMap { $0 }.joined(separator: " "))
                                 .font(.octoBodySmall).foregroundStyle(OctoColor.textMuted)
                         }
@@ -259,7 +259,7 @@ struct CopyFailed: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .glassEffect(Glass.octo, in: .rect(cornerRadius: 20))
+        .octoGlass(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
     }
@@ -276,7 +276,7 @@ struct CopyProgressRow: View {
         RowFrame(entry: SettingsIndex.syncNow) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Text(CopyWords.doing(run.step, server: run.server)).font(.octoBody).foregroundStyle(.white)
+                    Text(CopyWords.doing(run.step, server: run.server)).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
                     Spacer(minLength: 12)
                     if let count = CopyWords.count(run) {
                         Text(count).font(.octoBodySmall.monospacedDigit()).foregroundStyle(OctoColor.textSecondary).lineLimit(1)
@@ -342,7 +342,7 @@ struct CopyNote: View {
             CopyRing(run: run, size: 40, stopped: stopped)
             VStack(alignment: .leading, spacing: 2) {
                 Text(stopped ? CopyWords.failedTitle : (likes ? CopyWords.likesOnItsWay : CopyWords.onItsWay))
-                    .font(.octoBodySmall).foregroundStyle(.white)
+                    .font(.octoBodySmall).foregroundStyle(OctoColor.textPrimary)
                 if let run { Text(CopyWords.description(run)).font(.octoCaption.monospacedDigit()).foregroundStyle(OctoColor.textMuted) }
             }
         }
