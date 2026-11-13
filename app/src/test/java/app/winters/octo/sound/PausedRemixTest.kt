@@ -266,6 +266,52 @@ class PausedRemixTest {
         for (j in 960 until 24_000) assertEquals("frame ${h + j}", 5_000L * f + j, aFrame(heard(rig, h + j)))
     }
 
+    @Test
+    fun anEditAfterTheAckWithTheWrittenPointBeforeSPlaysAToSThenBWithNoGap() {
+        // Main's lag at its cap: the start is proposed well over a buffer
+        // ahead, so an edit 10 ms after the ack finds the written point before S.
+        val rig = MixRig(tuning = MixTuning(watchdogMs = 2_000, lagFloorMs = 500.0))
+        val a = rig.deck(0)
+        a.signal = ::aValue
+        a.play()
+        a.feed()
+        val b = rig.deck(1)
+        b.signal = ::bValue
+        rig.mixer.park(1, true)
+        b.play()
+        b.feed()
+        rig.runFor(200.0)
+        var writtenAtEdit = -1L
+        rig.onEvent = { e ->
+            if (e.kind == BlendEventKind.PROPOSED && rig.mixer.commitWord.ack(e.generation)) {
+                rig.mixer.acked(e.generation)
+                rig.sched.at(rig.sched.now + 10_000_000) {
+                    writtenAtEdit = rig.mixer.written
+                    rig.mixer.disarm(BlendDisarm.EDIT, e.generation)
+                }
+            }
+        }
+        rig.arm(testBlend(1, testPlan(start = 2_000, entry = 0, overlap = 2_000)))
+        rig.runFor(3_500.0)
+        val s = 2_000L * f
+        assertTrue("the written point before S: $writtenAtEdit", writtenAtEdit in 0 until s)
+        assertEquals(1, rig.builder.built.size)
+        // A alone at its own level up to S; at S A out and B in over 20 ms,
+        // B's shaping disarmed; then B alone. No silent gap.
+        val bad = (0 until s).firstOrNull { aFrame(heard(rig, it)) != it }
+        if (bad != null) {
+            val around = (bad - 6..bad + 6).map { "$it:${aFrame(heard(rig, it))}" }
+            val t = rig.track(0)
+            throw AssertionError("A alone breaks at $bad (written at the edit $writtenAtEdit): $around; notes ${rig.tap.notes}; track written ${t.written}, writes at ${t.writes.take(3)}")
+        }
+        for (j in 0 until 960) {
+            val m = s + j
+            val want = aValue(m) * (960 - j) / 960.0 + bValue(j.toLong()) * j / 960.0
+            assertEquals("the 20 ms at S, frame $m", want, heard(rig, m).toDouble(), 2e-4)
+        }
+        for (m in s + 960 until s + 48_000) assertEquals("B alone at mix frame $m", m - s, bFrame(heard(rig, m)))
+    }
+
     // The hold
 
     @Test
