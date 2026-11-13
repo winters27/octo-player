@@ -112,9 +112,15 @@ fn an_intro_holds_then_fades_and_rises_then_holds() {
     assert_eq!((intro_out_gain(0.0, 0.0), intro_in_gain(0.0, 0.0)), (1.0, 1.0));
     assert!((intro_out_gain(0.5, 0.0) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
     assert_eq!(intro_out_gain(1.0, 1.0), 1.0);
-    // Every other kind keeps its curve, whatever the shares say.
-    let blend = TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, ..plan.clone() };
+    // Every other kind keeps its curve, with no rise; a hold there holds the
+    // outgoing song alone, then runs the curve over the rest.
+    let blend =
+        TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, hold_share: 0.0, ..plan.clone() };
     assert_eq!(blend.gains(0.5), gains(0.5, BLEND_CURVE));
+    let held =
+        TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, hold_share: 0.5, ..plan.clone() };
+    assert_eq!(held.gains(0.25), (1.0, 0.0));
+    assert_eq!(held.gains(0.75), gains(0.5, BLEND_CURVE));
 }
 
 // The mixer's headroom at `p`: `db` lower through the blend, coming and
@@ -150,7 +156,7 @@ fn an_intro_keeps_the_level_across_the_next_songs_full_point() {
     }
     // A blend's curve over the same overlap lets the level fall into B's
     // quiet intro.
-    let blend = TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, ..plan };
+    let blend = TransitionPlan { kind: TransitionKind::Blend, k: BLEND_CURVE, hold_share: 0.0, ..plan };
     let lowest = summed_levels(&blend).into_iter().map(|(_, db)| db).fold(f64::INFINITY, f64::min);
     assert!(lowest < -6.0, "{lowest:.2} dB");
 }

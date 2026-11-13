@@ -554,6 +554,9 @@ impl Player {
                 self.pace = pace;
                 if let Some(m) = &mut self.mixer {
                     m.set_pace(pace);
+                    // A blend whose beats would now be heard too far apart
+                    // is cut where they would first be.
+                    m.follow_speed(pace.speed as f64);
                 }
                 self.drop_prepared();
             }

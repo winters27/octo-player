@@ -26,7 +26,8 @@ pub use features::{
 };
 pub use planner::{
     AUTOMIX_LONGEST_INTRO_MS, DRIFT_LIMIT_MS, LATE_MOVE_UNBOUNDED, PRE_ROLL_MS, PlanSettings,
-    TransitionContext, TransitionKind, TransitionPlan, is_plain_genre, plan_transition, transition_gains,
+    TransitionContext, TransitionKind, TransitionPlan, drop_cut_at_ms, is_plain_genre, plan_transition,
+    transition_gains,
 };
 pub use profile::{
     PROFILE_REVISION, PROFILE_VERSION, SectionProfile, TransitionProfile, level_code, level_of_code,
@@ -142,7 +143,10 @@ impl TransitionPlan {
             rise_share: 0.0,
             latest_end_ms: len_a_ms,
             late_move_bars: LATE_MOVE_UNBOUNDED,
+            both_heard_start_ms: 0,
             both_heard_end_ms: 0,
+            lock_ms: 0.0,
+            drift_gap: 0.0,
             drift_at_end_ms: 0.0,
         }
     }
@@ -157,8 +161,9 @@ impl TransitionPlan {
     /// line the incoming song up: the blend ends where it would have, starts
     /// at `now_ms` at the earliest, keeps its entry, curve and filters, and
     /// drops its bar lock and tempo matching, so it may move by any number
-    /// of bars and its beats are no longer lined up. `None` when too little
-    /// is left to blend.
+    /// of bars and its beats are no longer lined up. A blend held through
+    /// the incoming song's silent lead-in holds as long from its new start.
+    /// `None` when too little is left to blend.
     pub fn late_from(&self, now_ms: i64) -> Option<Self> {
         let end = self.start_ms + self.overlap_ms;
         let start_ms = self.start_ms.max(now_ms);
@@ -166,15 +171,23 @@ impl TransitionPlan {
         if overlap_ms < SHORTEST_FADE_MS as i64 {
             return None;
         }
+        let hold_share = match self.kind {
+            TransitionKind::Intro => self.hold_share,
+            _ => (self.hold_share * self.overlap_ms as f64 / overlap_ms as f64).min(1.0),
+        };
         Some(TransitionPlan {
             start_ms,
             overlap_ms,
+            hold_share,
             beat_match_rate: None,
             beat_ms: None,
             beat_anchor_ms: None,
             late: true,
             late_move_bars: LATE_MOVE_UNBOUNDED,
+            both_heard_start_ms: 0,
             both_heard_end_ms: 0,
+            lock_ms: 0.0,
+            drift_gap: 0.0,
             drift_at_end_ms: 0.0,
             reason: format!(
                 "late {} at {} over {} ({})",

@@ -57,6 +57,21 @@ pub fn automix_in_gain(t: f64, k: f64) -> f64 {
     (1.0 - out * out).max(0.0).sqrt()
 }
 
+/// Where a blend whose start is held is along its curve at `t` (0 to 1):
+/// the outgoing song alone at its own level until `hold_share`, while the
+/// incoming one's first sound is still to come, then the curve over the
+/// rest of the overlap. Below 0 while held, where every curve gives the
+/// outgoing song 1 and the incoming one 0.
+pub fn past_hold(t: f64, hold_share: f64) -> f64 {
+    if hold_share <= 0.0 {
+        t
+    } else if hold_share >= 1.0 {
+        -1.0
+    } else {
+        (t - hold_share) / (1.0 - hold_share)
+    }
+}
+
 /// The outgoing song's volume at `t` (0 to 1) through an intro: its own
 /// level until `hold_share`, then an equal-power fade to nothing at the end,
 /// so the fade's middle falls halfway between the two.

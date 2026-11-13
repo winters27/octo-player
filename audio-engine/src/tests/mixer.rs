@@ -434,6 +434,176 @@ fn an_outgoing_song_that_ends_inside_its_blend_lets_the_next_one_up_gently() {
     assert!(loudest(&out, climbing + 24_000, out.len() / 2) > 0.99);
 }
 
+// A (6 s) blending at 1 s into B (6 s) over `fade` frames with `shape`,
+// under `settings`; at each of `speeds`' output frames the speed is set the
+// way the player sets it. The sound, and where each setting put the cut,
+// in the blend's frames.
+fn blend_with_speeds(
+    a: &[i16],
+    b: &[i16],
+    fade: u64,
+    shape: FadeShape,
+    settings: &SoundSettings,
+    speeds: &[(usize, f64)],
+) -> (Vec<f32>, Vec<Option<u64>>) {
+    let dir = temp_dir();
+    let (pa, pb) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&pa, RATE, 2, a);
+    write_wav(&pb, RATE, 2, b);
+    let mut mixer = Mixer::new(RATE, 0, settings, Pace::default());
+    let mut lane = Lane::new(deck(1, &pa), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &pb);
+    wait_ready(&next);
+    mixer.plan_fade(1, 1.0, fade, next, Loudness::default(), shape);
+    let mut out = Vec::new();
+    let mut markers = Vec::new();
+    let mut block = vec![0.0; 256];
+    let mut cuts = Vec::new();
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        out.extend_from_slice(&block[..n * 2]);
+        if mixer.is_fading()
+            && let Some(lane) = mixer.lane_mut()
+        {
+            lane.last = true;
+        }
+        if let Some(&(at, speed)) = speeds.get(cuts.len())
+            && out.len() / 2 >= at
+        {
+            cuts.push(mixer.follow_speed(speed));
+        }
+        if state == MixState::Ended && n == 0 {
+            assert_eq!(cuts.len(), speeds.len(), "every speed was set");
+            return (out, cuts);
+        }
+        if n == 0 {
+            assert!(Instant::now() < until, "mixer stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+fn steady_left() -> Vec<i16> {
+    (0..RATE as usize * 6).flat_map(|_| [8_192, 0]).collect()
+}
+
+fn steady_right() -> Vec<i16> {
+    (0..RATE as usize * 6).flat_map(|_| [0, 8_192]).collect()
+}
+
+// The output frame holding the blend's frame `at` (it begins at 1 s).
+fn blend_frame(at: u64) -> usize {
+    48_000 + LATENCY + at as usize
+}
+
+#[test]
+fn a_lowered_speed_cuts_an_intro_only_once_its_hold_is_over() {
+    // A 4 s intro: A at its own level for 2 s; both heard together from
+    // 1.9 s to 3.5 s, the beats parting by 1% from the start, 35 ms by the
+    // end of that. At half speed 20 ms is the limit, reached 2 s in: the
+    // cut waits for it, A held at full through the hold.
+    let intro = FadeShape {
+        kind: crate::automix::TransitionKind::Intro,
+        hold_share: 0.5,
+        rise_share: 0.1,
+        both_heard_ms: (1_900.0, 3_500.0),
+        lock_ms: 0.0,
+        drift_gap: 0.01,
+        ..Default::default()
+    };
+    let slowed = [(blend_frame(24_000), 0.5)];
+    let (out, cuts) = blend_with_speeds(
+        &steady_left(),
+        &steady_right(),
+        192_000,
+        intro,
+        &SoundSettings::default(),
+        &slowed,
+    );
+    assert_eq!(cuts, vec![Some(96_000)]);
+    assert_eq!(out[blend_frame(95_000) * 2], 0.25, "A held at its own level");
+    // Then A goes over 20 ms, while B comes up to its own level.
+    assert_eq!(out[blend_frame(96_000 + 960 + 256) * 2], 0.0);
+    assert!((out[blend_frame(96_000 + 960 + 12_000 + 512) * 2 + 1] - 0.25).abs() < 1e-6);
+}
+
+// A 2 s blend whose two songs are heard together for its first 1.5 s, the
+// beats parting by 2% from the start: 30 ms by then, 60 ms heard at half
+// speed, the limit of 20 ms there reached 1 s in.
+fn drifting() -> FadeShape {
+    FadeShape { k: 0.4, both_heard_ms: (0.0, 1_500.0), lock_ms: 0.0, drift_gap: 0.02, ..Default::default() }
+}
+
+#[test]
+fn a_blend_cut_by_a_lowered_speed_lets_the_next_song_up_gently_and_limited() {
+    let slowed = [(blend_frame(14_400), 0.5)];
+    let (out, cuts) = blend_with_speeds(
+        &steady_left(),
+        &steady_right(),
+        96_000,
+        drifting(),
+        &SoundSettings::default(),
+        &slowed,
+    );
+    assert_eq!(cuts, vec![Some(48_000)]);
+    // A goes over 20 ms from 1 s in; B, held there, then climbs to its own
+    // level over 250 ms in even steps, never stepping.
+    let cut = blend_frame(48_000);
+    assert!(out[(cut - 10) * 2] > 0.05);
+    assert_eq!(out[(cut + 960 + 256) * 2], 0.0);
+    let from = out[cut * 2 + 1];
+    let climb = 0.25 - from;
+    assert!(climb > 0.02, "{from}");
+    let lift = RATE as usize / 4;
+    let step = (cut - 10..cut + 960 + lift + 512)
+        .map(|i| (out[i * 2 + 1] - out[(i - 1) * 2 + 1]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(step < climb / lift as f32 * 2.0, "a step of {step} on a climb of {climb}");
+    assert!((out[(cut + 960 + lift + 512) * 2 + 1] - 0.25).abs() < 1e-6);
+    // With full-scale noise and the Limiter off, nothing passes the ceiling
+    // through the blend, the cut and the climb.
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let (out, _) = blend_with_speeds(
+        &noise(288_000, 7),
+        &noise(288_000, 8),
+        96_000,
+        drifting(),
+        &limiter_off(),
+        &slowed,
+    );
+    let through = loudest(&out, blend_frame(0), cut + 960 + lift);
+    assert!(through <= ceiling + 1e-4, "{through}");
+}
+
+#[test]
+fn a_speed_that_keeps_the_beats_close_enough_leaves_the_blend_alone() {
+    let early = blend_frame(14_400);
+    let cases = [
+        ("within the limit", FadeShape { drift_gap: 0.005, ..drifting() }, vec![(early, 0.5)]),
+        ("past the stretch", drifting(), vec![(blend_frame(76_800), 0.5)]),
+        ("matched", FadeShape { drift_gap: 0.0, rate: Some(1.02), ..drifting() }, vec![(early, 0.5)]),
+        ("planned speed", drifting(), vec![(early, 1.0)]),
+        // Lowered, then back before the cut: cleared.
+        ("back again", drifting(), vec![(early, 0.5), (blend_frame(28_800), 1.0)]),
+    ];
+    for (what, shape, speeds) in cases {
+        let (out, cuts) = blend_with_speeds(
+            &steady_left(),
+            &steady_right(),
+            96_000,
+            shape,
+            &SoundSettings::default(),
+            &speeds,
+        );
+        assert_eq!(*cuts.last().unwrap(), None, "{what}");
+        // A plays its whole blend.
+        assert!(out[blend_frame(90_000) * 2] > 0.0, "{what}");
+    }
+}
+
 #[test]
 fn a_song_with_no_blend_plays_exactly_as_before() {
     // A blend later in a song changes nothing before it.

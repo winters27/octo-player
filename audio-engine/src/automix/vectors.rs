@@ -390,9 +390,23 @@ fn check(vectors: &Value) -> Vec<String> {
             c.fail(format!("{what}: lateMoveBars {}, expected {bars}", plan.late_move_bars));
         }
         c.near(
+            &format!("{what} bothHeardStartMs"),
+            Some(num(e, "bothHeardStartMs")),
+            Some(plan.both_heard_start_ms as f64),
+            t("ms"),
+        );
+        c.near(
             &format!("{what} bothHeardEndMs"),
             Some(num(e, "bothHeardEndMs")),
             Some(plan.both_heard_end_ms as f64),
+            t("ms"),
+        );
+        c.near(&format!("{what} lockMs"), Some(num(e, "lockMs")), Some(plan.lock_ms), t("ms") / 10.0);
+        c.near(&format!("{what} driftGap"), Some(num(e, "driftGap")), Some(plan.drift_gap), t("rate"));
+        c.near(
+            &format!("{what} dropCutAtHalfSpeedMs"),
+            num_or_none(e, "dropCutAtHalfSpeedMs"),
+            plan.drop_cut_at_ms(0.5, 0.0),
             t("ms"),
         );
         c.near(
@@ -503,6 +517,13 @@ fn check(vectors: &Value) -> Vec<String> {
             Some(actual),
             t("curve"),
         );
+    }
+    for d in list(vectors, "dropCuts") {
+        let heard = (num(d, "bothHeardStartMs"), num(d, "bothHeardEndMs"));
+        let (lock, gap, speed, from) =
+            (num(d, "lockMs"), num(d, "driftGap"), num(d, "speed"), num(d, "fromMs"));
+        let actual = planner::drop_cut_at_ms(heard, lock, gap, speed, from);
+        c.near(&format!("drop cut for {d}"), num_or_none(d, "cutAtMs"), actual, t("curve"));
     }
     c.failures
 }

@@ -975,6 +975,64 @@ fn a_matched_blend_plays_its_rate_however_soon_the_next_song_ends() {
     assert!((182_000..189_000).contains(&b_heard), "B heard for {b_heard} frames");
 }
 
+// A blend at 9 s over 2 s whose two songs are heard together for all of it,
+// their beats meeting at its start and `drift` ms apart in song time by
+// its end.
+fn drifting_plan(input: &crate::automix::PlanInput, drift: f64) -> crate::automix::TransitionPlan {
+    let mut plan = matched_plan(input);
+    plan.beat_match_rate = None;
+    (plan.both_heard_start_ms, plan.both_heard_end_ms, plan.lock_ms) = (0, 2_000, 0.0);
+    (plan.drift_gap, plan.drift_at_end_ms) = (drift / 2_000.0, drift);
+    plan
+}
+
+fn drifting_30(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    drifting_plan(input, 30.0)
+}
+
+fn drifting_10(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    drifting_plan(input, 10.0)
+}
+
+// Frames of A (left) heard when the speed is halved just as its blend
+// into B (right) begins, under `planner`.
+fn heard_when_slowed(planner: crate::automix::Planner) -> usize {
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    let a_samples: Vec<i16> = (0..RATE as usize * 12).flat_map(|_| [8_192, 0]).collect();
+    write_wav(&a, RATE, 2, &a_samples);
+    let b_samples: Vec<i16> = (0..RATE as usize * 6).flat_map(|_| [0, 8_192]).collect();
+    write_wav(&b, RATE, 2, &b_samples);
+    let (engine, events, capture, pump) = driven_engine();
+    engine.set_test_planner(Some(planner));
+    engine.set_crossfade(2_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
+    play_until(&pump, &events, "blend", 1_500, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
+    engine.set_speed(0.5, 1.0).unwrap();
+    pump.play_out();
+    events.wait_for("queue end", Duration::from_secs(20), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+    let out = capture.lock().unwrap().clone();
+    out.chunks_exact(2).filter(|f| f[0] != 0.0).count()
+}
+
+#[test]
+fn a_lowered_speed_cuts_a_blend_where_its_beats_would_be_heard_apart() {
+    // 30 ms apart in song time by the end is 60 ms heard at half speed: the
+    // 20 ms limit there is reached 1.33 s into the blend, where it is cut,
+    // so A is heard for its 9 s and about 2.5 s more.
+    let cut = heard_when_slowed(drifting_30);
+    assert!(cut < RATE as usize * 12, "A heard for {cut} frames");
+    assert!(cut > RATE as usize * 11, "A heard for {cut} frames");
+    // 10 ms apart is 20 ms heard: the blend plays out, A for the blend's
+    // 2 s of song heard over 4 s.
+    let kept = heard_when_slowed(drifting_10);
+    assert!(kept > RATE as usize * 25 / 2, "A heard for {kept} frames");
+}
+
 // What each plan made for a 30 s song was asked from: where it plans
 // from, and whether its beats stay locked at any pace.
 static ASKED: Mutex<Vec<(f64, i64, bool)>> = Mutex::new(Vec::new());
