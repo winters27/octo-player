@@ -55,6 +55,15 @@ const val INTRO_FADE_MS = 3_000L
 // an intro (one bar when locked).
 const val INTRO_RISE_MS = 1_000L
 
+// An intro plays only where the incoming song, with its rise, stays at
+// least INTRO_UNDER_OUTGOING_DB under the outgoing song held at its own
+// level, at the same moments, for INTRO_UNDER_OUTGOING_SHARE of the hold
+// where it sounds: the two together are then never clearly louder than the
+// outgoing song alone, and a short break in the outgoing song, where the
+// incoming one plays alone, does not count.
+const val INTRO_UNDER_OUTGOING_DB = 6.0
+const val INTRO_UNDER_OUTGOING_SHARE = 0.95
+
 // Music at full level the outgoing song would lose after a blend's end:
 // above KEPT_MUSIC_LIMIT_MS the start is left out, and each second below it
 // costs KEPT_MUSIC_WEIGHT. Full level is within KEPT_MUSIC_BELOW_BODY_DB of
@@ -662,6 +671,31 @@ private class PlanPass(
         return if (first.isNaN()) null else first to last
     }
 
+    // Whether an intro's incoming song stays INTRO_UNDER_OUTGOING_DB under
+    // the outgoing song through the hold, walked as the both-heard stretch
+    // is: at each step where the incoming song, with its rise, sounds above
+    // its silence gate, its 400 ms level less the outgoing song's at the
+    // same moment, the INTRO_UNDER_OUTGOING_SHARE percentile of those (the
+    // lower of two neighbors). True when it never sounds there.
+    private fun underOutgoing(s: Shape): Boolean {
+        val b = head ?: return true
+        val hold = s.holdShare * s.overlapMs
+        val gate = b.features.gateDb
+        val apart = ArrayList<Double>()
+        val count = floor(hold / HEARD_STEP_MS).toInt()
+        for (i in 0 until count) {
+            val since = i * HEARD_STEP_MS
+            val into = introInGain(since / s.overlapMs, s.riseShare)
+            if (into <= 0) continue
+            val level = b.levelAt(entry + since * speedB) + 20 * log10(into)
+            if (level <= gate) continue
+            apart += level - measured.levelAt(s.startMs + since)
+        }
+        if (apart.isEmpty()) return true
+        apart.sort()
+        return apart[floor(INTRO_UNDER_OUTGOING_SHARE * (apart.size - 1)).toInt()] <= -INTRO_UNDER_OUTGOING_DB
+    }
+
     // The best scoring shape; the later one wins a tie. Shapes that cut over
     // KEPT_MUSIC_LIMIT_MS of the outgoing song's full-level music are left
     // out; null when no other is left.
@@ -755,9 +789,11 @@ private class PlanPass(
     // outgoing song holds, then fades over two bars (or INTRO_FADE_MS
     // unlocked, at most half the quiet start) centered on where the next
     // song is full, a bar line from where the beats meet when locked; the
-    // next song rises over a bar (INTRO_RISE_MS unlocked). Null when no
-    // start is left, the beats allow none or every one left would cut the
-    // outgoing song short, and the lengthened blend is planned instead.
+    // next song rises over a bar (INTRO_RISE_MS unlocked). Only starts where
+    // the next song stays under the outgoing one through the hold
+    // (underOutgoing) are planned. Null when no start is left, the beats or
+    // levels allow none or every one left would cut the outgoing song
+    // short, and the lengthened blend is planned instead.
     private fun planIntro(quiet: Double): TransitionPlan? {
         val bar = lockA?.barMs
         val rise = bar ?: INTRO_RISE_MS.toDouble()
@@ -800,7 +836,7 @@ private class PlanPass(
                 if (latestEnd - start - hold >= fade / 2) all += intro(start, lock, latestEnd - start)
             }
         }
-        val allowed = all.filter { meets(it) }
+        val allowed = all.filter { meets(it) && underOutgoing(it) }
         if (allowed.isEmpty()) return null
         val best = best(allowed) { s ->
             var score = sharedScore(s)

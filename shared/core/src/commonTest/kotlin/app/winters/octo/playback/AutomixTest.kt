@@ -954,6 +954,28 @@ class AutomixTest {
     }
 
     @Test
+    fun anIntroPlaysOnlyWhereItsQuietStartStaysWellUnderTheOutgoingSong() {
+        // The two quiet starts against the outgoing song at the same moments
+        // (bars lined up): 7 dB and 5 dB under it.
+        val a = AutomixCases.tail("steady-100")
+        fun under(song: String): Double {
+            val b = AutomixCases.head(song)
+            val apart = (300 until 1_000).map { b.levelAt(it * 10.0) - a.levelAt(180_000 + it * 10.0) }.sorted()
+            return apart[apart.size / 2]
+        }
+        assertEquals(-7.0, under("under-100"), 0.5)
+        assertEquals(-5.0, under("near-100"), 0.5)
+        // 7 dB under through the hold: the intro.
+        val quiet = plan("intro-under-line")
+        assertEquals(quiet.reason, TransitionKind.INTRO, quiet.kind)
+        // 5 dB under: together they would be clearly louder than the
+        // outgoing song alone, so the blend lengthened into the quiet start.
+        val near = plan("intro-over-line")
+        assertTrue(near.reason, near.kind != TransitionKind.INTRO && near.kind != TransitionKind.GAPLESS)
+        assertTrue(near.reason, near.reason.contains("(full from"))
+    }
+
+    @Test
     fun anIntroWhoseBeatsWouldBeHeardApartIsRefused() {
         // 5.7% apart, unmatched: the intro would be far apart where the next
         // song is full; the blend is planned instead, within the bound.

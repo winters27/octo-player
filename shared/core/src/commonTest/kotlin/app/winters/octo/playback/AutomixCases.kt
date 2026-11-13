@@ -147,6 +147,15 @@ object AutomixCases {
         "audible-131" to SyntheticSong(22_050, 1, 45_000, audibleStart(130.9)),
         "audible-83" to SyntheticSong(22_050, 1, 45_000, audibleStart(250.0 / 3)),
         "audible-85" to SyntheticSong(22_050, 1, 45_000, audibleStart(84.5)),
+        // 100 BPM with a quiet start of 11 s, 11 dB and 13 dB under its own
+        // body but 5 dB and 7 dB under steady-100: just over and just under
+        // the line an intro must keep under the outgoing song.
+        "near-100" to SyntheticSong(
+            22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -19.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -8.0),
+        ),
+        "under-100" to SyntheticSong(
+            22_050, 1, 45_000, steady(0.0, 11_000.0, 100.0, 0.0, padDb = -21.0) + steady(11_000.0, 45_000.0, 100.0, 0.0, padDb = -8.0),
+        ),
     )
 
     data class Pair(
@@ -266,6 +275,10 @@ object AutomixCases {
         Pair("intro-phone-pace", "beat-120", "quiet-intro", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-phone-pace-confident", "steady-100", "quiet-100", matched, context = TransitionContext(pace = 1.25)),
         Pair("intro-cap", "hot-end", "long-intro", eight, headAgainstBody = true),
+        // An intro only where its quiet start stays 6 dB under the outgoing
+        // song: 7 dB under is planned, 5 dB under gives the blend.
+        Pair("intro-under-line", "steady-100", "under-100", eight),
+        Pair("intro-over-line", "steady-100", "near-100", eight),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()
