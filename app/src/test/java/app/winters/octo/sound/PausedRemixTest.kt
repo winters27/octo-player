@@ -214,6 +214,8 @@ class PausedRemixTest {
             x.rig.runFor(100.0)
             val p = x.rig.track(0)
             personPause(x)
+            // A's ring is full while paused: its source gives nothing more.
+            x.a.stalled()
             x.rig.runFor(1_000.0)
             // Next while paused, on B: a hold, the announced release, the new
             // song buffered into a new output, and the hold done.
