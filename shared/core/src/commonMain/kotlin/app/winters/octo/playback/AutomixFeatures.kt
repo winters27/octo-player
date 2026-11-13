@@ -191,6 +191,17 @@ class SectionAnalysis private constructor(
         return at.toDouble() / (to - from)
     }
 
+    // How long from fromMs to toMs the 400 ms level is at or above
+    // thresholdDb, in milliseconds.
+    fun msAtLeast(fromMs: Double, toMs: Double, thresholdDb: Double): Double =
+        if (toMs <= fromMs) 0.0 else shareAtLeast(fromMs, toMs, thresholdDb) * (toMs - fromMs)
+
+    // The 400 ms level at a moment in dBFS; SILENT_DB outside the envelope.
+    fun levelAt(ms: Double): Double {
+        val i = envelope.indexAt(ms)
+        return if (i < 0 || i >= envelope.size) SILENT_DB.toDouble() else body[i]
+    }
+
     // The same section measured against a body level known from elsewhere,
     // such as the whole song heard as it played: the gate, sound times,
     // outro and intro move with it; the boundaries and tempo stay.

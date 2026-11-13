@@ -120,11 +120,15 @@ class AutomixTest {
         val plan = plan("quiet-intro")
         // Without the intro a hot ending gets the shortest blend.
         assertEquals(SHORTEST_BLEND_MS, plan("hot-end").overlapMs)
+        assertEquals(TransitionKind.INTRO, plan.kind)
         assertTrue("${plan.overlapMs}", plan.overlapMs >= head.introEndMs!! - plan.entryMs)
         assertEquals(199_750L, plan.startMs + plan.overlapMs)
         assertTrue(plan.reason, plan.reason.contains("(full from 5."))
-        // Never longer than the slider allows.
-        assertEquals(4_000L, plan("quiet-intro-capped").overlapMs)
+        // Never longer than the longest intro allows, which says so.
+        val capped = plan("quiet-intro-capped")
+        assertEquals(TransitionKind.INTRO, capped.kind)
+        assertEquals(6_000L, capped.overlapMs)
+        assertTrue(capped.reason, capped.reason.contains(", capped)"))
     }
 
     @Test
@@ -181,6 +185,7 @@ class AutomixTest {
         for (pair in AutomixCases.pairs) {
             val p = AutomixCases.plan(pair)
             assertTrue("${pair.name}: ${p.latestEndMs}", p.startMs + p.overlapMs <= p.latestEndMs)
+            if (p.kind == TransitionKind.INTRO) continue
             assertEquals(pair.name, 0.0, p.holdShare, 0.0)
             assertEquals(pair.name, 0.0, p.riseShare, 0.0)
         }
@@ -193,8 +198,8 @@ class AutomixTest {
     @Test
     fun aLateStartMayMoveAPlanAnyNumberOfBarsOnlyWhereItsBeatsCannotDrift() {
         // No bar grid: the fixed crossfade, the plain ones, gapless joins,
-        // unlocked blends and late ones.
-        val unlocked = listOf("smart-off", "classical", "podcast", "album-in-order", "crossfade-off", "too-late", "hot-end", "no-analysis", "late", "pace", "skip-silence")
+        // unlocked blends and late ones, and one tempo untrusted.
+        val unlocked = listOf("smart-off", "classical", "podcast", "album-in-order", "crossfade-off", "too-late", "hot-end", "no-analysis", "no-tail", "no-head", "pace", "skip-silence", "drift-phone-pace")
         for (name in unlocked) {
             assertTrue(name, !plan(name).barLocked)
             assertEquals(name, LATE_MOVE_UNBOUNDED, plan(name).lateMoveBars)
@@ -202,14 +207,80 @@ class AutomixTest {
         val short = planTransition(FadeSong("a", 1, 30_000), FadeSong("b", 1, 180_000), AutomixCases.tail("hot-end"), AutomixCases.head("plain-b"), AutomixSettings(8_000))
         assertEquals(LATE_MOVE_UNBOUNDED, short.lateMoveBars)
         // A rate keeps the beats together wherever the blend sits.
-        assertNotNull(plan("beat-match").beatMatchRate)
-        assertEquals(LATE_MOVE_UNBOUNDED, plan("beat-match").lateMoveBars)
-        // Locked to the bar with a tempo gap and no rate: no move.
-        for (name in listOf("tempo-clash", "beat-match-off", "same-tempo")) {
+        for (name in listOf("beat-match", "intro-matched", "drift-late-matched")) {
+            assertNotNull(name, plan(name).beatMatchRate)
+            assertEquals(name, LATE_MOVE_UNBOUNDED, plan(name).lateMoveBars)
+        }
+        // Two equal tempos never drift apart either.
+        val tail = AutomixCases.tail("beat-120")
+        val head = AutomixCases.head("beat-120-b")
+        val grid = tail.features.tempo!!
+        val equal = SectionAnalysis.fromFeatures(head.envelope, head.features.copy(tempo = head.features.tempo!!.copy(bpm = grid.bpm, beatMs = grid.beatMs)))
+        val same = planTransition(AutomixCases.pair("same-tempo").current, AutomixCases.pair("same-tempo").next, tail, equal, AutomixSettings(8_000))
+        assertTrue(same.reason, same.barLocked && same.beatMatchRate == null)
+        assertEquals(LATE_MOVE_UNBOUNDED, same.lateMoveBars)
+        // Locked to the bar with a tempo gap and no rate: only as far as the
+        // latest end leaves room and the beats stay within the bound.
+        for (name in listOf("beat-match-off", "same-tempo", "drift-1", "drift-3", "late")) {
             val p = plan(name)
             assertTrue(name, p.barLocked && p.beatMatchRate == null)
-            assertEquals(name, 0, p.lateMoveBars)
+            val room = ((p.latestEndMs - p.startMs - p.overlapMs) / p.beatMs!! / BEATS_PER_BAR).toInt()
+            assertTrue("$name: ${p.lateMoveBars} of $room", p.lateMoveBars in 0..room)
         }
+    }
+
+    // How far apart the beats of `plan` are, in song time, where they are
+    // furthest apart while both songs are within 10 dB of their bodies,
+    // with the plan moved `bars` bars later; its beats meet at `lockMs`
+    // (counted the same way as the plan is moved).
+    private fun driftOf(plan: TransitionPlan, a: SectionAnalysis, b: SectionAnalysis, gap: Double, lockMs: Double, bars: Int): Double {
+        val shift = bars * plan.beatMs!! * BEATS_PER_BAR
+        val room = Math.pow(10.0, -OVERLAP_HEADROOM_DB / 20)
+        var first = Double.NaN
+        var last = Double.NaN
+        var since = 0.0
+        while (since <= plan.overlapMs) {
+            val t = since / plan.overlapMs
+            val out = plan.outGain(t) * room
+            val into = plan.inGain(t) * room
+            val at = plan.startMs + since + shift
+            val heardA = out > 0 && a.levelAt(at) + 20 * kotlin.math.log10(out) >= a.features.bodyDb - BOTH_HEARD_BELOW_BODY_DB
+            val heardB = into > 0 && b.levelAt(plan.entryMs + since * (plan.beatMatchRate ?: 1.0)) + 20 * kotlin.math.log10(into) >= b.features.bodyDb - BOTH_HEARD_BELOW_BODY_DB
+            if (heardA && heardB) {
+                if (first.isNaN()) first = at
+                last = at
+            }
+            since += 10.0
+        }
+        if (first.isNaN()) return 0.0
+        val lock = lockMs + shift
+        return gap * maxOf(0.0, last - lock, lock - first)
+    }
+
+    @Test
+    fun aLateMoveStopsAtTheFirstBarWhoseBeatsWouldBeHeardApart() {
+        val pair = AutomixCases.pair("late-move-count")
+        val p = AutomixCases.plan(pair)
+        val a = AutomixCases.tail(pair.a)
+        val b = AutomixCases.head(pair.b)
+        assertTrue(p.reason, p.barLocked && p.beatMatchRate == null && p.kind != TransitionKind.INTRO)
+        val gap = abs(foldTempoRatio(a.features.tempo!!.bpm / b.features.tempo!!.bpm) - 1)
+        val bar = p.beatMs!! * BEATS_PER_BAR
+        val count = p.lateMoveBars
+        // The beats meet where B's first beat from its entry plays.
+        val gridB = b.features.tempo!!
+        val firstBeat = gridB.firstBeatMs + kotlin.math.ceil((p.entryMs - gridB.firstBeatMs) / gridB.beatMs - 1e-9) * gridB.beatMs
+        val lock = p.startMs + (firstBeat - p.entryMs)
+        // The plan sits in A's quiet stretch, with room to move several bars
+        // before A's louder end comes under its blend.
+        assertTrue("$count: ${p.reason}", count >= 1)
+        assertTrue(p.reason, p.startMs + p.overlapMs + (count + 1) * bar <= p.latestEndMs)
+        for (bars in 0..count) {
+            val drift = driftOf(p, a, b, gap, lock, bars)
+            assertTrue("$bars bars later: $drift ms", drift <= DRIFT_LIMIT_MS + 0.5)
+        }
+        val past = driftOf(p, a, b, gap, lock, count + 1)
+        assertTrue("${count + 1} bars later: $past ms", past > DRIFT_LIMIT_MS)
     }
 
     @Test
@@ -419,7 +490,9 @@ class AutomixTest {
         assertEquals(0.0, offBy(plan.startMs - 500.0, 2_000.0), 20.0)
         assertEquals(8_000.0, plan.overlapMs.toDouble(), 10.0)
         assertEquals(TransitionKind.BLEND, plan.kind)
-        assertEquals(1_000.0, plan.entryMs.toDouble(), 20.0)
+        // The next song's last beat at or before its first sound (its
+        // clicks start at 1 s, every half second): none of it is cut.
+        assertEquals(500.0, plan.entryMs.toDouble(), 20.0)
         assertTrue(plan.barLocked)
         assertEquals(OVERLAP_HEADROOM_DB, plan.headroomDb, 0.0)
         assertEquals(FILTER_STRENGTH, plan.filterStrength, 0.0)
@@ -434,10 +507,14 @@ class AutomixTest {
     }
 
     @Test
-    fun differentTemposBlendTwoBars() {
+    fun temposTooFarApartNeverSoundTogetherOffTheBeat() {
+        // 120 against 100 BPM, 20% apart: the click tracks are heard only
+        // around their kicks, and the cut left sits where the two are never
+        // clearly heard at once.
         val plan = plan("tempo-clash")
-        assertEquals(4_000.0, plan.overlapMs.toDouble(), 10.0)
-        assertEquals(0.0, offBy(plan.startMs - 500.0, 2_000.0), 20.0)
+        assertEquals(plan.reason, TransitionKind.CUT, plan.kind)
+        assertTrue(plan.reason, plan.barLocked && plan.driftAtEndMs <= DRIFT_LIMIT_MS)
+        assertEquals(0L, plan.bothHeardEndMs)
     }
 
     @Test
@@ -445,7 +522,13 @@ class AutomixTest {
         val plan = plan("beat-match")
         assertEquals(120.0 / 118.0, plan.beatMatchRate!!, 0.005)
         val head = AutomixCases.head("beat-118").features.tempo!!
-        assertEquals(0.0, offBy(plan.entryMs - head.downbeatMs, head.barMs), 1.0)
+        // Its last bar line at or before its first sound (0.4 s) falls before
+        // its start: it comes in from 0, and the outgoing song starts earlier
+        // by its first bar line's time, so that bar line lands on one of A's.
+        assertEquals(0L, plan.entryMs)
+        val firstBar = head.downbeatMs - kotlin.math.floor(head.downbeatMs / head.barMs) * head.barMs
+        val meets = plan.startMs + firstBar / plan.beatMatchRate!!
+        assertTrue("$meets", onBar("beat-120", meets))
         assertEquals(8_000.0, plan.overlapMs.toDouble(), 10.0)
         assertNull("beat match is off unless asked for", plan("beat-match-off").beatMatchRate)
     }
@@ -503,24 +586,44 @@ class AutomixTest {
 
     @Test
     fun paceAndSkipSilenceTurnOffBarLockAndBeatMatch() {
+        // Both tempos are confident, so with the beats unable to line up a
+        // blend where both songs are clearly heard together is never
+        // planned: these click tracks are heard only around their kicks, and
+        // the cut sits where the two never are at once.
         for (name in listOf("pace", "skip-silence")) {
             val plan = plan(name)
             assertTrue(name, !plan.barLocked)
             assertNull(name, plan.beatMatchRate)
-            assertTrue(name, plan.kind != TransitionKind.CROSSFADE && plan.kind != TransitionKind.GAPLESS)
+            assertEquals(name, TransitionKind.CUT, plan.kind)
+            assertEquals(name, 0L, plan.bothHeardEndMs)
         }
+        // Where every start has both heard together, they join gaplessly.
+        assertEquals("gapless: the beats cannot be lined up", plan("pace-steady").reason)
+        // Where the outgoing song is no longer clearly heard, the blend goes
+        // ahead unlocked, as it always did.
+        val outro = plan("drift-phone-pace")
+        assertTrue(outro.reason, !outro.barLocked && outro.beatMatchRate == null && outro.kind != TransitionKind.GAPLESS)
+        assertEquals(0L, outro.bothHeardEndMs)
+        assertTrue(outro.reason, outro.startMs >= 190_000 - 250)
     }
 
     @Test
     fun tooLateForTheChosenStartBlendsAtTheEnd() {
+        // Both tempos trusted: from A's first bar line after the start it
+        // could have had, to the latest end.
         val late = plan("late")
         assertTrue(late.late)
-        assertEquals(199_750L - 8_000, late.startMs)
-        assertEquals(8_000L, late.overlapMs)
-        assertTrue(!late.barLocked)
+        assertTrue(late.barLocked)
+        assertEquals(0.0, offBy(late.startMs - 500.0, 2_000.0), 20.0)
+        assertTrue(late.reason, late.startMs >= 199_750L - 8_000)
+        assertEquals(199_750L, late.startMs + late.overlapMs)
+        // Under SHORTEST_BLEND_MS from the next bar line: a cut from A's
+        // earliest beat after the decision.
         val short = plan("late-short")
-        assertEquals(197_000L, short.startMs)
-        assertEquals(2_750L, short.overlapMs)
+        assertTrue(short.late && short.barLocked)
+        assertEquals(0.0, offBy(short.startMs - 500.0, 500.0), 20.0)
+        assertTrue(short.reason, short.startMs >= 197_000L && short.overlapMs <= SHORTEST_BLEND_MS)
+        assertEquals(199_750L, short.startMs + short.overlapMs)
         assertEquals(TransitionKind.GAPLESS, plan("too-late").kind)
     }
 
@@ -598,6 +701,255 @@ class AutomixTest {
         )
         assertEquals(TransitionKind.CROSSFADE, plan.kind)
         assertEquals(22_000L, plan.startMs)
+    }
+
+    // A's bar line nearest a time, from its tail's grid.
+    private fun barOf(song: String, ms: Double): Double {
+        val grid = AutomixCases.tail(song).features.tempo!!
+        return grid.downbeatMs + roundHalfUp((ms - grid.downbeatMs) / grid.barMs) * grid.barMs
+    }
+
+    private fun onBar(song: String, ms: Double, within: Double = 2.0) = abs(barOf(song, ms) - ms) <= within
+
+    // Where in A's time a locked plan's beats meet: B's first beat (its
+    // first bar line with a rate) from its entry on, played from the start.
+    private fun lockOf(name: String): Double {
+        val p = plan(name)
+        val grid = AutomixCases.head(AutomixCases.pair(name).b).features.tempo!!
+        val rate = p.beatMatchRate
+        val (anchor, step) = if (rate != null) grid.downbeatMs to grid.barMs else grid.firstBeatMs to grid.beatMs
+        val first = anchor + kotlin.math.ceil((p.entryMs - anchor) / step - 1e-9) * step
+        return p.startMs + (first - p.entryMs) / (rate ?: 1.0)
+    }
+
+    @Test
+    fun fullLevelMusicIsKeptOverEarlyExitsAtSectionBoundaries() {
+        val tail = AutomixCases.tail("steady-100-sections")
+        // Section boundaries 24 s and 4.8 s before the last bars, each within
+        // the reach of a bar line's boundary bonus.
+        assertTrue("${tail.features.boundariesMs}", tail.features.boundariesMs.any { abs(it - 170_400) <= 250 })
+        assertTrue("${tail.features.boundariesMs}", tail.features.boundariesMs.any { abs(it - 189_600) <= 250 })
+        val plan = plan("kept-music")
+        // The last bars, losing at most a second of the music at full level.
+        assertTrue(plan.reason, plan.latestEndMs - (plan.startMs + plan.overlapMs) <= KEPT_MUSIC_LIMIT_MS)
+        assertTrue(plan.reason, plan.startMs > 189_600 + 1_000)
+        // A song fading out still leaves at its outro.
+        val fading = plan("fade-out")
+        assertTrue(fading.reason, fading.startMs + fading.overlapMs < fading.latestEndMs - 10_000)
+    }
+
+    @Test
+    fun aBlendEndingOffTheBarStretchesToTheLatestEnd() {
+        // The last bar line a whole-bar blend can end on is 1.9 s before the
+        // latest end: the blend keeps its bar-line start and runs to it.
+        val plan = plan("off-grid-end")
+        assertEquals(plan.latestEndMs, plan.startMs + plan.overlapMs)
+        assertTrue(plan.reason, onBar("steady-100", lockOf("off-grid-end")))
+        assertEquals(7_200.0 + 1_900, plan.overlapMs.toDouble(), 30.0)
+        assertTrue(plan.reason, !plan.reason.contains("bars of"))
+        // Over the longest blend from there: one bar later.
+        val over = plan("off-grid-end-over")
+        assertEquals(over.latestEndMs, over.startMs + over.overlapMs)
+        assertTrue(over.reason, onBar("steady-100", lockOf("off-grid-end-over")))
+        assertEquals(plan.startMs + 2_400.0, over.startMs.toDouble(), 30.0)
+    }
+
+    @Test
+    fun anIntroEndingOffTheBarFadesTheOutgoingSongToTheLatestEnd() {
+        val introEnd = AutomixCases.head("quiet-100").features.introEndMs!!
+        // Five bars to the next song's full point, a two-bar fade: A holds
+        // for four bars, and only its fade end moves to the latest end.
+        val plan = plan("off-grid-intro")
+        assertEquals(plan.reason, TransitionKind.INTRO, plan.kind)
+        assertEquals(plan.latestEndMs, plan.startMs + plan.overlapMs)
+        assertTrue(plan.reason, onBar("steady-100", lockOf("off-grid-intro")))
+        assertEquals(9_600.0, plan.holdShare * plan.overlapMs, 30.0)
+        assertEquals(14_400.0 + 1_500, plan.overlapMs.toDouble(), 30.0)
+        // Over the longest intro: B's full point kept, one bar later.
+        val capped = plan("off-grid-intro-capped")
+        assertEquals(capped.reason, TransitionKind.INTRO, capped.kind)
+        assertEquals(capped.latestEndMs, capped.startMs + capped.overlapMs)
+        assertTrue(capped.reason, onBar("steady-100", lockOf("off-grid-intro-capped")))
+        assertEquals(plan("off-grid-intro").startMs + 2_400.0, capped.startMs.toDouble(), 30.0)
+        // A at its own level until four bars in.
+        val holdEnd = capped.holdShare * capped.overlapMs
+        assertEquals(9_600.0, holdEnd, 30.0)
+        assertEquals(1.0, capped.outGain((holdEnd - 1) / capped.overlapMs), 0.0)
+        // At the middle of A's fade, B has played at least its quiet start
+        // less half a bar.
+        val fadeMiddle = holdEnd + (capped.overlapMs - holdEnd) / 2
+        assertTrue("$fadeMiddle", capped.entryMs + fadeMiddle >= introEnd - 2_400 / 2.0)
+        assertTrue(capped.reason, capped.overlapMs <= AUTOMIX_LONGEST_INTRO_MS)
+        // With a fade of half the quiet start, so short that a bar later it
+        // would be under half the planned fade: no capped twin, the intro
+        // ends on its bar.
+        val short = plan("off-grid-intro-short-fade")
+        assertEquals(short.reason, TransitionKind.INTRO, short.kind)
+        assertEquals(1_200.0, (short.latestEndMs - short.startMs - short.overlapMs).toDouble(), 40.0)
+    }
+
+    @Test
+    fun aCutOnTheBeatEndsAtAnOffGridLatestEnd() {
+        val plan = plan("off-grid-cut")
+        assertEquals(plan.latestEndMs, plan.startMs + plan.overlapMs)
+        assertTrue(plan.reason, plan.overlapMs < SHORTEST_BLEND_MS)
+        val grid = AutomixCases.tail("steady-100").features.tempo!!
+        assertEquals(0.0, offBy(lockOf("off-grid-cut") - grid.firstBeatMs, grid.beatMs), 2.0)
+        assertTrue("${plan.driftAtEndMs}", plan.driftAtEndMs <= DRIFT_LIMIT_MS)
+    }
+
+    @Test
+    fun theRateComesFirstAndReachesSixPercent() {
+        // 0.3% apart is matched.
+        val small = plan("rate-small-gap")
+        assertEquals(1.003, small.beatMatchRate!!, 0.0005)
+        // 5.7% apart is matched, the intro's quiet start counted at the rate.
+        val far = plan("intro-matched")
+        assertEquals(100.0 / 106.0, far.beatMatchRate!!, 0.001)
+    }
+
+    @Test
+    fun theNextSongEntersOnItsOwnGridWithoutLosingASound() {
+        val head = AutomixCases.head("steady-100-late").features
+        val soundStart = head.soundStartMs!!
+        // Its first sound 350 ms after a beat: the entry is that beat.
+        val beat = plan("entry-on-beat")
+        assertEquals(1_150.0, beat.entryMs.toDouble(), 15.0)
+        assertTrue(beat.entryMs <= soundStart)
+        // With a rate its last bar line at or before the first sound falls
+        // before its start: it comes in from 0, and A starts earlier so that
+        // its first bar line (1.75 s) lands on A's.
+        val bar = plan("entry-on-downbeat")
+        assertNotNull(bar.beatMatchRate)
+        assertEquals(0L, bar.entryMs)
+        assertTrue("$soundStart", bar.entryMs != soundStart)
+        assertTrue(bar.reason, onBar("steady-101", bar.startMs + 1_750 / bar.beatMatchRate!!))
+        assertEquals(bar.startMs + 1_750 / bar.beatMatchRate!!, lockOf("entry-on-downbeat"), 15.0)
+        // Its last beat before its first sound falls before its start: from 0,
+        // with A earlier by its first beat's 300 ms.
+        val early = plan("entry-before-start")
+        assertEquals(0L, early.entryMs)
+        val grid = AutomixCases.tail("steady-101").features.tempo!!
+        assertEquals(0.0, offBy(early.startMs + 300 - grid.firstBeatMs, grid.beatMs), 2.0)
+    }
+
+    @Test
+    fun whereverBothSongsAreHeardTheirBeatsStayWithin40Ms() {
+        for (name in listOf("drift-1", "drift-3", "drift-7", "drift-10", "drift-20", "drift-40", "entry-on-beat", "entry-before-start", "beat-match-off", "same-tempo", "late-move-count")) {
+            val p = plan(name)
+            assertTrue("$name: ${p.reason}", p.kind == TransitionKind.GAPLESS || p.driftAtEndMs <= DRIFT_LIMIT_MS)
+        }
+        // About 1.5% apart: the three-bar blend (stretched to the latest end)
+        // starts later by whole bars, its end kept.
+        val one = plan("drift-1")
+        assertTrue(one.reason, one.barLocked && one.overlapMs < 3 * 2_376 && one.overlapMs >= SHORTEST_BLEND_MS)
+        assertTrue(one.reason, onBar("steady-101", lockOf("drift-1")))
+        assertEquals(one.latestEndMs, one.startMs + one.overlapMs)
+        assertTrue(one.reason, one.driftAtEndMs > 0)
+        // 7.1% apart: no 1.8 s cut (74 ms apart where both stop being heard).
+        val seven = plan("drift-7")
+        assertTrue(seven.reason, seven.kind == TransitionKind.GAPLESS || seven.overlapMs < SHORTEST_BLEND_MS)
+        // 20% and 40% apart: even the shortest cut is too long.
+        assertEquals(TransitionKind.GAPLESS, plan("drift-20").kind)
+        assertEquals("gapless: the beats would drift apart", plan("drift-40").reason)
+        // A in its outro, no longer clearly heard: the blend as planned.
+        val outro = plan("drift-outro")
+        assertTrue(outro.reason, outro.reason.contains("(2 bars of"))
+        // On the desktop, locked at 1.25 times: within 50 ms of song time.
+        val desk = plan("drift-desktop-pace")
+        assertTrue(desk.reason, desk.barLocked && desk.driftAtEndMs <= DRIFT_LIMIT_MS * 1.25)
+        assertTrue(desk.reason, desk.driftAtEndMs > 0)
+    }
+
+    @Test
+    fun lateLockedPlansKeepTheirRateOrTheirBound() {
+        // No planned start left, 3% apart and matched: from A's first bar line.
+        val matched = plan("drift-late-matched")
+        assertTrue(matched.reason, matched.late && matched.barLocked && matched.beatMatchRate != null)
+        assertTrue(matched.reason, onBar("steady-100", lockOf("drift-late-matched")))
+        assertEquals(matched.latestEndMs, matched.startMs + matched.overlapMs)
+        // 7.1% apart, unmatched: capped to a cut.
+        val capped = plan("drift-late-capped")
+        assertTrue(capped.reason, capped.late && capped.barLocked && capped.beatMatchRate == null)
+        assertTrue(capped.reason, capped.overlapMs < SHORTEST_BLEND_MS && capped.driftAtEndMs <= DRIFT_LIMIT_MS)
+        // Under SHORTEST_BLEND_MS left: the cut never starts before the plan
+        // was made.
+        val cut = plan("drift-late-cut")
+        assertTrue(cut.reason, cut.kind == TransitionKind.GAPLESS || cut.startMs >= 200_500)
+        assertTrue(cut.reason, cut.kind != TransitionKind.GAPLESS)
+        // A window under a bar long: the locked late plan, on a bar line.
+        val window = plan("drift-short-window")
+        assertTrue(window.reason, window.late && window.barLocked)
+        assertTrue(window.reason, onBar("steady-100", lockOf("drift-short-window")))
+    }
+
+    @Test
+    fun aRateTheNextSongIsTooShortToEaseBackFromIsPlannedAgain() {
+        val plan = plan("rate-room")
+        val pair = AutomixCases.pair("rate-room")
+        assertNull(plan.reason, plan.beatMatchRate)
+        // The entry without a rate: its last beat before its first sound
+        // (15.9 s), not its last bar line (15.27 s).
+        assertEquals(15_900.0, plan.entryMs.toDouble(), 20.0)
+        assertTrue(plan.reason, plan.barLocked && plan.driftAtEndMs <= DRIFT_LIMIT_MS)
+        // With the rate the next song would have been too short.
+        val rated = 1.05
+        assertTrue(pair.next.durationMs - 15_270 <= 14_400 * rated + BEAT_MATCH_SETTLE_MS + 1_000)
+    }
+
+    @Test
+    fun aQuietStartLongEnoughPlaysUnderTheOutgoingSongsLastBars() {
+        // Matched at 5.7%: an intro of whole bars, no sweeps, the fade
+        // centered on a bar line at or after the next song's full point.
+        val plan = plan("intro-matched")
+        assertEquals(plan.reason, TransitionKind.INTRO, plan.kind)
+        assertEquals(0.0, plan.filterStrength, 0.0)
+        assertTrue(plan.reason, plan.reason.contains(" bars of 100.0 BPM)"))
+        val bar = 2_400.0
+        val fade = (1 - plan.holdShare) * plan.overlapMs
+        assertEquals(2 * bar, fade, 30.0)
+        assertEquals(bar / plan.overlapMs, plan.riseShare, 0.003)
+        val fullAt = plan.holdShare * plan.overlapMs + fade / 2
+        val introEnd = AutomixCases.head("quiet-106").features.introEndMs!!
+        val quiet = (introEnd - plan.entryMs) / plan.beatMatchRate!!
+        assertTrue("$fullAt for $quiet", fullAt >= quiet && fullAt < quiet + bar)
+        // The quiet start counted at the rate: five bars, where it is four
+        // in the next song's own time.
+        assertEquals(5 * bar, fullAt, 30.0)
+        assertTrue("$introEnd", introEnd - plan.entryMs <= 4 * bar)
+        assertEquals(LATE_MOVE_UNBOUNDED, plan.lateMoveBars)
+    }
+
+    @Test
+    fun anIntroWhoseBeatsWouldBeHeardApartIsRefused() {
+        // 5.7% apart, unmatched: the intro would be far apart where the next
+        // song is full; the blend is planned instead, within the bound.
+        for (name in listOf("intro-unmatched", "intro-short-drift", "intro-drift")) {
+            val p = plan(name)
+            assertTrue("$name: ${p.reason}", p.kind != TransitionKind.INTRO)
+            assertTrue("$name: ${p.reason}", p.kind == TransitionKind.GAPLESS || p.driftAtEndMs <= DRIFT_LIMIT_MS)
+        }
+        // 1% apart with A dropping 12 dB at its outro: the starts whose fade
+        // falls in the outro keep the beats apart only where A is quiet.
+        val later = plan("intro-later-start")
+        assertEquals(later.reason, TransitionKind.INTRO, later.kind)
+        assertTrue(later.reason, later.driftAtEndMs <= DRIFT_LIMIT_MS)
+        assertTrue(later.reason, later.startMs + later.overlapMs * later.holdShare >= 186_000)
+        // A's tempo not the whole song's: no intro.
+        assertTrue(plan("intro-tempo-dropped").kind != TransitionKind.INTRO)
+        // At a phone's 1.25 times, a next song with no beat: an intro as
+        // before, unlocked; with a beat both are confident, and an intro
+        // where both are heard together is refused.
+        val beatless = plan("intro-phone-pace")
+        assertEquals(beatless.reason, TransitionKind.INTRO, beatless.kind)
+        assertTrue(beatless.reason, !beatless.barLocked)
+        val confident = plan("intro-phone-pace-confident")
+        assertTrue(confident.reason, confident.kind != TransitionKind.INTRO && confident.bothHeardEndMs == 0L)
+        // A quiet start of 35 s against the whole song's body: 16 s, capped.
+        val cap = plan("intro-cap")
+        assertEquals(cap.reason, TransitionKind.INTRO, cap.kind)
+        assertEquals(AUTOMIX_LONGEST_INTRO_MS, cap.overlapMs)
+        assertTrue(cap.reason, cap.reason.contains(", capped)"))
     }
 
     // Curves

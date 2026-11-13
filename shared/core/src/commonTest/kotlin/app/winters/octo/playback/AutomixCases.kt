@@ -1,5 +1,7 @@
 package app.winters.octo.playback
 
+import kotlin.math.floor
+
 // The made-up songs and song pairs the automix tests and
 // automix-vectors.json share.
 object AutomixCases {
@@ -14,6 +16,19 @@ object AutomixCases {
             SongLayer("pulse", firstMs, lengthMs, hz = 60.0, db = -6.0, bpm = bpm, firstMs = firstMs, every = 4, decayMs = 80.0),
             SongLayer("pulse", firstMs, lengthMs, hz = 2_000.0, db = -16.0, bpm = bpm, firstMs = firstMs, every = 1, decayMs = 10.0),
         )
+
+    // A kick on every bar from `barMs` and a click on every beat from
+    // `beatMs` over a pad at `padDb`, sounding from fromMs to toMs: a steady
+    // level with a clear beat. Pieces with the same grid join on the beat.
+    private fun steady(fromMs: Double, toMs: Double, bpm: Double, beatMs: Double, barMs: Double = beatMs, padDb: Double = -14.0) =
+        pad(fromMs, toMs, padDb) + listOf(
+            SongLayer("pulse", fromMs, toMs, hz = 60.0, db = padDb + 4, bpm = bpm, firstMs = barMs, every = 4, decayMs = 80.0),
+            SongLayer("pulse", fromMs, toMs, hz = 2_000.0, db = padDb - 4, bpm = bpm, firstMs = beatMs, every = 1, decayMs = 10.0),
+        )
+
+    // A steady beat whose first `quietMs` are 24 dB under the rest.
+    private fun quietStart(lengthMs: Double, bpm: Double, quietMs: Double) =
+        steady(0.0, quietMs, bpm, 0.0, padDb = -38.0) + steady(quietMs, lengthMs, bpm, 0.0)
 
     val songs: Map<String, SyntheticSong> = linkedMapOf(
         // 8 s of silence after the music stops.
@@ -35,6 +50,59 @@ object AutomixCases {
         "long-intro" to SyntheticSong(44_100, 1, 180_000, pad(0.0, 35_000.0, -38.0) + pad(35_000.0, 180_000.0, -14.0)),
         // A minute of the quiet pad, past the end of any head.
         "endless-intro" to SyntheticSong(44_100, 1, 200_000, pad(0.0, 60_000.0, -38.0) + pad(60_000.0, 200_000.0, -14.0)),
+        // A steady 100 BPM beat (2.4 s bars from 0) at full level from the
+        // first sample to the last.
+        "steady-100" to SyntheticSong(44_100, 1, 202_000, steady(0.0, 202_000.0, 100.0, 0.0)),
+        // The same at 101 BPM, 1% faster.
+        "steady-101" to SyntheticSong(44_100, 1, 202_000, steady(0.0, 202_000.0, 101.0, 0.0)),
+        // 101 BPM at full level until 190 s, then 12 dB under it: an outro
+        // where the song is no longer clearly heard.
+        "steady-101-outro" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 190_000.0, 101.0, 0.0) + steady(190_000.0, 202_000.0, 101.0, 0.0, padDb = -26.0),
+        ),
+        // 100 BPM at full level until 180 s, 14 dB under it until 192 s,
+        // then 7 dB under it to the end.
+        "steady-100-steps" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 180_000.0, 100.0, 0.0) + steady(180_000.0, 192_000.0, 100.0, 0.0, padDb = -28.0) +
+                steady(192_000.0, 202_000.0, 100.0, 0.0, padDb = -21.0),
+        ),
+        // 100 BPM, 4.5 dB louder from 170.4 s to 189.6 s: two section
+        // boundaries well before the last bars, full level throughout.
+        "steady-100-sections" to SyntheticSong(
+            44_100, 1, 201_850,
+            steady(0.0, 170_400.0, 100.0, 0.0, padDb = -18.5) + steady(170_400.0, 189_600.0, 100.0, 0.0) +
+                steady(189_600.0, 201_850.0, 100.0, 0.0, padDb = -18.5),
+        ),
+        // 100 BPM with a quiet start of about 4.4 s and of about 10.75 s.
+        "quiet-100-short" to SyntheticSong(44_100, 1, 180_000, quietStart(180_000.0, 100.0, 4_650.0)),
+        "quiet-100" to SyntheticSong(44_100, 1, 180_000, quietStart(180_000.0, 100.0, 11_000.0)),
+        // 106 BPM, 5.7% from 100, with a quiet start of about 9.5 s.
+        "quiet-106" to SyntheticSong(44_100, 1, 180_000, quietStart(180_000.0, 106.0, 9_750.0)),
+        // 100 BPM from 1.5 s, its beats at 1150 + 600 n and its bars at
+        // 1750 + 2400 n: its first sound comes 350 ms after a beat, and its
+        // last bar line before that falls before the song's start.
+        "steady-100-late" to SyntheticSong(44_100, 1, 180_000, steady(1_500.0, 180_000.0, 100.0, 1_150.0, barMs = 1_750.0)),
+        // 100 BPM from the first sample, its beats at 300 + 600 n: its last
+        // beat before its first sound falls before the song's start.
+        "steady-100-early" to SyntheticSong(44_100, 1, 180_000, steady(0.0, 180_000.0, 100.0, 300.0)),
+        // Short songs at tempos 0.3%, 3%, 7.1%, 10%, 20% and 40% slower
+        // than 100 BPM, full level throughout.
+        "steady-99.7" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.003, 0.0)),
+        "steady-97" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.03, 0.0)),
+        "steady-93" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.071, 0.0)),
+        "steady-91" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.1, 0.0)),
+        "steady-83" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.2, 0.0)),
+        "steady-71" to SyntheticSong(22_050, 1, 40_000, steady(0.0, 40_000.0, 100.0 / 1.4, 0.0)),
+        // 35 s at 95.24 BPM (beats every 630 ms from 15.9 s, bars from 15.27
+        // s): silent for 16 s, quiet until 27 s, then full level. Too short
+        // to ease back from a 5% rate after a long intro.
+        "short-quiet" to SyntheticSong(
+            44_100, 1, 35_000,
+            steady(16_000.0, 27_000.0, 60_000.0 / 630, 15_900.0, barMs = 15_270.0, padDb = -38.0) +
+                steady(27_000.0, 35_000.0, 60_000.0 / 630, 15_900.0, barMs = 15_270.0),
+        ),
     )
 
     data class Pair(
@@ -46,24 +114,30 @@ object AutomixCases {
         val context: TransitionContext = TransitionContext(),
         val tailMissing: Boolean = false,
         val headMissing: Boolean = false,
+        // The outgoing song as the queue lists it, when shorter than its sound.
+        val aLengthMs: Long? = null,
+        // The next song's head measured against its whole body, as a
+        // profile holds it.
+        val headAgainstBody: Boolean = false,
     ) {
-        val current: FadeSong get() = FadeSong(if (sameAlbumInOrder) "album" else "a", 1, songs.getValue(a).lengthMs)
+        val current: FadeSong get() = FadeSong(if (sameAlbumInOrder) "album" else "a", 1, aLengthMs ?: songs.getValue(a).lengthMs)
         val next: FadeSong get() = FadeSong(if (sameAlbumInOrder) "album" else "b", 2, songs.getValue(b).lengthMs)
     }
 
     private val eight = AutomixSettings(maxOverlapMs = 8_000)
+    private val matched = AutomixSettings(maxOverlapMs = 8_000, beatMatch = true)
 
     val pairs: List<Pair> = listOf(
         Pair("trailing-silence", "silence-tail", "plain-b", eight),
         Pair("fade-out", "fade-out", "plain-b", eight),
         Pair("hot-end", "hot-end", "plain-b", eight),
         Pair("quiet-intro", "hot-end", "quiet-intro", eight),
-        Pair("quiet-intro-capped", "hot-end", "quiet-intro", AutomixSettings(maxOverlapMs = 4_000)),
+        Pair("quiet-intro-capped", "hot-end", "quiet-intro", AutomixSettings(maxOverlapMs = 4_000, longestIntroMs = 6_000)),
         Pair("same-tempo", "beat-120", "beat-120-b", eight),
         Pair("same-tempo-long", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 16_000)),
         Pair("same-tempo-short", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 5_000)),
         Pair("tempo-clash", "beat-120", "beat-100", eight),
-        Pair("beat-match", "beat-120", "beat-118", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true)),
+        Pair("beat-match", "beat-120", "beat-118", matched),
         Pair("beat-match-off", "beat-120", "beat-118", eight),
         Pair("no-sweeps", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 8_000, filterSweeps = false)),
         Pair("no-analysis", "hot-end", "plain-b", eight, tailMissing = true, headMissing = true),
@@ -76,8 +150,8 @@ object AutomixCases {
         Pair("crossfade-off", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 0)),
         Pair("classical", "beat-120", "beat-120-b", eight, context = TransitionContext(nextGenre = "Classical; Baroque")),
         Pair("podcast", "hot-end", "plain-b", eight, context = TransitionContext(currentGenre = "Podcast")),
-        Pair("pace", "beat-120", "beat-120-b", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true), context = TransitionContext(pace = 1.25)),
-        Pair("skip-silence", "beat-120", "beat-118", AutomixSettings(maxOverlapMs = 8_000, beatMatch = true), context = TransitionContext(skipSilence = true)),
+        Pair("pace", "beat-120", "beat-120-b", matched, context = TransitionContext(pace = 1.25)),
+        Pair("skip-silence", "beat-120", "beat-118", matched, context = TransitionContext(skipSilence = true)),
         Pair("late", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 190_000)),
         Pair("late-short", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 197_000)),
         Pair("too-late", "beat-120", "beat-120-b", eight, context = TransitionContext(nowMs = 199_500)),
@@ -86,20 +160,78 @@ object AutomixCases {
         Pair("whole-song-level", "fade-out", "plain-b", eight, context = TransitionContext(bodyLevelDb = -24.0)),
         Pair("tempo-prior", "beat-120", "beat-120-b", eight, context = TransitionContext(tempoPrior = 60.0)),
         Pair("tempo-prior-off", "beat-120", "beat-120-b", eight, context = TransitionContext(tempoPrior = 100.0)),
+        // Kept music: early exits at section boundaries lose full-level music.
+        Pair("kept-music", "steady-100-sections", "steady-100", eight),
+        // Off-grid ends: the latest end 1.9 s (and 1.5 s, 1.1 s) past the
+        // last bar line a whole-bar plan can end on.
+        Pair("off-grid-end", "steady-100", "steady-100", AutomixSettings(maxOverlapMs = 9_200), aLengthMs = 201_350),
+        Pair("off-grid-end-over", "steady-100", "steady-100", eight, aLengthMs = 201_350),
+        Pair("off-grid-intro", "steady-100", "quiet-100", eight, aLengthMs = 200_950),
+        Pair("off-grid-intro-capped", "steady-100", "quiet-100", eight, aLengthMs = 201_350),
+        Pair(
+            "off-grid-intro-short-fade", "steady-100", "quiet-100-short",
+            AutomixSettings(maxOverlapMs = 2_400, longestIntroMs = 6_000), aLengthMs = 201_750,
+        ),
+        Pair("off-grid-cut", "steady-100", "steady-93", eight, aLengthMs = 201_350),
+        // Rate first and the entry on the next song's grid.
+        Pair("rate-small-gap", "steady-100", "steady-99.7", matched),
+        Pair("entry-on-beat", "steady-101", "steady-100-late", eight),
+        Pair("entry-on-downbeat", "steady-101", "steady-100-late", matched),
+        Pair("entry-before-start", "steady-101", "steady-100-early", eight),
+        // The drift cap with both songs at full level.
+        Pair("drift-1", "steady-101", "steady-100", eight),
+        Pair("drift-3", "steady-100", "steady-97", eight),
+        Pair("drift-7", "steady-100", "steady-93", eight),
+        Pair("drift-10", "steady-100", "steady-91", eight),
+        Pair("drift-20", "steady-100", "steady-83", eight),
+        Pair("drift-40", "steady-100", "steady-71", eight),
+        Pair("drift-outro", "steady-101-outro", "steady-93", eight),
+        Pair("drift-desktop-pace", "steady-100", "steady-97", eight, context = TransitionContext(pace = 1.25, lockAtPace = true)),
+        Pair("drift-phone-pace", "steady-101-outro", "steady-100", matched, context = TransitionContext(pace = 1.25)),
+        Pair("pace-steady", "steady-101", "steady-100", matched, context = TransitionContext(skipSilence = true)),
+        Pair("drift-late-matched", "steady-100", "steady-97", matched, context = TransitionContext(nowMs = 196_000)),
+        Pair("drift-late-capped", "steady-100", "steady-93", eight, context = TransitionContext(nowMs = 196_000)),
+        Pair("drift-late-cut", "steady-100", "steady-97", eight, context = TransitionContext(nowMs = 200_500)),
+        Pair("drift-short-window", "steady-100", "steady-100", eight, context = TransitionContext(nowMs = 191_450)),
+        Pair("late-move-count", "steady-100-steps", "steady-97", eight),
+        // Rate room: a 5% rate the next song is too short to ease back from.
+        Pair("rate-room", "steady-100", "short-quiet", matched),
+        // Intros.
+        Pair("intro-matched", "steady-100", "quiet-106", matched),
+        Pair("intro-unmatched", "steady-100", "quiet-106", eight),
+        Pair("intro-short-drift", "steady-101", "quiet-100-short", AutomixSettings(maxOverlapMs = 2_400)),
+        Pair("intro-drift", "steady-101", "quiet-100", eight),
+        Pair("intro-later-start", "steady-101-outro", "quiet-100", eight),
+        Pair("intro-tempo-dropped", "steady-100", "quiet-100", eight, context = TransitionContext(tempoPrior = 140.0)),
+        Pair("intro-phone-pace", "beat-120", "quiet-intro", matched, context = TransitionContext(pace = 1.25)),
+        Pair("intro-phone-pace-confident", "steady-100", "quiet-100", matched, context = TransitionContext(pace = 1.25)),
+        Pair("intro-cap", "hot-end", "long-intro", eight, headAgainstBody = true),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()
     private val heads = HashMap<String, SectionAnalysis>()
+    private val profileHeads = HashMap<String, SectionAnalysis>()
 
     fun tail(song: String): SectionAnalysis = synchronized(tails) { tails.getOrPut(song) { songs.getValue(song).tail() } }
 
     fun head(song: String): SectionAnalysis = synchronized(heads) { heads.getOrPut(song) { songs.getValue(song).head() } }
 
+    // The whole song's body level as the vectors file holds it, to four places.
+    fun wholeBodyDb(song: String): Double = floor(songs.getValue(song).wholeBodyDb()!! * 10_000 + 0.5) / 10_000
+
+    // The head measured against the whole song's body, as a profile holds it.
+    fun profileHead(song: String): SectionAnalysis =
+        synchronized(profileHeads) { profileHeads.getOrPut(song) { songs.getValue(song).profileHead(wholeBodyDb(song)) } }
+
     fun plan(pair: Pair): TransitionPlan = planTransition(
         current = pair.current,
         next = pair.next,
         tail = if (pair.tailMissing) null else tail(pair.a),
-        head = if (pair.headMissing) null else head(pair.b),
+        head = when {
+            pair.headMissing -> null
+            pair.headAgainstBody -> profileHead(pair.b)
+            else -> head(pair.b)
+        },
         settings = pair.settings,
         context = pair.context,
     )

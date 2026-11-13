@@ -3,8 +3,10 @@ package app.winters.octo.playback
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 
 // Songs shorter than this get the plain crossfade, never a planned one.
 const val SHORTEST_AUTOMIX_SONG_MS = 35_000L
@@ -30,9 +32,6 @@ const val PRE_ROLL_MS = 3_000L
 
 // Without a beat grid the start is tried every this many milliseconds.
 const val START_STEP_MS = 250L
-
-// The incoming song's entry moves onto a beat this close to its first sound.
-const val ENTRY_SNAP_MS = 300.0
 
 // Both songs play this much quieter through the overlap, so their sum
 // does not clip.
@@ -72,6 +71,12 @@ const val BEAT_MATCH_LARGEST_GAP = 0.06
 // a song's body.
 const val DRIFT_LIMIT_MS = 40.0
 const val BOTH_HEARD_BELOW_BODY_DB = 10.0
+
+// How finely the planner walks a blend to find where both songs are heard.
+private const val HEARD_STEP_MS = 10.0
+
+// A song's grid point this close before its start counts as at its start.
+private const val GRID_AT_START_MS = 1.0
 
 // Songs in these genres get the plain crossfade, never a planned one.
 val PLAIN_CROSSFADE_GENRES = Regex("classical|opera|spoken|audiobook|podcast|comedy", RegexOption.IGNORE_CASE)
@@ -120,8 +125,10 @@ data class AutomixSettings(
 // sections. `nowMs` is the outgoing song's position and `playedMs` how
 // much of it has actually been heard (less than nowMs after a seek
 // forward). `bodyLevelDb` and `tempoPrior` come from a LiveTap of the
-// outgoing song. A pace other than 1 or skip-silence moves media time
-// away from the beat, so they turn off bar lock and tempo matching.
+// outgoing song. Skip-silence moves media time away from the beat, and so
+// does a pace other than 1 unless `lockAtPace` says the player changes the
+// speed of both songs together after they are mixed: either turns off bar
+// lock and tempo matching. `pace` is also the speed the beats are heard at.
 data class TransitionContext(
     val nowMs: Long = 0,
     val playedMs: Long = nowMs,
@@ -133,6 +140,7 @@ data class TransitionContext(
     val nextGenre: String? = null,
     val bodyLevelDb: Double? = null,
     val tempoPrior: Double? = null,
+    val lockAtPace: Boolean = false,
 )
 
 // How to move from one song to the next. At startMs into the outgoing song
@@ -159,6 +167,14 @@ data class TransitionContext(
 // later as it is, LATE_MOVE_UNBOUNDED when any number may (a plan with no
 // bar grid, a matched rate or two equal tempos); past that the player
 // plans again from where it is. Every plan sets it.
+//
+// `bothHeardEndMs` is where, counted from startMs in the outgoing song's
+// time, both songs stop being clearly heard together (0 when they never
+// are), and `driftAtEndMs` how far apart their beats are in song time by
+// then; 0 when the beats cannot drift apart (a matched rate, equal tempos)
+// or are not lined up. A speed lowered to s while the blend is short of
+// bothHeardEndMs and driftAtEndMs is over DRIFT_LIMIT_MS * s puts the
+// beats audibly apart.
 data class TransitionPlan(
     val startMs: Long,
     val entryMs: Long,
@@ -177,6 +193,8 @@ data class TransitionPlan(
     val riseShare: Double = 0.0,
     val latestEndMs: Long = startMs + overlapMs,
     val lateMoveBars: Int,
+    val bothHeardEndMs: Long = 0,
+    val driftAtEndMs: Double = 0.0,
 ) {
     val barLocked: Boolean get() = beatMs != null
 
@@ -237,8 +255,20 @@ data class TransitionPlan(
 // genre that should not be mixed, the fixed crossfade with the plain curve.
 // Only the crossfade with smart transitions off takes the settings'
 // fadeCurve. Without the tail, or when no start is left at least PRE_ROLL_MS ahead,
-// the plan is a late one: the blend at the end, with the curve and the
-// filters but no bar lock.
+// the plan is a late one: the blend at the end.
+//
+// When both songs' tempos are trusted (each confident, the outgoing one
+// agreeing with the whole song's, and the beats able to stay locked at this
+// pace) every plan is locked to the outgoing song's bars, the incoming song
+// entering on its own grid, and a rate matches tempos up to
+// BEAT_MATCH_LARGEST_GAP apart. Without a rate, wherever both songs are
+// clearly heard their beats stay within DRIFT_LIMIT_MS times the pace of
+// each other: a blend starts later or becomes a short cut until they do, or
+// the songs join gaplessly. With both tempos confident but no lock, a blend
+// where both songs are clearly heard cannot be kept on the beat at all, so
+// only one where they never are is planned. A plan with a rate whose next
+// song is too short to ease back to its own speed is planned again without
+// the rate.
 fun planTransition(
     current: FadeSong,
     next: FadeSong?,
@@ -249,7 +279,7 @@ fun planTransition(
 ): TransitionPlan {
     val plain = crossfadeLength(current, next, settings.maxOverlapMs, context.repeatOne, context.stopAtEndOfSong)
     if (plain == 0L || next == null) {
-        return gaplessPlan(current, gaplessReason(current, next, settings.maxOverlapMs, context.repeatOne, context.stopAtEndOfSong))
+        return gaplessPlan(current.durationMs, gaplessReason(current, next, settings.maxOverlapMs, context.repeatOne, context.stopAtEndOfSong))
     }
     val lenA = current.durationMs
     val lenB = next.durationMs
@@ -260,158 +290,592 @@ fun planTransition(
     if (lenA < SHORTEST_AUTOMIX_SONG_MS || lenB < SHORTEST_AUTOMIX_SONG_MS) {
         return crossfadePlan(lenA, plain, "a song under ${SHORTEST_AUTOMIX_SONG_MS / 1000} s")
     }
+    val matched = planPass(lenA, lenB, tail, head, settings, context, withRate = true)
+    val rate = matched.beatMatchRate ?: return matched
+    // The incoming song spends overlap * rate of its own time in the blend
+    // and needs the settle after it to ease back to its own speed.
+    if (lenB - matched.entryMs > matched.overlapMs * rate + BEAT_MATCH_SETTLE_MS + 1_000) return matched
+    return planPass(lenA, lenB, tail, head, settings, context, withRate = false)
+}
 
+// One pass of the planner, with a rate when `withRate` allows one.
+private fun planPass(
+    lenA: Long,
+    lenB: Long,
+    tail: SectionAnalysis?,
+    head: SectionAnalysis?,
+    settings: AutomixSettings,
+    context: TransitionContext,
+    withRate: Boolean,
+): TransitionPlan {
     val limit = min(settings.maxOverlapMs.toDouble(), min(lenA, lenB) / 2.0)
     val sweeps = if (settings.filterSweeps) FILTER_STRENGTH else 0.0
     val headFeatures = head?.features?.takeIf { it.soundStartMs != null }
     val headEntry = headFeatures?.soundStartMs ?: 0L
-    val canLock = context.pace == 1.0 && !context.skipSilence
     val fixedEnd = (lenA - END_MARGIN_MS).toDouble()
 
     if (tail == null) {
-        return latePlan(lenA, fixedEnd, limit, context.nowMs, headEntry, null, head, sweeps, "no analysis of this song's end")
+        return loosePlan(lenA, fixedEnd, limit, context.nowMs.toDouble(), headEntry, null, head, sweeps, "no analysis of this song's end")
     }
     val measured = context.bodyLevelDb?.let(tail::withBodyLevel) ?: tail
     val a = measured.features
     val soundEndA = a.soundEndMs
     val outroA = a.outroStartMs
     if (soundEndA == null || outroA == null) {
-        return latePlan(lenA, fixedEnd, limit, context.nowMs, headEntry, null, head, sweeps, "this song's end is silent")
+        return loosePlan(lenA, fixedEnd, limit, context.nowMs.toDouble(), headEntry, null, head, sweeps, "this song's end is silent")
     }
 
     val latestEnd = min(soundEndA, lenA - END_MARGIN_MS).toDouble()
     val outroStart = min(outroA.toDouble(), latestEnd)
     var tempoA = a.tempo?.takeIf { it.confident }
+    var dropped = false
     val prior = context.tempoPrior
     if (tempoA != null && prior != null && prior > 0) {
         // The end must keep the tempo the whole song has.
         val moved = tempoA.inOctaveOf(prior)
-        tempoA = if (abs(moved.bpm / prior - 1) <= 0.04) moved else null
+        if (abs(moved.bpm / prior - 1) <= 0.04) {
+            tempoA = moved
+        } else {
+            tempoA = null
+            dropped = true
+        }
     }
     val tempoB = headFeatures?.tempo?.takeIf { it.confident }
-    val lockA = tempoA?.takeIf { canLock && tempoB != null }
+    val canLock = (context.pace == 1.0 || context.lockAtPace) && !context.skipSilence
+    val confident = tempoA != null && tempoB != null
+    val lockA = tempoA?.takeIf { confident && canLock }
     val lockB = tempoB?.takeIf { lockA != null }
     val ratio = if (lockA != null && lockB != null) foldTempoRatio(lockA.bpm / lockB.bpm) else null
+    val gap = ratio?.let { abs(it - 1) } ?: 0.0
+    val rate = ratio?.takeIf { withRate && settings.beatMatch && gap > 0 && gap <= BEAT_MATCH_LARGEST_GAP }?.coerceIn(0.94, 1.06)
 
+    // The entry of a locked plan is on the incoming song's own grid, at or
+    // before its first sound.
     val soundStartB = headEntry.toDouble()
-    var entry = soundStartB
-    if (lockB != null) {
-        val beat = lockB.nearestBeat(entry)
-        if (abs(beat - entry) <= ENTRY_SNAP_MS) entry = max(0.0, beat)
-    }
+    val (entry, leadIn) = if (lockB != null) gridEntry(lockB, soundStartB, rate != null) else soundStartB to 0.0
+    return PlanPass(
+        lenA = lenA,
+        limit = limit,
+        sweeps = sweeps,
+        measured = measured,
+        head = head,
+        headFeatures = headFeatures,
+        settings = settings,
+        context = context,
+        latestEnd = latestEnd,
+        outroStart = outroStart,
+        dropped = dropped,
+        lockA = lockA,
+        ratio = ratio,
+        gap = gap,
+        rate = rate,
+        entry = entry,
+        lead = leadIn / (rate ?: 1.0),
+        blind = confident && !canLock,
+    ).plan()
+}
 
-    var bars = 0
-    var overlap = if (lockA != null && ratio != null) {
-        bars = if (abs(ratio - 1) > 0.08) 2 else 4
-        bars * lockA.barMs
-    } else {
-        latestEnd - outroStart
-    }
-    // The next song's quiet start plays under the end of this one, so the
-    // blend lasts at least until the next song is near its full level.
-    val quietStart = headFeatures?.introEndMs?.let { max(0.0, it - entry) } ?: 0.0
-    val lengthened = quietStart > overlap
-    if (lengthened) {
-        if (lockA != null && bars > 0) {
-            bars = ceil(quietStart / lockA.barMs - 1e-9).toInt()
-            overlap = bars * lockA.barMs
-        } else {
-            overlap = quietStart
-        }
-    }
-    overlap = min(max(overlap, SHORTEST_BLEND_MS.toDouble()), limit)
-    if (lockA != null && bars > 0 && overlap < bars * lockA.barMs) {
-        // Cut back to whole bars that fit, when that is still long enough.
-        bars = floor(limit / lockA.barMs + 1e-9).toInt()
-        val whole = bars * lockA.barMs
-        if (bars >= 1 && whole >= SHORTEST_BLEND_MS) overlap = whole else bars = 0
-    }
-    overlap = floor(overlap + 0.5)
+// The incoming song's entry on its own grid: its last downbeat (with a
+// rate) or beat at or before its first sound, so none of its sound is cut.
+// When that falls before the song's start the song enters at 0, and the
+// second value is how far into the song its first grid point lies: the
+// outgoing song's start moves that much earlier, so that point lands on
+// the outgoing song's line.
+private fun gridEntry(b: Tempo, soundStartMs: Double, downbeats: Boolean): Pair<Double, Double> {
+    val step = if (downbeats) b.barMs else b.beatMs
+    val anchor = if (downbeats) b.downbeatMs else b.firstBeatMs
+    val last = anchor + floor((soundStartMs - anchor) / step + 1e-9) * step
+    return if (last >= -GRID_AT_START_MS) max(0.0, last) to 0.0 else 0.0 to (last + step)
+}
+
+// A place a blend or intro may go: from startMs over overlapMs in the
+// outgoing song's time, its beats meeting the incoming song's at lockMs
+// (the start, or later by the incoming song's lead-in). An intro holds and
+// rises over its shares; any other shape follows curve weight `k`, or when
+// that is null the curve its own length takes.
+private data class Shape(
+    val startMs: Double,
+    val lockMs: Double,
+    val overlapMs: Double,
+    val onBar: Boolean,
+    val intro: Boolean = false,
+    val holdShare: Double = 0.0,
+    val riseShare: Double = 0.0,
+    val k: Double? = null,
+) {
+    val endMs: Double get() = startMs + overlapMs
+
+    fun shifted(ms: Double) = copy(startMs = startMs + ms, lockMs = lockMs + ms)
+}
+
+private class PlanPass(
+    val lenA: Long,
+    val limit: Double,
+    val sweeps: Double,
+    val measured: SectionAnalysis,
+    val head: SectionAnalysis?,
+    val headFeatures: SectionFeatures?,
+    val settings: AutomixSettings,
+    val context: TransitionContext,
+    val latestEnd: Double,
+    val outroStart: Double,
+    // The outgoing song's tempo was not the whole song's.
+    val dropped: Boolean,
+    // The outgoing song's grid when the plan is locked to it.
+    val lockA: Tempo?,
+    val ratio: Double?,
+    val gap: Double,
+    val rate: Double?,
+    val entry: Double,
+    // From a locked shape's start to where the two grids meet, in the
+    // outgoing song's time.
+    val lead: Double,
+    // Both tempos confident with no lock: only a shape where both songs are
+    // never clearly heard together is planned.
+    val blind: Boolean,
+) {
+    val a = measured.features
+
+    // How fast the incoming song plays through the blend.
+    val speedB = rate ?: 1.0
+
+    // The beats drift apart through the blend and must be kept within the
+    // limit wherever both songs are clearly heard.
+    val bounded = lockA != null && rate == null && gap > 0
+
+    val driftLimit = DRIFT_LIMIT_MS * context.pace
 
     // Where the song will count as played, at the current pace of listening.
-    val countsAsPlayed = context.nowMs + max(0L, min(lenA / 2, COUNTS_AS_PLAYED_MS) - context.playedMs)
-    val lo = maxOf(
-        maxOf(EARLIEST_START_SHARE * lenA, EARLIEST_START_MS.toDouble(), countsAsPlayed.toDouble()),
-        latestEnd - LONGEST_EARLY_EXIT_MS,
-        tail.envelope.startMs.toDouble(),
-        (context.nowMs + PRE_ROLL_MS).toDouble(),
-    )
-    val hi = latestEnd - overlap
-    if (hi < lo) {
-        return latePlan(lenA, latestEnd, overlap, context.nowMs, headEntry, measured, head, sweeps, "no start left before ${seconds(hi.toLong())}")
+    val lo: Double = run {
+        val countsAsPlayed = context.nowMs + max(0L, min(lenA / 2, COUNTS_AS_PLAYED_MS) - context.playedMs)
+        maxOf(
+            maxOf(EARLIEST_START_SHARE * lenA, EARLIEST_START_MS.toDouble(), countsAsPlayed.toDouble()),
+            latestEnd - LONGEST_EARLY_EXIT_MS,
+            measured.envelope.startMs.toDouble(),
+            (context.nowMs + PRE_ROLL_MS).toDouble(),
+        )
     }
 
-    // Bar lines when the blend is locked to the bar, otherwise a fixed step
-    // back from the latest start.
-    val barLines = lockA?.barsBetween(lo, hi).orEmpty()
-    val onBars = barLines.isNotEmpty()
-    val candidates = barLines.ifEmpty {
-        generateSequence(hi) { it - START_STEP_MS }.takeWhile { it >= lo - 1e-6 }.toList().asReversed()
-    }
     val phraseAnchor = lockA?.let { it.downbeatMs + roundHalfUp((outroStart - it.downbeatMs) / it.barMs) * it.barMs }
-    val fullDb = a.bodyDb - 3
 
-    var bestStart = candidates.last()
-    var bestScore = Double.NEGATIVE_INFINITY
-    for (start in candidates) {
-        var score = -0.08 * (latestEnd - (start + overlap)) / 1000
-        if (outroStart < latestEnd - 1000) score -= 0.15 * abs(start - outroStart) / 1000
-        if (a.boundariesMs.any { abs(it - start) <= 250 }) score += 1.0
-        if (lockA != null && phraseAnchor != null && onBars) {
+    fun plan(): TransitionPlan {
+        var bars = 0
+        var overlap = if (lockA != null && ratio != null) {
+            bars = if (gap > 0.08) 2 else 4
+            bars * lockA.barMs
+        } else {
+            latestEnd - outroStart
+        }
+        // The next song's quiet start, in the outgoing song's time.
+        val quiet = headFeatures?.introEndMs?.let { max(0.0, it - entry) / speedB } ?: 0.0
+        if (quiet > fitted(overlap, bars) && quiet >= INTRO_SHORTEST_MS && !dropped) {
+            planIntro(quiet)?.let { return it }
+        }
+        // Without an intro the blend lasts at least until the next song is
+        // near its full level.
+        val lengthened = quiet > overlap
+        if (lengthened) {
+            if (lockA != null && bars > 0) {
+                bars = ceil(quiet / lockA.barMs - 1e-9).toInt()
+                overlap = bars * lockA.barMs
+            } else {
+                overlap = quiet
+            }
+        }
+        overlap = fitted(overlap, bars)
+
+        val hi = latestEnd - overlap
+        if (hi < lo) return latePlan(context.nowMs.toDouble(), overlap, "no start left before ${seconds(hi.toLong())}")
+
+        // Bar lines when the blend is locked to the bar, otherwise a fixed
+        // step back from the latest start.
+        val shapes = if (lockA != null) {
+            lockA.barsBetween(lo + lead, hi + lead).map { Shape(it - lead, it, overlap, onBar = true) }
+        } else {
+            steps(lo, hi).map { Shape(it, it, overlap, onBar = false) }
+        }
+        if (shapes.isEmpty()) return latePlan(lo, overlap, "no bar line left before ${seconds(hi.toLong())}")
+        val all = shapes.toMutableList()
+        if (lockA != null && shapes.none { kept(it) <= KEPT_MUSIC_LIMIT_MS }) stretched(shapes.last())?.let { all += it }
+        val allowed = all.mapNotNull { allow(it, lo) }
+        if (allowed.isEmpty()) return gaplessPlan(lenA, unheardReason())
+        val best = best(allowed) { blendScore(it) }
+        return blendPlan(best, lengthened)
+    }
+
+    // A blend's overlap kept between SHORTEST_BLEND_MS and the limit, in
+    // whole bars when it was planned in `bars` of them and whole bars fit.
+    private fun fitted(overlap: Double, bars: Int): Double {
+        var length = min(max(overlap, SHORTEST_BLEND_MS.toDouble()), limit)
+        if (lockA != null && bars > 0 && length < bars * lockA.barMs) {
+            // Cut back to whole bars that fit, when that is still long enough.
+            val fit = floor(limit / lockA.barMs + 1e-9).toInt()
+            val whole = fit * lockA.barMs
+            if (fit >= 1 && whole >= SHORTEST_BLEND_MS) length = whole
+        }
+        return floor(length + 0.5)
+    }
+
+    private fun steps(from: Double, to: Double): List<Double> =
+        generateSequence(to) { it - START_STEP_MS }.takeWhile { it >= from - 1e-6 }.toList().asReversed()
+
+    // Full-level music the outgoing song loses after the shape ends.
+    private fun kept(s: Shape): Double = measured.msAtLeast(s.endMs, latestEnd, a.bodyDb - KEPT_MUSIC_BELOW_BODY_DB)
+
+    // The last bar-line blend stretched to end exactly at the latest end,
+    // from its bar line or, over the limit, from the next one.
+    private fun stretched(last: Shape): Shape? {
+        val bar = lockA?.barMs ?: return null
+        var shape = Shape(last.startMs, last.lockMs, latestEnd - last.startMs, onBar = true)
+        if (shape.overlapMs > limit) {
+            val lock = last.lockMs + bar
+            shape = Shape(lock - lead, lock, latestEnd - (lock - lead), onBar = true)
+        }
+        return shape.takeIf { it.overlapMs >= SHORTEST_BLEND_MS }
+    }
+
+    // A blend candidate as it may be planned: capped to the drift bound,
+    // only with both songs never heard together when the beats cannot be
+    // lined up, or as it is.
+    private fun allow(s: Shape, earliest: Double): Shape? = when {
+        bounded -> cap(s, earliest)
+        blind -> s.takeIf { stretch(it) == null }
+        else -> s
+    }
+
+    // The candidate's end kept and its start moved later by whole bars
+    // until the beats stay within the bound; once that would leave under
+    // SHORTEST_BLEND_MS, a cut from the earliest beat of A that keeps them
+    // within it. Null when no cut does.
+    private fun cap(s: Shape, earliest: Double): Shape? {
+        val bar = lockA?.barMs ?: return s
+        var shape = s
+        while (true) {
+            if (meets(shape)) return shape
+            val lock = shape.lockMs + bar
+            val start = lock - lead
+            if (shape.endMs - start < SHORTEST_BLEND_MS) break
+            shape = Shape(start, lock, s.endMs - start, onBar = shape.onBar)
+        }
+        return cut(s.endMs, earliest)
+    }
+
+    // A cut ending at `end`, starting on a beat of A no earlier than
+    // `earliest`, from SHORTEST_BLEND_MS down to SHORTEST_FADE_MS long:
+    // the longest whose beats stay within the bound.
+    private fun cut(end: Double, earliest: Double): Shape? {
+        val grid = lockA ?: return null
+        val from = max(earliest, end - SHORTEST_BLEND_MS)
+        val to = end - SHORTEST_FADE_MS
+        for (beat in grid.beatsBetween(from + lead, to + lead)) {
+            val shape = Shape(beat - lead, beat, end - (beat - lead), onBar = onBarLine(beat))
+            if (meets(shape)) return shape
+        }
+        return null
+    }
+
+    private fun onBarLine(ms: Double): Boolean {
+        val grid = lockA ?: return false
+        val bars = (ms - grid.downbeatMs) / grid.barMs
+        return abs(bars - roundHalfUp(bars)) < 1e-6
+    }
+
+    private fun meets(s: Shape): Boolean = when {
+        bounded -> offset(s) <= driftLimit
+        blind -> stretch(s) == null
+        else -> true
+    }
+
+    // How far apart the beats are, in song time, where they are furthest
+    // apart while both songs are clearly heard: they meet at the lock point
+    // and drift apart by the tempo gap either side of it.
+    private fun offset(s: Shape): Double {
+        val (first, last) = stretch(s) ?: return 0.0
+        return gap * max(0.0, max(last - s.lockMs, s.lockMs - first))
+    }
+
+    // The first and last moments, in the outgoing song's time, where both
+    // songs are within BOTH_HEARD_BELOW_BODY_DB of their bodies through the
+    // shape, with its gains and the overlap's headroom; null when they
+    // never are.
+    private fun stretch(s: Shape): Pair<Double, Double>? {
+        val b = head ?: return null
+        if (headFeatures == null || s.overlapMs <= 0) return null
+        val k = s.k ?: curveOf(kindOf(s.overlapMs, measured, head, s.startMs, entry))
+        val room = 10.0.pow(-OVERLAP_HEADROOM_DB / 20)
+        val aFloor = a.bodyDb - BOTH_HEARD_BELOW_BODY_DB
+        val bFloor = b.features.bodyDb - BOTH_HEARD_BELOW_BODY_DB
+        var first = Double.NaN
+        var last = Double.NaN
+        val count = floor(s.overlapMs / HEARD_STEP_MS).toInt()
+        for (i in 0..count) {
+            val since = i * HEARD_STEP_MS
+            val t = since / s.overlapMs
+            val out = if (s.intro) introOutGain(t, s.holdShare) else automixOutGain(t, k)
+            val into = if (s.intro) introInGain(t, s.riseShare) else automixInGain(t, k)
+            if (out <= 0 || into <= 0) continue
+            val at = s.startMs + since
+            if (measured.levelAt(at) + 20 * log10(out * room) < aFloor) continue
+            if (b.levelAt(entry + since * speedB) + 20 * log10(into * room) < bFloor) continue
+            if (first.isNaN()) first = at
+            last = at
+        }
+        return if (first.isNaN()) null else first to last
+    }
+
+    // The best scoring shape; the later one wins a tie. Shapes that keep
+    // over KEPT_MUSIC_LIMIT_MS of full-level music are left out while any
+    // other is left.
+    private fun best(shapes: List<Shape>, score: (Shape) -> Double): Shape {
+        val pool = shapes.filter { kept(it) <= KEPT_MUSIC_LIMIT_MS }.ifEmpty { shapes }
+        var best = pool.last()
+        var bestScore = Double.NEGATIVE_INFINITY
+        for (s in pool) {
+            val value = score(s)
+            if (value >= bestScore) {
+                bestScore = value
+                best = s
+            }
+        }
+        return best
+    }
+
+    // The terms every shape shares: ending early, music cut, a section
+    // boundary at the start, and the bar and phrase it starts on.
+    private fun sharedScore(s: Shape): Double {
+        var score = -0.08 * (latestEnd - s.endMs) / 1000
+        if (a.boundariesMs.any { abs(it - s.startMs) <= 250 }) score += 1.0
+        val grid = lockA
+        if (grid != null && phraseAnchor != null && s.onBar) {
             score += 0.6
-            val barsBack = roundHalfUp((phraseAnchor - start) / lockA.barMs).toLong()
+            val barsBack = roundHalfUp((phraseAnchor - s.lockMs) / grid.barMs).toLong()
             if (barsBack % 8 == 0L) score += 0.8
         }
-        score -= 1.5 * measured.shareAtLeast(start, start + overlap, fullDb)
-        if (score >= bestScore) {
-            bestScore = score
-            bestStart = start
+        return score - KEPT_MUSIC_WEIGHT * kept(s) / 1000
+    }
+
+    private fun blendScore(s: Shape): Double {
+        var score = sharedScore(s)
+        if (outroStart < latestEnd - 1000) score -= 0.15 * abs(s.startMs - outroStart) / 1000
+        return score - 1.5 * measured.shareAtLeast(s.startMs, s.endMs, a.bodyDb - 3)
+    }
+
+    private fun blendPlan(s: Shape, lengthened: Boolean): TransitionPlan {
+        val kind = kindOf(s.overlapMs, measured, head, s.startMs, entry)
+        val startMs = roundHalfUp(s.startMs).toLong()
+        val overlapMs = roundHalfUp(s.endMs).toLong() - startMs
+        val entryMs = roundHalfUp(entry).toLong()
+        val reason = buildString {
+            append(kind.name.lowercase())
+            append(" at ").append(seconds(startMs)).append(" over ").append(seconds(overlapMs))
+            appendBars(overlapMs)
+            append(", next song from ").append(seconds(entryMs))
+            if (lengthened) headFeatures?.introEndMs?.let { append(" (full from ").append(seconds(it)).append(")") }
+            append(", outro at ").append(seconds(outroStart.toLong()))
+            append(", latest end ").append(seconds(latestEnd.toLong()))
+            if (head == null) append(", no analysis of the next song's start")
+            rate?.let { append(", rate ").append(decimals(it, 3)) }
+        }
+        return finish(
+            TransitionPlan(
+                startMs = startMs,
+                entryMs = entryMs,
+                overlapMs = overlapMs,
+                kind = kind,
+                k = curveOf(kind),
+                filterStrength = sweeps,
+                beatMatchRate = rate,
+                beatMs = lockA?.beatMs,
+                beatAnchorMs = lockA?.firstBeatMs,
+                late = false,
+                headroomDb = OVERLAP_HEADROOM_DB,
+                reason = reason,
+                latestEndMs = roundHalfUp(latestEnd).toLong(),
+                lateMoveBars = 0,
+            ),
+            s.lockMs,
+        )
+    }
+
+    // " (N bars of X BPM)" when the overlap is whole bars of a locked plan.
+    private fun StringBuilder.appendBars(overlapMs: Long) {
+        val grid = lockA ?: return
+        val bars = roundHalfUp(overlapMs / grid.barMs)
+        if (bars >= 1 && abs(overlapMs - bars * grid.barMs) <= 1.0) {
+            append(" (").append(bars.toLong()).append(" bars of ").append(decimals(grid.displayBpm, 1)).append(" BPM)")
         }
     }
 
-    var rate: Double? = null
-    if (settings.beatMatch && lockA != null && lockB != null && ratio != null) {
-        val gap = abs(ratio - 1)
-        if (gap >= 0.005 && gap <= 0.04) {
-            rate = ratio.coerceIn(0.94, 1.06)
-            entry = max(0.0, lockB.downbeatFrom(soundStartB - ENTRY_SNAP_MS))
+    // The next song's quiet start played under the end of this one: the
+    // outgoing song holds, then fades over two bars (or INTRO_FADE_MS
+    // unlocked, at most half the quiet start) centered on where the next
+    // song is full, a bar line when locked; the next song rises over a bar
+    // (INTRO_RISE_MS unlocked). Null when no start is left or the beats
+    // allow none, and the lengthened blend is planned instead.
+    private fun planIntro(quiet: Double): TransitionPlan? {
+        val bar = lockA?.barMs
+        val rise = bar ?: INTRO_RISE_MS.toDouble()
+        val fade = min(if (bar != null) INTRO_FADE_BARS * bar else INTRO_FADE_MS.toDouble(), quiet / 2)
+        val longest = settings.longestIntroMs.toDouble()
+        val fullAt = if (bar != null) {
+            min(ceil(quiet / bar - 1e-9), floor((longest - fade / 2) / bar + 1e-9)) * bar
+        } else {
+            min(quiet, longest - fade / 2)
         }
+        val hold = fullAt - fade / 2
+        if (hold <= 0) return null
+        val capped = fullAt < quiet - 1e-6
+        val overlap = floor(fullAt + fade / 2 + 0.5)
+        fun intro(start: Double, lock: Double, length: Double) = Shape(
+            start, lock, length, onBar = bar != null, intro = true,
+            holdShare = hold / length, riseShare = min(rise, length / 4) / length,
+        )
+        val hi = latestEnd - overlap
+        if (hi < lo) return null
+        val shapes = if (lockA != null) {
+            lockA.barsBetween(lo + lead, hi + lead).map { intro(it - lead, it, overlap) }
+        } else {
+            steps(lo, hi).map { intro(it, it, overlap) }
+        }
+        if (shapes.isEmpty()) return null
+        val all = shapes.toMutableList()
+        if (bar != null && shapes.none { kept(it) <= KEPT_MUSIC_LIMIT_MS }) {
+            // Only the outgoing song's fade end moves, to the latest end.
+            val last = shapes.last()
+            val length = latestEnd - last.startMs
+            if (length <= longest) {
+                all += intro(last.startMs, last.lockMs, length)
+            } else {
+                // Over the longest intro: one bar later, keeping where the
+                // next song is full from the start, when the fade left is
+                // still at least half the planned one.
+                val lock = last.lockMs + bar
+                val start = lock - lead
+                if (latestEnd - start - hold >= fade / 2) all += intro(start, lock, latestEnd - start)
+            }
+        }
+        val allowed = all.filter { meets(it) }
+        if (allowed.isEmpty()) return null
+        val best = best(allowed) { s ->
+            var score = sharedScore(s)
+            if (outroStart < latestEnd - 1000) score -= 0.15 * abs(s.startMs + hold - outroStart) / 1000
+            score
+        }
+        val startMs = roundHalfUp(best.startMs).toLong()
+        val overlapMs = roundHalfUp(best.endMs).toLong() - startMs
+        val entryMs = roundHalfUp(entry).toLong()
+        val reason = buildString {
+            append("intro at ").append(seconds(startMs)).append(" over ").append(seconds(overlapMs))
+            appendBars(overlapMs)
+            append(", next song from ").append(seconds(entryMs))
+            append(" (full from ").append(seconds(headFeatures?.introEndMs ?: entryMs))
+            if (capped) append(", capped")
+            append("), outro at ").append(seconds(outroStart.toLong()))
+            append(", latest end ").append(seconds(latestEnd.toLong()))
+            rate?.let { append(", rate ").append(decimals(it, 3)) }
+        }
+        return finish(
+            TransitionPlan(
+                startMs = startMs,
+                entryMs = entryMs,
+                overlapMs = overlapMs,
+                kind = TransitionKind.INTRO,
+                k = curveOf(TransitionKind.INTRO),
+                filterStrength = 0.0,
+                beatMatchRate = rate,
+                beatMs = lockA?.beatMs,
+                beatAnchorMs = lockA?.firstBeatMs,
+                late = false,
+                headroomDb = OVERLAP_HEADROOM_DB,
+                reason = reason,
+                holdShare = hold / overlapMs,
+                riseShare = min(rise, overlapMs / 4.0) / overlapMs,
+                latestEndMs = roundHalfUp(latestEnd).toLong(),
+                lateMoveBars = 0,
+            ),
+            best.lockMs,
+        )
     }
 
-    val kind = kindOf(overlap, measured, head, bestStart, entry)
-    // Beats that cannot drift apart let a late start move the plan any
-    // number of bars: no bar grid, a matched rate, or two equal tempos. A
-    // bar-locked plan with a tempo gap and no rate may not move.
-    val anyMove = lockA == null || rate != null || (ratio != null && abs(ratio - 1) == 0.0)
-    val start = floor(bestStart + 0.5).toLong()
-    val entryMs = floor(entry + 0.5).toLong()
-    val reason = buildString {
-        append(kind.name.lowercase())
-        append(" at ").append(seconds(start)).append(" over ").append(seconds(overlap.toLong()))
-        if (bars > 0 && lockA != null) append(" (").append(bars).append(" bars of ").append(decimals(lockA.displayBpm, 1)).append(" BPM)")
-        append(", next song from ").append(seconds(entryMs))
-        if (lengthened) append(" (full from ").append(seconds((entry + quietStart).toLong())).append(")")
-        append(", outro at ").append(seconds(outroStart.toLong()))
-        append(", latest end ").append(seconds(latestEnd.toLong()))
-        if (head == null) append(", no analysis of the next song's start")
-        rate?.let { append(", rate ").append(decimals(it, 3)) }
+    // The blend at the end, ending at the latest end, when no planned start
+    // is left after `earliest`. Locked: from A's first bar line at or after
+    // the later of `earliest` and a full `overlap` before the end, capped
+    // to the drift bound like a planned blend. Otherwise as it always was,
+    // and with the beats unable to line up only when both songs are never
+    // heard together.
+    private fun latePlan(earliest: Double, overlap: Double, why: String): TransitionPlan {
+        val grid = lockA
+        if (grid == null) {
+            val plan = loosePlan(lenA, latestEnd, overlap, earliest, roundHalfUp(entry).toLong(), measured, head, sweeps, why)
+            if (plan.kind == TransitionKind.GAPLESS) return plan.copy(lateMoveBars = LATE_MOVE_UNBOUNDED)
+            if (blind && stretch(shapeOf(plan, plan.startMs.toDouble())) != null) return gaplessPlan(lenA, unheardReason())
+            return finish(plan, plan.startMs.toDouble())
+        }
+        val from = max(earliest, latestEnd - overlap)
+        val lock = grid.downbeatFrom(from + lead)
+        val start = lock - lead
+        val length = latestEnd - start
+        val shape = when {
+            !bounded -> Shape(start, lock, length, onBar = true).takeIf { length >= SHORTEST_FADE_MS }
+            length >= SHORTEST_BLEND_MS -> cap(Shape(start, lock, length, onBar = true), from)
+            else -> cut(latestEnd, from)
+        } ?: return gaplessPlan(lenA, "too late to blend: $why")
+        val kind = kindOf(shape.overlapMs, measured, head, shape.startMs, entry)
+        val startMs = roundHalfUp(shape.startMs).toLong()
+        val overlapMs = roundHalfUp(shape.endMs).toLong() - startMs
+        val entryMs = roundHalfUp(entry).toLong()
+        val matched = rate?.let { ", rate ${decimals(it, 3)}" } ?: ""
+        return finish(
+            TransitionPlan(
+                startMs = startMs,
+                entryMs = entryMs,
+                overlapMs = overlapMs,
+                kind = kind,
+                k = curveOf(kind),
+                filterStrength = sweeps,
+                beatMatchRate = rate,
+                beatMs = grid.beatMs,
+                beatAnchorMs = grid.firstBeatMs,
+                late = true,
+                headroomDb = OVERLAP_HEADROOM_DB,
+                reason = "late ${kind.name.lowercase()} at ${seconds(startMs)} over ${seconds(overlapMs)}, next song from ${seconds(entryMs)}$matched: $why",
+                latestEndMs = roundHalfUp(latestEnd).toLong(),
+                lateMoveBars = 0,
+            ),
+            shape.lockMs,
+        )
     }
-    return TransitionPlan(
-        startMs = start,
-        entryMs = entryMs,
-        overlapMs = overlap.toLong(),
-        kind = kind,
-        k = curveOf(kind),
-        filterStrength = sweeps,
-        beatMatchRate = rate,
-        beatMs = lockA?.beatMs,
-        beatAnchorMs = lockA?.firstBeatMs,
-        late = false,
-        headroomDb = OVERLAP_HEADROOM_DB,
-        reason = reason,
-        latestEndMs = floor(latestEnd + 0.5).toLong(),
-        lateMoveBars = if (anyMove) LATE_MOVE_UNBOUNDED else 0,
+
+    private fun unheardReason() = if (bounded) "the beats would drift apart" else "the beats cannot be lined up"
+
+    private fun shapeOf(plan: TransitionPlan, lock: Double) = Shape(
+        plan.startMs.toDouble(), lock, plan.overlapMs.toDouble(), onBar = false,
+        intro = plan.kind == TransitionKind.INTRO, holdShare = plan.holdShare, riseShare = plan.riseShare, k = plan.k,
     )
+
+    // The plan with how far a late start may move it and where both songs
+    // stop being heard together.
+    private fun finish(plan: TransitionPlan, lock: Double): TransitionPlan {
+        val shape = shapeOf(plan, lock)
+        val heard = stretch(shape)
+        return plan.copy(
+            lateMoveBars = lateMoveBars(shape, plan),
+            bothHeardEndMs = heard?.let { roundHalfUp(it.second - plan.startMs).toLong() } ?: 0L,
+            driftAtEndMs = if (bounded) offset(shape) else 0.0,
+        )
+    }
+
+    // The most whole bars the plan may move later and still end by the
+    // latest end with its beats within the bound there; unbounded when the
+    // bound does not depend on where it sits.
+    private fun lateMoveBars(shape: Shape, plan: TransitionPlan): Int {
+        val bar = lockA?.barMs
+        if (!bounded || bar == null) return LATE_MOVE_UNBOUNDED
+        val end = (plan.startMs + plan.overlapMs).toDouble()
+        var bars = 0
+        while (end + (bars + 1) * bar <= plan.latestEndMs + 1e-6 && meets(shape.shifted((bars + 1) * bar))) bars++
+        return bars
+    }
 }
 
 // A tempo ratio folded by halving or doubling into 0.707 to 1.414, so a
@@ -441,23 +905,23 @@ private fun curveOf(kind: TransitionKind): Double = when (kind) {
     else -> CROSSFADE_CURVE
 }
 
-// The blend at the end: ending at latestEnd, over `overlap` or whatever is
-// left after nowMs, with the curve and filters but no bar lock. Too little
-// left to blend plays gaplessly.
-private fun latePlan(
+// The blend at the end with no bar lock: ending at latestEnd, over
+// `overlap` or whatever is left after `earliest`, with the curve and
+// filters. Too little left to blend plays gaplessly.
+private fun loosePlan(
     lenA: Long,
     latestEnd: Double,
     overlap: Double,
-    nowMs: Long,
+    earliest: Double,
     entryMs: Long,
     tail: SectionAnalysis?,
     head: SectionAnalysis?,
     sweeps: Double,
     why: String,
 ): TransitionPlan {
-    val start = max(nowMs.toDouble(), latestEnd - overlap)
+    val start = max(earliest, latestEnd - overlap)
     val length = floor(latestEnd - start + 0.5)
-    if (length < SHORTEST_FADE_MS) return gaplessPlan(FadeSong(null, null, lenA), "too late to blend: $why")
+    if (length < SHORTEST_FADE_MS) return gaplessPlan(lenA, "too late to blend: $why")
     val kind = kindOf(length, tail, head, start, entryMs.toDouble())
     val startMs = floor(start + 0.5).toLong()
     return TransitionPlan(
@@ -478,8 +942,8 @@ private fun latePlan(
     )
 }
 
-private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
-    startMs = max(0L, current.durationMs),
+private fun gaplessPlan(lenA: Long, reason: String) = TransitionPlan(
+    startMs = max(0L, lenA),
     entryMs = 0,
     overlapMs = 0,
     kind = TransitionKind.GAPLESS,
@@ -491,7 +955,7 @@ private fun gaplessPlan(current: FadeSong, reason: String) = TransitionPlan(
     late = false,
     headroomDb = 0.0,
     reason = "gapless: $reason",
-    latestEndMs = max(0L, current.durationMs),
+    latestEndMs = max(0L, lenA),
     lateMoveBars = LATE_MOVE_UNBOUNDED,
 )
 

@@ -85,7 +85,7 @@ class AutomixVectorsTest {
             // Heads measured against the whole song's body, as a profile
             // holds them.
             val againstBody = listOf("quiet-intro", "long-intro", "endless-intro", "beat-120").map { name ->
-                Section(name, "head", bodyDb = round(AutomixCases.songs.getValue(name).wholeBodyDb()!!))
+                Section(name, "head", bodyDb = AutomixCases.wholeBodyDb(name))
             }
             val sections = AutomixCases.songs.keys.flatMap { name -> listOf("tail", "head").map { Section(name, it) } } + tagged + againstBody
             for ((name, part, tag, bodyDb) in sections) {
@@ -145,9 +145,11 @@ class AutomixVectorsTest {
                     put("nextGenre", c.nextGenre)
                     put("bodyLevelDb", c.bodyLevelDb)
                     put("tempoPrior", c.tempoPrior)
+                    put("lockAtPace", c.lockAtPace)
                 }
                 put("tailMissing", pair.tailMissing)
                 put("headMissing", pair.headMissing)
+                put("headBodyLevelDb", if (pair.headAgainstBody) AutomixCases.wholeBodyDb(pair.b) else null)
                 put("expected", planJson(AutomixCases.plan(pair)))
             }
         }
@@ -329,6 +331,8 @@ class AutomixVectorsTest {
         put("riseShare", plan.riseShare)
         put("latestEndMs", plan.latestEndMs)
         put("lateMoveBars", plan.lateMoveBars)
+        put("bothHeardEndMs", plan.bothHeardEndMs)
+        put("driftAtEndMs", round(plan.driftAtEndMs))
     }
 
     // Checking
@@ -347,6 +351,8 @@ class AutomixVectorsTest {
 
         val songs = vectors.getValue("songs").jsonObject.mapValues { songOf(it.value.jsonObject) }
         val analyses = HashMap<String, SectionAnalysis>()
+        // Heads measured against a whole song's body, by song and body level.
+        val againstBody = HashMap<String, SectionAnalysis>()
 
         for (section in vectors.getValue("sections").jsonArray.map { it.jsonObject }) {
             val name = section.str("song")
@@ -362,6 +368,7 @@ class AutomixVectorsTest {
             val envelopeIn = song.envelope(section.num("fromMs"), section.num("toMs"))
             val analysis = if (part == "tail") analyzeTail(envelopeIn, tag) else analyzeHead(envelopeIn, tag, bodyDb)
             if (tag == null && bodyDb == null) analyses["$name/$part"] = analysis
+            if (tag == null && bodyDb != null && part == "head") againstBody["$name@$bodyDb"] = analysis
             val envelope = analysis.envelope
             if (envelope.size != section.getValue("hops").jsonPrimitive.int) failures += "$what: ${envelope.size} hops"
             if (envelope.startMs != section.getValue("startMs").jsonPrimitive.long) failures += "$what: starts at ${envelope.startMs}"
@@ -410,11 +417,16 @@ class AutomixVectorsTest {
         for (case in vectors.getValue("plans").jsonArray.map { it.jsonObject }) {
             val name = case.str("name")
             val settings = case.getValue("settings").jsonObject
+            val headBody = case.numOrNull("headBodyLevelDb")
             val plan = planTransition(
                 current = fadeSongOf(case.getValue("current").jsonObject),
                 next = fadeSongOf(case.getValue("next").jsonObject),
                 tail = if (case.bool("tailMissing")) null else analyses.getValue("${case.str("a")}/tail"),
-                head = if (case.bool("headMissing")) null else analyses.getValue("${case.str("b")}/head"),
+                head = when {
+                    case.bool("headMissing") -> null
+                    headBody != null -> againstBody.getValue("${case.str("b")}@$headBody")
+                    else -> analyses.getValue("${case.str("b")}/head")
+                },
                 settings = AutomixSettings(
                     maxOverlapMs = settings.getValue("maxOverlapMs").jsonPrimitive.long,
                     longestIntroMs = settings.getValue("longestIntroMs").jsonPrimitive.long,
@@ -442,6 +454,9 @@ class AutomixVectorsTest {
             near("$what latestEndMs", e.num("latestEndMs"), plan.latestEndMs.toDouble(), t("ms"))
             val bars = e.getValue("lateMoveBars").jsonPrimitive.int
             if (bars != plan.lateMoveBars) failures += "$what: lateMoveBars ${plan.lateMoveBars}, expected $bars"
+            near("$what bothHeardEndMs", e.num("bothHeardEndMs"), plan.bothHeardEndMs.toDouble(), t("ms"))
+            near("$what driftAtEndMs", e.num("driftAtEndMs"), plan.driftAtEndMs, t("ms") / 10)
+            if (e.str("reason") != plan.reason) failures += "$what: reason \"${plan.reason}\", expected \"${e.str("reason")}\""
         }
 
         for (g in vectors.getValue("gains").jsonArray.map { it.jsonObject }) {
@@ -532,6 +547,7 @@ class AutomixVectorsTest {
         nextGenre = o["nextGenre"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content,
         bodyLevelDb = o.numOrNull("bodyLevelDb"),
         tempoPrior = o.numOrNull("tempoPrior"),
+        lockAtPace = o["lockAtPace"]?.jsonPrimitive?.boolean ?: false,
     )
 
     private fun fadeSongOf(o: JsonObject) = FadeSong(
@@ -574,8 +590,8 @@ class AutomixVectorsTest {
                 "sections: render samples floor(fromMs*rate/1000) to floor(min(toMs, lengthMs)*rate/1000) exclusive, interleave, feed the envelope builder in blocks of 4093 samples with startMs = floor(fromMs*rate/1000)*1000/rate (integer division), then analyze. probes are envelope values at hop indexes.",
                 "sections are analyzed as a tail (analyzeTail: last 60 s) or a head (analyzeHead: first 45 s); tagBpm, when set, is the song's tag tempo.",
                 "bodyLevelDb, when set on a head, is the whole song's body level (the 75th percentile body of the whole song, as a profile measures it); the head is measured against it instead of its own body. A head whose sound starts but never comes within 6 dB of its body has introEndMs at the head's end.",
-                "plans: run the planner with the tail section of song a and the head section of song b that have neither tagBpm nor bodyLevelDb (null when tailMissing / headMissing) and the given context; settings.longestIntroMs is the longest intro.",
-                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap (0 for every other kind); latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number).",
+                "plans: run the planner with the tail section of song a and the head section of song b that have neither tagBpm nor bodyLevelDb (null when tailMissing / headMissing; when headBodyLevelDb is set, the head section of song b measured against that body instead) and the given context; settings.longestIntroMs is the longest intro; context.lockAtPace says the beats stay locked at any pace (the player changes the speed of both songs together after mixing them).",
+                "plan fields: holdShare and riseShare are an intro's hold and rise as shares of the overlap (0 for every other kind); latestEndMs is the latest the blend may end in the outgoing song's time (the song's length for a fixed crossfade and a gapless join); lateMoveBars is how many whole bars a late start may move the plan later as it is (2147483647 for any number); bothHeardEndMs is where, from startMs, both songs stop being within 10 dB of their bodies (with their gains and the 1 dB headroom, walked in 10 ms steps; 0 when they never are); driftAtEndMs is how far apart the beats are in song time by then (0 with a rate, equal tempos or no lock).",
                 "introGains: the outgoing song's gain is 1 up to holdShare, then cos(pi/2 * (t - holdShare) / (1 - holdShare)); the incoming song's is sin(pi/2 * t / riseShare) up to riseShare, then 1; t is clamped to 0..1.",
                 "tempoTrust: whether a beat grid whose period scores this (confidence: the onsets' autocorrelation at one, two, four and eight beat periods plus half of it at half a period) and whose two halves agree on the beat (steady) is trusted for bar lock.",
                 "biquads: cookbook second-order low-pass / high-pass at the given rate, cutoff and Q; coefficients are b0, b1, b2, a1, a2 (a0 = 1); impulse is the answer to a 1 at sample 0, sine the answer to 0.5 * sin(2 pi 1000 n / rate), 512 samples each, from a fresh filter.",
