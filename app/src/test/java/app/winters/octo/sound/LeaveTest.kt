@@ -51,18 +51,13 @@ class LeaveTest {
         return b
     }
 
-    // Main acks the first blend's start and at once makes an edit, so the
-    // old song leaves at the start; it stops the old deck at the blend's
-    // end, and acks every later start as it comes.
+    // Main acks the start and makes an edit 10 ms later, with the written
+    // point still before S, so the old song leaves at the start by the cut.
     private fun editAtTheHandover(rig: MixRig) {
         rig.onEvent = { e ->
-            when (e.kind) {
-                BlendEventKind.PROPOSED -> if (rig.mixer.commitWord.ack(e.generation)) {
-                    if (e.generation == 1L) rig.mixer.disarm(BlendDisarm.EDIT, e.generation)
-                    rig.mixer.acked(e.generation)
-                }
-                BlendEventKind.BLEND_END -> rig.mixer.outgoingStopped(e.generation)
-                else -> {}
+            if (e.kind == BlendEventKind.PROPOSED && rig.mixer.commitWord.ack(e.generation)) {
+                rig.mixer.acked(e.generation)
+                rig.sched.at(rig.sched.now + 10_000_000) { rig.mixer.disarm(BlendDisarm.EDIT, e.generation) }
             }
         }
     }
@@ -112,7 +107,9 @@ class LeaveTest {
 
     @Test
     fun aLeavingDecksSongThatEndsUnderTheRampHasNothingOfItsNextSongMixedThere() {
-        val rig = MixRig(tuning = MixTuning(watchdogMs = 2_000, lagFloorMs = 5.0))
+        // Main's lag at its cap: the start is proposed well over a buffer
+        // ahead.
+        val rig = MixRig(tuning = MixTuning(watchdogMs = 2_000, lagFloorMs = 500.0))
         // The old song ends 5 ms after the start and reads on into its next
         // song, at 0.7; the new song is -0.3.
         val end = start + 240
@@ -122,6 +119,7 @@ class LeaveTest {
         editAtTheHandover(rig)
         rig.arm(testBlend(1, testPlan(start = 2_000, entry = 0, overlap = 1_000), endMs = 2_005.0))
         rig.runFor(1_500.0)
+        assertTrue("cut at the start: ${rig.tap.notes}", rig.tap.notes.any { it.startsWith("leave 0 over 960@$start") })
         // The old song leaves over 20 ms from the start; from its end on, only
         // the new song (at or under zero) is heard.
         for (m in end until start + 960 + 480) {

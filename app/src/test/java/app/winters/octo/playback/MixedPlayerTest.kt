@@ -423,13 +423,15 @@ class MixedPlayerTest {
         assertTrue("old song after Next: $oldAfterNext frames, ${rig.notes}", oldAfterNext <= moveFrames)
     }
 
-    // Main acks a start this long after hearing it.
-    private fun lateAcks(rig: PlayerRig, ms: Long) {
+    // Main switches to Gapless as it hears `kind` with `cause`, so nothing is
+    // armed again after it; it acks a start `ackAfterMs` after hearing it.
+    private fun gaplessAt(rig: PlayerRig, kind: BlendEventKind, cause: BlendCause, ackAfterMs: Long = 0) {
         rig.mix.onEvent = { e ->
-            if (e.kind == BlendEventKind.PROPOSED) {
-                rig.mix.sched.at(rig.mix.sched.now + ms * 1_000_000) { rig.player.mixListener.onBlendEvent(e) }
+            if (e.kind == BlendEventKind.PROPOSED && ackAfterMs > 0) {
+                rig.mix.sched.at(rig.mix.sched.now + ackAfterMs * 1_000_000) { rig.player.mixListener.onBlendEvent(e) }
             } else {
                 rig.player.mixListener.onBlendEvent(e)
+                if (e.kind == kind && e.cause == cause) rig.player.automix = AutomixSettings(maxOverlapMs = 0)
             }
         }
     }
@@ -441,6 +443,8 @@ class MixedPlayerTest {
     fun afterANotReadyStartASeekAndANextPlayTheNewPlaceAtOnce() {
         val rig = PlayerRig(twoSongs(), stalled = setOf("b"))
         rig.play("a", "b", settings = crossfade)
+        // Gapless from the moment main hears it: nothing is armed again.
+        gaplessAt(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.NOT_READY)
         until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.NOT_READY)
         movesAfterTheBlendEnded(rig)
     }
@@ -457,7 +461,9 @@ class MixedPlayerTest {
     fun afterAFloorCancelASeekAndANextPlayTheNewPlaceAtOnce() {
         val rig = PlayerRig(twoSongs(), latencyCycles = 10)
         rig.play("a", "b", settings = crossfade)
-        lateAcks(rig, 500)
+        // Main acks 500 ms late, and is Gapless from the moment it hears the
+        // cancel: nothing is armed again.
+        gaplessAt(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.FLOOR, ackAfterMs = 500)
         until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.FLOOR)
         movesAfterTheBlendEnded(rig)
     }
