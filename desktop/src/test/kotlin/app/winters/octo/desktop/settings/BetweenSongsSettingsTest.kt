@@ -40,6 +40,25 @@ class BetweenSongsSettingsTest {
 
     private fun JsonObject.playback(): JsonObject = getValue("playback").jsonObject
 
+    private fun choiceFile() = betweenSongsFileFor(file())
+
+    // An older Octo opened over this one writes the file with only the
+    // fields it knows (no version, count or choice), each changed as it
+    // was changed there.
+    private fun olderOctoWritesOver(change: (JsonObject) -> JsonObject = { it }) {
+        val json = written()
+        val playback = change(JsonObject(json.playback() - setOf("betweenSongs", "crossfadeLength")))
+        file().writeText(JsonObject(json - setOf("settingsVersion", "saveCount") + ("playback" to playback)).toString())
+    }
+
+    private fun JsonObject.with(key: String, value: Any): JsonObject =
+        JsonObject(this + (key to if (value is Boolean) JsonPrimitive(value) else JsonPrimitive(value as Number)))
+
+    private fun startOver() {
+        file().delete()
+        choiceFile().delete()
+    }
+
     @Test
     fun aNewInstallIsAutomixWithMatchTempoOnAndWritesTheChoiceWithItsMirrors() {
         val store = SettingsStore(file())
@@ -81,7 +100,7 @@ class BetweenSongsSettingsTest {
             Case("20 s, no smart transitions field", { older(crossfadeSeconds = 20, smart = null) }, BetweenSongs.Automix, 16, tempo = true, untouched = false),
         )
         for (case in cases) {
-            file().delete()
+            startOver()
             case.write()
             val before = file().readBytes()
             val playback = SettingsStore(file()).current.playback
@@ -122,19 +141,122 @@ class BetweenSongsSettingsTest {
 
     // An older Octo opened over this one keeps only the fields it knows,
     // the mirrors among them, and drops the version; read again here, the
-    // choice comes back from the mirrors.
+    // choice comes back, Gapless's length for Crossfade with it.
     @Test
     fun anOlderOctoWritingOverTheFileKeepsTheChoice() {
-        for ((choice, length) in listOf(BetweenSongs.Crossfade to 6, BetweenSongs.Automix to 8, BetweenSongs.Gapless to 8)) {
-            file().delete()
+        for ((choice, length) in listOf(BetweenSongs.Crossfade to 6, BetweenSongs.Automix to 8, BetweenSongs.Gapless to 12)) {
+            startOver()
             SettingsStore(file()).update { it.copy(sidePanel = "queue", playback = it.playback.copy(betweenSongs = choice, crossfadeLength = length, matchTempo = choice == BetweenSongs.Automix)) }
-            val json = written()
-            val olderPlayback = JsonObject(json.playback() - setOf("betweenSongs", "crossfadeLength"))
-            file().writeText(JsonObject(json - "settingsVersion" + ("playback" to olderPlayback)).toString())
+            olderOctoWritesOver()
             val read = SettingsStore(file()).current.playback
             assertEquals("$choice", choice, read.betweenSongs)
-            if (choice != BetweenSongs.Gapless) assertEquals("$choice", length, read.crossfadeLength)
+            assertEquals("$choice", length, read.crossfadeLength)
         }
+    }
+
+    // Read back after an older Octo wrote over the file, a choice it never
+    // changed is the one written: Match tempo turned off stays off, and
+    // Gapless keeps Crossfade's length for later, however often it happens.
+    // The file is written back with the choice at once.
+    @Test
+    fun anOlderOctoWritingOverTheFileKeepsMatchTempoAndLength() {
+        SettingsStore(file()).editBetweenSongs(BetweenSongsChange.MatchTempo(false))
+        olderOctoWritesOver()
+        val automix = SettingsStore(file()).current.playback
+        assertEquals(BetweenSongs.Automix, automix.betweenSongs)
+        assertFalse("Match tempo stays off", automix.matchTempo)
+        assertEquals("written back with the choice", 2, written()["settingsVersion"]?.jsonPrimitive?.intOrNull)
+        assertEquals("Automix", written().playback()["betweenSongs"]?.jsonPrimitive?.content)
+
+        startOver()
+        val gapless = SettingsStore(file())
+        gapless.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        gapless.editBetweenSongs(BetweenSongsChange.Length(12))
+        gapless.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Gapless))
+        repeat(2) { round ->
+            olderOctoWritesOver()
+            val read = SettingsStore(file()).current.playback
+            assertEquals("round $round", BetweenSongs.Gapless, read.betweenSongs)
+            assertEquals("round $round: Crossfade's length kept", 12, read.crossfadeLength)
+        }
+    }
+
+    // A choice the older Octo did change is read from what it wrote, as an
+    // older file is, keeping what it could not hold: Crossfade's length when
+    // it turned crossfade off, and Match tempo as the file has it (never
+    // turned on by the reading).
+    @Test
+    fun aChoiceChangedInAnOlderOctoIsReadFromIt() {
+        // Automix with Match tempo off; the older Octo made its blend 10 s.
+        SettingsStore(file()).editBetweenSongs(BetweenSongsChange.MatchTempo(false))
+        olderOctoWritesOver { it.with("crossfadeSeconds", 10) }
+        val longer = SettingsStore(file()).current.playback
+        assertEquals(BetweenSongs.Automix, longer.betweenSongs)
+        assertEquals(10, longer.crossfadeLength)
+        assertFalse("Match tempo stays off", longer.matchTempo)
+
+        // Match tempo turned off in the older Octo itself.
+        startOver()
+        SettingsStore(file()).update { it.copy(sidePanel = "queue") }
+        olderOctoWritesOver { it.with("matchTempo", false) }
+        assertFalse(SettingsStore(file()).current.playback.matchTempo)
+
+        // Gapless at 12, then crossfade on at 6 there, smart transitions
+        // still off: Crossfade at 6.
+        startOver()
+        val gapless = SettingsStore(file())
+        gapless.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        gapless.editBetweenSongs(BetweenSongsChange.Length(12))
+        gapless.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Gapless))
+        olderOctoWritesOver { it.with("crossfadeSeconds", 6) }
+        val crossfade = SettingsStore(file()).current.playback
+        assertEquals(BetweenSongs.Crossfade, crossfade.betweenSongs)
+        assertEquals(6, crossfade.crossfadeLength)
+
+        // Crossfade at 12, then crossfade off there: Gapless, 12 kept.
+        startOver()
+        val fixed = SettingsStore(file())
+        fixed.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        fixed.editBetweenSongs(BetweenSongsChange.Length(12))
+        olderOctoWritesOver { it.with("crossfadeSeconds", 0) }
+        val off = SettingsStore(file()).current.playback
+        assertEquals(BetweenSongs.Gapless, off.betweenSongs)
+        assertEquals(12, off.crossfadeLength)
+    }
+
+    // The Between songs file goes through the same safe write as the
+    // settings file, after it, and only when what it holds changed; one
+    // that fails is written after the next write.
+    @Test
+    fun theBetweenSongsFileIsWrittenSafelyWhenItChanges() {
+        val disk = HeldDisk()
+        val store = (SettingsStore.openOn(disk, file(), clock = StepClock()) as SettingsOpen.Opened).store
+        store.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        assertEquals(listOf("settings.json", "settings.between-songs.json"), disk.replaced)
+        store.update { it.copy(sidePanel = "lyrics") }
+        assertEquals("unchanged, so not written again", listOf("settings.json", "settings.between-songs.json", "settings.json"), disk.replaced)
+        assertEquals(BetweenSongsFile(BetweenSongs.Crossfade, 8, true, 8, false), decodeBetweenSongsFile(choiceFile().readBytes()))
+        disk.refuseReplace += "settings.between-songs.json"
+        store.editBetweenSongs(BetweenSongsChange.Length(10))
+        assertEquals("the settings file is written all the same", 10, SettingsStore(file()).current.playback.crossfadeLength)
+        disk.refuseReplace.clear()
+        store.update { it.copy(sidePanel = "queue") }
+        assertEquals(10, decodeBetweenSongsFile(choiceFile().readBytes())?.crossfadeLength)
+    }
+
+    // The Between songs file is read only for a file an older Octo wrote;
+    // while it is held, that file waits as a held settings file does.
+    @Test
+    fun aHeldBetweenSongsFileHoldsOnlyAnOlderOctosFile() {
+        SettingsStore(file()).update { it.copy(sidePanel = "queue") }
+        val disk = HeldDisk().apply { refuseReads += "settings.between-songs.json" }
+        assertTrue("a file with the choice never reads it", SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 0) is SettingsOpen.Opened)
+        olderOctoWritesOver()
+        val held = SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 0) as SettingsOpen.Held
+        assertEquals(HeldAtStart.InUse, held.why)
+        assertEquals(choiceFile(), held.file)
+        disk.refuseReads.clear()
+        assertTrue(held.retry() is SettingsOpen.Opened)
     }
 
     // A first change to a file that never chose keeps what the card showed

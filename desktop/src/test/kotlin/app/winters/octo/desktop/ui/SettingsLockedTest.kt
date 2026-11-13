@@ -26,6 +26,7 @@ import app.winters.octo.design.ProvideOctoTheme
 import app.winters.octo.design.ProvideWindowLook
 import app.winters.octo.design.TypingState
 import app.winters.octo.desktop.settings.AppSettings
+import app.winters.octo.desktop.settings.HeldAtStart
 import app.winters.octo.desktop.settings.HeldDisk
 import app.winters.octo.desktop.settings.SettingsHold
 import app.winters.octo.desktop.settings.SettingsOpen
@@ -136,7 +137,7 @@ class SettingsLockedTest {
     // The window locked window's page, about as wide as the window.
     @Composable
     private fun Locked(held: SettingsOpen.Held, retryEveryMs: Long, onOpen: (SettingsStore) -> Unit) =
-        Column(Modifier.width(460.dp)) { SettingsLocked(held, retryEveryMs, onOpen) }
+        Column(Modifier.width(460.dp)) { SettingsLocked(held, retryEveryMs, onOpen = onOpen) }
 
     @Test(timeout = 30_000)
     fun theLockedWindowLooksAgainByItselfAndOpensOnTheRealFile() {
@@ -145,6 +146,7 @@ class SettingsLockedTest {
         val opened = AtomicReference<SettingsStore?>(null)
         Scene(460, 220) { Locked(held, 20) { opened.set(it) } }.use { s ->
             assertTrue(s.words().containsAll(listOf(SETTINGS_LOCKED_TITLE, SETTINGS_LOCKED_TEXT, SETTINGS_TRY_AGAIN, SETTINGS_OPEN_WITHOUT)))
+            assertFalse("no file named while another program has it", file().path in s.words())
             assertTrue("the title is a heading", s.nodes().any { it.config.getOrNull(SemanticsProperties.Heading) != null })
             s.render(10)
             assertNull("still held: nothing opens, not on the defaults either", opened.get())
@@ -169,6 +171,44 @@ class SettingsLockedTest {
             s.click(SETTINGS_TRY_AGAIN)
             assertTrue("Try again opened the file", opened.get() != null)
             assertEquals(real, opened.get()!!.current)
+        }
+    }
+
+    // A file this account may not read: the window says so and where the
+    // file is; once another program has it instead, its own look says that.
+    @Test(timeout = 30_000)
+    fun aFileOctoMayNotReadSaysSoAndWhereItIs() {
+        writeReal()
+        val disk = HeldDisk().apply { denyReads += SettingsStore.FILE_NAME }
+        val held = SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 0) as SettingsOpen.Held
+        Scene(460, 300) { Locked(held, 20) {} }.use { s ->
+            assertTrue(s.words().toString(), s.words().containsAll(listOf(SETTINGS_NO_ACCESS_TITLE, SETTINGS_NO_ACCESS_TEXT, file().path, SETTINGS_TRY_AGAIN, SETTINGS_OPEN_WITHOUT)))
+            disk.denyReads.clear()
+            disk.refuseReads += SettingsStore.FILE_NAME
+            s.until("the in-use words") { SETTINGS_LOCKED_TEXT in s.words() }
+            assertTrue(SETTINGS_LOCKED_TITLE in s.words())
+            assertFalse("no file named", file().path in s.words())
+        }
+    }
+
+    // A damaged file Octo cannot move aside: the window says so and where
+    // it is, and opens fresh once the person has moved it, with no banner
+    // (Octo set nothing aside).
+    @Test(timeout = 30_000)
+    fun aDamagedFileOctoCannotMoveSaysSoAndOpensOnceMoved() {
+        file().parentFile.mkdirs()
+        file().writeText("{ not settings")
+        val disk = HeldDisk().apply { refuseMove += SettingsStore.FILE_NAME }
+        val held = SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 3_000, retryMs = 100) as SettingsOpen.Held
+        val opened = AtomicReference<SettingsStore?>(null)
+        Scene(460, 300) { Locked(held, 20) { opened.set(it) } }.use { s ->
+            assertTrue(s.words().toString(), s.words().containsAll(listOf(SETTINGS_DAMAGED_TITLE, SETTINGS_DAMAGED_TEXT, file().path, SETTINGS_TRY_AGAIN, SETTINGS_OPEN_WITHOUT)))
+            s.render(10)
+            assertNull(opened.get())
+            assertTrue(file().renameTo(File(folder.root, "moved-by-hand.json")))
+            s.until("the window's own look") { opened.get() != null }
+            assertEquals(AppSettings().settled(), opened.get()!!.current)
+            assertNull(opened.get()!!.setAside.value)
         }
     }
 
@@ -242,6 +282,13 @@ class SettingsLockedTest {
             }
             val held = heldAgainstReads().second
             Scene(460, 220, scale = 2f, theme = theme) { Locked(held, 600_000) {} }.use { it.save("settings-locked-window-${theme.name.lowercase()}") }
+            // Each hold at the start, at one height, on a path as the app
+            // has it on Windows.
+            for (why in HeldAtStart.entries) {
+                val shown = SettingsOpen.Held(why, File("C:\\Users\\Listener\\AppData\\Roaming\\Octo\\settings.json")) { error("not looked at again") }
+                val name = why.name.replace(Regex("(?<=.)([A-Z])"), "-$1").lowercase()
+                Scene(460, 300, scale = 2f, theme = theme) { Locked(shown, 600_000) {} }.use { it.save("settings-locked-window-$name-${theme.name.lowercase()}") }
+            }
         }
     }
 }

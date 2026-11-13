@@ -439,30 +439,53 @@ private val json = Json {
 // write raises; a pending file carries the count of the file it began from.
 internal const val SAVE_COUNT_KEY = "saveCount"
 
+// The key a pending file names the main file it began from under: the hash
+// of its bytes (settingsHash), or NO_MAIN_FILE.
+internal const val BASE_HASH_KEY = "baseHash"
+
 // The settings as the file holds them: its version, its saveCount, then
-// every setting.
-internal fun encodeSettings(settings: AppSettings, saveCount: Long): ByteArray {
+// every setting. A pending file names the main file it began from too.
+internal fun encodeSettings(settings: AppSettings, saveCount: Long, baseHash: String? = null): ByteArray {
     val fields = json.encodeToJsonElement(AppSettings.serializer(), settings).jsonObject
     val file = buildJsonObject {
         put(SETTINGS_VERSION_KEY, SETTINGS_VERSION)
         put(SAVE_COUNT_KEY, saveCount)
+        if (baseHash != null) put(BASE_HASH_KEY, baseHash)
         fields.forEach { (key, value) -> put(key, value) }
     }
     return json.encodeToString(JsonObject.serializer(), file).toByteArray(Charsets.UTF_8)
 }
 
 // A file's settings as the app uses them, the saveCount it carries (0 for
-// a file without one), and what reading an older file's crossfade settings
-// came to (null for a file that has the choice). Throws
+// a file without one), what reading an older file's crossfade settings came
+// to (null for a file that has the choice), and, for a pending file, the
+// main file it began from (null when it names none). Throws
 // SerializationException or IllegalArgumentException for words that are
 // not settings.
-internal class ReadSettings(val settings: AppSettings, val saveCount: Long, val migrated: MigratedFile?)
+internal class ReadSettings(val settings: AppSettings, val saveCount: Long, val migrated: MigratedFile?, val baseHash: String? = null) {
+    // Whether a pending file began from the main file with this count and
+    // these bytes.
+    fun beganFrom(count: Long, hash: String): Boolean = saveCount == count && baseHash == hash
+}
 
-internal fun decodeSettings(text: String): ReadSettings {
+// `betweenSongs` gives the Between songs file, asked only for a file an
+// older Octo wrote; it may throw IOException while that file is held.
+internal fun decodeSettings(text: String, betweenSongs: () -> BetweenSongsFile? = { null }): ReadSettings {
     val file = json.parseToJsonElement(text) as? JsonObject ?: throw SerializationException("The settings are not an object")
     val count = (file[SAVE_COUNT_KEY] as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull ?: 0L
-    val migrated = migratedBetweenSongs(file)
-    return ReadSettings(json.decodeFromJsonElement(AppSettings.serializer(), migrated?.json ?: file).settled(), count, migrated)
+    val base = (file[BASE_HASH_KEY] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val migrated = migratedBetweenSongs(file, betweenSongs)
+    return ReadSettings(json.decodeFromJsonElement(AppSettings.serializer(), migrated?.json ?: file).settled(), count, migrated, base)
+}
+
+internal fun encodeBetweenSongsFile(choice: BetweenSongsFile): ByteArray =
+    json.encodeToString(BetweenSongsFile.serializer(), choice).toByteArray(Charsets.UTF_8)
+
+// The Between songs file's settings, or null for bytes that are not them.
+internal fun decodeBetweenSongsFile(bytes: ByteArray): BetweenSongsFile? = try {
+    json.decodeFromString(BetweenSongsFile.serializer(), bytes.toString(Charsets.UTF_8))
+} catch (e: IllegalArgumentException) {
+    null
 }
 
 // Reads and writes the settings file. A write goes to a temporary file
@@ -478,9 +501,15 @@ internal fun decodeSettings(text: String): ReadSettings {
 // A write that fails means another program holds the file (Windows lets a
 // reader in while refusing a replace, so a read proves nothing). On every
 // failed write the whole state goes to the pending file at once, with the
-// saveCount it began from, so a crash or a power cut mid-hold loses
-// nothing; the next start uses it, and the first write that succeeds
-// deletes it. `hold` and `locked` say how it stands.
+// saveCount and the bytes' hash of the main file it began from, so a crash
+// or a power cut mid-hold loses nothing; the next start uses it, and the
+// first write that succeeds deletes it. A pending file from before that
+// could not be moved aside is never deleted or written over: it is moved
+// aside after each write that works, and until then a held write keeps
+// nothing beside the file. `hold` and `locked` say how it stands.
+//
+// Every write that works also writes the Between songs file beside it when
+// what it holds changed (see BetweenSongsFile), the same safe way.
 //
 // With `writeDelayMs`, changes are kept in memory at once and written a
 // moment later, together, off the caller's thread: a slider dragged for a
@@ -491,6 +520,7 @@ class SettingsStore internal constructor(
     private val writeDelayMs: Long,
     private val writeRetryMs: Long,
     private val disk: SettingsDisk,
+    private val clock: SettingsClock,
     start: SettingsStart,
 ) {
     // A store on `file`, read at once, waiting up to START_WAIT_MS while
@@ -502,12 +532,14 @@ class SettingsStore internal constructor(
         writeDelayMs,
         WRITE_RETRY_MS,
         RealSettingsDisk,
+        SettingsClock.Real,
         SettingsOpening(file, writeDelayMs, SettingsClock.Real, START_WAIT_MS, START_RETRY_MS, WRITE_RETRY_MS, RealSettingsDisk).waitForStart()
             ?: throw IllegalStateException("Another program holds $file"),
     )
 
     private val lock = Any()
     private val pending: File? = file?.let(::pendingFileFor)
+    private val betweenSongsFile: File? = file?.let(::betweenSongsFileFor)
     private val _state = MutableStateFlow(start.settings)
 
     val state: StateFlow<AppSettings> = _state
@@ -530,11 +562,20 @@ class SettingsStore internal constructor(
     private val _setAside = MutableStateFlow(start.setAside)
     val setAside: StateFlow<String?> = _setAside
 
-    // The saveCount of the file as this store last read or wrote it.
+    // The saveCount of the file as this store last read or wrote it, and
+    // the hash of its bytes: the main file a pending file begins from.
     private var saveCount = start.saveCount
+    private var mainHash = start.mainHash
 
     // A pending file to delete once the main file is written.
     private var pendingLeft = start.pendingLeft
+
+    // Why a pending file from before is still to be set aside, while it
+    // could not be moved.
+    private var stuckPending = start.stuckPending
+
+    // The Between songs file as this store last wrote it.
+    private var betweenSongsWritten: BetweenSongsFile? = null
 
     // The settings changed since the file was last written, if any.
     private var unsaved: AppSettings? = null
@@ -620,7 +661,8 @@ class SettingsStore internal constructor(
 
     // Writes what is waiting now; one that fails is tried again in
     // `writeRetryMs`. With nothing waiting, a pending file still left is
-    // deleted (the app's exit runs this too).
+    // deleted, and one from before still to be set aside is moved (the
+    // app's exit runs this too).
     fun flush() {
         if (file == null) return
         synchronized(lock) {
@@ -629,6 +671,7 @@ class SettingsStore internal constructor(
             val settings = unsaved
             if (settings == null) {
                 if (pendingLeft) dropPending()
+                moveStuckAside()
                 return
             }
             if (save(settings)) unsaved = null else flushIn(writeRetryMs)
@@ -637,26 +680,37 @@ class SettingsStore internal constructor(
 
     // True once the file holds these settings. While it is held the whole
     // state goes to the pending file instead, encoded as the file is and
-    // with the count it began from.
+    // with the main file it began from.
     private fun save(settings: AppSettings): Boolean {
         val main = file ?: return false
+        val bytes = encodeSettings(settings, saveCount + 1)
         try {
-            disk.replace(main, encodeSettings(settings, saveCount + 1))
+            disk.replace(main, bytes)
         } catch (e: IOException) {
-            val kept = try {
-                disk.replace(pending!!, encodeSettings(settings, saveCount))
-                true
-            } catch (e: IOException) {
-                false
-            }
-            if (kept) pendingLeft = true
-            setHold(if (kept) SettingsHold.Kept else SettingsHold.Unkept)
+            setHold(if (keepPending(settings)) SettingsHold.Kept else SettingsHold.Unkept)
             return false
         }
         saveCount += 1
+        mainHash = settingsHash(bytes)
         if (pendingLeft) dropPending()
+        moveStuckAside()
+        keepBetweenSongs(settings)
         setHold(SettingsHold.Free)
         return true
+    }
+
+    // The whole state to the pending file; never over a pending file from
+    // before that is still to be set aside. True once written.
+    private fun keepPending(settings: AppSettings): Boolean {
+        val kept = pending ?: return false
+        if (!moveStuckAside()) return false
+        return try {
+            disk.replace(kept, encodeSettings(settings, saveCount, mainHash))
+            pendingLeft = true
+            true
+        } catch (e: IOException) {
+            false
+        }
     }
 
     // Deletes the pending file; one that will not go is tried again after
@@ -664,6 +718,29 @@ class SettingsStore internal constructor(
     private fun dropPending() {
         val kept = pending ?: return
         if (disk.delete(kept)) pendingLeft = false
+    }
+
+    // Moves a pending file from before aside, never deleting it; true once
+    // none is left to move.
+    private fun moveStuckAside(): Boolean {
+        val why = stuckPending ?: return true
+        val stuck = pending ?: return true
+        if (!disk.exists(stuck) || moveAside(disk, clock, stuck, why) != null) stuckPending = null
+        return stuckPending == null
+    }
+
+    // The Between songs file, written when what it holds changed; a write
+    // that fails is tried again after the next.
+    private fun keepBetweenSongs(settings: AppSettings) {
+        val at = betweenSongsFile ?: return
+        val now = BetweenSongsFile.of(settings.playback)
+        if (now == betweenSongsWritten) return
+        try {
+            disk.replace(at, encodeBetweenSongsFile(now))
+            betweenSongsWritten = now
+        } catch (e: IOException) {
+            betweenSongsWritten = null
+        }
     }
 
     private fun setHold(hold: SettingsHold) {
@@ -710,6 +787,6 @@ class SettingsStore internal constructor(
         // settings: its changes stay in memory, with no writer, no exit
         // write and no pending file.
         fun readOnly(): SettingsStore =
-            SettingsStore(null, 0, 0, RealSettingsDisk, SettingsStart(AppSettings().settled(), 0, write = false, pendingLeft = false, setAside = null))
+            SettingsStore(null, 0, 0, RealSettingsDisk, SettingsClock.Real, SettingsStart(AppSettings().settled(), 0, write = false, pendingLeft = false, setAside = null))
     }
 }

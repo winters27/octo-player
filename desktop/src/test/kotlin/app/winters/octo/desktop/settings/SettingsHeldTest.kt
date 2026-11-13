@@ -23,6 +23,11 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.FileInputStream
 import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.attribute.AclEntry
+import java.nio.file.attribute.AclEntryPermission
+import java.nio.file.attribute.AclEntryType
+import java.nio.file.attribute.AclFileAttributeView
 
 // A settings file another program holds. Held after the app opened (a
 // write refused while the file stays readable, which a read cannot see):
@@ -162,7 +167,8 @@ class SettingsHeldTest {
         SettingsStore(file()).update { it.copy(sidePanel = "queue") }
         SettingsStore(file()).update { it.copy(sidePanel = "info") }
         assertEquals(3L, countIn(file()))
-        pending().writeBytes(encodeSettings(real().copy(sidePanel = "lyrics", recentSearches = emptyList()), 2))
+        // The very bytes, another count.
+        pending().writeBytes(encodeSettings(real().copy(sidePanel = "lyrics", recentSearches = emptyList()), 2, settingsHash(file().readBytes())))
         val store = opened(HeldDisk())
         assertEquals("info", store.current.sidePanel)
         assertEquals(listOf("radiohead"), store.current.recentSearches)
@@ -172,41 +178,135 @@ class SettingsHeldTest {
     }
 
     // No main file counts as 0, as does a main file without a count: a
-    // pending file applies against either only from 0.
+    // pending file applies against either only from 0, and only against the
+    // bytes it began from (none for no file).
     @Test
     fun noFileOrAFileWithoutACountIsZero() {
         file().parentFile.mkdirs()
-        pending().writeBytes(encodeSettings(real(), 0))
+        pending().writeBytes(encodeSettings(real(), 0, NO_MAIN_FILE))
         assertEquals("charts,recentlyPlayed,-pinned", opened(HeldDisk()).current.appearance.homeSections)
         assertEquals("written as the file", 1L, countIn(file()))
         assertFalse(pending().exists())
 
         file().delete()
-        pending().writeBytes(encodeSettings(real(), 4))
+        pending().writeBytes(encodeSettings(real(), 4, NO_MAIN_FILE))
         val fresh = opened(HeldDisk())
         assertEquals(AppSettings().settled(), fresh.current)
         assertEquals(1, aside("settings.pending.older-").size)
 
         // A file an older Octo wrote has no count.
         file().writeText("""{"sidePanel": "info"}""")
-        pending().writeBytes(encodeSettings(real().copy(sidePanel = "lyrics"), 0))
+        pending().writeBytes(encodeSettings(real().copy(sidePanel = "lyrics"), 0, settingsHash(file().readBytes())))
         assertEquals("lyrics", opened(HeldDisk()).current.sidePanel)
     }
 
+    // A pending file is used only against the very bytes it began from: an
+    // older Octo writing the file since (no count, so 0 like the pending
+    // file's base) leaves it older, so it is set aside as it was and the
+    // file the older Octo wrote is used.
+    @Test
+    fun aPendingFileIsUsedOnlyAgainstTheBytesItBeganFrom() {
+        file().parentFile.mkdirs()
+        file().writeText("""{"sidePanel": "queue"}""")
+        val olderFile = file().readBytes()
+        val held = opened(HeldDisk().apply { refuseReplace += "settings.json" })
+        held.update { it.copy(sidePanel = "lyrics") }
+        val kept = pending().readBytes()
+        assertEquals(0L, countIn(pending()))
+        // Nothing wrote the file since: the pending file is the newer state.
+        assertEquals("lyrics", opened(HeldDisk()).current.sidePanel)
+
+        // An older Octo wrote the file in between.
+        file().writeBytes(olderFile)
+        pending().writeBytes(kept)
+        file().writeText("""{"sidePanel": "info"}""")
+        val store = opened(HeldDisk())
+        assertEquals("info", store.current.sidePanel)
+        assertFalse(pending().exists())
+        assertArrayEquals("kept aside as it was", kept, aside("settings.pending.older-").single().readBytes())
+
+        // Begun with no file at all, and an older Octo wrote one since.
+        file().delete()
+        val fresh = opened(HeldDisk().apply { refuseReplace += "settings.json" })
+        fresh.update { it.copy(sidePanel = "lyrics") }
+        file().writeText("""{"sidePanel": "info"}""")
+        assertEquals("info", opened(HeldDisk(), StepClock(1_800_000_000_000)).current.sidePanel)
+        assertEquals(2, aside("settings.pending.older-").size)
+    }
+
+    // A hold after this session wrote the file: the pending file names the
+    // count and the bytes this session wrote, so the next start uses it.
+    @Test
+    fun aHoldAfterAWriteInTheSameSessionIsUsedNextTime() {
+        writeReal()
+        val disk = HeldDisk()
+        val store = opened(disk)
+        store.update { it.copy(sidePanel = "info") }
+        disk.refuseReplace += "settings.json"
+        store.update { it.copy(sidePanel = "lyrics") }
+        assertEquals(SettingsHold.Kept, store.hold.value)
+        assertEquals("lyrics", SettingsStore(file()).current.sidePanel)
+        assertTrue(aside("settings.pending.older-").isEmpty())
+    }
+
+    // A pending file from before that cannot be moved aside is never
+    // deleted, and never written over by a later hold (nothing is kept
+    // beside the file then, and the banner says so); it is moved aside, as
+    // it was, after the first write once it can be.
+    @Test
+    fun aPendingFileThatCannotBeMovedAsideIsNeverLost() {
+        writeReal()
+        SettingsStore(file()).update { it.copy(sidePanel = "info") }
+        val older = encodeSettings(real().copy(sidePanel = "lyrics"), 1, NO_MAIN_FILE)
+        pending().writeBytes(older)
+        val disk = HeldDisk().apply { refuseMove += "settings.pending.json" }
+        val store = opened(disk)
+        assertEquals("info", store.current.sidePanel)
+        store.update { it.copy(sidePanel = "queue") }
+        assertEquals(SettingsHold.Free, store.hold.value)
+        assertArrayEquals("not deleted after a write", older, pending().readBytes())
+        store.flush()
+        assertArrayEquals("not deleted by the exit's flush", older, pending().readBytes())
+        disk.refuseReplace += "settings.json"
+        store.update { it.copy(sidePanel = "info") }
+        assertEquals("nothing kept beside the file", SettingsHold.Unkept, store.hold.value)
+        assertArrayEquals("not written over", older, pending().readBytes())
+        disk.refuseReplace.clear()
+        disk.refuseMove.clear()
+        store.tryAgain()
+        assertEquals(SettingsHold.Free, store.hold.value)
+        assertFalse(pending().exists())
+        assertArrayEquals("moved aside as it was", older, aside("settings.pending.older-").single().readBytes())
+        assertEquals("info", SettingsStore(file()).current.sidePanel)
+    }
+
     // A main file that is not settings is set aside and the pending file
-    // used: the app did not start fresh, so no banner says it did.
+    // used: the app did not start fresh, so no banner says it did. With the
+    // main file gone, counts start again.
     @Test
     fun anUnreadableMainFileWithAPendingFileOpensOnThePendingFile() {
         file().parentFile.mkdirs()
         file().writeText("{ half a fi")
-        pending().writeBytes(encodeSettings(real(), 7))
+        pending().writeBytes(encodeSettings(real(), 7, "0000"))
         val clock = StepClock()
         val store = opened(HeldDisk(), clock)
         assertEquals("charts,recentlyPlayed,-pinned", store.current.appearance.homeSections)
         assertEquals("{ half a fi", aside("settings.unreadable-").single().readText())
         assertNull(store.setAside.value)
-        assertEquals(8L, countIn(file()))
+        assertEquals(1L, countIn(file()))
         assertFalse(pending().exists())
+    }
+
+    // The main file set aside and the first write held: the pending file
+    // names no main file, so the next start uses it.
+    @Test
+    fun aHeldWriteAfterTheMainFileWasSetAsideIsUsedNextTime() {
+        file().parentFile.mkdirs()
+        file().writeText("{ half a fi")
+        pending().writeBytes(encodeSettings(real(), 7, "0000"))
+        val store = opened(HeldDisk().apply { refuseReplace += "settings.json" })
+        assertEquals(SettingsHold.Kept, store.hold.value)
+        assertEquals("charts,recentlyPlayed,-pinned", opened(HeldDisk()).current.appearance.homeSections)
     }
 
     @Test
@@ -230,7 +330,52 @@ class SettingsHeldTest {
         val disk = HeldDisk().apply { refuseReads += "settings.json" }
         val open = SettingsStore.openOn(disk, file(), clock = clock, waitMs = 3_000, retryMs = 100)
         assertTrue(open is SettingsOpen.Held)
+        assertEquals(HeldAtStart.InUse, (open as SettingsOpen.Held).why)
         assertTrue(pending().exists())
+    }
+
+    // Each thing that holds Octo at the start is told apart, with the file
+    // it is about: another program has it, or this account may not read it.
+    @Test
+    fun eachHoldAtTheStartSaysWhatHoldsOcto() {
+        val read = writeReal()
+        val disk = HeldDisk().apply { refuseReads += "settings.json" }
+        val inUse = SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 0) as SettingsOpen.Held
+        assertEquals(HeldAtStart.InUse, inUse.why)
+        assertEquals(file(), inUse.file)
+        disk.refuseReads.clear()
+        disk.denyReads += "settings.json"
+        val denied = inUse.retry() as SettingsOpen.Held
+        assertEquals(HeldAtStart.NoAccess, denied.why)
+        assertEquals(file(), denied.file)
+        disk.denyReads.clear()
+        pending().writeBytes(encodeSettings(read, 1, settingsHash(file().readBytes())))
+        disk.denyReads += "settings.pending.json"
+        val pendingDenied = denied.retry() as SettingsOpen.Held
+        assertEquals(HeldAtStart.NoAccess, pendingDenied.why)
+        assertEquals("the file named is the one refused", pending(), pendingDenied.file)
+        disk.denyReads.clear()
+        assertTrue(pendingDenied.retry() is SettingsOpen.Opened)
+    }
+
+    // A damaged file Octo cannot move aside (a folder it may not change)
+    // says so, rather than that another program has it; once it can be
+    // moved, Octo starts fresh with it kept aside.
+    @Test
+    fun aDamagedFileThatCannotBeMovedAsideSaysSo() {
+        file().parentFile.mkdirs()
+        file().writeText("{ not settings")
+        val disk = HeldDisk().apply { refuseMove += "settings.json" }
+        val open = SettingsStore.openOn(disk, file(), clock = StepClock(), waitMs = 3_000, retryMs = 100)
+        assertTrue(open is SettingsOpen.Held)
+        assertEquals(HeldAtStart.Damaged, (open as SettingsOpen.Held).why)
+        assertEquals(file(), open.file)
+        assertEquals("never touched", "{ not settings", file().readText())
+        disk.refuseMove.clear()
+        val fresh = (open.retry() as SettingsOpen.Opened).store
+        assertEquals(AppSettings().settled(), fresh.current)
+        assertEquals("{ not settings", aside("settings.unreadable-").single().readText())
+        assertTrue(fresh.setAside.value != null)
     }
 
     // Held from the start: no store on the defaults. The wait runs through
@@ -297,6 +442,7 @@ class SettingsHeldTest {
     fun openWithoutMySettingsSavesNothing() {
         writeReal()
         val before = file().readBytes()
+        val files = file().parentFile.list().orEmpty().sorted()
         val store = SettingsStore.readOnly()
         assertTrue(store.readOnly)
         assertEquals(AppSettings().settled(), store.current)
@@ -307,7 +453,7 @@ class SettingsHeldTest {
         store.tryAgain()
         assertEquals("lyrics", store.current.sidePanel)
         assertArrayEquals(before, file().readBytes())
-        assertEquals(listOf(SettingsStore.FILE_NAME), file().parentFile.list().orEmpty().toList())
+        assertEquals("nothing beside it", files, file().parentFile.list().orEmpty().sorted())
         assertFalse(store.locked.value)
         assertEquals(listOf<SettingsBanner>(SettingsBanner.ReadOnly), settingsBanners(store.readOnly, store.hold.value, store.setAside.value))
         // The next start reads the real file, with nothing of that session.
@@ -396,7 +542,50 @@ class SettingsHeldTest {
             raf.channel.lock().use { SettingsStore.open(file(), clock = StepClock()) }
         }
         assertTrue(held is SettingsOpen.Held)
-        val freed = (held as SettingsOpen.Held).retry()
+        assertEquals(HeldAtStart.InUse, (held as SettingsOpen.Held).why)
+        val freed = held.retry()
         assertEquals(read, (freed as SettingsOpen.Opened).store.current)
+    }
+
+    // Windows itself, as this account is denied reading the file: it says
+    // so, rather than that another program has it.
+    @Test
+    fun aRealReadDenialOnWindowsSaysSo() {
+        assumeTrue(currentOs() == DesktopOs.Windows)
+        val read = writeReal()
+        val held = denied(file(), AclEntryPermission.READ_DATA) { SettingsStore.open(file(), clock = StepClock(), waitMs = 0) }
+        assertTrue("held: $held", held is SettingsOpen.Held)
+        assertEquals(HeldAtStart.NoAccess, (held as SettingsOpen.Held).why)
+        assertEquals(read, (held.retry() as SettingsOpen.Opened).store.current)
+    }
+
+    // Windows itself, as a damaged file sits in a folder Octo may not
+    // change: it cannot be moved aside, and the window says so.
+    @Test
+    fun aRealDamagedFileInAFolderOctoCannotChangeSaysSo() {
+        assumeTrue(currentOs() == DesktopOs.Windows)
+        file().parentFile.mkdirs()
+        file().writeText("{ not settings")
+        val held = denied(file().parentFile, AclEntryPermission.ADD_FILE, AclEntryPermission.DELETE_CHILD) {
+            denied(file(), AclEntryPermission.DELETE) { SettingsStore.open(file(), clock = StepClock(), waitMs = 3_000, retryMs = 100) }
+        }
+        assertTrue("held: $held", held is SettingsOpen.Held)
+        assertEquals(HeldAtStart.Damaged, (held as SettingsOpen.Held).why)
+        assertEquals("never touched", "{ not settings", file().readText())
+        assertTrue(held.retry() is SettingsOpen.Opened)
+        assertEquals("{ not settings", aside("settings.unreadable-").single().readText())
+    }
+
+    // Runs `block` while this account is denied `what` on `at`, then gives
+    // it back.
+    private fun <T> denied(at: File, vararg what: AclEntryPermission, block: () -> T): T {
+        val view = Files.getFileAttributeView(at.toPath(), AclFileAttributeView::class.java)
+        val before = view.acl
+        view.acl = listOf(AclEntry.newBuilder().setType(AclEntryType.DENY).setPrincipal(view.owner).setPermissions(*what).build()) + before
+        try {
+            return block()
+        } finally {
+            view.acl = before
+        }
     }
 }

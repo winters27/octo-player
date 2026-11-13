@@ -1,11 +1,12 @@
 package app.winters.octo.desktop.settings
 
-import kotlinx.serialization.SerializationException
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 
 // The time the settings store reads, and its waiting; tests make both
 // instant.
@@ -27,21 +28,28 @@ interface SettingsClock {
 // pending file refused too, so changes made now may be lost (Unkept).
 enum class SettingsHold { Free, Kept, Unkept }
 
-// What opening the settings file gave: the store, or a file another program
-// holds, looked at once more by `retry`.
+// What keeps Octo from its settings at the start: another program has the
+// file open (InUse); this account is not allowed to read it (NoAccess); or
+// it is damaged and Octo cannot move it aside to start fresh (Damaged).
+enum class HeldAtStart { InUse, NoAccess, Damaged }
+
+// What opening the settings file gave: the store, or a file that holds Octo
+// (which file, and why), looked at once more by `retry`.
 sealed interface SettingsOpen {
     class Opened(val store: SettingsStore) : SettingsOpen
 
-    class Held(val retry: () -> SettingsOpen) : SettingsOpen
+    class Held(val why: HeldAtStart, val file: File, val retry: () -> SettingsOpen) : SettingsOpen
 }
 
 // The disk as the settings store uses it. The tests stand in for it to hold
 // a file the way another program can: refusing reads, or letting it be read
 // while refusing to replace it.
 internal interface SettingsDisk {
+    // False only when the file is surely not there.
     fun exists(file: File): Boolean
 
-    // The file's bytes; IOException while another program holds it.
+    // The file's bytes; AccessDeniedException when this account is not
+    // allowed to read it, another IOException while another program holds it.
     fun read(file: File): ByteArray
 
     // The bytes to a temporary file beside `file`, flushed to the disk, then
@@ -57,9 +65,11 @@ internal interface SettingsDisk {
 }
 
 internal object RealSettingsDisk : SettingsDisk {
-    override fun exists(file: File): Boolean = file.exists()
+    // A file the account cannot even look at counts as there, so its read
+    // says why it cannot be had.
+    override fun exists(file: File): Boolean = !Files.notExists(file.toPath())
 
-    override fun read(file: File): ByteArray = file.readBytes()
+    override fun read(file: File): ByteArray = Files.readAllBytes(file.toPath())
 
     override fun replace(file: File, bytes: ByteArray) {
         file.parentFile?.mkdirs()
@@ -84,17 +94,44 @@ internal object RealSettingsDisk : SettingsDisk {
 // written: settings.pending.json beside settings.json.
 internal fun pendingFileFor(file: File): File = File(file.parentFile, file.nameWithoutExtension + ".pending.json")
 
-// What a store starts from: its settings; the saveCount of the file they
-// were read against, which the next write raises; whether to write them at
+// The file beside settings.json with the Between songs settings as Octo
+// last wrote them there: settings.between-songs.json.
+internal fun betweenSongsFileFor(file: File): File = File(file.parentFile, file.nameWithoutExtension + ".between-songs.json")
+
+// The main file's bytes as a pending file names the file it began from.
+internal fun settingsHash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+// What a pending file names when it began with no main file there.
+internal const val NO_MAIN_FILE = ""
+
+// Why a file is set aside: it is not settings, or it is a pending file older
+// than the main file.
+internal const val SET_ASIDE_UNREADABLE = "unreadable"
+internal const val SET_ASIDE_OLDER = "older"
+
+// Moves `at` aside as <name>.<why>-<time>.json, never deleting it; the name
+// it now has, or null when it could not be moved.
+internal fun moveAside(disk: SettingsDisk, clock: SettingsClock, at: File, why: String): String? {
+    val aside = File(at.parentFile, at.nameWithoutExtension + "." + why + "-" + clock.now() + ".json")
+    return if (disk.move(at, aside)) aside.name else null
+}
+
+// What a store starts from: its settings; the main file on disk as it
+// stands, its saveCount (which the next write raises) and the hash of its
+// bytes, 0 and NO_MAIN_FILE when there is none; whether to write them at
 // once (they came from the pending file, or an older file that chose its
 // Between songs setting); whether a pending file is left to delete once the
-// main file is written; and the name an unreadable file was set aside
-// under when the store starts fresh because of it.
+// main file is written; why a pending file that could not be moved aside is
+// still to go (it is moved aside later, never deleted or written over); and
+// the name an unreadable file was set aside under when the store starts
+// fresh because of it.
 internal class SettingsStart(
     val settings: AppSettings,
     val saveCount: Long,
+    val mainHash: String = NO_MAIN_FILE,
     val write: Boolean,
     val pendingLeft: Boolean,
+    val stuckPending: String? = null,
     val setAside: String?,
 )
 
@@ -104,13 +141,14 @@ internal class SettingsStart(
 // file it cannot read is there.
 //
 // The pending file is the newer state only when it began from the very file
-// read (its saveCount is the main file's; no file and a file without a
-// count are 0); one that does not match (its delete failed and later
-// sessions wrote, or the main file was replaced outside Octo) is set aside.
-// A main file that is not settings is set aside and the pending file used.
-// A file that does not parse is read again: it is set aside only when two
-// reads give the same bytes, so a file caught while another program writes
-// it is never taken for a broken one.
+// read: its saveCount is the main file's (no file and a file without a
+// count are 0) and it names the hash of the main file's bytes. One that does
+// not match (its delete failed and later sessions wrote, or the main file
+// was written outside Octo, an older Octo among them) is set aside. A main
+// file that is not settings is set aside and the pending file used. A file
+// that does not parse is read again: it is set aside only when two reads
+// give the same bytes, so a file caught while another program writes it is
+// never taken for a broken one.
 internal class SettingsOpening(
     private val file: File,
     private val writeDelayMs: Long,
@@ -121,6 +159,7 @@ internal class SettingsOpening(
     private val disk: SettingsDisk,
 ) {
     private val pending = pendingFileFor(file)
+    private val betweenSongs = betweenSongsFileFor(file)
 
     // The bytes of the last read of each file that did not parse.
     private var badMain: ByteArray? = null
@@ -130,95 +169,112 @@ internal class SettingsOpening(
     private sealed interface Seen {
         data object Absent : Seen
 
-        data object Busy : Seen
+        // Not to be had yet, and why: being written (bytes that did not
+        // parse, read again), held or refused.
+        class Busy(val why: HeldAtStart, val file: File) : Seen
 
         data object Unreadable : Seen
 
-        class Good(val read: ReadSettings) : Seen
+        class Good(val read: ReadSettings, val hash: String) : Seen
+    }
+
+    // What a look at both files gave: the start, or the file that holds
+    // Octo and why.
+    sealed interface Look {
+        class Ready(val start: SettingsStart) : Look
+
+        class Waiting(val why: HeldAtStart, val file: File) : Look
     }
 
     // The store, or the file held once the wait is over.
-    fun open(): SettingsOpen = waitForStart()?.let { SettingsOpen.Opened(store(it)) } ?: held()
+    fun open(): SettingsOpen = opened(waitForLook())
 
     // What the files give within the wait, or null while still held.
-    fun waitForStart(): SettingsStart? {
+    fun waitForStart(): SettingsStart? = (waitForLook() as? Look.Ready)?.start
+
+    private fun waitForLook(): Look {
         val until = clock.now() + waitMs
         while (true) {
-            look()?.let { return it }
-            if (clock.now() >= until) return null
+            val seen = look()
+            if (seen is Look.Ready || clock.now() >= until) return seen
             clock.sleep(retryMs)
         }
     }
 
-    private fun held(): SettingsOpen = SettingsOpen.Held { look()?.let { SettingsOpen.Opened(store(it)) } ?: held() }
+    private fun opened(seen: Look): SettingsOpen = when (seen) {
+        is Look.Ready -> SettingsOpen.Opened(SettingsStore(file, writeDelayMs, writeRetryMs, disk, clock, seen.start))
+        is Look.Waiting -> SettingsOpen.Held(seen.why, seen.file) { opened(look()) }
+    }
 
-    private fun store(start: SettingsStart) = SettingsStore(file, writeDelayMs, writeRetryMs, disk, start)
-
-    // One look at both files: what they give, or null while either is held.
+    // One look at both files.
     @Synchronized
-    fun look(): SettingsStart? {
-        val main = see(file, badMain) { badMain = it }
-        if (main == Seen.Busy) return null
-        val kept = see(pending, badPending) { badPending = it }
-        if (kept == Seen.Busy) return null
-        val aside = if (main == Seen.Unreadable) setAside(file, UNREADABLE) ?: return null else null
-        val count = (main as? Seen.Good)?.read?.saveCount ?: 0L
-        // A pending file that could not be moved aside is deleted after the
-        // next write instead.
-        var stuck = false
+    fun look(): Look {
+        val main = see(file, badMain, betweenSongs) { badMain = it }
+        if (main is Seen.Busy) return Look.Waiting(main.why, main.file)
+        val kept = see(pending, badPending, null) { badPending = it }
+        if (kept is Seen.Busy) return Look.Waiting(kept.why, kept.file)
+        val aside = if (main == Seen.Unreadable) moveAside(disk, clock, file, SET_ASIDE_UNREADABLE) ?: return Look.Waiting(HeldAtStart.Damaged, file) else null
+        // The main file on disk now: none once it is set aside.
+        val good = main as? Seen.Good
+        val count = good?.read?.saveCount ?: 0L
+        val hash = good?.hash ?: NO_MAIN_FILE
+        var stuck: String? = null
         val used = when (kept) {
-            is Seen.Good -> if (main == Seen.Unreadable || kept.read.saveCount == count) {
+            is Seen.Good -> if (main == Seen.Unreadable || kept.read.beganFrom(count, hash)) {
                 kept.read
             } else {
-                stuck = setAside(pending, OLDER) == null
+                if (moveAside(disk, clock, pending, SET_ASIDE_OLDER) == null) stuck = SET_ASIDE_OLDER
                 null
             }
             Seen.Unreadable -> {
-                stuck = setAside(pending, UNREADABLE) == null
+                if (moveAside(disk, clock, pending, SET_ASIDE_UNREADABLE) == null) stuck = SET_ASIDE_UNREADABLE
                 null
             }
             else -> null
         }
-        val read = used ?: (main as? Seen.Good)?.read
-        return SettingsStart(
-            settings = read?.settings ?: AppSettings().settled(),
-            saveCount = used?.saveCount ?: count,
-            write = used != null || read?.migrated?.untouched == false,
-            pendingLeft = used != null || stuck,
-            setAside = aside.takeIf { used == null },
+        val read = used ?: good?.read
+        return Look.Ready(
+            SettingsStart(
+                settings = read?.settings ?: AppSettings().settled(),
+                saveCount = count,
+                mainHash = hash,
+                write = used != null || read?.migrated?.untouched == false,
+                pendingLeft = used != null,
+                stuckPending = stuck,
+                setAside = aside.takeIf { used == null },
+            ),
         )
     }
 
-    private fun see(at: File, bad: ByteArray?, remember: (ByteArray?) -> Unit): Seen {
-        if (!disk.exists(at)) return Seen.Absent
+    // One file: its settings, read with the Between songs file `choice` when
+    // it is an older Octo's.
+    private fun see(at: File, bad: ByteArray?, choice: File?, remember: (ByteArray?) -> Unit): Seen {
         val bytes = try {
+            if (!disk.exists(at)) return Seen.Absent
             disk.read(at)
         } catch (e: IOException) {
-            return Seen.Busy
+            return Seen.Busy(heldBy(e), at)
         }
-        return try {
-            Seen.Good(decodeSettings(bytes.toString(Charsets.UTF_8))).also { remember(null) }
-        } catch (e: SerializationException) {
-            unreadable(bytes, bad, remember)
+        val read = try {
+            decodeSettings(bytes.toString(Charsets.UTF_8)) { choice?.let(::readBetweenSongsFile) }
+        } catch (e: IOException) {
+            return Seen.Busy(heldBy(e), choice ?: at)
         } catch (e: IllegalArgumentException) {
-            unreadable(bytes, bad, remember)
+            // A SerializationException is one too.
+            return unreadable(bytes, bad, remember, at)
         }
+        remember(null)
+        return Seen.Good(read, settingsHash(bytes))
     }
 
-    private fun unreadable(bytes: ByteArray, bad: ByteArray?, remember: (ByteArray?) -> Unit): Seen {
+    // The Between songs file, or null when there is none or it is not one.
+    private fun readBetweenSongsFile(at: File): BetweenSongsFile? = if (disk.exists(at)) decodeBetweenSongsFile(disk.read(at)) else null
+
+    private fun heldBy(e: IOException): HeldAtStart = if (e is AccessDeniedException) HeldAtStart.NoAccess else HeldAtStart.InUse
+
+    private fun unreadable(bytes: ByteArray, bad: ByteArray?, remember: (ByteArray?) -> Unit, at: File): Seen {
         if (bad != null && bad.contentEquals(bytes)) return Seen.Unreadable
         remember(bytes)
-        return Seen.Busy
-    }
-
-    // Moves `at` aside, never deleting it; the name it now has, or null.
-    private fun setAside(at: File, why: String): String? {
-        val aside = File(at.parentFile, at.nameWithoutExtension + "." + why + "-" + clock.now() + ".json")
-        return if (disk.move(at, aside)) aside.name else null
-    }
-
-    private companion object {
-        const val UNREADABLE = "unreadable"
-        const val OLDER = "older"
+        return Seen.Busy(HeldAtStart.InUse, at)
     }
 }
