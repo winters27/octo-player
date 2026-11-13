@@ -5,11 +5,15 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.AudioProcessor.AudioFormat
 import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.playback.entryId
 import java.nio.ByteBuffer
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 // How long a change of level, balance or curve takes, so it never clicks.
 const val GLIDE_MS = 30f
@@ -209,15 +213,33 @@ interface DeckSound {
 // settings shape nothing, so a transition can start at any moment without
 // the output being set up again; the sound then passes through unchanged.
 // It keeps the song time of every frame it hands on (from where the player
-// says each stream starts, and the speed), runs an armed transition on
-// that time, and feeds what the listener hears to a LiveTap.
+// says each stream starts, before the speed step changed it, and the
+// speed), runs an armed transition on that time, and feeds what the
+// listener hears to a LiveTap.
+//
+// Given `labels`, it is a deck's last step on the way to the mixer: it is
+// always active, hands on float stereo at the song's rate whatever the
+// song's channels (mono doubled, more than two mixed down), labels every
+// stretch it hands on with its song time and stream, and leaves blends to
+// the mixer.
 @UnstableApi
 class OctoDspProcessor(
     private val keepActive: () -> Boolean = { false },
     private val tap: LiveTapFeed? = null,
     private val entryOf: (AudioProcessor.StreamMetadata) -> String? = ::entryOfStream,
+    private val labels: DeckTimeQueue? = null,
     private val settings: () -> SoundSettings,
 ) : BaseAudioProcessor(), DeckSound {
+    // Whether this step feeds the mixer.
+    val mixPath: Boolean get() = labels != null
+
+    private var times: ChainTimes? = null
+    private var stereo = FloatArray(0)
+    private var downmix: FloatArray? = null
+    private var songEndMs = Double.NaN
+    private var live = false
+    private var streamSpeed = 1.0
+    private var streamStarted = false
     private var pendingSong: SongLoudness? = null
     private var song: SongLoudness? = null
     private var shaper: SoundShaper? = null
@@ -254,6 +276,11 @@ class OctoDspProcessor(
         speed = value
     }
 
+    // Where the chain notes each stream's start and skipped silence.
+    fun useTimes(chainTimes: ChainTimes) {
+        times = chainTimes
+    }
+
     // The loudness of the song that plays after the current one.
     fun setNextSong(next: SongLoudness) {
         pendingSong = next
@@ -261,13 +288,21 @@ class OctoDspProcessor(
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
         val encoding = inputAudioFormat.encoding
-        if (encoding != C.ENCODING_PCM_16BIT && encoding != C.ENCODING_PCM_FLOAT) return AudioFormat.NOT_SET
+        if (encoding != C.ENCODING_PCM_16BIT && encoding != C.ENCODING_PCM_FLOAT) {
+            if (mixPath) throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+            return AudioFormat.NOT_SET
+        }
+        if (mixPath) {
+            downmix = stereoMatrix(inputAudioFormat.channelCount)
+            return AudioFormat(inputAudioFormat.sampleRate, 2, C.ENCODING_PCM_FLOAT)
+        }
         if (!settings().shapesSound() && !keepActive()) return AudioFormat.NOT_SET
         return AudioFormat(inputAudioFormat.sampleRate, inputAudioFormat.channelCount, C.ENCODING_PCM_FLOAT)
     }
 
     // Runs after the song before has played out, and after a seek.
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
+        draining = false
         val newSong = pendingSong
         if (newSong != null) {
             song = newSong
@@ -285,8 +320,21 @@ class OctoDspProcessor(
         val entry = entryOf(streamMetadata)
         val sameSong = kept != null && entry == entryId
         entryId = entry
-        streamStartMs = streamMetadata.positionOffsetUs / 1_000.0
+        // The speed step hands later steps the start divided by the speed;
+        // the song time is the start it received.
+        streamSpeed = speed.toDouble()
+        streamStartMs = streamMetadata.positionOffsetUs * streamSpeed / 1_000.0
         framesOut = 0
+        if (mixPath) {
+            labels?.clear()
+            // While skipping is off the skipper is out of the pipeline and
+            // never sees this flush, so its old points are dropped here.
+            times?.flushed()
+            streamStarted = true
+            val info = songOfStream(streamMetadata)
+            songEndMs = info.first
+            live = info.second
+        }
         val shaping = transitions
         if (shaping == null || shaping.sampleRate != format.sampleRate || shaping.channels != format.channelCount) {
             transitions = TransitionShaper(format.sampleRate, format.channelCount)
@@ -318,26 +366,117 @@ class OctoDspProcessor(
         // The tap is only for planning blends.
         if (keepActive()) tap?.push(input, count)
         val out = current.process(input, frames, output)
-        shapeTransition(out)
-        emit(out * format.channelCount)
+        if (mixPath) {
+            emitToMix(out, format.channelCount)
+        } else {
+            shapeTransition(out)
+            emit(out * format.channelCount)
+        }
     }
 
+    // The sound the limiter still holds goes out at the end of the stream,
+    // but only once what was handed on before it has been taken: the
+    // player asks for the end while its last output may still be unwritten,
+    // and a new output now would overwrite it.
+    private var draining = false
+
     override fun onQueueEndOfStream() {
+        draining = true
+    }
+
+    override fun getOutput(): ByteBuffer {
+        if (draining && !hasPendingOutput()) {
+            draining = false
+            drainHeld()
+        }
+        return super.getOutput()
+    }
+
+    override fun isEnded(): Boolean = !draining && super.isEnded()
+
+    private fun drainHeld() {
         val current = shaper ?: return
         val room = current.latency * current.channels
         if (output.size < room) output = FloatArray(room)
         val out = current.drain(output)
-        shapeTransition(out)
-        emit(out * current.channels)
+        if (mixPath) {
+            emitToMix(out, current.channels)
+        } else {
+            shapeTransition(out)
+            emit(out * current.channels)
+        }
     }
 
     override fun onReset() {
+        draining = false
         shaper = null
         transitions = null
         song = null
         seen = null
         entryId = null
+        labels?.clear()
         tap?.close()
+    }
+
+    // Hands `frames` shaped frames of `output` on as stereo, labeled with
+    // their song time. A frame's place in the song is its place in the
+    // speed step's input (this step's frame times the speed) plus the
+    // silence skipped before that place; a label ends wherever more was
+    // skipped.
+    private fun emitToMix(frames: Int, channels: Int) {
+        if (frames == 0) return
+        val queue = labels ?: return
+        val format = inputAudioFormat
+        val rate = format.sampleRate.toDouble()
+        val msPerFrame = streamSpeed * 1_000.0 / rate
+        var at = 0
+        while (at < frames) {
+            val k = framesOut + at
+            val sonicIn = k * streamSpeed
+            val here = floor(sonicIn + 1e-9).toLong()
+            val skips = times?.skipsBefore(here) ?: 0L
+            val nextPoint = times?.nextPointAfter(here) ?: Long.MAX_VALUE
+            val until = if (nextPoint == Long.MAX_VALUE) Long.MAX_VALUE else ceil(nextPoint / streamSpeed - 1e-9).toLong()
+            val n = minOf((frames - at).toLong(), maxOf(1L, until - k)).toInt()
+            val songMs = streamStartMs + (sonicIn + skips) * 1_000.0 / rate
+            queue.push(n, songMs, msPerFrame, entryId, streamStarted, songEndMs, live)
+            streamStarted = false
+            at += n
+        }
+        framesOut += frames
+        emitStereo(frames, channels)
+    }
+
+    private fun emitStereo(frames: Int, channels: Int) {
+        val samples = frames * 2
+        if (stereo.size < samples) stereo = FloatArray(samples)
+        when (channels) {
+            1 -> for (i in 0 until frames) {
+                stereo[i * 2] = output[i]
+                stereo[i * 2 + 1] = output[i]
+            }
+            2 -> output.copyInto(stereo, 0, 0, samples)
+            else -> {
+                val m = downmix ?: stereoMatrix(channels)
+                for (i in 0 until frames) {
+                    var l = 0f
+                    var r = 0f
+                    val base = i * channels
+                    for (ch in 0 until channels) {
+                        val x = output[base + ch]
+                        l += x * m[ch * 2]
+                        r += x * m[ch * 2 + 1]
+                    }
+                    stereo[i * 2] = l
+                    stereo[i * 2 + 1] = r
+                }
+            }
+        }
+        val bytes = samples * Float.SIZE_BYTES
+        val buffer = replaceOutputBuffer(bytes)
+        buffer.asFloatBuffer().put(stereo, 0, samples)
+        buffer.position(bytes)
+        buffer.flip()
     }
 
     // Runs the armed transition, when it is for this song, on the frames
@@ -363,6 +502,46 @@ class OctoDspProcessor(
         buffer.position(bytes)
         buffer.flip()
     }
+}
+
+// Each input channel's share of left and right, as [ch * 2] and
+// [ch * 2 + 1]: Media3's standard constant-power mix down to stereo, or
+// for a layout it has none for, odd channels to the left and even to the
+// right, scaled to keep the level.
+@UnstableApi
+internal fun stereoMatrix(channels: Int): FloatArray {
+    val out = FloatArray(channels * 2)
+    if (channels <= 2) {
+        out[0] = 1f
+        if (channels == 2) out[3] = 1f else out[1] = 1f
+        return out
+    }
+    try {
+        val m = ChannelMixingMatrix.createForConstantPower(channels, 2)
+        for (ch in 0 until channels) {
+            out[ch * 2] = m.getMixingCoefficient(ch, 0)
+            out[ch * 2 + 1] = m.getMixingCoefficient(ch, 1)
+        }
+    } catch (e: UnsupportedOperationException) {
+        val share = 1f / sqrt((channels + 1) / 2f)
+        for (ch in 0 until channels) out[ch * 2 + (ch and 1)] = share
+    }
+    return out
+}
+
+// The song's length in ms (NaN when not known) and whether its window is
+// live or unseekable, from what the player says about the stream.
+@UnstableApi
+internal fun songOfStream(metadata: AudioProcessor.StreamMetadata): Pair<Double, Boolean> {
+    val uid = metadata.periodUid ?: return Double.NaN to false
+    val timeline = metadata.timeline
+    if (timeline.isEmpty) return Double.NaN to false
+    val index = timeline.getIndexOfPeriod(uid)
+    if (index < 0) return Double.NaN to false
+    val period = timeline.getPeriod(index, Timeline.Period())
+    val window = timeline.getWindow(period.windowIndex, Timeline.Window())
+    val end = if (window.durationUs == C.TIME_UNSET) Double.NaN else window.durationUs / 1_000.0
+    return end to (window.isLive() || !window.isSeekable)
 }
 
 // The queue entry a stream belongs to, from what the player says about it.
