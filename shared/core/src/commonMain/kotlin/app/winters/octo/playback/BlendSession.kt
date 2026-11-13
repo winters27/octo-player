@@ -48,8 +48,11 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
 
     private var overlapMs = 0.0
     private var barMs = Double.NaN
-    private var intro = false
     private var holdShare = 0.0
+    private var bothHeardStartMs = 0.0
+    private var bothHeardEndMs = 0.0
+    private var lockMs = 0.0
+    private var driftGap = 0.0
     private var latestEndMs = 0.0
     private var outgoingEndMs = 0.0
     private var speed = 1.0
@@ -89,6 +92,16 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private var runFrom = 0L
     private var runMs = 0.0
     private var stopped = false
+
+    // A's song time since the plan's start is anchorSongMs at anchorFrame,
+    // growing by msPerFrame a frame (rebased at each pace change). Its blend
+    // time is that less the extensions, never below where a hold froze it.
+    private var anchorFrame = 0L
+    private var anchorSongMs = 0.0
+    private var frozenBlendMs = 0.0
+
+    // The blend time a speed drop cuts the blend at; NaN when none.
+    private var dropCutMs = Double.NaN
 
     // An undone start waiting to hear what A plays after its end.
     private var askGen = -1L
@@ -187,8 +200,13 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         startMs = arm.startMs
         overlapMs = arm.overlapMs
         barMs = if (arm.barMs > 0) arm.barMs else Double.NaN
-        intro = arm.intro
         holdShare = arm.holdShare
+        bothHeardStartMs = arm.bothHeardStartMs
+        bothHeardEndMs = arm.bothHeardEndMs
+        lockMs = arm.lockMs
+        driftGap = arm.driftGap
+        frozenBlendMs = 0.0
+        dropCutMs = Double.NaN
         latestEndMs = arm.latestEndMs
         outgoingEndMs = arm.outgoingEndMs
         speed = arm.speed
@@ -284,6 +302,28 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     }
 
     // The Crossfader stopped A: the generation retires.
+    // The listener's pace became `pace` from `switchFrame`, the first frame
+    // carrying it. A's and B's clocks run at the new pace from there, and
+    // the blend is cut at the first moment of its blend time (holds mapped)
+    // where the beats would drift past the bound at that pace; a pace that
+    // keeps them within it clears such a cut.
+    fun paceChanged(pace: Double, switchFrame: Long) {
+        soonest = point
+        if (state == BlendState.IDLE) return
+        if (startFrame >= 0) {
+            anchorSongMs = songSince(switchFrame)
+            anchorFrame = switchFrame
+            if (!stopped && switchFrame >= runFrom) {
+                runMs = incomingMs(switchFrame)
+                runFrom = switchFrame
+            }
+        }
+        speed = pace
+        msPerFrame = pace * 1_000.0 / timing.sampleRate
+        if (startFrame < 0 || state == BlendState.ENDED) return
+        dropCutMs = blendDropCutAtMs(bothHeardStartMs, bothHeardEndMs, lockMs, driftGap, pace, blendAt(switchFrame))
+    }
+
     fun outgoingStopped(generation: Long) {
         if (generation == this.generation && state != BlendState.IDLE) retire()
     }
@@ -352,7 +392,33 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     private fun timers(frame: Long) {
         val horizon = timing.placementHorizonFrames
         if (state == BlendState.HELD && frame > deadline - horizon) deadlinePassed(frame)
-        if (endAt >= 0 && (state == BlendState.MIXING || state == BlendState.STALLED) && frame > endAt - horizon) blendEndReached()
+        val running = state == BlendState.MIXING || state == BlendState.STALLED
+        if (running && !dropCutMs.isNaN()) {
+            val cutAt = frameAtBlend(dropCutMs)
+            if (frame > cutAt - horizon) dropCut(max(cutAt, soonest))
+        }
+        if (endAt >= 0 && running && frame > endAt - horizon) blendEndReached()
+    }
+
+    // The speed drop's cut: after the handover A leaves over 20 ms and B
+    // goes to its own level over 250 ms; before it, the start is undone as
+    // by the session's own disarm.
+    private fun dropCut(at: Long) {
+        dropCutMs = Double.NaN
+        if (!handedOver()) word.cancel(generation)
+        if (handedOver()) {
+            val ramp = rampFrames(BLEND_DISARM_RAMP_MS)
+            action(BlendActionKind.A_LEAVE, at, rampFrames(BLEND_LEAVE_RAMP_MS))
+            action(BlendActionKind.B_DISARM, at, ramp)
+            endBlend(at, incomingMs(at), ramp)
+            return
+        }
+        undo(at)
+        event(BlendEventKind.CANCELLED, at, cause = BlendCause.PACE)
+        openAsk()
+        event(BlendEventKind.FOLLOW_UP_NEEDED, at, now = true)
+        asked = true
+        retire()
     }
 
     // Head-timed rules: the late start while armed; the proposal, then the
@@ -435,6 +501,8 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         }
         startFrame = s
         state = BlendState.MIXING
+        anchorFrame = s
+        anchorSongMs = 0.0
         runFrom = s
         runMs = 0.0
         stopped = false
@@ -445,12 +513,17 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // A start that can no longer be decided the proposal lead ahead of the
     // head moves to A's first bar line (or, with no bar grid, the first
     // frame) that far ahead, while the plan's bar budget and its latest end
-    // allow; otherwise B does not start.
+    // allow (with no bar grid, any budget but 0 and the latest end);
+    // otherwise B does not start.
     private fun lateStart(predicted: Long, at: Long) {
         val nowMs = startMs + (head + timing.proposalLeadFrames - predicted) * msPerFrame
         val bars = if (locked) max(1.0, ceil((nowMs - startMs) / barMs)) else 0.0
         val target = if (locked) startMs + bars * barMs else nowMs
-        val fits = if (locked) bars <= allowedBars().toDouble() else target + overlapMs + extensionMs <= latestEndMs
+        val fits = if (locked) {
+            bars <= allowedBars().toDouble()
+        } else {
+            lateMoveBars != 0 && target + overlapMs + extensionMs <= latestEndMs
+        }
         if (fits) {
             if (locked) movedBars += bars.toInt()
             startMs = target
@@ -524,18 +597,19 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         }
     }
 
-    // B ran dry at `at`. Inside A's hold of an intro, with room, B is held
-    // for placement on a later bar and A's blend time stops; otherwise A
-    // fades on and B waits for the clean cut.
+    // B ran dry at `at`. Inside A's hold (any kind with a hold: an intro, a
+    // lead-in), with room, B is held for placement on a later bar and A's
+    // blend time stops; otherwise A fades on and B waits for the clean cut.
     private fun incomingDry(at: Long) {
         stop(at)
-        val blendMs = (at - startFrame) * msPerFrame - extensionMs
-        val room = if (intro && blendMs < holdShare * overlapMs) roomDeadline(at) else -1L
+        val blendMs = blendAt(at)
+        val room = if (holdShare > 0 && blendMs < holdShare * overlapMs) roomDeadline(at) else -1L
         action(BlendActionKind.HOLD_B, at)
         if (room >= 0) {
             state = BlendState.HELD
             holdFrom = at
             deadline = room
+            frozenBlendMs = blendMs
             action(BlendActionKind.FREEZE_A, at)
         } else {
             state = BlendState.STALLED
@@ -563,16 +637,31 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
                 bars++
             }
             best
+        } else if (lateMoveBars == 0) {
+            // An unlocked plan that may not move has no hold extension.
+            -1L
         } else {
             val byEnd = stop + floorFrames((latestEndMs - startMs - overlapMs - extensionMs) / msPerFrame)
-            val byLeft = startFrame + ceilFrames((outgoingEndMs - leftMs * speed - startMs) / msPerFrame) - 1
+            val byLeft = anchorFrame + ceilFrames((outgoingEndMs - leftMs * speed - startMs - anchorSongMs) / msPerFrame) - 1
             min(byEnd, byLeft)
         }
         return if (latest >= stop + timing.placementHorizonFrames) latest else -1L
     }
 
     private fun leaves(at: Long, leftMs: Double): Boolean =
-        (outgoingEndMs - (startMs + (at - startFrame) * msPerFrame)) / speed > leftMs
+        (outgoingEndMs - (startMs + songSince(at))) / speed > leftMs
+
+    // A's song time since the plan's start at `frame`.
+    private fun songSince(frame: Long): Double = anchorSongMs + (frame - anchorFrame) * msPerFrame
+
+    // A's blend time at `frame`: frozen while B is held, after a hold the
+    // song time less the extensions.
+    private fun blendAt(frame: Long): Double =
+        if (state == BlendState.HELD) frozenBlendMs else max(songSince(frame) - extensionMs, frozenBlendMs)
+
+    // The frame where A's blend time reaches `blendMs`, the extensions so
+    // far included.
+    private fun frameAtBlend(blendMs: Double): Long = anchorFrame + frames((blendMs + extensionMs - anchorSongMs) / msPerFrame)
 
     // B is ready again before the deadline: its next frame lands a whole
     // number of bars after its stop, past the placement horizon (at the
@@ -675,8 +764,9 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
     // yet committed, it simply moves (the commit point decides). Committed
     // and now inside the commit deadline, it moves to A's next bar line, to
     // the placement horizon with no bar grid, or, with no bar line before
-    // A's end or within the plan's bar budget, B starts at the horizon by the
-    // clean cut (a committed start cannot be cancelled).
+    // A's end or within the plan's bar budget (or a budget of 0 with no bar
+    // grid), B starts at the horizon by the clean cut (a committed start
+    // cannot be cancelled).
     private fun restarted(frame: Long, s: Long) {
         if (head >= startFrame) return
         if (!committed && !handedOver()) {
@@ -688,7 +778,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             replace(s, commitNow = false)
             return
         }
-        if (!locked) {
+        if (!locked && lateMoveBars != 0) {
             val at = max(soonest + timing.placementHorizonFrames, s)
             startMs += (at - s) * msPerFrame
             action(BlendActionKind.MOVE_START, frame, ms = startMs)
@@ -696,7 +786,7 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
             moved(frame)
             return
         }
-        run {
+        if (locked) {
             val bar = barMs / msPerFrame
             var bars = max(1.0, ceil((earliest - s) / bar))
             var at = s + frames(bars * bar)
@@ -723,6 +813,8 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
 
     private fun replace(s: Long, commitNow: Boolean) {
         startFrame = s
+        anchorFrame = s
+        anchorSongMs = 0.0
         runFrom = s
         action(BlendActionKind.START_B, s)
         action(BlendActionKind.LIMITER_ON, s)

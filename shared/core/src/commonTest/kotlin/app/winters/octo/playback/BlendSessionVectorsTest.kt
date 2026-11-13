@@ -30,11 +30,13 @@ import org.junit.Test
 //   and "events" lists, in order. A missing list means none. The ops:
 //   - advance {to, head, aSongMs}: BlendSession.advance.
 //   - arm {gen, startMs, overlapMs, latestEndMs, outgoingEndMs,
-//     lateMoveBars?, barMs?, intro?, holdShare?, speed?,
-//     commitBeforeAck?}: opens gen on the commit word, as the registering
-//     thread does, then arms. lateMoveBars is a number or "unbounded"
-//     (LATE_MOVE_UNBOUNDED) and defaults to 0; intro and commitBeforeAck
-//     default to false, holdShare to 0, speed to 1, barMs to none.
+//     lateMoveBars?, barMs?, holdShare?, speed?, bothHeardStartMs?,
+//     bothHeardEndMs?, lockMs?, driftGap?, commitBeforeAck?}: opens gen on
+//     the commit word, as the registering thread does, then arms.
+//     lateMoveBars is a number or "unbounded" (LATE_MOVE_UNBOUNDED) and
+//     defaults to 0; commitBeforeAck defaults to false, speed to 1, barMs to
+//     none, the rest to 0.
+//   - paceChanged {pace, frame}: BlendSession.paceChanged.
 //   - post {deck: "A" | "B", input, frame, value?}: BlendSession.post.
 //   - ack and cancel {gen, ok}: main's compare-and-set on the word, which
 //     must return ok.
@@ -46,8 +48,9 @@ import org.junit.Test
 //   {kind, gen, frame, ms?, ms2?, cause?}: a missing value or ms is 0, a
 //   missing cause "none". A pass is a number, "none" (-1) or "held" (-2).
 //   Times in ms match to 1e-6.
-// - armAt, replanNow, ease, commitWords: cases for blendArmAtMs,
-//   blendReplanNowMs, blendIncomingRate and the commit word's packing.
+// - armAt, replanNow, ease, dropCut, commitWords: cases for blendArmAtMs,
+//   blendReplanNowMs, blendIncomingRate, blendDropCutAtMs (expect null for
+//   none) and the commit word's packing.
 // The expected values were worked out from the rules by hand, never written
 // from a run. A failure lists every step that is off, not only the first.
 class BlendSessionVectorsTest {
@@ -129,6 +132,23 @@ class BlendSessionVectorsTest {
     }
 
     @Test
+    fun dropCuts() {
+        for (element in file.getValue("dropCut").jsonArray) {
+            val case = element.jsonObject
+            val at = blendDropCutAtMs(
+                case.double("bothHeardStartMs"),
+                case.double("bothHeardEndMs"),
+                case.double("lockMs"),
+                case.double("driftGap"),
+                case.double("pace"),
+                case.double("fromMs"),
+            )
+            val expect = case.present("expect")?.jsonPrimitive?.double
+            if (expect == null) assertTrue("from ${case.double("fromMs")}: expected none, got $at", at.isNaN()) else assertEquals(expect, at, 1e-9)
+        }
+    }
+
+    @Test
     fun commitWords() {
         for (element in file.getValue("commitWords").jsonArray) {
             val case = element.jsonObject
@@ -183,9 +203,12 @@ class BlendSessionVectorsTest {
                             outgoingEndMs = step.double("outgoingEndMs"),
                             lateMoveBars = step.moveBars("lateMoveBars"),
                             barMs = step.doubleOr("barMs", Double.NaN),
-                            intro = step.boolOr("intro", false),
                             holdShare = step.doubleOr("holdShare", 0.0),
                             speed = step.doubleOr("speed", 1.0),
+                            bothHeardStartMs = step.doubleOr("bothHeardStartMs", 0.0),
+                            bothHeardEndMs = step.doubleOr("bothHeardEndMs", 0.0),
+                            lockMs = step.doubleOr("lockMs", 0.0),
+                            driftGap = step.doubleOr("driftGap", 0.0),
                             commitBeforeAck = step.boolOr("commitBeforeAck", false),
                         ),
                     )
@@ -203,6 +226,7 @@ class BlendSessionVectorsTest {
                 "disarm" -> session.disarm(named(BlendDisarm.entries, step.text("reason")), step.long("frame"), step.longOr("settledHead", step.long("frame")))
                 "failed" -> session.failed(BlendDeck.valueOf(step.text("deck")), step["pass"]?.let(::pass) ?: BLEND_NO_ANSWER)
                 "followUp" -> session.followUp(step.long("gen"), pass(step.getValue("pass")))
+                "paceChanged" -> session.paceChanged(step.double("pace"), step.long("frame"))
                 "stopped" -> session.outgoingStopped(step.long("gen"))
                 "cleared" -> session.cleared(step.long("from"))
                 else -> failures += "$where: no such op"

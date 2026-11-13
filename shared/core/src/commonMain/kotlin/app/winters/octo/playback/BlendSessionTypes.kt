@@ -1,6 +1,7 @@
 package app.winters.octo.playback
 
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.max
 import kotlin.math.min
 
 // The two decks of a blend: A plays out, B comes in.
@@ -141,15 +142,15 @@ enum class BlendEventKind {
     // starts, in B's song time since entry over the rate.
     BLEND_END,
 
-    // The session cancelled the plan itself (cause A_MOVED_ON, A_ENDED or
-    // PAUSED).
+    // The session cancelled the plan itself (cause A_MOVED_ON, A_ENDED,
+    // PAUSED, or PACE for a speed drop's cut before the handover).
     CANCELLED,
 
     // An undone start needs to hear what A plays next: answer with followUp.
     FOLLOW_UP_NEEDED,
 }
 
-enum class BlendCause { NONE, NOT_READY, LATE, FLOOR, A_MOVED_ON, A_ENDED, PAUSED }
+enum class BlendCause { NONE, NOT_READY, LATE, FLOOR, A_MOVED_ON, A_ENDED, PAUSED, PACE }
 
 // Follow-up answers: no next pass (A stops at its end), the pass A already
 // holds, and a failure that carries no answer.
@@ -204,13 +205,22 @@ data class BlendArm(
     // The most whole bars of A the blend may move later in all (a late
     // start, a hold, a restart inside the commit deadline) and still meet its
     // drift bound: LATE_MOVE_UNBOUNDED for no limit, 0 for no move. A move
-    // past it does not happen. Without a bar grid only the plan's latest end
-    // bounds a move to the first frame far enough ahead.
+    // past it does not happen. Without a bar grid only 0 counts (no move and
+    // no hold extension); any other budget moves within the latest end.
     val lateMoveBars: Int,
     val barMs: Double = Double.NaN,
-    val intro: Boolean = false,
+    // A holds its level (and B does not yet sound) for this share of the
+    // overlap, whatever the kind: an intro's hold, a silent lead-in. B going
+    // dry before it may move the meeting point.
     val holdShare: Double = 0.0,
     val speed: Double = 1.0,
+    // Where both songs are heard together, and where their beats meet, in
+    // the blend's time (ms of A from the start); the beats part by
+    // driftGap ms a ms away from the lock. A gap of 0 has no bound.
+    val bothHeardStartMs: Double = 0.0,
+    val bothHeardEndMs: Double = 0.0,
+    val lockMs: Double = 0.0,
+    val driftGap: Double = 0.0,
     // A start too quiet to be heard before the acknowledgement can arrive
     // commits at its deadline without waiting for it.
     val commitBeforeAck: Boolean = false,
@@ -287,6 +297,23 @@ class CommitWord {
 // output time than the lead.
 fun blendArmAtMs(startMs: Double, preRollLeadMs: Double, proposalLeadMs: Double, readyLeadMs: Double, speed: Double): Double =
     min(startMs - preRollLeadMs, startMs - (proposalLeadMs + readyLeadMs) * speed)
+
+// After a drop of the pace to `pace`: the first moment at or after
+// `fromMs`, inside the both-heard stretch, where the beats would be more
+// than DRIFT_LIMIT_MS times the pace apart (their offset is driftGap times
+// the distance from the lock); NaN when there is none. All in the blend's
+// time.
+fun blendDropCutAtMs(bothHeardStartMs: Double, bothHeardEndMs: Double, lockMs: Double, driftGap: Double, pace: Double, fromMs: Double): Double {
+    if (driftGap <= 0) return Double.NaN
+    val from = max(bothHeardStartMs, fromMs)
+    if (from > bothHeardEndMs) return Double.NaN
+    val within = DRIFT_LIMIT_MS * pace / driftGap
+    return when {
+        from < lockMs - within || from > lockMs + within -> from
+        lockMs + within < bothHeardEndMs -> lockMs + within
+        else -> Double.NaN
+    }
+}
 
 // What a re-plan takes as now: A's song time at the output's head plus the
 // proposal lead, never the mixed point or the heard position.

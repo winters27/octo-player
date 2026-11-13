@@ -109,16 +109,104 @@
       ]
     },
     {
-      "name": "a-crossfade-late-move-counts-no-bars",
-      "about": "The same late Crossfade with a bar budget of 0: without a bar grid no bars are counted, only the latest end bounds the move, so it moves to 180145 as with an unbounded budget.",
+      "name": "an-unlocked-plan-that-may-not-move-re-plans",
+      "about": "The same late Crossfade with a budget of 0 (an unlocked plan whose both-heard stretch would break if moved): no move, incoming not ready; the re-plan from the head arms at 182000 and is not moved.",
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 180145}]},
-        {"op": "post", "deck": "B", "input": "ready", "frame": 470400},
-        {"op": "post", "deck": "A", "input": "startAt", "frame": 470400, "value": 486960},
-        {"op": "advance", "to": 470880, "head": 460800, "aSongMs": 179810, "actions": [{"kind": "startB", "frame": 486960}, {"kind": "limiterOn", "frame": 486960}]},
-        {"op": "advance", "to": 475200, "head": 465600, "aSongMs": 179900, "events": [{"kind": "moved", "gen": 1, "frame": 470400, "ms": 180145, "ms2": 0}, {"kind": "proposed", "gen": 1, "frame": 486960}]}
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0, "actions": [{"kind": "aDisarm", "frame": 470400}]},
+        {"op": "advance", "to": 475200, "head": 470400, "aSongMs": 179900, "events": [{"kind": "incomingNotReady", "gen": 1, "frame": 470400, "cause": "late"}]},
+        {"op": "arm", "gen": 2, "startMs": 182000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 480000},
+        {"op": "post", "deck": "A", "input": "startAt", "frame": 547200, "value": 576000},
+        {"op": "advance", "to": 552000, "head": 542400, "aSongMs": 181500, "actions": [{"kind": "startB", "frame": 576000}, {"kind": "limiterOn", "frame": 576000}]}
+      ]
+    },
+    {
+      "name": "an-unlocked-plan-that-may-not-move-has-no-hold",
+      "about": "An unlocked intro with a budget of 0: B dry inside A's hold gets no extension and goes straight to the clean cut at its return.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 12000, "lateMoveBars": 0, "holdShare": 0.7, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
+        {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 696000},
+        {"op": "advance", "to": 696480, "head": 672480, "aSongMs": 184510, "actions": [{"kind": "cut", "frame": 696480, "value": 960}, {"kind": "limiterOff", "frame": 697440}]},
+        {"op": "advance", "to": 700800, "head": 696480, "aSongMs": 184600, "events": [{"kind": "blendEnd", "gen": 1, "frame": 696480, "ms": 3000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "incoming-dry-in-a-blends-lead-in-rejoins-on-a-bar",
+      "about": "A plain blend with a silent lead-in (holdShare 0.25 of 8 s: A holds to 2000) is held like an intro: B dry 1 s in is placed one bar on (624000), and the blend ends one bar later, B's own time there the unextended 8000.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 8000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.25, "latestEndMs": 192000, "outgoingEndMs": 192250},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 528000},
+        {"op": "advance", "to": 528480, "head": 504480, "aSongMs": 181010, "actions": [{"kind": "holdB", "frame": 528000}, {"kind": "freezeA", "frame": 528000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 600000},
+        {"op": "advance", "to": 600480, "head": 576480, "aSongMs": 182510, "actions": [{"kind": "placeB", "frame": 624000}, {"kind": "unfreezeA", "frame": 624000, "ms": 2000}]},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 955200, "value": 960000},
+        {"op": "advance", "to": 960000, "head": 936000, "aSongMs": 190000, "actions": [{"kind": "aEnd", "frame": 960000}, {"kind": "limiterOff", "frame": 960000}], "events": [{"kind": "moved", "gen": 1, "frame": 600000, "ms": 180000, "ms2": 2000}]},
+        {"op": "advance", "to": 964800, "head": 960000, "aSongMs": 190100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 960000, "ms": 8000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-speed-drop-cuts-where-the-beats-would-part",
+      "about": "Beats lock at 1000 with a gap of 0.0025 over both-heard 1000 to 13000 (30 ms at the end, within 40). The pace drops to 0.5 at blend time 4000, inside A's hold (to 7000): the bound is now 20 ms, first broken at lock + 20 / gap = 9000, so A keeps its hold and the clean cut lands there, 480000 frames on at half speed.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.5, "latestEndMs": 200000, "outgoingEndMs": 200250, "bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "paceChanged", "pace": 0.5, "frame": 672000},
+        {"op": "advance", "to": 1147200, "head": 1123200, "aSongMs": 188950},
+        {"op": "advance", "to": 1152000, "head": 1128000, "aSongMs": 189000, "actions": [{"kind": "aLeave", "frame": 1152000, "value": 960}, {"kind": "bDisarm", "frame": 1152000, "value": 12000}, {"kind": "limiterOff", "frame": 1164000}]},
+        {"op": "advance", "to": 1156800, "head": 1152000, "aSongMs": 189050, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1152000, "ms": 9000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-raise-before-the-drop-cut-clears-it",
+      "about": "The same drop, then the pace back to 1 at blend time 6000: the bound (40 ms, lock + 16000) is never broken inside the stretch, so the cut is cleared and the blend runs to its end at 1248000.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.5, "latestEndMs": 200000, "outgoingEndMs": 200250, "bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "paceChanged", "pace": 0.5, "frame": 672000},
+        {"op": "advance", "to": 864480, "head": 840480, "aSongMs": 186005},
+        {"op": "paceChanged", "pace": 1, "frame": 864000},
+        {"op": "advance", "to": 1152480, "head": 1128480, "aSongMs": 192010},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 1243200, "value": 1248000},
+        {"op": "advance", "to": 1248000, "head": 1224000, "aSongMs": 194000, "actions": [{"kind": "aEnd", "frame": 1248000}, {"kind": "limiterOff", "frame": 1248000}]},
+        {"op": "advance", "to": 1252800, "head": 1248000, "aSongMs": 194100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1248000, "ms": 14000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "a-hold-extension-delays-the-drop-cut",
+      "about": "The drop at blend time 2000 schedules the cut at 9000. B then stalls at blend time 3000, inside the hold, and is placed one bar later (2000 ms, 192000 frames at half speed): the cut lands at 1440000 instead of 1248000, and B's own time there is 9000.",
+      "profile": "android",
+      "steps": [
+        {"op": "prelude", "name": "clock"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.5, "latestEndMs": 200000, "outgoingEndMs": 200250, "bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025},
+        {"op": "prelude", "name": "committedAfterArm"},
+        {"op": "paceChanged", "pace": 0.5, "frame": 576000},
+        {"op": "post", "deck": "B", "input": "dry", "frame": 672000},
+        {"op": "advance", "to": 672480, "head": 648480, "aSongMs": 183005, "actions": [{"kind": "holdB", "frame": 672000}, {"kind": "freezeA", "frame": 672000}]},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 760000},
+        {"op": "advance", "to": 760480, "head": 736480, "aSongMs": 183922, "actions": [{"kind": "placeB", "frame": 864000}, {"kind": "unfreezeA", "frame": 864000, "ms": 2000}]},
+        {"op": "advance", "to": 1248480, "head": 1224480, "aSongMs": 189005, "events": [{"kind": "moved", "gen": 1, "frame": 760000, "ms": 180000, "ms2": 2000}]},
+        {"op": "advance", "to": 1435200, "head": 1411200, "aSongMs": 190950},
+        {"op": "advance", "to": 1440000, "head": 1416000, "aSongMs": 191000, "actions": [{"kind": "aLeave", "frame": 1440000, "value": 960}, {"kind": "bDisarm", "frame": 1440000, "value": 12000}, {"kind": "limiterOff", "frame": 1452000}]},
+        {"op": "advance", "to": 1444800, "head": 1440000, "aSongMs": 191050, "events": [{"kind": "blendEnd", "gen": 1, "frame": 1440000, "ms": 9000}]},
+        {"op": "stopped", "gen": 1}
       ]
     },
     {
@@ -190,7 +278,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -208,7 +296,7 @@
       "profile": "android",
       "steps": [
         {"op": "advance", "to": 470400, "head": 460800, "aSongMs": 179800},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 182000}]},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": 1, "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250, "actions": [{"kind": "moveStart", "frame": 470400, "ms": 182000}]},
         {"op": "post", "deck": "B", "input": "ready", "frame": 480000},
         {"op": "advance", "to": 523200, "head": 499200, "aSongMs": 180900, "events": [{"kind": "moved", "gen": 1, "frame": 470400, "ms": 182000, "ms2": 0}]},
         {"op": "post", "deck": "A", "input": "startAt", "frame": 547200, "value": 576000},
@@ -493,7 +581,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -511,7 +599,7 @@
       "profile": "iphone50",
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 624480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -529,7 +617,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 202000, "outgoingEndMs": 202250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 202000, "outgoingEndMs": 202250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -551,7 +639,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 12000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.7, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 12000, "lateMoveBars": "unbounded", "holdShare": 0.7, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -569,7 +657,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 195000, "outgoingEndMs": 195250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 195000, "outgoingEndMs": 195250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}]},
@@ -585,7 +673,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 198000, "outgoingEndMs": 198250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 198000, "outgoingEndMs": 198250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -636,7 +724,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "A", "input": "dry", "frame": 600000},
         {"op": "advance", "to": 600480, "head": 576480, "aSongMs": 182500, "actions": [{"kind": "aEnd", "frame": 600000}, {"kind": "bDisarm", "frame": 600480, "value": 12000}, {"kind": "limiterOff", "frame": 612480}]},
@@ -698,7 +786,7 @@
       "profile": "android",
       "steps": [
         {"op": "prelude", "name": "clock"},
-        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "intro": true, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 14000, "barMs": 2000, "lateMoveBars": "unbounded", "holdShare": 0.75, "latestEndMs": 200000, "outgoingEndMs": 200250},
         {"op": "prelude", "name": "committedAfterArm"},
         {"op": "post", "deck": "B", "input": "dry", "frame": 624000},
         {"op": "advance", "to": 624480, "head": 600480, "aSongMs": 183010, "actions": [{"kind": "holdB", "frame": 624000}, {"kind": "freezeA", "frame": 624000}]},
@@ -1194,6 +1282,15 @@
     {"rate": 0.96, "incomingMs": 50160, "entryMs": 30000, "easeFromMs": 16000, "expect": 1.0},
     {"rate": 1.04, "incomingMs": 49240, "entryMs": 30000, "easeFromMs": 16000, "expect": 1.02},
     {"rate": 1.0, "incomingMs": 40000, "entryMs": 30000, "easeFromMs": 16000, "expect": 1.0}
+  ],
+  "dropCut": [
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 4000, "expect": 9000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 1, "fromMs": 4000, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 10000, "expect": 10000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 8000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 0, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 12000, "driftGap": 0.0025, "pace": 0.25, "fromMs": 0, "expect": 1000},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0, "pace": 0.5, "fromMs": 4000, "expect": null},
+    {"bothHeardStartMs": 1000, "bothHeardEndMs": 13000, "lockMs": 1000, "driftGap": 0.0025, "pace": 0.5, "fromMs": 14000, "expect": null}
   ],
   "commitWords": [
     {"gen": 1, "state": "initial", "word": 4},
