@@ -9,9 +9,11 @@ import app.winters.octo.query.QueryRule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,7 +100,9 @@ class LiveUnshownStartTest {
             assertEquals(rocks, played(PlayRequest(spec, pageOwner = car)))
             assertEquals(rocks.first(), rig.current())
         } finally {
-            scope.cancel()
+            // The watch tidies up as it stops, so it ends before the rig
+            // closes the database.
+            runBlocking { scope.coroutineContext.job.cancelAndJoin() }
         }
     }
 }
