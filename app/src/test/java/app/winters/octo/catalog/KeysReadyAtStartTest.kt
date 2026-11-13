@@ -32,7 +32,9 @@ class KeysReadyAtStartTest {
         db.close()
     }
 
-    private fun run(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) = runBlocking { withTimeout(10_000) { block() } }
+    // A hang guard, not a speed bound: the 1,200-song refill and the merge
+    // after it can take well over 10 s in a loaded full run.
+    private fun run(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) = runBlocking { withTimeout(60_000) { block() } }
 
     private fun stale() = db.longOf("SELECT COUNT(*) FROM source_track WHERE keysVersion != ?", SONG_KEYS_VERSION)
 
