@@ -1157,12 +1157,23 @@ class DeckMixer(
         }
         if (playerPaused || holding || held != null) target = min(target, max(writePoint, mixPoint))
         while (limiterOut < target) {
+            // Past what the real output takes now, a block is mixed ahead
+            // only while every playing deck already holds it and a dry-out
+            // ramp: running into a ring its deck is still filling would fade
+            // the deck out for nothing.
+            if (mixPoint >= writeTo && !aheadReady()) break
             val b = mixBlock() ?: break
             blocks.addLast(b)
             afterBlock(b)
         }
         if (writable && r != null) write(r, writeTo, now)
         wantsFrames = !writable || r == null || r.written - r.head < realBufferFrames - realBufferFrames / 4
+    }
+
+    private fun aheadReady(): Boolean = decks.all { d ->
+        val o = d.out
+        o == null || !contributes(d) || !o.playing || o.ended || d.dry != DRY_NORMAL ||
+            o.ring.written - d.mixIdx >= blockFrames + rampFrames
     }
 
     // Writes stored block frames into `r` from the write point up to
