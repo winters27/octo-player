@@ -41,9 +41,13 @@ fun buildDeck(
     loads: OctoLoadControl,
     // Where the deck's playback runs (its own thread unless a test says).
     playbackLooper: PlaybackLooperProvider = PlaybackLooperProvider(),
+    // How long a release waits for that thread to let go. A deck playing
+    // on its caller's own thread waits none: the release runs there next.
+    releaseTimeoutMs: Long = ExoPlayer.DEFAULT_RELEASE_TIMEOUT_MS,
 ): ExoPlayer =
     ExoPlayer.Builder(context, renderers, sources)
         .setPlaybackLooperProvider(playbackLooper)
+        .setReleaseTimeoutMs(releaseTimeoutMs)
         .setLoadControl(loads)
         .setAudioAttributes(deckAudioAttributes(), /* handleAudioFocus = */ false)
         .setHandleAudioBecomingNoisy(true)
