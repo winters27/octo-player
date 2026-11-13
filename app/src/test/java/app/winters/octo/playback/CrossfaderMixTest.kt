@@ -60,7 +60,7 @@ class CrossfaderMixTest {
         rig.player.mixListener.onBlendEvent(event(BlendEventKind.PROPOSED, 1))
         assertTrue(rig.runUntil(6_000) { !rig.player.isBlending })
         assertEquals(listOf("q:a", "q:b"), rig.transitions)
-        // The blend ran to its end: nothing cut or cancelled it.
+        // The blend ran to its end: nothing cut or canceled it.
         val end = rig.events.first { it.kind == BlendEventKind.BLEND_END && it.generation == 1L }
         assertTrue("ended ${end.ms} ms in", end.ms > 1_000)
         assertFalse(rig.events.any { it.kind == BlendEventKind.CANCELLED })
@@ -168,20 +168,34 @@ class CrossfaderMixTest {
         assertEquals(3, rig.player.mediaItemCount)
     }
 
-    @Test
-    fun writesThatChangeNothingKeepTheBlendAndAChangedOrderUndoesIt() {
+    // A blend set up and armed, then `write`: the blend still hands over and
+    // runs to its end when the write changes nothing.
+    private fun keepsTheBlend(write: (PlayerRig) -> Unit) {
         val rig = PlayerRig(twoSongs())
         rig.play("a", "b", settings = crossfade)
         assertTrue(armed(rig))
-        rig.player.repeatMode = Player.REPEAT_MODE_OFF
-        rig.player.shuffleModeEnabled = false
-        rig.player.setPlayOrder(shuffleOrderOf(rig.decks[0]))
-        // The sleep timer's tick writes the end of song it already has.
-        rig.player.pauseAtEndOfSong = false
+        write(rig)
         assertEquals(CommitState.INITIAL, rig.mix.mixer.commitWord.stateOf(1))
         assertTrue(handedOver(rig))
         assertTrue(rig.runUntil(6_000) { !rig.player.isBlending })
         assertFalse(rig.events.any { it.kind == BlendEventKind.CANCELLED })
+    }
+
+    @Test
+    fun repeatAndShuffleSetToWhatTheyAreKeepTheBlend() = keepsTheBlend {
+        it.player.repeatMode = Player.REPEAT_MODE_OFF
+        it.player.shuffleModeEnabled = false
+    }
+
+    @Test
+    fun anEndOfSongWriteThatChangesNothingKeepsTheBlend() = keepsTheBlend {
+        // The sleep timer's tick writes the end of song it already has.
+        it.player.pauseAtEndOfSong = false
+    }
+
+    @Test
+    fun theDecksOwnPlayOrderKeepsTheBlendAndAChangedOneUndoesIt() {
+        keepsTheBlend { it.player.setPlayOrder(shuffleOrderOf(it.decks[0])) }
         // A changed play order is an edit: the run-up is undone.
         val again = PlayerRig(twoSongs())
         again.play("a", "b", settings = crossfade)
