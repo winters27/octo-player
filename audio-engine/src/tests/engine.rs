@@ -686,6 +686,57 @@ fn a_server_with_a_trusted_certificate_plays() {
     engine.shutdown();
 }
 
+// Red when: `set_client_certificate` keeps the old identity on a refusal,
+// or the engine's client never offers the identity it was given.
+#[test]
+fn a_client_certificate_reaches_its_server_and_a_refused_one_leaves_none() {
+    use crate::api::{ClientCertificate, Origin, TrustedCertificate};
+    use crate::error::EngineError;
+    use crate::testing::http_server::{ClientAuthServer, ClientCa, SelfSigned};
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let ca = ClientCa::generate();
+    let client = ca.issue("listener", &rcgen::PKCS_ECDSA_P256_SHA256);
+    let clients = [ca.der.clone()];
+    let song = flac_bytes(RATE, 2, &sine(440.0, RATE, 2, 0, 12_000, 0.3), &[]);
+    let server = ClientAuthServer::start(song, &certificate, Some(&clients), &rustls::version::TLS13);
+    let streamed = |id: &str| QueueItem { source: server.url(), ..item(id, Path::new("")) };
+    let (engine, events, _) = engine(4.0);
+    engine.set_trusted_certificates(vec![TrustedCertificate {
+        host: "127.0.0.1".into(),
+        sha256: certificate.fingerprint(),
+    }]);
+    let origins = vec![Origin { scheme: "https".into(), host: "127.0.0.1".into(), port: server.port() }];
+    let given =
+        ClientCertificate { origins: origins.clone(), chain: client.chain.clone(), key: client.key.clone() };
+    engine.set_client_certificate(Some(given)).unwrap();
+    engine.load(vec![streamed("offered")], 0, 0, true).unwrap();
+    events.wait_for(
+        "offered song's end",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::TrackEnded { item_id, .. } if item_id == "offered"),
+    );
+    let story = events.story();
+    let offered: Vec<&String> = story.iter().filter(|line| line.contains("offered")).collect();
+    assert_eq!(offered, ["start offered", "end offered Finished"], "{story:?}");
+    let shown = Some(client.chain[0].clone());
+    let leaves: Vec<_> = server.seen().into_iter().map(|seen| seen.leaf).collect();
+    assert!(!leaves.is_empty() && leaves.iter().all(|leaf| *leaf == shown), "{leaves:?}");
+    // A key the engine cannot sign with: refused, and none is offered.
+    let refused = ClientCertificate { origins, chain: client.chain.clone(), key: b"not a key".to_vec() };
+    let err = engine.set_client_certificate(Some(refused)).unwrap_err();
+    assert!(matches!(err, EngineError::Failed { kind: ErrorKind::InvalidArgument, .. }), "{err:?}");
+    let asked = server.seen().len();
+    engine.load(vec![streamed("refused")], 0, 0, true).unwrap();
+    let error = events.wait_for(
+        "refused song's error",
+        Duration::from_secs(10),
+        |e| matches!(e, EngineEvent::Error { item_id: Some(id), .. } if id == "refused"),
+    );
+    assert!(matches!(error, EngineEvent::Error { kind: ErrorKind::Network, .. }), "{error:?}");
+    assert_eq!(server.seen().len(), asked, "a request reached the server with no certificate");
+    engine.shutdown();
+}
+
 #[test]
 fn says_what_the_device_runs_at_and_what_the_song_is() {
     let dir = temp_dir();

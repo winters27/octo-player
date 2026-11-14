@@ -1,6 +1,8 @@
 use super::*;
-use crate::source::trust::Trust;
-use crate::testing::http_server::{Behaviour, SelfSigned, TestServer};
+use crate::source::trust::{Identity, Trust};
+use crate::testing::http_server::{
+    Behaviour, ClientAuthServer, ClientCa, ClientIdentity, SelfSigned, TestServer,
+};
 use std::io::{Read, Seek, SeekFrom, Write};
 use ureq::unversioned::resolver::{ResolvedSocketAddrs, Resolver};
 
@@ -1204,4 +1206,134 @@ fn a_sign_in_page_refusing_a_later_request_ends_the_song() {
         assert_eq!((failure.kind, failure.status), (ErrorKind::SignInPage, Some(status)));
         assert_eq!(server.asked().len(), 2, "the sign-in page was asked again");
     }
+}
+
+// Trust in `certificate` for 127.0.0.1, as a pin.
+fn pinned(certificate: &SelfSigned) -> Arc<Trust> {
+    let trust = Arc::new(Trust::default());
+    trust.replace([("127.0.0.1".to_string(), certificate.fingerprint())]);
+    trust
+}
+
+// Asks for `url` and reads the whole answer, so the connection goes back to
+// the client's pool; whether an answer came.
+fn fetched(agent: &ureq::Agent, url: &str) -> bool {
+    match agent.get(url).call() {
+        Ok(mut answer) => answer.body_mut().read_to_vec().is_ok(),
+        Err(_) => false,
+    }
+}
+
+// `client`'s certificate, offered to these origins.
+fn identity_for(client: &ClientIdentity, origins: &[(&str, &str, u16)]) -> Identity {
+    let origins = origins.iter().map(|(scheme, host, port)| (scheme.to_string(), host.to_string(), *port));
+    Identity::new(origins, client.chain.clone(), client.key.clone()).unwrap()
+}
+
+// Red when: `connect` offers the identity without matching the origin (the
+// other port, host or scheme then gets it), `tls_origin` leaves out https's
+// own port (the address with no port is refused), or the identified
+// settings are made without the identity. On TLS 1.2 and 1.3.
+#[test]
+fn a_client_certificate_goes_only_to_its_own_origins() {
+    let ca = ClientCa::generate();
+    let client = ca.issue("listener", &rcgen::PKCS_ECDSA_P256_SHA256);
+    let leaf = Some(client.chain[0].clone());
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let clients = [ca.der.clone()];
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        let server = ClientAuthServer::start(b"song".to_vec(), &certificate, Some(&clients), version);
+        let (port, url) = (server.port(), server.url());
+        let other = port.wrapping_add(1);
+        let trust = pinned(&certificate);
+        let direct = agent(trust.clone());
+        // Every https address reaches the server, whatever port it names.
+        let ported = agent_with_parts(trust.clone(), IDLE_LIMIT, Ports { plain: 1, secure: port });
+        let offered = |agent: &ureq::Agent, url: &str, origin: (&str, &str, u16)| {
+            trust.set_identity(Some(identity_for(&client, &[origin])));
+            fetched(agent, url)
+        };
+        assert!(!fetched(&direct, &url), "none set {version:?}");
+        assert!(offered(&direct, &url, ("https", "127.0.0.1", port)), "own origin {version:?}");
+        assert!(!offered(&direct, &url, ("https", "127.0.0.1", other)), "another port {version:?}");
+        assert!(!offered(&direct, &url, ("https", "localhost", port)), "another host {version:?}");
+        assert!(!offered(&direct, &url, ("http", "127.0.0.1", port)), "another scheme {version:?}");
+        let unported = "https://127.0.0.1/song.flac";
+        assert!(offered(&ported, unported, ("https", "127.0.0.1", 443)), "port 443 {version:?}");
+        assert!(!offered(&ported, unported, ("https", "127.0.0.1", port)), "port reached {version:?}");
+        let leaves: Vec<_> = server.seen().into_iter().map(|seen| seen.leaf).collect();
+        assert_eq!(leaves, [leaf.clone(), leaf.clone()], "{version:?}");
+    }
+}
+
+// Red when: `TlsTransport::is_open` stops checking the trust's generation,
+// or `set_identity` stops moving it: the kept connection then carries the
+// old certificate on. On TLS 1.2 and 1.3.
+#[test]
+fn a_changed_client_certificate_is_shown_on_the_next_request() {
+    let ca = ClientCa::generate();
+    let a = ca.issue("a", &rcgen::PKCS_ECDSA_P256_SHA256);
+    let b = ca.issue("b", &rcgen::PKCS_ECDSA_P384_SHA384);
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let clients = [ca.der.clone()];
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        let server = ClientAuthServer::start(b"song".to_vec(), &certificate, Some(&clients), version);
+        let mine = [("https", "127.0.0.1", server.port())];
+        let trust = pinned(&certificate);
+        let fetcher = agent(trust.clone());
+        trust.set_identity(Some(identity_for(&a, &mine)));
+        // Nothing changed: the second request goes on the first's connection.
+        assert!(fetched(&fetcher, &server.url()) && fetched(&fetcher, &server.url()), "{version:?}");
+        // Changed: the very next request goes on a new connection, with b.
+        trust.set_identity(Some(identity_for(&b, &mine)));
+        assert!(fetched(&fetcher, &server.url()), "{version:?}");
+        let seen = server.seen();
+        let connections: Vec<usize> = seen.iter().map(|s| s.connection).collect();
+        assert_eq!(connections, [0, 0, 1], "{version:?}");
+        let leaves: Vec<_> = seen.into_iter().map(|s| s.leaf).collect();
+        let (shown_a, shown_b) = (Some(a.chain[0].clone()), Some(b.chain[0].clone()));
+        assert_eq!(leaves, [shown_a.clone(), shown_a, shown_b], "{version:?}");
+        // Taken away: none is shown, and the server refuses.
+        trust.set_identity(None);
+        assert!(!fetched(&fetcher, &server.url()), "{version:?}");
+        assert_eq!(server.seen().len(), 3, "{version:?}");
+    }
+}
+
+// Red when: `TlsTransport::is_open` stops checking the trust's generation:
+// a connection kept from before a pin was taken away is used again.
+#[test]
+fn a_kept_connection_is_not_used_again_once_its_pin_is_taken_away() {
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    let server = ClientAuthServer::start(b"song".to_vec(), &certificate, None, &rustls::version::TLS13);
+    let trust = pinned(&certificate);
+    let fetcher = agent(trust.clone());
+    assert!(fetched(&fetcher, &server.url()) && fetched(&fetcher, &server.url()));
+    let connections: Vec<usize> = server.seen().iter().map(|s| s.connection).collect();
+    assert_eq!(connections, [0, 0], "the connection was not kept");
+    trust.replace([]);
+    assert!(!fetched(&fetcher, &server.url()), "a connection the pin let in was used again");
+    assert_eq!(server.seen().len(), 2);
+}
+
+// Red when: `ClientCertificate` or `Identity` derives `Debug`, or the one
+// written by hand shows the key.
+#[test]
+fn a_client_certificates_key_never_shows_in_debug_output() {
+    let client = ClientCa::generate().issue("listener", &rcgen::PKCS_ECDSA_P256_SHA256);
+    // Six bytes from the private scalar, as `Debug` would list them.
+    let secret: Vec<String> = client.key[40..46].iter().map(u8::to_string).collect();
+    let secret = secret.join(", ");
+    let origin = crate::api::Origin { scheme: "https".into(), host: "music.example.com".into(), port: 443 };
+    let given = crate::api::ClientCertificate {
+        origins: vec![origin],
+        chain: client.chain.clone(),
+        key: client.key.clone(),
+    };
+    let shown = format!("{given:?}");
+    assert!(shown.contains("music.example.com") && !shown.contains(&secret), "{shown}");
+    let trust = Trust::default();
+    trust.set_identity(Some(identity_for(&client, &[("https", "music.example.com", 443)])));
+    let shown = format!("{trust:?}");
+    assert!(shown.contains("music.example.com") && !shown.contains(&secret), "{shown}");
 }

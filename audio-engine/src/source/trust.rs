@@ -457,4 +457,55 @@ mod tests {
         trust.replace([]);
         assert!(!trust.allows("other.example.com", certificate));
     }
+
+    // Red when: `origin_key` reads the scheme or a name in its case, or an
+    // address in one written form only, or `tls_origin` leaves out https's
+    // own port.
+    #[test]
+    fn origins_match_in_any_case_and_address_form_with_https_own_port_filled_in() {
+        let music = origin_key("https", "music.example.com", 443);
+        assert_eq!(origin_key("HTTPS", "Music.Example.COM", 443), music);
+        assert_ne!(origin_key("https", "music.example.com", 8443), music);
+        assert_ne!(origin_key("http", "music.example.com", 443), music);
+        assert_eq!(origin_key("https", "[::1]", 8443), origin_key("https", "0:0:0::1", 8443));
+        let uri = |text: &str| text.parse::<ureq::http::Uri>().unwrap();
+        assert_eq!(tls_origin(&uri("https://Music.Example.com/rest")), music);
+        assert_eq!(tls_origin(&uri("https://[::1]:8443/rest")), origin_key("https", "::1", 8443));
+    }
+
+    // Red when: `identity_problem` lets through an empty chain, bytes that
+    // are no key, another certificate's key or a chain that is no
+    // certificate, or `Identity::new` makes one it refused.
+    #[test]
+    fn an_identity_is_refused_without_a_certificate_or_with_a_key_the_engine_cannot_use() {
+        use crate::testing::http_server::ClientCa;
+        let ca = ClientCa::generate();
+        for alg in [&rcgen::PKCS_ECDSA_P256_SHA256, &rcgen::PKCS_ECDSA_P384_SHA384, &rcgen::PKCS_ED25519] {
+            let client = ca.issue("listener", alg);
+            assert_eq!(identity_problem(&client.chain, &client.key), None, "{alg:?}");
+        }
+        let a = ca.issue("a", &rcgen::PKCS_ECDSA_P256_SHA256);
+        let b = ca.issue("b", &rcgen::PKCS_ECDSA_P256_SHA256);
+        assert!(identity_problem(&[], &a.key).is_some(), "no certificate");
+        assert!(identity_problem(&a.chain, b"not a key").is_some(), "no key");
+        assert!(identity_problem(&b.chain, &a.key).is_some(), "another certificate's key");
+        assert!(identity_problem(&[b"not a certificate".to_vec()], &a.key).is_some(), "not a certificate");
+        let origins = [("https".to_string(), "music.example.com".to_string(), 443)];
+        assert!(Identity::new(origins, b.chain.clone(), a.key.clone()).is_err(), "made although refused");
+    }
+
+    // Red when: settings made for one way of naming servers are used for
+    // the other, or kept once the generation moves.
+    #[test]
+    fn settings_are_made_for_each_way_of_naming_servers_and_each_generation() {
+        let trust = Arc::new(Trust::default());
+        let tls = PinnedTls::new(trust.clone());
+        let named = tls.made(true).unwrap();
+        let unnamed = tls.made(false).unwrap();
+        assert!(named.plain.enable_sni && !unnamed.plain.enable_sni);
+        assert!(Arc::ptr_eq(&named, &tls.made(true).unwrap()), "made again with nothing changed");
+        trust.replace([]);
+        let again = tls.made(true).unwrap();
+        assert!(!Arc::ptr_eq(&named, &again) && again.generation > named.generation);
+    }
 }
