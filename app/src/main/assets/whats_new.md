@@ -33,6 +33,9 @@
 
 - **Servers behind a sign-in page work.** If your server sits behind Authentik, Authelia or Cloudflare Access, Octo signs in through it, and when the sign-in page turns Octo away, Octo names it instead of saying the server can't be reached. A sign-in page is never played or kept as a song.
 - **Certificates from eMudhra's compromised keys are refused**, so no one can pose as your server with one. Octo says so when a server uses one.
+- **Servers with their own certificate authority work.** If you installed your authority's certificate on the phone (step-ca, say), Octo trusts your server's certificates like any other, so short ones renewed every day keep playing.
+- **A changed certificate is asked about again.** When a server whose certificate you trusted shows a new one, Octo asks with the new fingerprint instead of failing every song until you sign in again, and the song plays once you trust it. A renewal that keeps the same key needs no question.
+- **Music goes to the shared library:** when your family's owner sends your songs there, your plan on the Family page says so instead of showing your own library's size.
 - Hearts that get the version you heard need an Octo server from this update.
 - Imports waiting for Mornye's check say so, and say when they will go on. Health names Mornye and octo-sonic, and Mornye's row offers Pass on the dashboard while its check is paused.
 - A higher quality copy that waits says the server's own words for why.
