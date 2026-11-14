@@ -1,0 +1,105 @@
+# Makes the two things only Apple's Mac tools can for the iPhone app's store build: the compiled
+# icon and launch screen catalog (actool), and the App Intents metadata that lists Octo's
+# Shortcuts actions, App Shortcuts and widget buttons (written by an unsigned Release build).
+# Everything else is built, signed and uploaded on Linux (ios/scripts/release). Run it by hand
+# when the icon or the App Intents change, then commit the two artifacts under
+# ios/Resources/StoreAssets. It uses the Xcode whose build matches the iOS SDK the Linux build
+# stamps, never just the newest one, and a build with any error yields no metadata.
+name: iOS store assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      xcode_build:
+        description: Xcode build to use, the one the Linux SDK came from
+        required: true
+        default: 27A9275
+
+permissions:
+  contents: read
+
+# The input reaches scripts only through the environment; pick-xcode.sh checks its form first.
+env:
+  XCODE_BUILD: ${{ inputs.xcode_build }}
+
+jobs:
+  icon:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The Xcode build
+        run: bash ios/scripts/release/pick-xcode.sh "$XCODE_BUILD"
+
+      - name: Compile the icon and the launch screen
+        run: |
+          mkdir -p out
+          xcrun actool ios/AppIcon.icon ios/Launch.xcassets \
+            --compile out \
+            --platform iphoneos \
+            --target-device iphone \
+            --minimum-deployment-target 26.0 \
+            --app-icon AppIcon \
+            --output-partial-info-plist out/partial-Info.plist \
+            --output-format human-readable-text --notices --warnings --errors
+          test -f out/Assets.car
+          python3 ios/scripts/release/store_inputs.py record . icon out/inputs.json "$XCODE_BUILD"
+          ls -la out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-store-icon
+          path: out/
+          if-no-files-found: error
+
+  intents:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The Xcode build
+        run: bash ios/scripts/release/pick-xcode.sh "$XCODE_BUILD"
+
+      - name: XcodeGen 2.46.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          bin=$(find "$RUNNER_TEMP/xcodegen" -type f -name xcodegen -perm -u+x | head -n 1)
+          test -n "$bin"
+          dirname "$bin" >> "$GITHUB_PATH"
+
+      - name: Make the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build, unsigned, Release
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Octo.xcodeproj \
+            -scheme Octo \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -IDEBuildingContinueBuildingAfterErrors=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: Collect the App Intents metadata
+        run: python3 ios/scripts/release/store_inputs.py collect . "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/Octo.app" out "$XCODE_BUILD"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-store-intents
+          path: out/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-store-intents-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore

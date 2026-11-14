@@ -1,4 +1,5 @@
-# The Xcode project for TestFlight and App Store builds, made on macOS with `xcodegen generate`.
+# The Xcode project the "iOS store assets" workflow builds on macOS (`xcodegen generate`) to make
+# the App Intents metadata; the version comes from Info.plist. Store builds are made on Linux.
 # Day-to-day builds and installs use xtool (xtool.yml) from the same sources. The app and its
 # extensions compile their own folders here; the shared modules come from Package.swift.
 name: Octo
@@ -13,8 +14,6 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: YES
 packages:
   OctoPackage:
