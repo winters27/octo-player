@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import app.winters.octo.playback.albumKey
+import app.winters.octo.playback.entryId
 import app.winters.octo.playback.storedLoudness
 
 // The player's audio output with Octo's shaping in it. Each time a song is
@@ -24,7 +25,7 @@ class OctoAudioSink(
         val info = chooseReplayGain(ReplayGain.read(config.format.metadata), item?.mediaMetadata?.storedLoudness())
         val album = item?.let(::albumKey)
         val id = item?.mediaId?.ifEmpty { null }
-        shaping.setNextSong(SongLoudness(info, albums.follows(id, album)))
+        shaping.setNextSong(SongLoudness(info, albums.follows(id, album)), item?.entryId)
         super.configure(config)
     }
 

@@ -71,6 +71,36 @@ class FallbackAndGateTest {
     }
 
     @Test
+    fun aFallbackOutputThatDiesGoesToAFreshOneWithTheMusicFromWhereItStopped() {
+        val rig = MixRig()
+        val d = rig.deck(0)
+        d.signal = ::counting
+        d.play()
+        feedTo(rig, d, 48_000L * 6)
+        rig.runFor(1_000.0)
+        val p = rig.track(0)
+        rig.builder.failing = Int.MAX_VALUE
+        rig.mixer.pause(hold = false)
+        d.pause()
+        shadowOf(Looper.getMainLooper()).idle()
+        rig.runFor(600.0)
+        val h = p.head
+        rig.mixer.wantPlaying(true)
+        d.play()
+        var waited = 0
+        while (p.plays < 2 && waited++ < 1_000) rig.runFor(1.0)
+        assertEquals("the fallback played", 2, p.plays)
+        // Builds work again, and the fallback's output dies in its silence.
+        rig.builder.failing = 0
+        p.dead = true
+        rig.runFor(1_500.0)
+        val t = rig.builder.built.last()
+        assertTrue("a fresh output after the fallback's: ${rig.tap.notes}", t !== p && t.written > 4_800)
+        // The music from h, nothing lost (past the onset ramp).
+        for (j in 960 until 2_000) assertEquals("frame $j", h + j, carried(t.left(j.toLong())))
+    }
+
+    @Test
     fun withEveryBuildFailingTheResumePlaysThePausedOutputSilentForItsSpanAndLosesNothing() {
         val rig = MixRig()
         val d = rig.deck(0)

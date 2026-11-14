@@ -194,7 +194,6 @@ class DeckMixer(
     private var lastHeadMix = 0L
     private var lastPresented = 0L
     private var lastPresentedNanos = 0L
-    private var noDeckSince = -1L
     private var dryAnchorNanos = -1L
     private var fallback: Fallback? = null
     private val ownEvents = LongArray(32)
@@ -418,8 +417,18 @@ class DeckMixer(
     // OctoPlayer's intent: whether the person wants music now.
     fun wantPlaying(playing: Boolean) = post {
         intentPlaying = playing
-        if (playing) playerPaused = false
+        if (playing) {
+            playerPaused = false
+            stopped = false
+        }
         wake(-1L)
+    }
+
+    // OctoPlayer's stop: nothing resumes, so what was kept for a resume
+    // goes once nothing is left to play.
+    fun stop() = post {
+        stopped = true
+        lifecycle(loop.nanoTime())
     }
 
     // A releasing interrupt (a seek, a skip, new items, stop, Cast): the
@@ -556,13 +565,14 @@ class DeckMixer(
             // is over. A player's own restart keeps a leave going.
             d.leaveLeft = 0
             d.leaveTotal = 0
+            forgetHead(d.slot)
         }
         d.announced = false
         d.announcedPending = false
         if (old != null && old !== o && !old.released) d.tail = null
         d.restarting = false
         if (!d.parked && d.role != ROLE_B) d.on = true
-        noDeckSince = -1L
+        nothingSince = -1L
         wake(-1L)
     }
 
@@ -578,11 +588,13 @@ class DeckMixer(
         // its new output coming. The real output plays on meanwhile.
         d.restarting = !d.announced && o.playing
         if (d.announced) {
+            forgetHead(d.slot)
             d.announcedPending = true
             d.announced = false
             d.tail = null
         }
-        val lone = decks.none { it !== d && it.out != null && it.on && !it.parked }
+        // A parked B whose start, cut or commit is still to apply plays too.
+        val lone = decks.none { it !== d && it.out != null && ((it.on && !it.parked) || startsSoon(it)) }
         // Paused, or resumed with nothing playing out yet: what was mixed
         // for the old place would go into the next output first.
         val paused = held != null || playerPaused || cur?.let { !it.started || it.paused } != false
@@ -610,6 +622,13 @@ class DeckMixer(
         if (holding && !d.parked) holding = false
         wake(-1L)
     }
+
+    // Whether `d` is the blend's B with its start, a cut or the commit still
+    // waiting to apply.
+    private fun startsSoon(d: DeckState): Boolean =
+        d.role == ROLE_B && ((d.startAt >= 0 && !d.started) || pending.any {
+            it.gen == blendGen && (it.kind == BlendActionKind.START_B || it.kind == BlendActionKind.CUT || it.kind == BlendActionKind.COMMIT_B)
+        })
 
     // A lone deck's announced move while it plays: the output pauses and
     // goes, nothing mixed for the old position is written, and the new
@@ -1008,10 +1027,12 @@ class DeckMixer(
 
     // A leave ramps the deck out over `frames` as its frames are mixed; a
     // deck with no frame left to mix stops at once, so no leave waits for
-    // frames that may come only after the slot has another part.
+    // frames that may come only after the slot has another part. A dry deck
+    // counts as having none: what it holds would come back only to blip
+    // under the ramp.
     private fun leave(d: DeckState, frames: Int) {
         val o = d.out
-        val left = if (o != null) o.ring.written > d.mixIdx else d.tail?.let { it.out.ring.written > it.at } == true
+        val left = if (o != null) d.dry != DRY_DRY && o.ring.written > d.mixIdx else d.tail?.let { it.out.ring.written > it.at } == true
         probe?.note(if (left) "leave ${d.slot} over $frames" else "leave ${d.slot} at once", mixPoint)
         if (left) d.leave(frames) else d.stop()
     }
@@ -2219,25 +2240,62 @@ class DeckMixer(
     // mixer decides a start, ahead of what is heard by the route's latency.
     class HeadSong(val entry: String?, val ms: Double, val nanos: Long)
 
-    private val headSongs = java.util.concurrent.atomic.AtomicReferenceArray<HeadSong?>(2)
+    // Two slots written on the mix thread with nothing allocated, under a
+    // sequence count that is odd while a write is in progress; main reads
+    // them.
+    private val headSeq = java.util.concurrent.atomic.AtomicIntegerArray(2)
+    private val headKnown = java.util.concurrent.atomic.AtomicIntegerArray(2)
+    private val headEntry = java.util.concurrent.atomic.AtomicReferenceArray<String?>(2)
+    private val headMsBits = java.util.concurrent.atomic.AtomicLongArray(2)
+    private val headAt = java.util.concurrent.atomic.AtomicLongArray(2)
 
-    // The slot's song time at the head, or null while no output plays it.
-    fun headSong(slot: Int): HeadSong? = headSongs.get(slot)
+    // The slot's song time at the head, or null while none is known.
+    fun headSong(slot: Int): HeadSong? {
+        while (true) {
+            val seq = headSeq.get(slot)
+            if (seq and 1 != 0) continue
+            val known = headKnown.get(slot) != 0
+            val entry = headEntry.get(slot)
+            val ms = Double.fromBits(headMsBits.get(slot))
+            val at = headAt.get(slot)
+            if (headSeq.get(slot) == seq) return if (known) HeadSong(entry, ms, at) else null
+        }
+    }
 
+    private fun writeHead(slot: Int, known: Boolean, entry: String?, ms: Double, at: Long) {
+        headSeq.incrementAndGet(slot)
+        headKnown.set(slot, if (known) 1 else 0)
+        headEntry.set(slot, entry)
+        headMsBits.set(slot, ms.toRawBits())
+        headAt.set(slot, at)
+        headSeq.incrementAndGet(slot)
+    }
+
+    // A slot's move (a seek, a load): its song time at the head is not known
+    // until its new output's frames reach the head.
+    private fun forgetHead(slot: Int) {
+        if (headKnown.get(slot) != 0) writeHead(slot, false, null, Double.NaN, 0L)
+    }
+
+    // While the real output plays, each slot's song time where its frames
+    // are at the head. Paused, the time stands (its moment moves on with
+    // the clock). Playing with the slot's frames not yet at the head (a new
+    // output after the player's own restart), the last time is kept for
+    // main to run on.
     private fun publishHeadSongs(r: Real?) {
         val playing = r != null && r.started && !r.paused && r.music
-        val at = r?.headNanos ?: 0L
         for (d in decks) {
             val o = d.out
-            if (!playing || o == null || !o.coversMixFrame(lastHeadMix)) {
-                if (headSongs.get(d.slot) != null) headSongs.set(d.slot, null)
+            if (!playing) {
+                if (headKnown.get(d.slot) != 0) writeHead(d.slot, true, headEntry.get(d.slot), Double.fromBits(headMsBits.get(d.slot)), loop.nanoTime())
                 continue
             }
+            if (o == null || !o.coversMixFrame(lastHeadMix)) continue
             o.ring.marks.view(view)
             val ring = o.ringAt(lastHeadMix)
             val m = view.covering(ring)
             val ms = view.songAt(ring)
-            headSongs.set(d.slot, if (m < 0 || ms.isNaN()) null else HeadSong(view.entry(m), ms, at))
+            if (m >= 0 && !ms.isNaN()) writeHead(d.slot, true, view.entry(m), ms, r?.headNanos ?: loop.nanoTime())
         }
     }
 
@@ -2427,8 +2485,10 @@ class DeckMixer(
     private fun lifecycle(now: Long) {
         if (quitting) return
         val alive = decks.any { it.out != null }
-        if (!alive) {
-            if (noDeckSince < 0) noDeckSince = now
+        if (!nothingLeft()) {
+            nothingSince = -1L
+        } else if (nothingSince < 0) {
+            nothingSince = now
         }
         val want = wantsSound()
         val r = cur
@@ -2438,8 +2498,8 @@ class DeckMixer(
                 releaseReal(cur!!)
                 cur = null
             }
-            if (nothingLeft() && noDeckSince >= 0) {
-                val due = noDeckSince + tuning.idleReleaseMs * 1_000_000
+            if (nothingSince >= 0) {
+                val due = nothingSince + tuning.idleReleaseMs * 1_000_000
                 if (now >= due) {
                     releaseSpareOutputs()
                 } else {
@@ -2486,15 +2546,26 @@ class DeckMixer(
 
     private fun hasSomethingToPlay(): Boolean = decks.any { hasFrames(it) } || blocks.any { it.outStart + it.outCount > writePoint }
 
-    // No deck output left, none coming from a player's own restart and no
-    // released frames still to play: a stop, or the queue's end.
-    private fun nothingLeft(): Boolean = decks.none { it.out != null || it.restarting || it.tail != null }
+    // No deck output left that can play again (Media3 stops its renderers
+    // at the queue's end without letting the output go), none coming from a
+    // player's own restart and no released frames still to play: a stop, a
+    // station's pause, or the queue's end.
+    private fun nothingLeft(): Boolean = decks.none { d ->
+        d.out?.let { !(it.ended && !it.playing) } == true || d.restarting || d.tail != null
+    }
+
+    // Since when nothing has been left to play, or -1.
+    private var nothingSince = -1L
 
     private val idleTask = Runnable { lifecycle(loop.nanoTime()) }
 
     // With nothing left to play, the output built for a resume goes, and a
-    // paused one once settled: nothing stays alive after a stop.
+    // paused one once settled. Not while the player means to resume (a
+    // station's pause lets its stream go and comes back): what it holds
+    // then is the resume's, so a build failing there is never met with no
+    // output at all. They go at a stop or the queue's end.
     private fun releaseSpareOutputs() {
+        if (playerPaused && !stopped) return
         loop.remove(idleTask)
         fresh?.let {
             releaseReal(it)
@@ -2506,6 +2577,9 @@ class DeckMixer(
             held = null
         }
     }
+
+    // The player stopped: no resume is coming.
+    private var stopped = false
 
     // A fresh output becomes the one written from the write point; when
     // that continues a stream (after a pause, a rebuild, a restart) its
@@ -2928,7 +3002,12 @@ class DeckMixer(
         if (r.dead) return
         r.dead = true
         probe?.note("rebuild $why", r.headMix)
-        val consumed = r.headMix
+        // The silent fallback's output died: its held frames and silence
+        // were never heard, so the music goes on from h on the new output,
+        // and the fallback is over.
+        val fb = fallback?.takeIf { cur === r }
+        val consumed = if (fb != null && !fb.musicStarted) fb.musicFrom else r.headMix
+        if (fb != null) fallback = null
         releaseReal(r)
         if (cur === r) cur = null
         writePoint = consumed

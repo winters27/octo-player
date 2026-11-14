@@ -202,9 +202,18 @@ interface DeckSound {
 
     fun reading(entryId: String?, tagBpm: Double? = null): TapReading?
 
-    // The deck's ReplayGain in dB under the current settings, for `song`
-    // or, with none, for the song it plays now.
-    fun replayGainDb(song: SongLoudness? = null): Double
+    // The deck's gain in dB under the current settings (ReplayGain and the
+    // EQ's preamp) for `song` at `sampleRate`, or, with none, for the song
+    // it plays now at its own rate.
+    fun replayGainDb(song: SongLoudness? = null, sampleRate: Int = 0): Double
+
+    // The loudness the deck applies, or will once the song before has played
+    // out, to queue entry `entryId`, once that song's sound is open; null
+    // before then.
+    fun loudnessOf(entryId: String?): SongLoudness?
+
+    // The rate of the sound the deck has open, or 0 before any.
+    val sampleRate: Int
 }
 
 // Octo's own sound shaping, as a step in the player's audio path. It takes
@@ -245,10 +254,14 @@ class OctoDspProcessor(
     private var live = false
     private var streamSpeed = 1.0
     private var streamStarted = false
-    private var pendingSong: SongLoudness? = null
-
-    // Read on main too, for a plan's gain between the two songs.
+    // The next song's loudness and queue entry, and the current song's,
+    // with the rates their sounds are at; read on main too, for a plan's
+    // gain between two songs.
+    @Volatile private var pendingSong: SongLoudness? = null
+    @Volatile private var pendingEntry: String? = null
     @Volatile private var song: SongLoudness? = null
+    @Volatile private var configuredRate = 0
+    @Volatile private var songRate = 0
     private var shaper: SoundShaper? = null
     private var transitions: TransitionShaper? = null
 
@@ -264,7 +277,7 @@ class OctoDspProcessor(
 
     // The queue entry the stream belongs to, where in its song the stream
     // started, and the frames handed on since.
-    private var entryId: String? = null
+    @Volatile private var entryId: String? = null
     private var streamStartMs = 0.0
     private var framesOut = 0L
 
@@ -278,8 +291,19 @@ class OctoDspProcessor(
 
     override fun reading(entryId: String?, tagBpm: Double?): TapReading? = tap?.reading(entryId, tagBpm)
 
-    override fun replayGainDb(song: SongLoudness?): Double =
-        20.0 * log10(replayGainFactor(settings(), song ?: this.song).toDouble())
+    override fun replayGainDb(song: SongLoudness?, sampleRate: Int): Double {
+        val now = settings()
+        val rate = sampleRate.takeIf { it > 0 } ?: songRate.takeIf { it > 0 } ?: 48_000
+        return 20.0 * log10(replayGainFactor(now, song ?: this.song).toDouble()) + now.effectivePreampDb(rate)
+    }
+
+    override fun loudnessOf(entryId: String?): SongLoudness? {
+        val pending = pendingSong
+        if (pending != null && pendingEntry == entryId) return pending
+        return song.takeIf { this.entryId == entryId }
+    }
+
+    override val sampleRate: Int get() = configuredRate
 
     // The playback speed; the stream starts again at it right after.
     fun setSpeed(value: Float) {
@@ -291,12 +315,15 @@ class OctoDspProcessor(
         times = chainTimes
     }
 
-    // The loudness of the song that plays after the current one.
-    fun setNextSong(next: SongLoudness) {
+    // The loudness of the song that plays after the current one, and its
+    // queue entry.
+    fun setNextSong(next: SongLoudness, entry: String? = null) {
+        pendingEntry = entry
         pendingSong = next
     }
 
     override fun onConfigure(inputAudioFormat: AudioFormat): AudioFormat {
+        configuredRate = inputAudioFormat.sampleRate
         val encoding = inputAudioFormat.encoding
         if (encoding != C.ENCODING_PCM_16BIT && encoding != C.ENCODING_PCM_FLOAT) {
             if (mixPath) throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
@@ -314,11 +341,12 @@ class OctoDspProcessor(
     override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
         draining = false
         val newSong = pendingSong
-        if (newSong != null) {
-            song = newSong
-            pendingSong = null
+        if (newSong != null) song = newSong
+        songRate = inputAudioFormat.sampleRate
+        if (!isActive) {
+            if (newSong != null && pendingSong === newSong) pendingSong = null
+            return
         }
-        if (!isActive) return
         val format = inputAudioFormat
         val kept = shaper?.takeIf { it.sampleRate == format.sampleRate && it.channels == format.channelCount }
         val current = kept ?: SoundShaper(format.sampleRate, format.channelCount).also { shaper = it }
@@ -330,6 +358,9 @@ class OctoDspProcessor(
         val entry = entryOf(streamMetadata)
         val sameSong = kept != null && entry == entryId
         entryId = entry
+        // Cleared only now, so the song's loudness reads the same from main
+        // all through the hand-over.
+        if (newSong != null && pendingSong === newSong) pendingSong = null
         // The speed step hands later steps the start divided by the speed;
         // the song time is the start it received.
         streamSpeed = speed.toDouble()

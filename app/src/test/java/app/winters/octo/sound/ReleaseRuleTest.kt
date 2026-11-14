@@ -66,13 +66,52 @@ class ReleaseRuleTest {
         pause(rig, d)
         rig.runFor(400.0)
         // The player stops, as OctoPlayer does it: nothing continues on the
-        // slot, the move is announced, the deck output goes and nothing
-        // comes after it.
+        // slot, the mixer hears the stop, the move is announced, the deck
+        // output goes and nothing comes after it.
         rig.mixer.resetContinuation(0)
+        rig.mixer.stop()
         rig.mixer.announce(0)
         d.output.release()
         rig.runFor(1_500.0)
         assertEquals("alive: ${rig.builder.built.filter { !it.released }.map { it.id }}", 0, alive(rig))
+    }
+
+    @Test
+    fun theQueuesEndLeavesNoOutputAlive() {
+        val rig = MixRig()
+        val d = rig.deck(0)
+        d.signal = { 0.3f }
+        d.play()
+        d.feed(forMs = 1_000.0)
+        rig.runFor(1_100.0)
+        // The last song's stream ends, and Media3 stops its renderers there:
+        // the deck output pauses, ended, and is never let go.
+        d.end()
+        rig.runFor(600.0)
+        d.pause()
+        rig.runFor(1_500.0)
+        assertEquals("alive: ${rig.builder.built.filter { !it.released }.map { it.id }}", 0, alive(rig))
+    }
+
+    @Test
+    fun aStationsPauseKeepsAnOutputForTheResumeAndAStopLetsItGo() {
+        val rig = MixRig()
+        val d = rig.deck(0)
+        d.signal = { 0.3f }
+        d.play()
+        d.feed()
+        rig.runFor(1_000.0)
+        pause(rig, d)
+        rig.runFor(400.0)
+        // A station's pause lets its stream go: announced, nothing continues.
+        rig.mixer.resetContinuation(0)
+        rig.mixer.announce(0)
+        d.output.release()
+        rig.runFor(1_500.0)
+        assertEquals("kept for the resume: ${rig.builder.built.map { "${it.id} ${it.released}" }}", 1, alive(rig))
+        rig.mixer.stop()
+        rig.runFor(10.0)
+        assertEquals("let go at the stop", 0, alive(rig))
     }
 
     @Test
