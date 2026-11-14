@@ -95,7 +95,7 @@ pub fn intro_out_gain(t: f64, hold_share: f64) -> f64 {
 pub fn intro_in_gain(t: f64, rise_share: f64, hold_share: f64, level: f64) -> f64 {
     let p = t.clamp(0.0, 1.0);
     let hold = hold_share.clamp(0.0, 1.0);
-    let rise = rise_share.clamp(0.0, hold);
+    let rise = rise_share.clamp(0.0, 1.0).min(hold);
     let g = level.clamp(0.0, 1.0);
     if p < rise {
         return (PI / 2.0 * p / rise).sin() * g;

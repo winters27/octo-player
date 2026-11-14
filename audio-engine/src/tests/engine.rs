@@ -1285,6 +1285,64 @@ fn a_long_intro_is_decided_before_it_starts() {
     engine.shutdown();
 }
 
+// The next song's deck gain over the playing one's that the player planned
+// with, and the planner's intro level given it and given decks at one gain.
+static GAIN_PLANS: Mutex<Option<(f64, f64, f64)>> = Mutex::new(None);
+
+fn gain_recording_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let plan = crate::automix::plan(input);
+    let mut even = input.clone();
+    even.context.incoming_gain_db = 0.0;
+    let even_level = crate::automix::plan(&even).intro_level;
+    *GAIN_PLANS.lock().unwrap() = Some((input.context.incoming_gain_db, plan.intro_level, even_level));
+    plan
+}
+
+#[test]
+fn an_intro_is_trimmed_for_the_gain_the_next_songs_deck_plays_it_at() {
+    // ReplayGain on Track, the next song tagged 6 dB louder than the
+    // playing one: the player plans with the next song 6 dB over it, and
+    // the intro's level is the planner's for that, not for decks at one
+    // gain. The next song's 11 s quiet start makes the intro.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 60, 0.3));
+    let quiet = RATE as usize * 11;
+    let mut next = sine(500.0, RATE, 2, 0, quiet, 0.06);
+    next.extend(sine(500.0, RATE, 2, quiet, RATE as usize * 29, 0.3));
+    write_wav(&b, RATE, 2, &next);
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_test_planner(Some(gain_recording_plan));
+    engine
+        .set_replaygain(crate::sound::model::ReplayGainSettings {
+            mode: crate::sound::model::ReplayGainMode::Track,
+            ..Default::default()
+        })
+        .unwrap();
+    engine.set_crossfade(8_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    let tagged = |id: &str, path: &Path, gain: f32| QueueItem {
+        replay_gain: Some(crate::sound::replaygain::ReplayGainInfo {
+            track_gain: Some(gain),
+            track_peak: None,
+            album_gain: None,
+            album_peak: None,
+        }),
+        ..item(id, path)
+    };
+    engine.load(vec![tagged("a", &a, 0.0), tagged("b", &b, 6.0)], 0, 0, true).unwrap();
+    let planned =
+        play_until(&pump, &events, "plan", 1_500, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { reason, .. } = planned else { unreachable!() };
+    let (gain, level, even) = GAIN_PLANS.lock().unwrap().take().expect("a plan");
+    assert!((gain - 6.0).abs() < 1e-3, "{gain}: {reason}");
+    assert!(reason.contains("intro at"), "{reason}");
+    assert!((level - even).abs() > 1e-3, "{level} against {even}: {reason}");
+    engine.shutdown();
+}
+
 // The longest blend and the longest intro the planner was handed, for a
 // playing song 13 s long.
 static LENGTHS: Mutex<Option<(i64, i64)>> = Mutex::new(None);

@@ -162,24 +162,23 @@ impl TransitionPlan {
     /// line the incoming song up: the blend ends where it would have, starts
     /// at `now_ms` at the earliest, keeps its entry, curve and filters, and
     /// drops its bar lock and tempo matching, so it may move by any number
-    /// of bars (an intro by none) and its beats are no longer lined up. A
-    /// blend held through the incoming song's silent lead-in holds as long
-    /// from its new start. `None` when too little is left to blend, or to
-    /// fade the outgoing song out over SHORTEST_FADE_MS after such a hold.
+    /// of bars and its beats are no longer lined up. A blend held through
+    /// the incoming song's silent lead-in holds as long from its new start.
+    /// `None` when too little is left to blend, or to fade the outgoing song
+    /// out over SHORTEST_FADE_MS after such a hold, and for an intro, whose
+    /// trim was measured for where it was planned.
     pub fn late_from(&self, now_ms: i64) -> Option<Self> {
+        if self.kind == TransitionKind::Intro {
+            return None;
+        }
         let end = self.start_ms + self.overlap_ms;
         let start_ms = self.start_ms.max(now_ms);
         let overlap_ms = end - start_ms;
         if overlap_ms < SHORTEST_FADE_MS as i64 {
             return None;
         }
-        let intro = self.kind == TransitionKind::Intro;
-        let hold_share = if intro {
-            self.hold_share
-        } else {
-            (self.hold_share * self.overlap_ms as f64 / overlap_ms as f64).min(1.0)
-        };
-        if !intro && (1.0 - hold_share) * (overlap_ms as f64) < SHORTEST_FADE_MS as f64 - 1e-6 {
+        let hold_share = (self.hold_share * self.overlap_ms as f64 / overlap_ms as f64).min(1.0);
+        if (1.0 - hold_share) * (overlap_ms as f64) < SHORTEST_FADE_MS as f64 - 1e-6 {
             return None;
         }
         Some(TransitionPlan {
@@ -190,7 +189,7 @@ impl TransitionPlan {
             beat_ms: None,
             beat_anchor_ms: None,
             late: true,
-            late_move_bars: if intro { 0 } else { LATE_MOVE_UNBOUNDED },
+            late_move_bars: LATE_MOVE_UNBOUNDED,
             both_heard_start_ms: 0,
             both_heard_end_ms: 0,
             lock_ms: 0.0,

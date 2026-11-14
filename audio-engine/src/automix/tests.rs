@@ -112,6 +112,9 @@ fn an_intro_holds_then_fades_and_rises_then_holds() {
     assert_eq!((intro_out_gain(0.0, 0.0), intro_in_gain(0.0, 0.0, 0.0, 1.0)), (1.0, 1.0));
     assert!((intro_out_gain(0.5, 0.0) - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
     assert_eq!(intro_out_gain(1.0, 1.0), 1.0);
+    // A hold share that is not a number bounds nothing: the rise is its own.
+    let rising = intro_in_gain(0.05, 0.1, f64::NAN, 0.5);
+    assert!((rising - 0.5 * std::f64::consts::FRAC_PI_4.sin()).abs() < 1e-12, "{rising}");
     // Every other kind keeps its curve, with no rise; a hold there holds the
     // outgoing song alone, then runs the curve over the rest.
     let blend =
@@ -263,11 +266,71 @@ fn a_late_plan_still_fades_the_outgoing_song_out_after_a_silent_lead_in() {
     assert_eq!(late.overlap_ms, 3_000);
     assert!((late.hold_share * 3_000.0 - 2_000.0).abs() < 1e-9, "{}", late.hold_share);
     assert!(plan.late_from(153_600).is_none());
-    // An intro keeps its shares, and its trim was planned for where it sat:
-    // it may not move again.
-    let intro = TransitionPlan { kind: TransitionKind::Intro, ..plan.clone() };
-    let late_intro = intro.late_from(153_600).unwrap();
-    assert_eq!((late_intro.hold_share, late_intro.late_move_bars), (plan.hold_share, 0));
+}
+
+#[test]
+fn a_late_blend_capped_too_short_to_fade_the_outgoing_song_out_is_not_planned() {
+    // A's grid at 132 BPM (1818 ms bars, a downbeat at 201.45 s), the next
+    // song's at 35 BPM (a tagged slow song), 5.7% apart with no rate. The
+    // next song is silent until 1.6 s and its first beat is at 1.65 s, so it
+    // enters at 0 and a blend holds A through those 1.6 s. Started at 199 s,
+    // the late blend runs from A's downbeat at 201.45 s less that lead to the
+    // latest end, 1.95 s: within the drift bound, but only 350 ms after the
+    // hold to fade A out, and every cut is shorter still. Neither the capped
+    // blend nor a cut is planned.
+    let a = SyntheticSong {
+        rate: 44_100,
+        channels: 1,
+        length_ms: 202_000,
+        layers: steady(0.0, 202_000.0, 100.0, 0.0, 0.0, -14.0),
+    };
+    let b = SyntheticSong {
+        rate: 22_050,
+        channels: 1,
+        length_ms: 40_000,
+        layers: steady(1_600.0, 40_000.0, 100.0, 1_650.0, 1_650.0, -14.0),
+    };
+    let (mut tail, mut head) = (a.tail(), b.head());
+    let (fast, slow) = (tail.features.tempo.unwrap(), head.features.tempo.unwrap());
+    tail.features.tempo = Some(Tempo {
+        bpm: 132.0,
+        beat_ms: 60_000.0 / 132.0,
+        first_beat_ms: 1_470.0,
+        downbeat_ms: 1_470.0,
+        ..fast
+    });
+    head.features.tempo = Some(Tempo {
+        bpm: 35.0,
+        beat_ms: 60_000.0 / 35.0,
+        first_beat_ms: 1_650.0,
+        downbeat_ms: 1_650.0,
+        ..slow
+    });
+    let song = |len| FadeSong { album_id: None, album_order: None, duration_ms: len };
+    let settings = PlanSettings::new(8_000);
+    let late = TransitionContext { now_ms: 199_000, played_ms: 199_000, ..Default::default() };
+    let plan =
+        plan_transition(&song(202_000), Some(&song(40_000)), Some(&tail), Some(&head), &settings, &late);
+    assert_eq!(plan.kind, TransitionKind::Gapless, "{}", plan.reason);
+    assert!(plan.reason.starts_with("gapless: too late to blend"), "{}", plan.reason);
+}
+
+#[test]
+fn a_late_intro_is_not_re_placed() {
+    // Its trim was measured for where it was planned, so started late it is
+    // not played from somewhere else, however much of it is left: no late
+    // intro, and a replan still starting too soon joins gaplessly.
+    let intro = TransitionPlan {
+        kind: TransitionKind::Intro,
+        hold_share: 0.6,
+        rise_share: 0.1,
+        intro_level: 0.4,
+        ..TransitionPlan::fixed_crossfade(200_000, 14_000, "test")
+    };
+    assert!(intro.late_from(186_500).is_none());
+    assert!(intro.late_from(100_000).is_none());
+    let replan = intro.clone();
+    assert!(intro.started_late(186_000, 1_500, 500, true, |_| replan).is_none());
 }
 
 #[test]
