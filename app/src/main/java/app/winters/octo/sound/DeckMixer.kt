@@ -603,11 +603,13 @@ class DeckMixer(
         // frames of the old position still unheard go. While paused or held
         // everything mixed or written past the settled head is mixed again
         // from there; while playing, the output pauses at the release and the
-        // new position starts on a fresh output.
+        // new position starts on a fresh output. An output still in its gate
+        // (a resume a moment ago) counts as playing: what was mixed for the
+        // old position would be its first music.
         if (d.announcedPending && lone) {
             if (paused || holding) {
                 if (max(writePoint, mixPoint) > (if (settledHead >= 0) settledHead else lastHeadMix)) clearAll(keep = null)
-            } else if (cur?.let { it.started && it.music } == true && (blend == null || session.state == BlendState.IDLE)) {
+            } else if (cur?.started == true && (blend == null || session.state == BlendState.IDLE)) {
                 clearPlaying()
             }
         } else if (d.announcedPending && holding) {
