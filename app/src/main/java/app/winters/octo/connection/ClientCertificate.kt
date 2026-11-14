@@ -6,6 +6,8 @@ import java.net.Socket
 import java.security.Principal
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLSocket
@@ -17,41 +19,57 @@ class ClientCertChoice(val alias: String, val hosts: Set<String>) {
     override fun toString() = "ClientCertChoice(alias=${mask(alias)}, hosts=$hosts)"
 }
 
+// What a key manager had for a socket when the server on it asked for a
+// certificate: the alias the socket's host had then, offered or turned down
+// for its kind of key, or none. A socket with a mark was asked.
+internal class SocketMark(val alias: String?)
+
+// Whether a server that takes this kind of key takes this key.
+private fun fitsKey(type: String, key: PrivateKey): Boolean = type.equals(key.algorithm, ignoreCase = true)
+
 // Hands the chosen client certificate to the server when it asks for one,
-// and to no other host. The key stays in the phone's certificate store;
-// the app only gets to use it, after the user picked it.
-class ClientCertKeyManager(
-    private val context: Context,
+// to no other host, and only when the server takes its kind of key. The key
+// stays in the phone's certificate store; the app only gets to use it,
+// after the user picked it. Every socket it is asked about goes into
+// `marks` with the alias its host had, so a connection made for another
+// certificate can be told apart later.
+internal class ClientCertKeyManager(
+    context: Context,
     private val choice: () -> ClientCertChoice?,
+    private val marks: MutableMap<Socket, SocketMark> = Collections.synchronizedMap(WeakHashMap()),
+    // How the phone's certificate store gives a key and a chain by name.
+    private val keys: (String) -> PrivateKey? = { KeyChain.getPrivateKey(context, it) },
+    private val chains: (String) -> Array<X509Certificate>? = { KeyChain.getCertificateChain(context, it) },
 ) : X509ExtendedKeyManager() {
     // Reading the store is slow, so what was read is kept by name.
-    private val chains = ConcurrentHashMap<String, Array<X509Certificate>>()
-    private val keys = ConcurrentHashMap<String, PrivateKey>()
+    private val readChains = ConcurrentHashMap<String, Array<X509Certificate>>()
+    private val readKeys = ConcurrentHashMap<String, PrivateKey>()
 
     override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String? =
-        aliasFor((socket as? SSLSocket)?.handshakeSession?.peerHost)
+        aliasFor((socket as? SSLSocket)?.handshakeSession?.peerHost, keyType, socket)
 
     override fun chooseEngineClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, engine: SSLEngine?): String? =
-        aliasFor(engine?.peerHost)
+        aliasFor(engine?.peerHost, keyType, null)
 
-    // Only for the server's own hosts. With no host to go by, nothing is shown.
-    private fun aliasFor(host: String?): String? {
-        val current = choice() ?: return null
-        return current.alias.takeIf { host != null && host.lowercase() in current.hosts }
+    // Only for the server's own hosts, and only when one of the kinds of key
+    // the server takes is this key's; a key the store cannot give declines.
+    // With no host to go by, nothing is shown. The socket, when there is
+    // one, is noted with the alias its host had, offered or not.
+    internal fun aliasFor(host: String?, keyType: Array<out String>?, socket: Socket?): String? {
+        val current = choice()
+        val had = if (current != null && host != null && host.lowercase() in current.hosts) current.alias else null
+        if (socket != null) marks[socket] = SocketMark(had)
+        if (had == null) return null
+        val key = getPrivateKey(had) ?: return null
+        return had.takeIf { keyType.orEmpty().any { type -> fitsKey(type, key) } }
     }
 
     // Both run on the connection's thread, never the main one, as the store requires.
     override fun getCertificateChain(alias: String): Array<X509Certificate>? =
-        chains[alias] ?: runCatching { KeyChain.getCertificateChain(context, alias) }.getOrNull()?.also { chains[alias] = it }
+        readChains[alias] ?: runCatching { chains(alias) }.getOrNull()?.also { readChains[alias] = it }
 
     override fun getPrivateKey(alias: String): PrivateKey? =
-        keys[alias] ?: runCatching { KeyChain.getPrivateKey(context, alias) }.getOrNull()?.also { keys[alias] = it }
-
-    // Forgets what was read, for when the choice changes.
-    fun forget() {
-        chains.clear()
-        keys.clear()
-    }
+        readKeys[alias] ?: runCatching { keys(alias) }.getOrNull()?.also { readKeys[alias] = it }
 
     // The app never acts as a server, and never lists the store.
     override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null

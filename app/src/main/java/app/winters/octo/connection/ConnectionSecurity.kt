@@ -1,6 +1,7 @@
 package app.winters.octo.connection
 
 import android.content.Context
+import android.security.KeyChain
 import app.winters.octo.subsonic.HeaderScope
 import app.winters.octo.subsonic.gateway.GatewayCookies
 import app.winters.octo.subsonic.gateway.GatewayNames
@@ -17,21 +18,34 @@ import okhttp3.ConnectionPool
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.internal.OkHttpInternalApi
+import okhttp3.internal.connection.RealConnection
 import java.io.IOException
 import java.net.InetAddress
 import java.net.Socket
+import java.security.PrivateKey
+import java.security.cert.Certificate
 import java.security.cert.X509Certificate
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.X509TrustManager
 
 // Whether a server's gateway sign-in can't be used where it is: gateway
 // headers with a plain http main address outside the home network, where
 // they are never sent, so the address has to move to https first.
 fun needsHttps(main: HttpUrl, headers: List<ServerHeader>): Boolean =
     headers.any { GatewayNames.isGatewayName(it.name) } && gatewayOrigins(main, null).isEmpty()
+
+// A connection made for another client certificate than the one in use
+// now: dropped, and the call made again on a fresh one.
+class StaleClientIdentity : IOException("made for another client certificate")
 
 // What the network needs to know about the signed-in server: its
 // addresses, extra headers, trusted certificates and client certificate,
@@ -40,10 +54,24 @@ fun needsHttps(main: HttpUrl, headers: List<ServerHeader>): Boolean =
 // covers and streams) reads it on every request, so a change applies
 // everywhere at once.
 @Singleton
-class ConnectionSecurity @Inject constructor(
-    @ApplicationContext private val context: Context,
+class ConnectionSecurity internal constructor(
+    private val context: Context,
     private val devices: DeviceIds,
+    // The chain the phone built for a host, and how the phone's certificate
+    // store gives a key and a chain by name. The app passes the phone's own;
+    // tests on the JVM, which has none of them, pass their own.
+    built: (X509TrustManager) -> BuiltChain?,
+    private val keys: (String) -> PrivateKey?,
+    private val chains: (String) -> Array<X509Certificate>?,
 ) {
+    @Inject constructor(@ApplicationContext context: Context, devices: DeviceIds) : this(
+        context,
+        devices,
+        ::phoneBuiltChain,
+        { KeyChain.getPrivateKey(context, it) },
+        { KeyChain.getCertificateChain(context, it) },
+    )
+
     // What decides who is signed in where: the addresses, the ones gateway
     // headers may go to, every header, the trusted certificates and the
     // client certificate. Header values are secrets, so only names print.
@@ -79,11 +107,21 @@ class ConnectionSecurity @Inject constructor(
 
     // Distrusted authorities are turned down before a pin is looked at.
     private val platform = platformTrustManager()
-    private val trustManager = DistrustingTrustManager(PinningTrustManager(platform, pins, remember), phoneBuiltChain(platform))
+    private val trustManager = DistrustingTrustManager(PinningTrustManager(platform, pins, remember), built(platform))
+
     // The client certificate the factory's context was made for. Kept apart
     // from `current`, which clear() lets go of, so the next configuration
     // compares with what is installed rather than with nothing.
     @Volatile private var installedIdentity: String? = null
+
+    // Every socket a key manager here was asked about, with the alias its
+    // host had then, held only as long as the socket is.
+    private val marks: MutableMap<Socket, SocketMark> = Collections.synchronizedMap(WeakHashMap())
+
+    // The key manager of the context installed now, for the leaf in use.
+    // contextFor sets it and the factory below makes the first context, so
+    // both this and `marks` are declared before the factory.
+    @Volatile private var keyManager: ClientCertKeyManager? = null
 
     // One factory for every client installed here, over a context made for
     // the client certificate in use: another certificate swaps the context
@@ -94,13 +132,22 @@ class ConnectionSecurity @Inject constructor(
     // client certificate changes.
     private val pool = ConnectionPool()
 
+    // Calls made again because their connection was made for another client
+    // certificate, for tests.
+    internal val staleRetries = AtomicInteger()
+
     // A TLS context with a key manager of its own (nothing read from the
     // phone's certificate store carries over) and the shared trust manager.
     private fun contextFor(): SSLContext {
-        val keys = ClientCertKeyManager(context) {
-            current?.let { now -> now.identity.clientCert?.let { ClientCertChoice(it, now.hosts) } }
-        }
-        return SSLContext.getInstance("TLS").apply { init(arrayOf(keys), arrayOf(trustManager), null) }
+        val manager = ClientCertKeyManager(
+            context,
+            choice = { current?.let { now -> now.identity.clientCert?.let { ClientCertChoice(it, now.hosts) } } },
+            marks = marks,
+            keys = keys,
+            chains = chains,
+        )
+        keyManager = manager
+        return SSLContext.getInstance("TLS").apply { init(arrayOf(manager), arrayOf(trustManager), null) }
     }
 
     // Uses the settings for the server at these addresses from now on. The
@@ -144,10 +191,13 @@ class ConnectionSecurity @Inject constructor(
     // Sets up a client builder to use all of the above. The configuration in
     // force as a request starts goes with it (serverHeaders), so every hop of
     // it, and the cookies its answers set, belong to that one even when
-    // another comes in meanwhile.
+    // another comes in meanwhile. A call whose connection was made for
+    // another client certificate is made once more.
     fun install(builder: OkHttpClient.Builder): OkHttpClient.Builder = builder
+        .addInterceptor(retryStale)
         .addInterceptor(watch)
         .serverHeaders { current?.let(::scopeOf) }
+        .addNetworkInterceptor(identityCheck)
         .connectionPool(pool)
         .sslSocketFactory(factory, trustManager)
         .hostnameVerifier(PinningHostnameVerifier(pins, remember))
@@ -169,6 +219,50 @@ class ConnectionSecurity @Inject constructor(
             if (server && isConnectionError(e)) _connectionErrors.tryEmit(Unit)
             throw e
         }
+    }
+
+    // A call whose connection was made for another client certificate is
+    // made once more, on a fresh connection (identityCheck dropped the old
+    // one). OkHttp's own retry never sees it: nothing failed on the wire.
+    private val retryStale = Interceptor { chain ->
+        try {
+            chain.proceed(chain.request())
+        } catch (_: StaleClientIdentity) {
+            staleRetries.incrementAndGet()
+            chain.proceed(chain.request())
+        }
+    }
+
+    // The alias in use for a host, and the leaf of its chain.
+    private fun aliasFor(host: String): String? = current?.takeIf { pinKey(host) in it.hosts }?.identity?.clientCert
+
+    private fun leafFor(host: String): String? =
+        aliasFor(host)?.let { alias -> keyManager?.getCertificateChain(alias)?.firstOrNull()?.fingerprint() }
+
+    // A connection is stale when its handshake was asked for a certificate
+    // and the alias its host had then is not the one in use there now, or
+    // when it presented a leaf that is not the one in use there (a resumed
+    // session is never asked).
+    internal fun stale(mark: SocketMark?, host: String, local: List<Certificate>?): Boolean {
+        if (mark != null && mark.alias != aliasFor(host)) return true
+        val leaf = local?.firstOrNull() as? X509Certificate ?: return false
+        return leaf.fingerprint() != leafFor(host)
+    }
+
+    // Before a request goes out on a connection made for another client
+    // certificate: its session is dropped so it is never resumed, the
+    // connection takes no more calls, and the call is made again
+    // (retryStale).
+    @OptIn(OkHttpInternalApi::class)
+    private val identityCheck = Interceptor { chain ->
+        val connection = chain.connection()
+        val socket = connection?.socket() as? SSLSocket
+        if (connection != null && socket != null && stale(marks[socket], chain.request().url.host, connection.handshake()?.localCertificates)) {
+            runCatching { socket.session.invalidate() }
+            (connection as? RealConnection)?.noNewExchanges()
+            throw StaleClientIdentity()
+        }
+        chain.proceed(chain.request())
     }
 
     private fun scopeOf(now: Current) = HeaderScope(

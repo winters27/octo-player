@@ -182,6 +182,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockwebserver)
+    // Certificates made for a test's own TLS server and client.
+    testImplementation(libs.okhttp.tls)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     // The SQLite of the oldest phones Octo runs on, for checking queries there.
