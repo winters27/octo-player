@@ -67,9 +67,9 @@ class HeadReadTest {
         rig.arm(testBlend(1, testPlan(start = 2_000, entry = 0, overlap = 1_000)))
         rig.runFor(4_000.0)
         val told = rig.events.map { "${it.kind}/${it.cause}" }
-        assertTrue("written again: ${rig.tap.notes}", rig.tap.notes.any { it.startsWith("head jump") })
         assertTrue("no start dropped: $told", rig.events.none { it.kind == BlendEventKind.INCOMING_NOT_READY })
         assertTrue("the blend ran: $told", rig.events.any { it.kind == BlendEventKind.BLEND_END })
+        assertTrue("written again: ${rig.tap.notes}", rig.tap.notes.any { it.startsWith("head jump") })
     }
 
     @Test
