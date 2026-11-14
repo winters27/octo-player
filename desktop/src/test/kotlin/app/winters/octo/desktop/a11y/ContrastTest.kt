@@ -24,8 +24,12 @@ import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.desktop.ui.SongMenu
 import app.winters.octo.design.POPUP_TAG
+import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.desktop.pages.addServer
 import app.winters.octo.desktop.pages.rememberCaption
+import app.winters.octo.subsonic.gateway.Gateway
+import org.junit.Assert.assertEquals
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
@@ -128,6 +132,12 @@ class ContrastTest {
         assertTrue("measured only ${spots.size} spots", spots.size >= minimum)
         val low = spots.filter { it.ratio < it.need }
         assertTrue("under AA:\n" + low.joinToString("\n") { "${"%.2f".format(it.ratio)} < ${it.need}: ${it.name}" }, low.isEmpty())
+    }
+
+    // The same, with every named spot found: exactly `count` of them.
+    private fun checkEvery(spots: List<Spot>, count: Int) {
+        check(spots, minimum = count)
+        assertEquals("every named spot was found", count, spots.size)
     }
 
     // The Songs page, the sidebar and the player over the cover's colours.
@@ -383,13 +393,14 @@ class ContrastTest {
                 val sheetBox = s.popup()
                 list + inMenu + s.spots(sheet, "${theme.label} sheet", listOf(
                     Triple("Add a server", "sheet title (secondary)", 7.0),
-                    Triple("Server address", "field name (muted)", 4.5),
-                    Triple("Name", "field name (muted)", 4.5),
-                    Triple("Optional, like Home or Work", "field hint (muted)", 4.5),
+                    Triple(SignInWords.SERVER_ADDRESS, "field name (main)", 7.0),
+                    Triple(SignInWords.SERVER_NAME, "field name (main)", 7.0),
+                    Triple(SignInWords.NAME_PLACEHOLDER, "field hint (muted)", 4.5),
+                    Triple(SignInWords.OPTIONAL_TAG, "Optional tag on its fill", 4.5),
                 ), { sheetBox.contains(it.center) })
             }
         }
-        check(spots, minimum = ThemeChoice.entries.size * 15)
+        checkEvery(spots, ThemeChoice.entries.size * 16)
     }
 
     // Settings > Appearance in every theme, each word at its role's minimum.
@@ -416,25 +427,70 @@ class ContrastTest {
         check(spots, minimum = ThemeChoice.entries.size * 5)
     }
 
-    // The sign-in page, which keeps Octo's dark look, in every theme.
-    @Test(timeout = 300_000)
+    // The sign-in page, which keeps Octo's dark look, in every theme: closed,
+    // with Advanced open, and calling a sign-in page failure out (the error
+    // note and the pointer in the error words); then the Optional tag on its
+    // fill in two accents. Tall enough that nothing measured is scrolled off.
+    @Test(timeout = 400_000)
     fun theSignInPageReadsInEveryTheme() {
-        val spots = A11yScene(folder.newFolder()).use { s ->
+        val spots = A11yScene(folder.newFolder(), height = 1_600, reduceMotion = true).use { s ->
             s.onUi { s.app.signOut() }
             s.settle(1_000).close()
-            ThemeChoice.entries.flatMap { theme ->
-                s.onUi { s.app.settings.pickTheme(theme) }
-                val image = s.settle(700)
-                keep(image, "contrast-theme-sign-in-${theme.name.lowercase()}")
-                s.spots(image, "${theme.label} sign-in", listOf(
+            val form = { s.app.signInForm }
+            val themes = ThemeChoice.entries.flatMap { theme ->
+                s.onUi {
+                    s.app.settings.pickTheme(theme)
+                    form().advancedOpen = false
+                    form().result = null
+                }
+                val closed = s.settle(700)
+                keep(closed, "contrast-theme-sign-in-${theme.name.lowercase()}")
+                val plain = s.spots(closed, "${theme.label} sign-in", listOf(
                     Triple("Octo", "name (main)", 7.0),
                     Triple("Sign in to your music server...", "line (secondary)", 7.0),
-                    Triple("Server address", "field name (muted)", 4.5),
-                    Triple(rememberCaption(true), "switch caption (muted)", 4.5),
+                    Triple(SignInWords.SERVER_ADDRESS, "field name (main)", 7.0),
+                    Triple(SignInWords.REQUIRED, "placeholder (muted)", 4.5),
+                    Triple(rememberCaption(true), "switch line (secondary)", 7.0),
                 ))
+                s.onUi { form().advancedOpen = true }
+                val open = s.settle(700)
+                keep(open, "contrast-theme-sign-in-advanced-${theme.name.lowercase()}")
+                val advanced = s.spots(open, "${theme.label} Advanced", listOf(
+                    Triple(SignInWords.ADVANCED, "section title (main)", 7.0),
+                    Triple(SignInWords.ADVANCED_LINE, "section line (secondary)", 7.0),
+                    Triple(SignInWords.GROUP_GETTING_THERE, "group title (main)", 7.0),
+                    Triple(SignInWords.HOME_NOTE, "note (secondary)", 7.0),
+                    Triple(SignInWords.OPTIONAL_TAG, "Optional tag on its fill", 4.5),
+                ))
+                s.onUi {
+                    form().typeAddress("https://music.example.com")
+                    form().result = false to GatewayWords.failure(Gateway.Authentik, false)
+                    form().failed(form().attemptAddress, Gateway.Authentik)
+                }
+                val called = s.settle(700)
+                keep(called, "contrast-theme-sign-in-callout-${theme.name.lowercase()}")
+                val error = s.spots(called, "${theme.label} callout", listOf(
+                    Triple(GatewayWords.inGroup(form().result!!.second), "error note (error words)", 4.5),
+                    Triple(GatewayWords.POINTER, "pointer (error words)", 4.5),
+                ))
+                s.onUi {
+                    form().result = null
+                    form().typeAddress("")
+                }
+                plain + advanced + error
             }
+            val accents = AccentChoice.entries.take(2).flatMap { accent ->
+                s.onUi {
+                    s.app.settings.update { it.copy(appearance = it.appearance.copy(accent = accent)) }
+                    form().advancedOpen = true
+                }
+                val image = s.settle(700)
+                keep(image, "contrast-sign-in-tag-${accent.name.lowercase()}")
+                s.spots(image, "${accent.label} tag", listOf(Triple(SignInWords.OPTIONAL_TAG, "Optional tag on its fill", 4.5)))
+            }
+            themes + accents
         }
-        check(spots, minimum = ThemeChoice.entries.size * 4)
+        checkEvery(spots, ThemeChoice.entries.size * 12 + 2)
     }
 
     private fun A11yScene.until(what: () -> Boolean) {

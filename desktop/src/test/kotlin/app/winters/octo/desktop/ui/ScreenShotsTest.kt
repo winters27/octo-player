@@ -28,8 +28,11 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.connection.GatewayWords
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SignInOutcome
+import app.winters.octo.subsonic.AuthMode
+import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.desktop.settings.AmbienceStyle
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -272,11 +275,31 @@ class ScreenShotsTest {
                 app.signInForm.result = null
                 app.signInForm.advancedOpen = true
                 app.signInForm.home = "192.168.1.20:4533"
-                app.signInForm.addHeader()
-                app.signInForm.setHeaderName(0, "X-Access-Token")
-                app.signInForm.setHeaderValue(0, "secret")
+                val header = app.signInForm.addHeader()
+                app.signInForm.setHeaderName(header, "X-Access-Token")
+                app.signInForm.setHeaderValue(header, "secret")
             }
             shot("signin-advanced")
+            // A sign-in page answered: its group calls the failure out, and
+            // the pointer takes the result line's place.
+            SwingUtilities.invokeAndWait {
+                app.signInForm.result = false to GatewayWords.failure(Gateway.Authentik, false)
+                app.signInForm.failed(app.signInForm.attemptAddress, Gateway.Authentik)
+            }
+            shot("signin-gateway-callout")
+            // API key in the main card.
+            SwingUtilities.invokeAndWait {
+                app.signInForm.result = null
+                app.signInForm.pickMethod(AuthMode.ApiKey)
+            }
+            shot("signin-api-key")
+            // An invite: its fields in the main card, its sentence a note.
+            SwingUtilities.invokeAndWait {
+                app.signInForm.pickMethod(AuthMode.Token)
+                app.signInForm.takeJoinLink("https://music.example.com/family/join#invite=tok_9")
+            }
+            shot("signin-invite")
+            SwingUtilities.invokeAndWait { app.signInForm.leaveLink() }
             val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
             SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
             shot("home", 3_000)

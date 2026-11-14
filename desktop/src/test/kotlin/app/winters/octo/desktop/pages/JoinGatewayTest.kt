@@ -20,6 +20,7 @@ import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -83,6 +84,8 @@ class JoinGatewayTest {
         assertTrue(form.advancedOpen)
         assertEquals(GatewayKind.Password, form.gatewayKind)
         assertEquals(GatewayWords.failure(Gateway.Authelia, false), form.result?.second)
+        // The group calls the refusal out and waits to be brought into view.
+        assertTrue(form.callout && form.calloutPending && form.showsCallout)
     }
 
     // A hand-over meeting a sign-in page stops (no "expired"), opens the
@@ -99,7 +102,9 @@ class JoinGatewayTest {
         assertTrue(form.advancedOpen)
         assertEquals(GatewayKind.Password, form.gatewayKind)
         assertEquals(GatewayWords.failure(Gateway.Authelia, false), form.result?.second)
+        assertTrue(form.callout && form.calloutPending && form.showsCallout)
         fill(form)
+        assertFalse("typing in the group ends the callout", form.callout)
         assertNull(receiveFromForm(accounts, FamilyPlatform.Windows, form))
         assertEquals(HANDOVER_DENIED, form.result?.second)
         assertEquals(basicCredentials("alice", "app-pw"), server.calls.last { it.url.pathSegments.last() == "redeemFamilySignIn" }.headers["Authorization"])

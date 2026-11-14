@@ -17,7 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.LaunchedEffect
@@ -34,12 +37,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.dp
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.CardFit
 import app.winters.octo.design.Corner
@@ -63,6 +69,7 @@ import app.winters.octo.design.Spinner
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
@@ -87,7 +94,6 @@ import app.winters.octo.server.PasswordDraft
 import app.winters.octo.server.passwordChangeWords
 import app.winters.octo.server.passwordDraftProblem
 import app.winters.octo.subsonic.AuthMode
-import app.winters.octo.subsonic.shownAddress
 import app.winters.octo.serverupdate.upToDateLine
 import kotlinx.coroutines.launch
 
@@ -317,7 +323,7 @@ fun signInTo(app: AppState, server: SavedServer, note: String? = null) = serverS
 private fun serverSheet(app: AppState, kind: SheetKind, server: SavedServer?, note: String? = null) {
     // Each opening starts afresh, even straight after another sheet.
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax) { close ->
+    app.popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
         key(opening) {
             val form = remember { SignInForm(server, keepsSecret = kind == SheetKind.Edit || kind == SheetKind.Secure).also { f -> note?.let { f.result = false to it } } }
             ServerSheet(app, kind, server, form, close)
@@ -325,19 +331,26 @@ private fun serverSheet(app: AppState, kind: SheetKind, server: SavedServer?, no
     }
 }
 
-// The form of a server sheet: the sign-in page's fields, smaller, in the
-// middle of the window. A certificate the system does not trust is asked
-// about in its place.
+// The form of a server sheet: the sign-in page's groups, in the middle of
+// the window. The fields and Advanced scroll; the result line and the
+// buttons stay at its foot. The API key takes the password's place in every
+// kind of sheet, and signing in again shows Advanced's head, closed. A
+// certificate the system does not trust is asked about in its place.
 @Composable
 private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: SavedServer?, form: SignInForm, close: () -> Unit) {
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
+    val scroll = rememberScrollState()
+    val places = remember { FormPlaces() }
+    val calloutFocus = remember { CalloutFocus() }
+    var content by remember { mutableStateOf<LayoutCoordinates?>(null) }
     // Which of test or save ran last, to run again once a certificate is trusted.
     var again by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun test() {
         if (!form.ready) return
         again = ::test
+        form.sending()
         form.busy = true
         form.result = null
         val tried = form.attemptAddress
@@ -370,6 +383,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
             close()
             return
         }
+        form.sending()
         form.busy = true
         form.result = null
         // Taken now, so a switch, sign-out or removal asked for while this
@@ -410,17 +424,25 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
     // values.
     LaunchedEffect(form) { if (server != null) form.knowSavedGateway(server, app.accounts.savedGateway(server)) }
 
+    // The sign-in page group and the key row are brought into view from
+    // here, outside Advanced, so closing it never ends a wait.
+    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
+    CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
+    CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
+
     val asked = form.question
     if (asked != null) {
-        TrustQuestion(
-            asked,
-            onTrust = {
-                form.question = null
-                app.accounts.security.trust(asked.host, asked.fingerprint)
-                again?.invoke()
-            },
-            onCancel = form::distrust,
-        )
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            TrustQuestion(
+                asked,
+                onTrust = {
+                    form.question = null
+                    app.accounts.security.trust(asked.host, asked.fingerprint)
+                    again?.invoke()
+                },
+                onCancel = form::distrust,
+            )
+        }
         return
     }
 
@@ -431,58 +453,65 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
             SheetKind.SignIn, SheetKind.Secure -> "Sign in to ${server?.name.orEmpty()}"
         },
     )
+    CompositionLocalProvider(LocalCalloutHost provides host) {
+        Column(
+            Modifier
+                .weight(1f, fill = false)
+                .scrollbar(scroll)
+                .verticalScroll(scroll)
+                .onGloballyPositioned { content = it }
+                .padding(horizontal = Space.Xl, vertical = Space.M),
+            verticalArrangement = Arrangement.spacedBy(Space.L),
+        ) {
+            when (kind) {
+                SheetKind.Add -> Unit
+                SheetKind.Edit -> Txt("Octo signs in with the new details before it saves them.", DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
+                SheetKind.SignIn, SheetKind.Secure -> Txt(server?.let(::accountLine).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
+            }
+            FormGroup(null, notes = { if (kind != SheetKind.SignIn) ConnectionNotes(form) }) {
+                if (kind != SheetKind.SignIn) {
+                    FormFieldRow(
+                        SignInWords.SERVER_ADDRESS,
+                        value = form.address,
+                        onChange = form::typeAddress,
+                        placeholder = SignInWords.REQUIRED,
+                        leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
+                        onSubmit = ::save,
+                        focus = if (kind == SheetKind.Add || kind == SheetKind.Secure) first else null,
+                    )
+                    FormFieldRow(
+                        SignInWords.SERVER_NAME,
+                        optional = true,
+                        value = form.label,
+                        onChange = { form.label = it },
+                        placeholder = SignInWords.NAME_PLACEHOLDER,
+                        onSubmit = ::save,
+                        focus = if (kind == SheetKind.Edit) first else null,
+                    )
+                    FormFieldRow(
+                        SignInWords.USERNAME,
+                        optional = form.useApiKey,
+                        value = form.username,
+                        onChange = {
+                            form.username = it
+                            form.result = null
+                        },
+                        placeholder = if (form.useApiKey) "" else SignInWords.REQUIRED,
+                        onSubmit = ::save,
+                    )
+                }
+                SecretRow(form, ::save, places, if (kind == SheetKind.SignIn) first else null)
+                FormSwitchRow(
+                    if (form.useApiKey) "Remember API key" else "Remember password",
+                    rememberCaption(form.rememberPassword),
+                    form.rememberPassword,
+                ) { form.rememberPassword = it }
+            }
+            Advanced(form, ::save, places)
+        }
+    }
     PopupPadding {
-        when (kind) {
-            SheetKind.Add -> Unit
-            SheetKind.Edit -> Txt("Octo signs in with the new details before it saves them.", DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
-            SheetKind.SignIn, SheetKind.Secure -> Txt(server?.let(::accountLine).orEmpty(), DesktopType.meta, OctoColors.TextSecondary)
-        }
-        if (kind != SheetKind.SignIn) {
-            Field("Server address") {
-                GlassField(
-                    form.address,
-                    form::typeAddress,
-                    Modifier.fillMaxWidth(),
-                    placeholder = "music.example.com or 192.168.1.20:4533",
-                    focusRequester = if (kind == SheetKind.Add || kind == SheetKind.Secure) first else null,
-                    onSubmit = ::save,
-                    leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
-                )
-                form.url?.let { Txt("Connects to ${shownAddress(it)}", DesktopType.meta, OctoColors.TextMuted) }
-                if (form.insecure) Txt("This address isn't encrypted and isn't on your home network, so others could read what is sent.", DesktopType.meta, OctoColors.Error, maxLines = 3)
-            }
-            Field("Name") {
-                GlassField(form.label, { form.label = it }, Modifier.fillMaxWidth(), placeholder = "Optional, like Home or Work", onSubmit = ::save, focusRequester = if (kind == SheetKind.Edit) first else null)
-            }
-            Field(if (form.useApiKey) "Username (optional)" else "Username") {
-                GlassField(form.username, { form.username = it; form.result = null }, Modifier.fillMaxWidth(), onSubmit = ::save)
-            }
-        }
-        if (!form.useApiKey) {
-            Field("Password") {
-                SecretField(
-                    form.password,
-                    { form.password = it; form.result = null },
-                    if (form.keepsSecret) "Leave empty to keep the saved one" else "Password",
-                    ::save,
-                    if (kind == SheetKind.SignIn) first else null,
-                )
-            }
-        } else if (kind == SheetKind.SignIn) {
-            Field("API key") { SecretField(form.apiKey, { form.apiKey = it; form.result = null }, "API key", ::save, first) }
-        }
-        SheetSwitch(
-            if (form.useApiKey) "Remember API key" else "Remember password",
-            rememberCaption(form.rememberPassword),
-            form.rememberPassword,
-        ) { form.rememberPassword = it }
-        // Signing in again shows Advanced only once a sign-in page answered,
-        // for its fields.
-        if (kind != SheetKind.SignIn || form.detected != null) {
-            AdvancedToggle(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
-            if (form.advancedOpen) Advanced(form, ::save)
-        }
-        form.result?.let { (ok, text) -> Txt(text, DesktopType.meta, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4) }
+        ResultLine(form)
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically) {
             if (kind != SheetKind.SignIn) TextAction("Test connection", ::test, enabled = form.ready)
             Spacer(Modifier.weight(1f))
@@ -510,6 +539,34 @@ fun changePassword(app: AppState) {
     val connection = app.connection ?: return
     val opening = Any()
     app.popups.showCentred(width = SettingsSize.Sheet, scrim = true) { close -> key(opening) { PasswordSheet(app, connection, close) } }
+}
+
+// A password or key: dots until the eye inside the field shows it.
+@Composable
+internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder: String, submit: () -> Unit, focus: FocusRequester? = null) {
+    var reveal by remember { mutableStateOf(false) }
+    GlassField(
+        value,
+        onChange,
+        Modifier.fillMaxWidth(),
+        placeholder = placeholder,
+        password = !reveal,
+        focusRequester = focus,
+        onSubmit = submit,
+        trailing = {
+            val words = if (reveal) "Hide" else "Show"
+            IconAction(
+                if (reveal) OctoIcons.Conceal else OctoIcons.Reveal,
+                words,
+                { reveal = !reveal },
+                // Tab goes from field to field, past the eye.
+                Modifier.focusProperties { canFocus = false },
+                size = ControlHeight.M,
+                iconSize = IconSize.Toolbar,
+                tint = OctoColors.TextSecondary,
+            )
+        },
+    )
 }
 
 @Composable

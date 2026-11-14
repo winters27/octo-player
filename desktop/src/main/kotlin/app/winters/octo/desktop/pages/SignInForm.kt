@@ -9,16 +9,30 @@ import app.winters.octo.subsonic.FamilyHandOverLink
 import app.winters.octo.subsonic.FamilySignInPrefill
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import app.winters.octo.connection.AdvancedLayout
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.HeaderList
 import app.winters.octo.connection.addressChanged
+import app.winters.octo.connection.advancedLayout
+import app.winters.octo.connection.authModeOf
+import app.winters.octo.connection.flagsOf
 import app.winters.octo.connection.gatewayAllowed
+import app.winters.octo.connection.gatewayEdited
+import app.winters.octo.connection.kindPicked
+import app.winters.octo.connection.methodPicked
 import app.winters.octo.connection.reactToFailure
 import app.winters.octo.data.HeaderDraft
+import app.winters.octo.connection.calloutShown as calloutShownRule
+import app.winters.octo.connection.calm as calmRule
+import app.winters.octo.connection.keepsKey as keepsKeyRule
+import app.winters.octo.connection.keepsPassword as keepsPasswordRule
+import app.winters.octo.connection.keyShown as keyShownRule
+import app.winters.octo.connection.pointTo as pointToRule
+import app.winters.octo.connection.sending as sendingRule
 import app.winters.octo.desktop.server.API_KEY_EXTENSION
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SavedGateway
@@ -67,7 +81,13 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     var useApiKey by mutableStateOf(last?.authMode == AuthMode.ApiKey)
     var apiKey by mutableStateOf("")
     var home by mutableStateOf(last?.home?.removeSuffix("/").orEmpty())
-    val headers = mutableStateListOf<HeaderDraft>()
+
+    // The custom header rows, each with an id kept beside it, so they draw
+    // keyed; every write goes through one of HeaderList's ops.
+    var headerList by mutableStateOf(HeaderList.empty)
+        private set
+    val headers: List<HeaderDraft> get() = headerList.rows
+    val headerIds: List<Long> get() = headerList.ids
 
     // The sign-in page in front of the server: the kind of sign-in it takes,
     // its two fields (a username and password, or a Client ID and Secret),
@@ -94,7 +114,25 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     var busy by mutableStateOf(false)
 
     // The last test or sign-in's answer: whether it worked, and what to say.
-    var result by mutableStateOf<Pair<Boolean, String>?>(null)
+    // Every write calms the sign-in page group; a failure that met one calls
+    // it out again just after its words are written (failed).
+    private var said by mutableStateOf<Pair<Boolean, String>?>(null)
+    var result: Pair<Boolean, String>?
+        get() = said
+        set(value) {
+            said = value
+            follow(calmRule(gatewayState))
+        }
+
+    // The sign-in page group calls the last failure out (`callout`) and
+    // still has to be brought into view (`calloutPending`); the API key
+    // row, just asked for, still has to be brought into view (`keyPending`).
+    var callout by mutableStateOf(false)
+        private set
+    var calloutPending by mutableStateOf(false)
+        private set
+    var keyPending by mutableStateOf(false)
+        private set
 
     // A certificate the system does not trust, waiting for an answer.
     var question by mutableStateOf<CertificateQuestion?>(null)
@@ -140,12 +178,13 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     init {
         if (last != null) {
             typeAddress(last.address.removeSuffix("/"))
-            headers.addAll(last.headerNames.map { HeaderDraft(it, "", saved = true) })
+            headerList = headerList.replaced(last.headerNames.map { HeaderDraft(it, "", saved = true) })
         }
     }
 
-    // Where focus starts: the password when the server and user are known.
-    val startsAtPassword: Boolean get() = lastServer != null && username.isNotBlank() && !useApiKey
+    // Where focus starts: the secret (the password, or the API key) when the
+    // server and who signs in are known.
+    val startsAtPassword: Boolean get() = lastServer != null && (useApiKey || username.isNotBlank())
 
     // Takes what was typed or pasted into the address field. A full address
     // sets the scheme and leaves the rest; otherwise the scheme follows the
@@ -191,19 +230,44 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             return last.extensions.any { it.startsWith("$API_KEY_EXTENSION:") }
         }
 
-    val mode: AuthMode
-        get() = when {
-            useApiKey -> AuthMode.ApiKey
-            legacyPassword -> AuthMode.LegacyPassword
-            else -> AuthMode.Token
-        }
+    val mode: AuthMode get() = authModeOf(legacyPassword, useApiKey)
+
+    // How the kept server signs in, for which saved secret may stand in.
+    private val savedMode: AuthMode? get() = lastServer?.authMode
+
+    // Whether the password, or the key, may stay empty and keep the saved
+    // one: only a saved password for a password Method, and a saved key for
+    // API key.
+    val keepsPassword: Boolean get() = keepsPasswordRule(keepsSecret, savedMode, mode)
+    val keepsKey: Boolean get() = keepsKeyRule(keepsSecret, savedMode, mode)
 
     // Whether the form has what the chosen way of signing in needs.
     val ready: Boolean
         get() = !busy && url != null && when (mode) {
-            AuthMode.ApiKey -> apiKey.isNotBlank() || keepsSecret
-            else -> username.isNotBlank() && (password.isNotEmpty() || keepsSecret)
+            AuthMode.ApiKey -> apiKey.isNotBlank() || keepsKey
+            else -> username.isNotBlank() && (password.isNotEmpty() || keepsPassword)
         }
+
+    // Advanced's groups and rows, and the Methods its Method row offers.
+    val layout: AdvancedLayout
+        get() = advancedLayout(
+            joining = invite != null || handOver != null,
+            takesApiKeys = takesApiKeys,
+            apiKeyOn = useApiKey,
+            kind = gatewayKind,
+            certificateRow = false,
+        )
+
+    // Picks how to sign in. API key with no key kept asks for the key row to
+    // be brought into view.
+    fun pickMethod(picked: AuthMode) {
+        val old = mode
+        val (legacy, key) = flagsOf(picked)
+        legacyPassword = legacy
+        useApiKey = key
+        follow(methodPicked(gatewayState, old, picked, keepsKeyRule(keepsSecret, savedMode, picked)))
+        result = null
+    }
 
     // Whether anything but the name differs from the kept server, so the
     // details need a sign-in test before they are saved. The sign-in page is
@@ -211,27 +275,31 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     fun changesConnection(server: SavedServer): Boolean =
         url?.toString() != server.address || username.trim() != server.username || mode != server.authMode ||
             home.trim().removeSuffix("/") != server.home?.removeSuffix("/").orEmpty() || password.isNotEmpty() || apiKey.isNotEmpty() ||
-            rememberPassword != server.rememberSignIn || headers.any { !it.saved } ||
+            rememberPassword != server.rememberSignIn || headers.any { !it.saved || it.value.isNotBlank() } ||
             (headers.map { it.name } + gatewayRows).sortedBy { it.lowercase() } != server.headerNames.sortedBy { it.lowercase() } ||
             gatewayKind != savedGateway || gatewayFirst.isNotEmpty() || gatewaySecond.isNotEmpty()
 
-    fun addHeader() {
-        headers.add(HeaderDraft("", ""))
+    // A blank header row at the end; its id, for the row to take focus.
+    fun addHeader(): Long {
+        val (next, id) = headerList.added()
+        headerList = next
+        return id
     }
 
-    fun removeHeader(index: Int) {
-        if (index in headers.indices) headers.removeAt(index)
+    fun removeHeader(id: Long) {
+        headerList = headerList.remove(id)
+        result = null
     }
 
     // A renamed saved header no longer keeps its saved value.
-    fun setHeaderName(index: Int, name: String) {
-        val old = headers.getOrNull(index) ?: return
-        headers[index] = old.copy(name = name, saved = old.saved && name.trim().equals(old.name.trim(), ignoreCase = true))
+    fun setHeaderName(id: Long, name: String) {
+        headerList = headerList.renamed(id, name)
+        result = null
     }
 
-    fun setHeaderValue(index: Int, value: String) {
-        val old = headers.getOrNull(index) ?: return
-        headers[index] = old.copy(value = value)
+    fun setHeaderValue(id: Long, value: String) {
+        headerList = headerList.valued(id, value)
+        result = null
     }
 
     // Picks the kind of sign-in the sign-in page takes. Another kind starts
@@ -241,17 +309,19 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             gatewayFirst = ""
             gatewaySecond = ""
         }
-        gatewayKind = kind
+        follow(kindPicked(gatewayState, kind))
         result = null
     }
 
     fun typeGatewayFirst(text: String) {
         gatewayFirst = text
+        follow(gatewayEdited(gatewayState))
         result = null
     }
 
     fun typeGatewaySecond(text: String) {
         gatewaySecond = text
+        follow(gatewayEdited(gatewayState))
         result = null
     }
 
@@ -261,8 +331,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // How to get through the sign-in page met, or the one picked.
     val gatewayHint: String?
-        get() = detected?.let(GatewayWords::hint)
-            ?: if (gatewayKind == GatewayKind.CloudflareToken) GatewayWords.hint(Gateway.CloudflareAccess) else null
+        get() = detected?.let(GatewayWords::hint) ?: GatewayWords.tip(gatewayKind)
 
     // Sign-in page fields over plain http to an address outside the home
     // network: refused when tried, said beforehand.
@@ -275,13 +344,18 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
     // The kind of sign-in page the kept server's saved headers make up, read
     // off the window's thread: its rows show as that kind, saved, rather
     // than as headers, and Advanced opens on it. Nothing changes once
-    // another address is typed.
+    // another address is typed, nor when the person touched one of those
+    // rows (typed in it, removed it, or added a row of that name), since
+    // the answer may land while they type; every other row keeps its id.
     fun knowSavedGateway(server: SavedServer, saved: SavedGateway) {
         if (saved.kind == GatewayKind.None || url?.toString() != server.address) return
+        fun named(row: HeaderDraft) = saved.names.any { it.equals(row.name.trim(), ignoreCase = true) }
+        val untouched = saved.names.all { name -> headers.any { it.saved && it.value.isEmpty() && it.name.trim().equals(name, ignoreCase = true) } } &&
+            headers.none { !it.saved && named(it) }
+        if (!untouched) return
         savedGateway = saved.kind
-        val moved = headers.filter { row -> row.saved && saved.names.any { it.equals(row.name.trim(), ignoreCase = true) } }
-        gatewayRows = moved.map { it.name }
-        headers.removeAll(moved)
+        gatewayRows = headers.filter { it.saved && named(it) }.map { it.name }
+        headerList = headerList.kept { !(it.saved && named(it)) }
         if (gatewayKind == GatewayKind.None) gatewayKind = saved.kind
         advancedOpen = true
     }
@@ -294,14 +368,35 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         follow(reactToFailure(gatewayState, attempted, attemptAddress, gateway))
     }
 
-    private val gatewayState: GatewayFormState get() = GatewayFormState(advancedOpen, gatewayKind, detected, detectedFor)
+    private val gatewayState: GatewayFormState
+        get() = GatewayFormState(advancedOpen, gatewayKind, detected, detectedFor, callout, calloutPending, keyPending)
 
     private fun follow(state: GatewayFormState) {
         advancedOpen = state.advancedOpen
         gatewayKind = state.kind
         detected = state.detected
         detectedFor = state.detectedFor
+        callout = state.callout
+        calloutPending = state.calloutPending
+        keyPending = state.keyPending
     }
+
+    // An attempt starts: nothing from the last one is called out or waits to
+    // be brought into view.
+    fun sending() = follow(sendingRule(gatewayState))
+
+    // The group was brought into view.
+    fun calloutShown() = follow(calloutShownRule(gatewayState))
+
+    // The pointer under the buttons: the group is brought into view again.
+    fun pointTo() = follow(pointToRule(gatewayState))
+
+    // The key row was brought into view.
+    fun keyShown() = follow(keyShownRule(gatewayState))
+
+    // The sign-in page group shows the failure as its error note, ringed,
+    // with the pointer in the result line's place.
+    val showsCallout: Boolean get() = callout && advancedOpen && result?.first == false
 
     // Another address forgets the sign-in page met at the last one.
     private fun movedFrom(before: String) {
@@ -343,7 +438,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     private fun forgetServerDetails() {
         keptId = null
-        headers.clear()
+        headerList = headerList.replaced(emptyList())
         gatewayRows = emptyList()
         savedGateway = GatewayKind.None
         gatewayKind = GatewayKind.None

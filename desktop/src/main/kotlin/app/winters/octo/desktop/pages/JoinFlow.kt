@@ -1,12 +1,16 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,21 +19,22 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.ResolvedHeaders
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
-import app.winters.octo.design.GlassField
 import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
-import app.winters.octo.design.OctoType
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.TextAction
-import app.winters.octo.design.Txt
+import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Accounts
@@ -63,6 +68,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.Done? {
     val url = form.url ?: return null
     val invite = form.invite ?: return null
+    form.sending()
     val tried = form.attemptAddress
     val headers = when (val resolved = accounts.joinHeaders(form.request())) {
         is ResolvedHeaders.Problem -> {
@@ -112,6 +118,7 @@ suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.
 // uses them.
 suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: SignInForm): SignInOutcome.Done? {
     val link = form.handOver ?: return null
+    form.sending()
     val tried = form.attemptAddress
     val headers = when (val resolved = accounts.joinHeaders(form.request())) {
         is ResolvedHeaders.Problem -> {
@@ -175,15 +182,22 @@ fun AppState.openFamilyLink(link: FamilyLink) {
         signInForm.take(link)
         return
     }
-    popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax) { close ->
+    popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
         val form = remember { SignInForm().also { it.take(link) } }
         LinkSheet(this@openFamilyLink, form, close)
     }
 }
 
+// The sheet a link opens while signed in: the link's card and Advanced
+// scroll; the result line and the buttons stay at its foot. A certificate
+// the system does not trust is asked about in its place.
 @Composable
 private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+    val places = remember { FormPlaces() }
+    val calloutFocus = remember { CalloutFocus() }
+    var content by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var asking by remember { mutableStateOf<CertificateQuestion?>(null) }
     fun finish(done: SignInOutcome.Done?) {
         asking = form.question
@@ -194,6 +208,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
     }
     fun go() {
         if (form.busy) return
+        form.sending()
         form.busy = true
         form.result = null
         val tried = form.attemptAddress
@@ -217,21 +232,26 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
     }
     // A hand-over starts at once: there is nothing to type.
     LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null) go() }
+    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
+    CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
+    CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
     val question = asking
     if (question != null) {
-        TrustQuestion(
-            question,
-            onTrust = {
-                app.accounts.security.trust(question.host, question.fingerprint)
-                form.question = null
-                asking = null
-                go()
-            },
-            onCancel = {
-                form.distrust()
-                asking = null
-            },
-        )
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            TrustQuestion(
+                question,
+                onTrust = {
+                    app.accounts.security.trust(question.host, question.fingerprint)
+                    form.question = null
+                    asking = null
+                    go()
+                },
+                onCancel = {
+                    form.distrust()
+                    asking = null
+                },
+            )
+        }
         return
     }
     MenuTitle(
@@ -241,49 +261,116 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             else -> "Sign in"
         },
     )
-    PopupPadding { LinkCard(form, ::go, onLeave = close) }
+    CompositionLocalProvider(LocalCalloutHost provides host) {
+        Column(
+            Modifier
+                .weight(1f, fill = false)
+                .scrollbar(scroll)
+                .verticalScroll(scroll)
+                .onGloballyPositioned { content = it }
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LinkCard(form, ::go, places)
+            Advanced(form, ::go, places)
+        }
+    }
+    PopupPadding { LinkFooter(form, ::go, onLeave = close) }
 }
 
-// The part of the sign-in card a family link fills: signing up from an
-// invite (a name and a password, twice, with how strong it looks), a
-// sign-in coming from another device (what is happening, step by step), or
-// the server and username filled in, waiting for the password. Advanced,
-// with the sign-in page fields, shows here too: an invite or hand-over to a
-// server behind a sign-in page needs them.
+// The part of the sign-in a family link fills, as the page's main card:
+// signing up from an invite (a name and a password, twice, the strength
+// under the first), a sign-in coming from another device (what is
+// happening, with a spinner at the end while it goes), or the server and
+// username filled in, waiting for the password or key. On the page the
+// address row comes first, with its notes. The invite's sentence and the
+// hand-over's "choose Allow" are notes under the card.
 @Composable
-internal fun ColumnScope.LinkCard(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
+internal fun LinkCard(
+    form: SignInForm,
+    go: () -> Unit,
+    places: FormPlaces,
+    address: (@Composable () -> Unit)? = null,
+    addressNotes: @Composable ColumnScope.() -> Unit = {},
+) {
     val invite = form.invite
     val handOver = form.handOver
-    when {
-        invite != null -> {
-            Txt("You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.", OctoType.bodySmall, OctoColors.TextSecondary, maxLines = 3)
-            Label("Your name")
-            GlassField(form.inviteName, { form.inviteName = it; form.result = null }, Modifier.fillMaxWidth(), placeholder = "As the family sees you", onSubmit = go)
-            Label("Password")
-            SecretField(form.invitePassword, { form.invitePassword = it; form.result = null }, "At least $MIN_PASSWORD characters", go, null)
-            passwordStrength(form.invitePassword)?.let { Txt(it, OctoType.caption, OctoColors.TextMuted) }
-            Label("Password again")
-            SecretField(form.inviteAgain, { form.inviteAgain = it; form.result = null }, "The same password", go, null)
-        }
-        handOver != null -> {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (form.busy) ProgressRing(null)
-                Txt(form.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}", OctoType.body, OctoColors.TextPrimary, maxLines = 3)
+    FormGroup(
+        null,
+        notes = {
+            addressNotes()
+            when {
+                invite != null -> FormNote("You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.")
+                handOver != null -> FormNote("On your other device, choose Allow when it asks about this computer.")
             }
-            Txt("On your other device, choose Allow when it asks about this computer.", OctoType.caption, OctoColors.TextMuted, maxLines = 2)
-        }
-        else -> {
-            Label("Username")
-            GlassField(form.username, { form.username = it; form.result = null }, Modifier.fillMaxWidth(), onSubmit = go)
-            Label("Password")
-            SecretField(form.password, { form.password = it; form.result = null }, "Password", go, null)
+        },
+    ) {
+        address?.invoke()
+        when {
+            invite != null -> {
+                FormFieldRow(
+                    SignInWords.YOUR_NAME,
+                    value = form.inviteName,
+                    onChange = {
+                        form.inviteName = it
+                        form.result = null
+                    },
+                    placeholder = "As the family sees you",
+                    onSubmit = go,
+                )
+                FormFieldRow(
+                    SignInWords.PASSWORD,
+                    description = passwordStrength(form.invitePassword),
+                    value = form.invitePassword,
+                    onChange = {
+                        form.invitePassword = it
+                        form.result = null
+                    },
+                    placeholder = "At least $MIN_PASSWORD characters",
+                    secret = true,
+                    onSubmit = go,
+                )
+                FormFieldRow(
+                    SignInWords.PASSWORD_AGAIN,
+                    value = form.inviteAgain,
+                    onChange = {
+                        form.inviteAgain = it
+                        form.result = null
+                    },
+                    placeholder = "The same password",
+                    secret = true,
+                    onSubmit = go,
+                )
+            }
+            handOver != null -> FormRow(form.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}") {
+                if (form.busy) ProgressRing(null)
+            }
+            else -> {
+                FormFieldRow(
+                    SignInWords.USERNAME,
+                    optional = form.useApiKey,
+                    value = form.username,
+                    onChange = {
+                        form.username = it
+                        form.result = null
+                    },
+                    placeholder = if (form.useApiKey) "" else SignInWords.REQUIRED,
+                    onSubmit = go,
+                )
+                SecretRow(form, go, places, null)
+            }
         }
     }
-    AdvancedToggle(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
-    if (form.advancedOpen) Advanced(form, go, joining = invite != null || handOver != null)
-    form.result?.let { (ok, text) ->
-        Txt(text, OctoType.bodySmall, if (ok) OctoColors.TextSecondary else OctoColors.Error, maxLines = 4)
-    }
+}
+
+// The foot of a link's card: the result line, then the way out of the link
+// and the button that goes on. The page draws it in its card; the sheet
+// keeps it under its scrolling part.
+@Composable
+internal fun LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
+    val invite = form.invite
+    val handOver = form.handOver
+    ResultLine(form)
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
         TextAction(if (handOver != null) "Cancel" else "Sign in with a password instead", onLeave)
         when {

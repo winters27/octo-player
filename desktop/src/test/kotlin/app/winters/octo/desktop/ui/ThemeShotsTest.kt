@@ -165,7 +165,8 @@ class ThemeShotsTest {
                 s.onUi {
                     if (popup == "menu") s.app.popups.showAt(IntOffset(400, 120)) { close -> SongMenu(s.app, listOf(s.app.library!!.index!!.songs[2]), close) } else addServer(s.app)
                 }
-                s.settle(1_200).also { keep(it, "theme-over-art-$popup-${theme.name.lowercase()}") }
+                // Compared once the pop-up and the cover have stopped moving.
+                s.settleStill(1_200, quiet = CoverFadeMs).also { keep(it, "theme-over-art-$popup-${theme.name.lowercase()}") }
             }
         val problems = mutableListOf<String>()
         for (popup in listOf("menu", "sheet")) {
