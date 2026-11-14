@@ -79,6 +79,9 @@ object OctoIcons {
     // Everything known about a song.
     val Info = R.drawable.sym_info
 
+    // Something that went wrong, beside the words that say what.
+    val Error = R.drawable.sym_error
+
     // Picking songs in a list, and a picked one.
     val Select = R.drawable.sym_check_circle
 
