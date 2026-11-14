@@ -891,6 +891,11 @@ impl Mixer {
             made += frames;
             self.made += frames as u64;
         }
+        // The mix has ended only once the shaper's held-back tail is out
+        // too; until then more sound is coming.
+        if state == MixState::Ended && self.tail_left > 0 {
+            state = MixState::Playing;
+        }
         (made, state)
     }
 

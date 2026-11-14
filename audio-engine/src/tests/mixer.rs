@@ -59,6 +59,39 @@ fn dc_file(path: &Path, frames: usize, left: i16, right: i16) {
 }
 
 #[test]
+fn a_render_says_the_mix_has_ended_only_once_the_limiters_tail_is_out() {
+    // 4,950 frames of song and the limiter's 72 held back, rendered 1,000
+    // at a time: the fifth render ends the song with 50 of the tail, so 22
+    // are still to come and it must not say the mix has ended.
+    let dir = temp_dir();
+    let a = dir.join("a.wav");
+    dc_file(&a, 4_950, 8_192, 8_192);
+    let song = deck(1, &a);
+    let until = Instant::now() + Duration::from_secs(5);
+    while !song.is_filled() {
+        assert!(Instant::now() < until, "the song never decoded");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let mut mixer = Mixer::new(RATE, 0, &SoundSettings::default(), Pace::default());
+    let mut lane = Lane::new(song, Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let mut block = vec![0.0; 2_000];
+    let mut markers = Vec::new();
+    let mut renders = Vec::new();
+    loop {
+        let (n, state) = mixer.render(&mut block, &mut markers);
+        renders.push(n);
+        if state == MixState::Ended {
+            break;
+        }
+        assert!(renders.len() < 10, "{renders:?}");
+    }
+    assert_eq!(renders.iter().sum::<usize>(), 4_950 + 72, "{renders:?}");
+    assert_eq!(mixer.render(&mut block, &mut markers), (0, MixState::Ended), "{renders:?}");
+}
+
+#[test]
 fn crossfade_is_equal_power_and_on_time() {
     let dir = temp_dir();
     let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
