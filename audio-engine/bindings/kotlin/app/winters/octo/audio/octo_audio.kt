@@ -697,6 +697,8 @@ internal object IntegrityCheckingUniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_octo_audio_checksum_func_client_identity_problem(
+    ): Int
     external fun uniffi_octo_audio_checksum_func_equalizer_presets(
     ): Int
     external fun uniffi_octo_audio_checksum_func_graphic_bands(
@@ -746,6 +748,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_octo_audio_checksum_method_engine_seek(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_automix(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_engine_set_client_certificate(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_set_crossfade(
     ): Int
@@ -880,6 +884,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_automix(`ptr`: Long,`settings`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_octo_audio_fn_method_engine_set_client_certificate(`ptr`: Long,`certificate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_crossfade(`ptr`: Long,`ms`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_octo_audio_fn_method_engine_set_dsp(`ptr`: Long,`dsp`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -958,7 +964,11 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_octo_audio_fn_method_loopvideo_width(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
+    external fun uniffi_octo_audio_fn_method_clientcertificate_uniffi_trait_debug(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_method_httpheader_uniffi_trait_debug(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_client_identity_problem(`chain`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_equalizer_presets(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1097,6 +1107,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_octo_audio_checksum_func_client_identity_problem() and 0xFFFF) != 14732) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_func_equalizer_presets() and 0xFFFF) != 16428) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1172,6 +1185,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_automix() and 0xFFFF) != 60543) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_client_certificate() and 0xFFFF) != 22506) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_crossfade() and 0xFFFF) != 65324) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1211,7 +1227,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_stop_after_current() and 0xFFFF) != 64048) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_engine_set_trusted_certificates() and 0xFFFF) != 19505) {
+    if ((lib.uniffi_octo_audio_checksum_method_engine_set_trusted_certificates() and 0xFFFF) != 57246) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_method_engine_set_volume() and 0xFFFF) != 52620) {
@@ -1471,6 +1487,33 @@ private class JavaLangRefCleanable(
 /**
  * @suppress
  */
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    fun lift(value: Int): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterUInt: FfiConverter<UInt, Int> {
     override fun lift(value: Int): UInt {
         return value.toUInt()
@@ -1686,6 +1729,25 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
     }
 }
 
+/**
+ * @suppress
+ */
+public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
+    override fun read(buf: ByteBuffer): ByteArray {
+        val len = buf.getInt()
+        val byteArr = ByteArray(len)
+        buf.get(byteArr)
+        return byteArr
+    }
+    override fun allocationSize(value: ByteArray): ULong {
+        return 4UL + value.size.toULong()
+    }
+    override fun write(value: ByteArray, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        buf.put(value)
+    }
+}
+
 
 // This template implements a class for working with a Rust struct via a handle
 // to the live Rust struct on the other side of the FFI.
@@ -1872,6 +1934,15 @@ public interface EngineInterface {
     fun `setAutomix`(`settings`: AutomixSettings)
     
     /**
+     * Offers this client certificate, from the next connection on, to the
+     * origins it names when one asks, and to no other server; `None` offers
+     * none. A connection made before is not used again. One the engine
+     * could not present (see `client_identity_problem`) is refused: none is
+     * offered then, and the error says why.
+     */
+    fun `setClientCertificate`(`certificate`: ClientCertificate?)
+    
+    /**
      * Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
      */
     fun `setCrossfade`(`ms`: kotlin.UInt)
@@ -1931,7 +2002,8 @@ public interface EngineInterface {
      * Replaces the certificates trusted for streams. A server's certificate
      * is checked the system's way first; only when that fails is it let
      * through, and only when its host has a pin equal to its SHA-256.
-     * Applies to connections made from now on.
+     * Applies from the next connection on: one made before is not used
+     * again.
      */
     fun `setTrustedCertificates`(`certificates`: List<TrustedCertificate>)
     
@@ -2360,6 +2432,27 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
 
     
     /**
+     * Offers this client certificate, from the next connection on, to the
+     * origins it names when one asks, and to no other server; `None` offers
+     * none. A connection made before is not used again. One the engine
+     * could not present (see `client_identity_problem`) is refused: none is
+     * offered then, and the error says why.
+     */
+    @Throws(EngineException::class)override fun `setClientCertificate`(`certificate`: ClientCertificate?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_engine_set_client_certificate(
+        it,
+        
+        FfiConverterOptionalTypeClientCertificate.lower(`certificate`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * Crossfade length in milliseconds, 0 to 16000; 0 turns it off.
      */
     @Throws(EngineException::class)override fun `setCrossfade`(`ms`: kotlin.UInt)
@@ -2576,7 +2669,8 @@ open class Engine: Disposable, AutoCloseable, EngineInterface
      * Replaces the certificates trusted for streams. A server's certificate
      * is checked the system's way first; only when that fails is it let
      * through, and only when its host has a pin equal to its SHA-256.
-     * Applies to connections made from now on.
+     * Applies from the next connection on: one made before is not used
+     * again.
      */override fun `setTrustedCertificates`(`certificates`: List<TrustedCertificate>)
         = 
     callWithHandle {
@@ -3655,6 +3749,71 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
 
 
 /**
+ * A client certificate the engine offers to the origins named with it
+ * when one asks, and to no other server. The key is secret, so it is
+ * never shown: `Debug`, and the Kotlin `toString` made from it, give the
+ * origins and the number of certificates alone.
+ */
+data class ClientCertificate (
+    val `origins`: List<Origin>
+    , 
+    /**
+     * The certificates, each in DER: the client's own first, then any
+     * that issued it.
+     */
+    val `chain`: List<kotlin.ByteArray>
+    , 
+    /**
+     * The private key as PKCS#8 DER.
+     */
+    val `key`: kotlin.ByteArray
+    
+){
+    
+
+    
+
+    // The local Rust `Display`/`Debug` implementation.
+    override fun toString(): String {
+        return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_clientcertificate_uniffi_trait_debug(FfiConverterTypeClientCertificate.lower(this),
+        _status)
+}
+    )
+    }
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeClientCertificate: FfiConverterRustBuffer<ClientCertificate> {
+    override fun read(buf: ByteBuffer): ClientCertificate {
+        return ClientCertificate(
+            FfiConverterSequenceTypeOrigin.read(buf),
+            FfiConverterSequenceByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ClientCertificate) = (
+            FfiConverterSequenceTypeOrigin.allocationSize(value.`origins`) +
+            FfiConverterSequenceByteArray.allocationSize(value.`chain`) +
+            FfiConverterByteArray.allocationSize(value.`key`)
+    )
+
+    override fun write(value: ClientCertificate, buf: ByteBuffer) {
+            FfiConverterSequenceTypeOrigin.write(value.`origins`, buf)
+            FfiConverterSequenceByteArray.write(value.`chain`, buf)
+            FfiConverterByteArray.write(value.`key`, buf)
+    }
+}
+
+
+
+/**
  * Headphone crossfeed: each ear hears a little of the other side.
  */
 data class CrossfeedSettings (
@@ -4141,6 +4300,53 @@ public object FfiConverterTypeHttpHeader: FfiConverterRustBuffer<HttpHeader> {
     override fun write(value: HttpHeader, buf: ByteBuffer) {
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`value`, buf)
+    }
+}
+
+
+
+/**
+ * A server's scheme, host and port, to which a client certificate is
+ * offered. An IPv6 host may be written in brackets, as in an address.
+ */
+data class Origin (
+    val `scheme`: kotlin.String
+    , 
+    val `host`: kotlin.String
+    , 
+    val `port`: kotlin.UShort
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeOrigin: FfiConverterRustBuffer<Origin> {
+    override fun read(buf: ByteBuffer): Origin {
+        return Origin(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUShort.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Origin) = (
+            FfiConverterString.allocationSize(value.`scheme`) +
+            FfiConverterString.allocationSize(value.`host`) +
+            FfiConverterUShort.allocationSize(value.`port`)
+    )
+
+    override fun write(value: Origin, buf: ByteBuffer) {
+            FfiConverterString.write(value.`scheme`, buf)
+            FfiConverterString.write(value.`host`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
     }
 }
 
@@ -6311,6 +6517,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeClientCertificate: FfiConverterRustBuffer<ClientCertificate?> {
+    override fun read(buf: ByteBuffer): ClientCertificate? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeClientCertificate.read(buf)
+    }
+
+    override fun allocationSize(value: ClientCertificate?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeClientCertificate.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ClientCertificate?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeClientCertificate.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeHeadphoneCorrection: FfiConverterRustBuffer<HeadphoneCorrection?> {
     override fun read(buf: ByteBuffer): HeadphoneCorrection? {
         if (buf.get().toInt() == 0) {
@@ -6683,6 +6921,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 /**
  * @suppress
  */
+public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.ByteArray>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ByteArray> {
+        val len = buf.getInt()
+        return List<kotlin.ByteArray>(len) {
+            FfiConverterByteArray.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ByteArray>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterByteArray.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ByteArray>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterByteArray.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeEqFilter: FfiConverterRustBuffer<List<EqFilter>> {
     override fun read(buf: ByteBuffer): List<EqFilter> {
         val len = buf.getInt()
@@ -6757,6 +7023,34 @@ public object FfiConverterSequenceTypeHttpHeader: FfiConverterRustBuffer<List<Ht
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeHttpHeader.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeOrigin: FfiConverterRustBuffer<List<Origin>> {
+    override fun read(buf: ByteBuffer): List<Origin> {
+        val len = buf.getInt()
+        return List<Origin>(len) {
+            FfiConverterTypeOrigin.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<Origin>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeOrigin.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<Origin>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeOrigin.write(it, buf)
         }
     }
 }
@@ -6872,6 +7166,25 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
         }
     }
 }
+        /**
+         * Why the engine could not present a client certificate with this chain
+         * (each in DER, the client's own first) and this PKCS#8 DER key, or `None`
+         * when it can. It signs with RSA of at least 2048 bits, P-256 or P-384
+         * (the key carrying its public key) and Ed25519, and the key must be the
+         * one the first certificate names.
+         */ fun `clientIdentityProblem`(`chain`: List<kotlin.ByteArray>, `key`: kotlin.ByteArray): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_client_identity_problem(
+    
+        
+        FfiConverterSequenceByteArray.lower(`chain`),
+        FfiConverterByteArray.lower(`key`),_status)
+}
+    )
+    }
+    
+
         /**
          * The built-in equalizer curves, the same as the Android app's.
          */ fun `equalizerPresets`(): List<EqPreset> {

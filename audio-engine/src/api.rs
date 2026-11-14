@@ -18,6 +18,7 @@ use crate::pace::Pace;
 use crate::player::{Command, Driven, Shared};
 use crate::sound::model::{DspSettings, EqPreset, EqSettings, ReplayGainSettings};
 use crate::sound::replaygain::ReplayGainInfo;
+use crate::source::trust::{Identity, identity_problem};
 
 /// An extra request header for a stream, such as one a server's proxy needs.
 /// The value can be a password, so it is never shown: `Debug`, and the
@@ -43,6 +44,39 @@ pub struct TrustedCertificate {
     pub host: String,
     /// The SHA-256 of the certificate itself, in hex; colons and spaces are ignored.
     pub sha256: String,
+}
+
+/// A server's scheme, host and port, to which a client certificate is
+/// offered. An IPv6 host may be written in brackets, as in an address.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct Origin {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+}
+
+/// A client certificate the engine offers to the origins named with it
+/// when one asks, and to no other server. The key is secret, so it is
+/// never shown: `Debug`, and the Kotlin `toString` made from it, give the
+/// origins and the number of certificates alone.
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
+#[uniffi::export(Debug)]
+pub struct ClientCertificate {
+    pub origins: Vec<Origin>,
+    /// The certificates, each in DER: the client's own first, then any
+    /// that issued it.
+    pub chain: Vec<Vec<u8>>,
+    /// The private key as PKCS#8 DER.
+    pub key: Vec<u8>,
+}
+
+impl fmt::Debug for ClientCertificate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClientCertificate")
+            .field("origins", &self.origins)
+            .field("chain", &self.chain.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// One entry in the play queue.
@@ -471,9 +505,32 @@ impl Engine {
     /// Replaces the certificates trusted for streams. A server's certificate
     /// is checked the system's way first; only when that fails is it let
     /// through, and only when its host has a pin equal to its SHA-256.
-    /// Applies to connections made from now on.
+    /// Applies from the next connection on: one made before is not used
+    /// again.
     pub fn set_trusted_certificates(&self, certificates: Vec<TrustedCertificate>) {
         self.shared.trust.replace(certificates.into_iter().map(|c| (c.host, c.sha256)));
+    }
+
+    /// Offers this client certificate, from the next connection on, to the
+    /// origins it names when one asks, and to no other server; `None` offers
+    /// none. A connection made before is not used again. One the engine
+    /// could not present (see `client_identity_problem`) is refused: none is
+    /// offered then, and the error says why.
+    pub fn set_client_certificate(&self, certificate: Option<ClientCertificate>) -> Result<(), EngineError> {
+        let identity = certificate.map(|c| {
+            let origins = c.origins.into_iter().map(|o| (o.scheme, o.host, o.port));
+            Identity::new(origins, c.chain, c.key)
+        });
+        match identity.transpose() {
+            Ok(identity) => {
+                self.shared.trust.set_identity(identity);
+                Ok(())
+            }
+            Err(problem) => {
+                self.shared.trust.set_identity(None);
+                Err(invalid(&problem))
+            }
+        }
     }
 
     /// Sends a `Position` event every `ms` while playing; 0 turns it off.
@@ -607,4 +664,14 @@ pub fn equalizer_presets() -> Vec<EqPreset> {
 #[uniffi::export]
 pub fn graphic_bands() -> Vec<f32> {
     crate::sound::model::GRAPHIC_BANDS.to_vec()
+}
+
+/// Why the engine could not present a client certificate with this chain
+/// (each in DER, the client's own first) and this PKCS#8 DER key, or `None`
+/// when it can. It signs with RSA of at least 2048 bits, P-256 or P-384
+/// (the key carrying its public key) and Ed25519, and the key must be the
+/// one the first certificate names.
+#[uniffi::export]
+pub fn client_identity_problem(chain: Vec<Vec<u8>>, key: Vec<u8>) -> Option<String> {
+    identity_problem(&chain, &key)
 }

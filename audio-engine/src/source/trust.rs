@@ -1,11 +1,17 @@
 //! Certificates the listener chose to trust although the system does not,
-//! each for its own host, and the TLS connection that uses them.
+//! each for its own host, the client certificate offered to the server,
+//! and the TLS connection that uses them.
 //!
 //! Every certificate is first checked the system's way. Only when that
 //! fails is a pin looked at: the connection goes ahead when the host has a
 //! pin equal to the SHA-256 of the certificate the server showed. A pin
 //! never applies to any other host, and nothing else is ever let through.
 //! The same rule as the app's own HTTP client.
+//!
+//! A client certificate is offered only to the origins (scheme, host and
+//! port) set with it, and to no other server. A change to the pins or the
+//! client certificate applies from the next connection: one made before it
+//! is never used again.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -15,18 +21,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::crypto::CryptoProvider;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
+use rustls::sign::CertifiedKey;
 use rustls::{ClientConfig, ClientConnection, DigitallySignedStruct, SignatureScheme, StreamOwned};
 use ureq::unversioned::transport::{
     Buffers, ConnectionDetails, Connector, Either, LazyBuffers, NextTimeout, Transport, TransportAdapter,
 };
 
-/// The pinned certificates, shared by every connection an engine makes.
+/// The pinned certificates and the client certificate, shared by every
+/// connection an engine makes.
 #[derive(Debug, Default)]
 pub struct Trust {
     // SHA-256 fingerprints by host.
     pins: RwLock<HashMap<String, Vec<[u8; 32]>>>,
-    // Moves on with every change, so TLS settings made before it are made again.
+    // The client certificate and the origins it is offered to.
+    identity: RwLock<Option<Arc<Identity>>>,
+    // Moves on with every change, so TLS settings made before it are made
+    // again and connections made before it are not used again.
     generation: AtomicU64,
 }
 
@@ -56,6 +68,18 @@ impl Trust {
         pinned.iter().any(|pin| pin[..] == *digest.as_ref())
     }
 
+    /// Offers this client certificate to its own origins from the next
+    /// connection on, or none. It is in place before the generation moves,
+    /// so a connection that sees the new generation also sees it.
+    pub fn set_identity(&self, identity: Option<Identity>) {
+        *self.identity.write().unwrap_or_else(|e| e.into_inner()) = identity.map(Arc::new);
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn identity(&self) -> Option<Arc<Identity>> {
+        self.identity.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     fn generation(&self) -> u64 {
         self.generation.load(Ordering::SeqCst)
     }
@@ -69,6 +93,74 @@ fn host_key(host: &str) -> String {
         Ok(ip) => ip.to_string(),
         Err(_) => bare.to_ascii_lowercase(),
     }
+}
+
+// An origin as it is matched: the scheme in lowercase and the host as
+// `host_key` writes it, with the port.
+type OriginKey = (String, String, u16);
+
+fn origin_key(scheme: &str, host: &str, port: u16) -> OriginKey {
+    (scheme.trim().to_ascii_lowercase(), host_key(host), port)
+}
+
+// The origin of a connection that needs TLS: https, at port 443 unless the
+// address names another.
+fn tls_origin(uri: &ureq::http::Uri) -> OriginKey {
+    let scheme = uri.scheme_str().unwrap_or_default();
+    origin_key(scheme, uri.host().unwrap_or_default(), uri.port_u16().unwrap_or(443))
+}
+
+/// A client certificate: its chain, the client's own first, its private
+/// key, and the origins it is offered to.
+pub struct Identity {
+    origins: Vec<OriginKey>,
+    chain: Vec<CertificateDer<'static>>,
+    key: PrivatePkcs8KeyDer<'static>,
+}
+
+impl Identity {
+    /// A client certificate offered to these origins, each a scheme, host
+    /// and port, with its chain in DER (the client's own first) and its
+    /// PKCS#8 DER key. Refused, saying why, when the engine could not
+    /// present it (see `identity_problem`).
+    pub fn new(
+        origins: impl IntoIterator<Item = (String, String, u16)>,
+        chain: Vec<Vec<u8>>,
+        key: Vec<u8>,
+    ) -> Result<Self, String> {
+        if let Some(problem) = identity_problem(&chain, &key) {
+            return Err(problem);
+        }
+        let origins: Vec<OriginKey> = origins.into_iter().map(|(s, h, p)| origin_key(&s, &h, p)).collect();
+        let chain = chain.into_iter().map(CertificateDer::from).collect();
+        Ok(Self { origins, chain, key: PrivatePkcs8KeyDer::from(key) })
+    }
+}
+
+// By hand, so the key never reaches a log: only the origins and how many
+// certificates the chain holds show.
+impl fmt::Debug for Identity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Identity")
+            .field("origins", &self.origins)
+            .field("chain", &self.chain.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Why the engine could not present this chain (DER, the client's own
+/// first) with this PKCS#8 DER key, or `None` when it can: there is no
+/// certificate, the key is not one it signs with (RSA of at least 2048
+/// bits, P-256 or P-384 carrying its public key, Ed25519), or it is not the
+/// key the first certificate names.
+pub fn identity_problem(chain: &[Vec<u8>], key: &[u8]) -> Option<String> {
+    if chain.is_empty() {
+        return Some("no certificate came with the key".into());
+    }
+    let chain = chain.iter().map(|der| CertificateDer::from(der.clone())).collect();
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.to_vec()));
+    let provider = rustls::crypto::ring::default_provider();
+    CertifiedKey::from_der(chain, key, &provider).err().map(|e| e.to_string())
 }
 
 // Lowercase hex with everything else dropped, as the app keeps it: exactly
@@ -142,41 +234,92 @@ impl ServerCertVerifier for PinnedVerifier {
     }
 }
 
-/// Puts TLS on HTTPS connections, checked as above.
+/// Puts TLS on HTTPS connections, checked as above, offering the client
+/// certificate to its own origins only.
 pub struct PinnedTls {
     trust: Arc<Trust>,
-    // The settings made for the trust's generation, reused until it changes.
-    config: Mutex<Option<(u64, Arc<ClientConfig>)>>,
+    // The settings made for the trust's generation, one set for each way of
+    // naming servers, reused until the generation moves.
+    sets: Mutex<Vec<Arc<Made>>>,
+}
+
+// The TLS settings made for one generation of the trust and one way of
+// naming servers: one offering no client certificate, and one offering the
+// identity there was then, kept with the origins it is for. A connection
+// picks from the set its origins came from, so it never offers one
+// identity on the strength of another's origins.
+struct Made {
+    generation: u64,
+    sni: bool,
+    plain: Arc<ClientConfig>,
+    identified: Option<(Vec<OriginKey>, Arc<ClientConfig>)>,
+}
+
+impl Made {
+    // The settings for a connection to `origin`.
+    fn for_origin(&self, origin: &OriginKey) -> &Arc<ClientConfig> {
+        match &self.identified {
+            Some((origins, config)) if origins.contains(origin) => config,
+            _ => &self.plain,
+        }
+    }
 }
 
 impl PinnedTls {
     pub fn new(trust: Arc<Trust>) -> Self {
-        Self { trust, config: Mutex::new(None) }
+        Self { trust, sets: Mutex::new(Vec::new()) }
     }
 
-    // Made again after the pins change, which also forgets sessions a
-    // removed pin let in, so they cannot be picked up again.
-    fn config(&self, sni: bool) -> Result<Arc<ClientConfig>, rustls::Error> {
+    // Made again after the pins or the identity change, which also forgets
+    // the sessions made before, so none can be picked up again. The
+    // generation is read before the identity, so a set kept for a
+    // generation never holds an identity older than it.
+    fn made(&self, sni: bool) -> Result<Arc<Made>, rustls::Error> {
         let generation = self.trust.generation();
-        let mut cached = self.config.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((made_for, config)) = cached.as_ref()
-            && *made_for == generation
-        {
-            return Ok(config.clone());
+        let mut sets = self.sets.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = sets.iter().find(|set| set.generation == generation && set.sni == sni) {
+            return Ok(found.clone());
         }
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let system = Arc::new(rustls_platform_verifier::Verifier::new(provider.clone())?);
         let verifier = Arc::new(PinnedVerifier { system, trust: self.trust.clone() });
-        let mut config = ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
-            .dangerous()
-            .with_custom_certificate_verifier(verifier)
-            .with_no_client_auth();
-        config.enable_sni = sni;
-        let config = Arc::new(config);
-        *cached = Some((generation, config.clone()));
-        Ok(config)
+        let plain = settings(&provider, &verifier, None, sni)?;
+        let identified = match self.trust.identity() {
+            Some(identity) => {
+                let config = settings(&provider, &verifier, Some(&identity), sni)?;
+                Some((identity.origins.clone(), config))
+            }
+            None => None,
+        };
+        let made = Arc::new(Made { generation, sni, plain, identified });
+        sets.retain(|set| set.generation == generation);
+        sets.push(made.clone());
+        Ok(made)
     }
+}
+
+// TLS settings checked as above, offering `identity` when there is one.
+// Each is made on its own, with sessions of its own, so a session made
+// without the identity is never resumed with it, or the other way round.
+fn settings(
+    provider: &Arc<CryptoProvider>,
+    verifier: &Arc<PinnedVerifier>,
+    identity: Option<&Identity>,
+    sni: bool,
+) -> Result<Arc<ClientConfig>, rustls::Error> {
+    let builder = ClientConfig::builder_with_provider(provider.clone())
+        .with_safe_default_protocol_versions()?
+        .dangerous()
+        .with_custom_certificate_verifier(verifier.clone());
+    let mut config = match identity {
+        Some(identity) => {
+            let key = PrivateKeyDer::Pkcs8(identity.key.clone_key());
+            builder.with_client_auth_cert(identity.chain.clone(), key)?
+        }
+        None => builder.with_no_client_auth(),
+    };
+    config.enable_sni = sni;
+    Ok(Arc::new(config))
 }
 
 impl fmt::Debug for PinnedTls {
@@ -199,7 +342,10 @@ impl<In: Transport> Connector<In> for PinnedTls {
         if !details.needs_tls() || transport.is_tls() {
             return Ok(Some(Either::A(transport)));
         }
-        let config = self.config(details.config.tls_config().use_sni())?;
+        let made = self.made(details.config.tls_config().use_sni())?;
+        // The identity goes only to one of its own origins; every other
+        // server is offered none.
+        let config = made.for_origin(&tls_origin(details.uri)).clone();
         let host = details.uri.host().unwrap_or_default();
         let bare = host.trim_start_matches('[').trim_end_matches(']');
         let name =
@@ -210,7 +356,9 @@ impl<In: Transport> Connector<In> for PinnedTls {
         conn.complete_io(&mut sock)?;
         let buffers =
             LazyBuffers::new(details.config.input_buffer_size(), details.config.output_buffer_size());
-        Ok(Some(Either::B(TlsTransport { buffers, stream: StreamOwned { conn, sock } })))
+        let stream = StreamOwned { conn, sock };
+        let tls = TlsTransport { buffers, stream, generation: made.generation, trust: self.trust.clone() };
+        Ok(Some(Either::B(tls)))
     }
 }
 
@@ -218,6 +366,11 @@ impl<In: Transport> Connector<In> for PinnedTls {
 pub struct TlsTransport {
     buffers: LazyBuffers,
     stream: StreamOwned<ClientConnection, TransportAdapter>,
+    // The trust's generation it was made in. Once that moves (a pin or the
+    // client certificate changed), it counts as closed, so it is never used
+    // for another request.
+    generation: u64,
+    trust: Arc<Trust>,
 }
 
 impl Transport for TlsTransport {
@@ -241,7 +394,7 @@ impl Transport for TlsTransport {
     }
 
     fn is_open(&mut self) -> bool {
-        self.stream.get_mut().get_mut().is_open()
+        self.trust.generation() == self.generation && self.stream.get_mut().get_mut().is_open()
     }
 
     fn is_tls(&self) -> bool {
