@@ -57,6 +57,9 @@ kotlin {
             implementation(libs.junit)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.mockwebserver)
+            // Certificates made in a test: a renewal with the same key, an
+            // authority of the test's own.
+            implementation(libs.okhttp.tls)
         }
     }
 }

@@ -729,11 +729,15 @@ struct EndKey: Hashable {
 }
 #endif
 
-/// Asks before trusting a certificate the phone does not.
+/// Asks before trusting a certificate the phone does not. `changed` asks about a host the person
+/// trusted another certificate for, met while in use.
 struct TrustSheet: View {
     let question: ServerTrust.Untrusted
+    var changed = false
     let trust: () -> Void
     let cancel: () -> Void
+
+    private var title: String { changed ? SignInWords.trustChangedTitle : SignInWords.trustTitle }
 
     /// Sized to its content when it fits, and scrolling when large text or a small screen would
     /// push the buttons off.
@@ -749,25 +753,25 @@ struct TrustSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Rectangle().fill(OctoShade(0.45)).ignoresSafeArea().onTapGesture(perform: cancel))
         .accessibilityAddTraits(.isModal)
-        .accessibilityLabel("Trust this certificate")
+        .accessibilityLabel(title)
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Trust this certificate?").font(.octoHeadline)
-            Text("This phone doesn't trust the certificate the server showed. If it's your own server's, check the fingerprint matches before you trust it. Octo will trust this one certificate, and only for this host.")
+            Text(title).font(.octoHeadline)
+            Text(changed ? SignInWords.trustChangedDetail : SignInWords.trustDetail("phone"))
                 .font(.octoBodySmall)
                 .foregroundStyle(OctoColor.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Host").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                Text(SignInWords.trustHost).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(question.host).font(.octoBodySmall)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text("SHA-256 fingerprint").font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                Text(SignInWords.trustFingerprint).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(question.fingerprint).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
             }
             HStack(spacing: 10) {
-                AccentButton("Trust this certificate", size: .medium, action: trust)
+                AccentButton(SignInWords.trustConfirm, size: .medium, action: trust)
                 GlazeButton("Cancel", size: .medium, action: cancel)
             }
         }

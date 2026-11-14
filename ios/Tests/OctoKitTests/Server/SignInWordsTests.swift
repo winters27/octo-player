@@ -80,6 +80,14 @@ import Testing
             "link.afterAddressChange": SignInWords.linkAfterAddressChange,
             "link.whileSignInOpen": SignInWords.linkWhileSignInOpen,
             "link.askWhileSignInOpen": SignInWords.askWhileSignInOpen("{name}"),
+            "trust.title": SignInWords.trustTitle,
+            "trust.changed.title": SignInWords.trustChangedTitle,
+            "trust.host": SignInWords.trustHost,
+            "trust.fingerprint": SignInWords.trustFingerprint,
+            "trust.confirm": SignInWords.trustConfirm,
+            "trust.refused": SignInWords.notTrusted,
+            "trust.detail": SignInWords.trustDetail("{device}"),
+            "trust.changed.detail": SignInWords.trustChangedDetail,
         ]
         for (mode, name) in modes {
             words["method.\(name)"] = SignInWords.methodLabel(mode)

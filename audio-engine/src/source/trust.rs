@@ -4,9 +4,11 @@
 //!
 //! Every certificate is first checked the system's way. Only when that
 //! fails is a pin looked at: the connection goes ahead when the host has a
-//! pin equal to the SHA-256 of the certificate the server showed. A pin
-//! never applies to any other host, and nothing else is ever let through.
-//! The same rule as the app's own HTTP client.
+//! pin for the certificate the server showed, either the SHA-256 of its
+//! public key (written `spki:` and the hex, which a renewal with the same
+//! key keeps) or, as pins were kept before, of the whole certificate. A
+//! pin never applies to any other host, and nothing else is ever let
+//! through. The same rule as the app's own HTTP client.
 //!
 //! A client certificate is offered only to the origins (scheme, host and
 //! port) set with it, and to no other server. A change to the pins or the
@@ -33,8 +35,8 @@ use ureq::unversioned::transport::{
 /// connection an engine makes.
 #[derive(Debug, Default)]
 pub struct Trust {
-    // SHA-256 fingerprints by host.
-    pins: RwLock<HashMap<String, Vec<[u8; 32]>>>,
+    // Pins by host.
+    pins: RwLock<HashMap<String, Vec<Pin>>>,
     // The client certificate and the origins it is offered to.
     identity: RwLock<Option<Arc<Identity>>>,
     // Moves on with every change, so TLS settings made before it are made
@@ -43,15 +45,16 @@ pub struct Trust {
 }
 
 impl Trust {
-    /// Replaces every pin with these, as (host, fingerprint) pairs. A host
-    /// is matched in any case; a fingerprint is hex, and anything in it
-    /// that is not hex (colons, spaces) is ignored.
+    /// Replaces every pin with these, as (host, pin) pairs. A host is
+    /// matched in any case; a pin is `spki:` and the hex SHA-256 of a
+    /// public key, or the hex SHA-256 of a whole certificate, and anything
+    /// in the hex that is not hex (colons, spaces) is ignored.
     pub fn replace(&self, pins: impl IntoIterator<Item = (String, String)>) {
-        let mut by_host: HashMap<String, Vec<[u8; 32]>> = HashMap::new();
-        for (host, fingerprint) in pins {
-            match parse_fingerprint(&fingerprint) {
-                Some(digest) => by_host.entry(host_key(&host)).or_default().push(digest),
-                None => log::warn!("ignoring a trusted certificate for {host}: not a SHA-256 fingerprint"),
+        let mut by_host: HashMap<String, Vec<Pin>> = HashMap::new();
+        for (host, pin) in pins {
+            match parse_pin(&pin) {
+                Some(pin) => by_host.entry(host_key(&host)).or_default().push(pin),
+                None => log::warn!("ignoring a trusted certificate for {host}: not a SHA-256 pin"),
             }
         }
         *self.pins.write().unwrap_or_else(|e| e.into_inner()) = by_host;
@@ -64,8 +67,12 @@ impl Trust {
         let Some(pinned) = pins.get(&host_key(host)) else {
             return false;
         };
-        let digest = ring::digest::digest(&ring::digest::SHA256, certificate);
-        pinned.iter().any(|pin| pin[..] == *digest.as_ref())
+        let whole = ring::digest::digest(&ring::digest::SHA256, certificate);
+        let key = spki_of(certificate).map(|spki| ring::digest::digest(&ring::digest::SHA256, spki));
+        pinned.iter().any(|pin| match pin {
+            Pin::Certificate(digest) => digest[..] == *whole.as_ref(),
+            Pin::Key(digest) => key.as_ref().is_some_and(|key| digest[..] == *key.as_ref()),
+        })
     }
 
     /// Offers this client certificate to its own origins from the next
@@ -161,6 +168,64 @@ pub fn identity_problem(chain: &[Vec<u8>], key: &[u8]) -> Option<String> {
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.to_vec()));
     let provider = rustls::crypto::ring::default_provider();
     CertifiedKey::from_der(chain, key, &provider).err().map(|e| e.to_string())
+}
+
+// What a pin stands for: the SHA-256 of a certificate's public key (its
+// SubjectPublicKeyInfo), or of the whole certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pin {
+    Key([u8; 32]),
+    Certificate([u8; 32]),
+}
+
+// The mark a key pin starts with, as the app keeps it.
+const KEY_PIN_MARK: &str = "spki:";
+
+// A pin as the app keeps it: the mark and a key's hex, or a certificate's
+// hex alone.
+fn parse_pin(text: &str) -> Option<Pin> {
+    let text = text.trim();
+    match text.get(..KEY_PIN_MARK.len()) {
+        Some(mark) if mark.eq_ignore_ascii_case(KEY_PIN_MARK) => parse_fingerprint(&text[KEY_PIN_MARK.len()..]).map(Pin::Key),
+        _ => parse_fingerprint(text).map(Pin::Certificate),
+    }
+}
+
+// One DER element at the start of `input`: its tag, the element whole, its
+// contents, and what follows it. None when it runs past the input.
+fn der_next(input: &[u8]) -> Option<(u8, &[u8], &[u8], &[u8])> {
+    let tag = *input.first()?;
+    let first = *input.get(1)? as usize;
+    let (length, header) = if first < 0x80 {
+        (first, 2)
+    } else {
+        let count = first & 0x7f;
+        if count == 0 || count > 4 {
+            return None;
+        }
+        let bytes = input.get(2..2 + count)?;
+        (bytes.iter().fold(0usize, |n, b| n << 8 | *b as usize), 2 + count)
+    };
+    let end = header.checked_add(length)?;
+    let whole = input.get(..end)?;
+    Some((tag, whole, &whole[header..], &input[end..]))
+}
+
+// The SubjectPublicKeyInfo of a DER certificate, whole: Certificate is a
+// SEQUENCE whose first element, tbsCertificate, holds an optional [0]
+// version, then serialNumber, signature, issuer, validity, subject, and
+// subjectPublicKeyInfo.
+fn spki_of(certificate: &[u8]) -> Option<&[u8]> {
+    let (_, _, certificate, _) = der_next(certificate)?;
+    let (_, _, mut tbs, _) = der_next(certificate)?;
+    if tbs.first() == Some(&0xa0) {
+        tbs = der_next(tbs)?.3;
+    }
+    for _ in 0..5 {
+        tbs = der_next(tbs)?.3;
+    }
+    let (tag, spki, _, _) = der_next(tbs)?;
+    (tag == 0x30).then_some(spki)
 }
 
 // Lowercase hex with everything else dropped, as the app keeps it: exactly
@@ -429,6 +494,64 @@ mod tests {
         assert_eq!(parse_fingerprint(&DIGEST[2..]), None, "too short");
         assert_eq!(parse_fingerprint(&format!("{DIGEST}00")), None, "too long");
         assert_eq!(parse_fingerprint(""), None);
+    }
+
+    use rcgen::PublicKeyData;
+
+    // A self-made certificate for this name with this key, numbered so two
+    // with the same key differ.
+    fn made(key: &rcgen::KeyPair, serial: u64) -> Vec<u8> {
+        let mut params = rcgen::CertificateParams::new(vec!["music.example.com".to_string()]).unwrap();
+        params.serial_number = Some(rcgen::SerialNumber::from_slice(&serial.to_be_bytes()));
+        params.self_signed(key).unwrap().der().to_vec()
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn a_key_pin_is_read_with_its_mark_and_a_plain_one_as_a_certificate_pin() {
+        let plain = parse_fingerprint(DIGEST).unwrap();
+        assert_eq!(parse_pin(&format!("spki:{DIGEST}")), Some(Pin::Key(plain)));
+        assert_eq!(parse_pin(&format!(" SPKI:{} ", DIGEST.to_uppercase())), Some(Pin::Key(plain)));
+        assert_eq!(parse_pin(DIGEST), Some(Pin::Certificate(plain)));
+        assert_eq!(parse_pin("spki:"), None);
+    }
+
+    // The key read out of a certificate is the key it was made with, in
+    // the SubjectPublicKeyInfo form the app's pin hashes.
+    #[test]
+    fn the_key_in_a_certificate_is_found() {
+        for alg in [&rcgen::PKCS_ECDSA_P256_SHA256, &rcgen::PKCS_ECDSA_P384_SHA384, &rcgen::PKCS_ED25519] {
+            let key = rcgen::KeyPair::generate_for(alg).unwrap();
+            assert_eq!(spki_of(&made(&key, 1)), Some(key.subject_public_key_info().as_slice()));
+        }
+        assert_eq!(spki_of(b"not a certificate"), None);
+        assert_eq!(spki_of(&[0x30, 0x82, 0xff]), None);
+    }
+
+    // A server that renews its certificate with the same key stays trusted
+    // by a key pin; a new key does not. A pin of the whole certificate, as
+    // kept before, still lets that one certificate through.
+    #[test]
+    fn a_key_pin_survives_a_renewal_with_the_same_key_and_an_old_pin_still_counts() {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let first = made(&key, 1);
+        let renewed = made(&key, 2);
+        let other = made(&rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap(), 3);
+        assert_ne!(first, renewed);
+        let key_pin = format!("spki:{}", hex(ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info()).as_ref()));
+        let trust = Trust::default();
+        trust.replace([("music.example.com".to_string(), key_pin)]);
+        assert!(trust.allows("music.example.com", &first));
+        assert!(trust.allows("music.example.com", &renewed));
+        assert!(!trust.allows("music.example.com", &other));
+        assert!(!trust.allows("other.example.com", &renewed));
+        let old_pin = hex(ring::digest::digest(&ring::digest::SHA256, &first).as_ref());
+        trust.replace([("music.example.com".to_string(), old_pin)]);
+        assert!(trust.allows("music.example.com", &first));
+        assert!(!trust.allows("music.example.com", &renewed));
     }
 
     #[test]

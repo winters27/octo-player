@@ -12,10 +12,14 @@ import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.StoredConnection
 import app.winters.octo.connection.decodeConnection
 import app.winters.octo.connection.encodeConnection
+import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.letGo
 import app.winters.octo.connection.mask
 import app.winters.octo.connection.needsHttps
+import app.winters.octo.connection.normalizePin
 import app.winters.octo.connection.opened
+import app.winters.octo.connection.pin
+import app.winters.octo.connection.pinKey
 import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.connection.sealed
 import app.winters.octo.server.PasswordChange
@@ -50,6 +54,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -157,8 +162,11 @@ sealed interface SignInError {
     class Failed(val cause: SubsonicException) : SignInError
 
     // The server showed a certificate the phone does not trust. The user
-    // may choose to trust exactly this one, for this host only.
-    class Untrusted(val host: String, val fingerprint: String) : SignInError
+    // may choose to trust it, for this host only: its fingerprint is what
+    // they compare, and its pin (the key's) what is kept.
+    class Untrusted(val host: String, val fingerprint: String, val pin: String) : SignInError {
+        constructor(host: String, leaf: X509Certificate) : this(host, leaf.fingerprint(), leaf.pin())
+    }
 
     // Another kept server already has this address and username.
     class AlreadyKept(val name: String) : SignInError
@@ -625,6 +633,27 @@ class SessionRepository @Inject constructor(
         val updated = saved.copy(connection = encodeConnection(settings.sealed(vault::seal)))
         _servers.value = store.update { it.replacing(updated) }
         _state.value = SessionState.SignedIn(activate(session.client.primaryUrl, settings, creds, updated))
+    }
+
+    // Trusts the certificate a host of the server in use showed in place of
+    // the one trusted there before, for that host only, and keeps it with
+    // the server's connection. Only a host that had a pin is changed, so a
+    // question left over from another server changes nothing.
+    suspend fun trustChangedCertificate(host: String, pin: String) = changes.withLock {
+        val session = current ?: return@withLock
+        val pins = session.connection.pins.mapKeys { pinKey(it.key) }
+        if (pinKey(host) !in pins) return@withLock
+        val saved = _servers.value.find(session.id) ?: return@withLock
+        val settings = session.connection.copy(pins = pins + (pinKey(host) to normalizePin(pin)))
+        val updated = saved.copy(connection = encodeConnection(settings.sealed(vault::seal)))
+        _servers.value = store.update { it.replacing(updated) }
+        applySecurity(session.client.primaryUrl, settings)
+        _state.value = SessionState.SignedIn(
+            Session(
+                session.client, session.serverType, session.serverVersion, session.isOcto, session.adminReachable,
+                session.extensions, settings, session.id, session.label,
+            ),
+        )
     }
 
     // A kept server's connection for the edit form, the one in use when `id`

@@ -4,6 +4,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.subsonic.gateway.SignInPageAnswer
+import javax.net.ssl.SSLException
 
 // Which of the shared reasons a player error is, from Media3's error code
 // and, for an HTTP answer, its status. A song found online (`outside`) was
@@ -39,6 +40,10 @@ fun playFailureOf(error: PlaybackException, outside: Boolean = false): PlayFailu
 // (Media3 wraps what the HTTP client threw); anything else, its reason's.
 fun playFailureWords(error: PlaybackException, outside: Boolean = false): String =
     if (signInPageIn(error)) GatewayWords.PLAY_FAILURE else playFailureOf(error, outside).words
+
+// Whether the connection's TLS failed (a certificate turned down, say),
+// anywhere in this error's causes.
+fun tlsFailureIn(error: Throwable): Boolean = generateSequence(error) { it.cause }.take(16).any { it is SSLException }
 
 // Whether a sign-in page answered in place of the server, anywhere in this
 // error's causes.

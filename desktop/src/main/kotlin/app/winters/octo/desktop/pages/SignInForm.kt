@@ -24,6 +24,7 @@ import app.winters.octo.connection.LinkFormState
 import app.winters.octo.connection.LinkRefusal
 import app.winters.octo.connection.LinkTake
 import app.winters.octo.connection.ReceivedAction
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.addressChanged
 import app.winters.octo.connection.linkFacts
 import app.winters.octo.connection.receivedFacts
@@ -727,7 +728,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
 
     fun distrust() {
         question = null
-        result = false to "Not connected. The server's certificate wasn't trusted."
+        result = false to SignInWords.TRUST_REFUSED
     }
 }
 

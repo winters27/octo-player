@@ -7,7 +7,6 @@ import app.winters.octo.connection.LegacyRetry
 import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.ServerHeader
 import app.winters.octo.connection.SignInWords
-import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.gatewayAllowed
 import app.winters.octo.connection.isHeaderName
 import app.winters.octo.connection.isDistrusted
@@ -1345,7 +1344,7 @@ class Accounts(
         if (e !is SubsonicException.Unreachable || !failedOnTls(e)) return null
         for (url in urls.filterNotNull()) {
             val leaf = own.security.takeRejected(url.host) ?: continue
-            return CertificateQuestion(url.host, leaf.fingerprint())
+            return CertificateQuestion(url.host, leaf)
         }
         return null
     }

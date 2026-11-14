@@ -137,6 +137,24 @@ public enum SignInWords {
 
     public static func askWhileSignInOpen(_ name: String) -> String { "Sign in to \(name) when you're done here." }
 
+    /// The question about a server certificate the device does not trust: asked while signing in,
+    /// and again in use when a host Octo trusted a certificate for shows a different one.
+    public static let trustTitle = "Trust this certificate?"
+    public static let trustChangedTitle = "The server's certificate changed"
+    public static let trustHost = "Host"
+    public static let trustFingerprint = "SHA-256 fingerprint"
+    public static let trustConfirm = "Trust this certificate"
+
+    /// `device` is "phone" or "computer".
+    public static func trustDetail(_ device: String) -> String {
+        "This \(device) doesn't trust the certificate the server showed. If it's your own server's, check the fingerprint "
+            + "matches before you trust it. Octo trusts it for this host only, and keeps trusting it when it's renewed with the same key."
+    }
+
+    public static let trustChangedDetail =
+        "This host showed a different certificate from the one you trusted. Servers renew their certificates, so this is "
+            + "often expected, but check the fingerprint matches your server's before you trust it. Until then Octo can't reach the server."
+
     /// The words for any error a sign-in can end with.
     public static func describe(_ error: Error) -> String {
         if let octo = error as? OctoError {

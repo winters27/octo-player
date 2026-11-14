@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.animation.AnimatedVisibility
+import app.winters.octo.design.PopupHost
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -84,6 +85,7 @@ import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.family.clipboardText
 import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.ServerSecurity
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SwitchOutcome
 import app.winters.octo.desktop.server.TestOutcome
@@ -237,7 +239,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 onTrust = {
                     form.question = null
                     close()
-                    app.accounts.security.trust(asked.host, asked.fingerprint)
+                    app.accounts.security.trust(asked.host, asked.pin)
                     again?.invoke()
                 },
                 onCancel = close,
@@ -710,30 +712,51 @@ internal fun SchemeToggle(prefix: String, onClick: () -> Unit, enabled: Boolean 
 // listener can compare it with the server's own. Nothing is trusted unless
 // they say so.
 @Composable
-internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, onCancel: () -> Unit) {
-    MenuTitle("Trust this certificate?")
+internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, onCancel: () -> Unit, changed: Boolean = false) {
+    MenuTitle(if (changed) SignInWords.TRUST_CHANGED_TITLE else SignInWords.TRUST_TITLE)
     PopupPadding {
         Txt(
-            "This computer doesn't trust the certificate the server showed. If it's your own server's, " +
-                "check the fingerprint matches before you trust it. Octo will trust this one " +
-                "certificate, and only for this host.",
+            if (changed) SignInWords.TRUST_CHANGED_DETAIL else SignInWords.trustDetail("computer"),
             OctoType.bodySmall,
             OctoColors.TextSecondary,
             maxLines = 6,
         )
         Column {
-            Txt("Host", OctoType.caption, OctoColors.TextMuted)
+            Txt(SignInWords.TRUST_HOST, OctoType.caption, OctoColors.TextMuted)
             Txt(question.host, OctoType.bodySmall)
         }
         Column {
-            Txt("SHA-256 fingerprint", OctoType.caption, OctoColors.TextMuted)
+            Txt(SignInWords.TRUST_FINGERPRINT, OctoType.caption, OctoColors.TextMuted)
             // Two lines of sixteen pairs, so no pair is split.
             val pairs = formatFingerprint(question.fingerprint).split(':')
             Txt(pairs.chunked(16).joinToString("\n") { it.joinToString(":") }, OctoType.caption.copy(fontFamily = FontFamily.Monospace), maxLines = 3)
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
             GlazeCapsule(null, "Cancel", onCancel)
-            GlazeCapsule(null, "Trust this certificate", onTrust, lit = true)
+            GlazeCapsule(null, SignInWords.TRUST_CONFIRM, onTrust, lit = true)
         }
+    }
+}
+
+// A host of the server in use showing another certificate than the one
+// the listener trusted there, asked about again in the middle of the
+// window. Trusting it keeps its pin, so the next request (and the audio
+// engine's next connection) goes through. Closing it any way but trusting
+// counts as no, and that certificate is not asked about again.
+fun askAboutChangedCertificate(popups: PopupHost, security: ServerSecurity, question: CertificateQuestion) {
+    popups.showCentred(width = 420.dp, scrim = true) { close ->
+        val trusted = remember { booleanArrayOf(false) }
+        DisposableEffect(Unit) { onDispose { if (!trusted[0]) security.answered(question, trusted = false) } }
+        TrustQuestion(
+            question,
+            onTrust = {
+                trusted[0] = true
+                security.trust(question.host, question.pin)
+                security.answered(question, trusted = true)
+                close()
+            },
+            onCancel = close,
+            changed = true,
+        )
     }
 }

@@ -199,7 +199,20 @@ struct MainShell: View {
 
             // Over the bar and even the player.
             SelectionBarHost().zIndex(1.5)
+
+            // A host of the server in use showing another certificate than the one trusted
+            // there, asked about again over everything.
+            if let changed = session.certificateChange {
+                TrustSheet(question: changed, changed: true) {
+                    session.answerCertificateChange(trusted: true)
+                } cancel: {
+                    session.answerCertificateChange(trusted: false)
+                }
+                .transition(.opacity)
+                .zIndex(2)
+            }
         }
+        .animation(.easeOut(duration: 0.2), value: session.certificateChange)
         .background(ToastWindowProbe(router: router))
         .environment(\.nowPlayingArt, art)
         .environment(drift)

@@ -6,9 +6,10 @@ import app.winters.octo.connection.PinningTrustManager
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.isConnectionError
-import app.winters.octo.connection.normalizeFingerprint
+import app.winters.octo.connection.isPinnedHost
+import app.winters.octo.connection.normalizePin
+import app.winters.octo.connection.pin
 import app.winters.octo.connection.pinKey
-import app.winters.octo.connection.platformTrustManager
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.subsonic.DeviceIdentity
 import app.winters.octo.subsonic.HeaderScope
@@ -38,6 +39,8 @@ import java.security.cert.Certificate
 import java.security.cert.X509Certificate
 import java.util.Collections
 import java.util.WeakHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLContext
@@ -46,10 +49,14 @@ import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509ExtendedKeyManager
+import javax.net.ssl.X509TrustManager
 
 // A certificate the system does not trust, to ask the listener about: the
-// host that showed it and its SHA-256 fingerprint.
-data class CertificateQuestion(val host: String, val fingerprint: String)
+// host that showed it, its SHA-256 fingerprint (what they compare) and its
+// pin (its key's, what is kept when they trust it).
+data class CertificateQuestion(val host: String, val fingerprint: String, val pin: String) {
+    constructor(host: String, leaf: X509Certificate) : this(host, leaf.fingerprint(), leaf.pin())
+}
 
 // How a call that failed went wrong at the network's level, weakest first:
 // nothing, anything else, the connection cut off, the secure handshake.
@@ -186,6 +193,9 @@ internal class SwappingFactory(@Volatile var delegate: SSLSocketFactory, private
 // one of its own (forCheck).
 class ServerSecurity(
     private val settings: SettingsStore,
+    // The authorities trusted before any pin: the runtime's and the
+    // system's (systemTrust).
+    private val authorities: () -> X509TrustManager = { systemTrust },
     // This computer's id and name, told to the signed-in server only.
     device: () -> DeviceIdentity = { desktopDevice(settings) },
 ) {
@@ -215,12 +225,43 @@ class ServerSecurity(
     // address in use can be checked again.
     @Volatile var onConnectionError: (() -> Unit)? = null
 
+    // A host of the server in use the listener trusted a certificate for,
+    // showing another one: the question to ask again, one at a time. Only
+    // the shared security asks; a check's own (forCheck) keeps its
+    // rejected certificate for the sign-in form.
+    private val _certificateChange = MutableStateFlow<CertificateQuestion?>(null)
+    val certificateChange: StateFlow<CertificateQuestion?> = _certificateChange
+
+    // Pins of certificates the listener said no to, not asked about again
+    // until Octo starts again or the server is signed out of.
+    private val declined: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     // The trusted certificates, by host.
     val pins: () -> Map<String, String> = { settings.current.trustedCertificates }
-    private val remember: (String, X509Certificate) -> Unit = { host, leaf -> rejected[pinKey(host)] = leaf }
+    private val remember: (String, X509Certificate) -> Unit = { host, leaf ->
+        rejected[pinKey(host)] = leaf
+        if (isServerHost(host) && isPinnedHost(pins(), host)) {
+            val asked = CertificateQuestion(pinKey(host), leaf)
+            if (asked.pin !in declined) _certificateChange.compareAndSet(null, asked)
+        }
+    }
 
-    // Distrusted authorities are turned down before a pin is looked at.
-    private val trustManager by lazy { DistrustingTrustManager(PinningTrustManager(platformTrustManager(), pins, remember)) }
+    // Whether this is the main or home host of the server in use.
+    private fun isServerHost(host: String): Boolean {
+        val now = current ?: return false
+        return pinKey(host) == pinKey(now.main.host) || now.home?.let { pinKey(host) == pinKey(it.host) } == true
+    }
+
+    // The answer to a changed certificate: the question goes, and one said
+    // no to is not asked about again.
+    fun answered(question: CertificateQuestion, trusted: Boolean) {
+        if (!trusted) declined += question.pin
+        _certificateChange.compareAndSet(question, null)
+    }
+
+    // Distrusted authorities are turned down before a pin is looked at. The
+    // system's authorities come in with the runtime's.
+    private val trustManager by lazy { DistrustingTrustManager(PinningTrustManager(authorities(), pins, remember)) }
 
     // The sockets the factory made, with what the key manager did for each.
     private val marks: MutableMap<Socket, SocketMark> = Collections.synchronizedMap(WeakHashMap())
@@ -292,11 +333,15 @@ class ServerSecurity(
         current = null
         onConnectionError = null
         rejected.clear()
+        declined.clear()
+        _certificateChange.value = null
     }
 
-    // Trusts this certificate for this host only, from now on.
-    fun trust(host: String, fingerprint: String) {
-        settings.update { it.copy(trustedCertificates = it.trustedCertificates + (pinKey(host) to normalizeFingerprint(fingerprint))) }
+    // Trusts the certificate with this pin (CertificateQuestion.pin, or a
+    // whole certificate's fingerprint as older pins were) for this host
+    // only, from now on.
+    fun trust(host: String, pin: String) {
+        settings.update { it.copy(trustedCertificates = it.trustedCertificates + (pinKey(host) to normalizePin(pin))) }
     }
 
     // The certificate a host last showed that was not trusted, taken once.
@@ -323,7 +368,7 @@ class ServerSecurity(
     // A security of its own for checking a server: this computer's id and
     // name and the trusted certificates, nothing configured yet, and no
     // cookies.
-    fun forCheck(): ServerSecurity = ServerSecurity(settings) { device }
+    fun forCheck(): ServerSecurity = ServerSecurity(settings, authorities) { device }
 
     // For a client that keeps files from the server (covers): a sign-in page
     // answering in the server's place is refused rather than kept.

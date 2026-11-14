@@ -23,6 +23,9 @@ final class Session {
     var quality: StreamQuality {
         didSet { Self.store(quality) }
     }
+    /// A host of the server in use showing another certificate than the one trusted there,
+    /// waiting for the person's answer (`MainShell` asks); one at a time.
+    private(set) var certificateChange: ServerTrust.Untrusted?
 
     /// Runs before the server in use changes to another (its id) or none, while the old one is
     /// still the one in use: what plays stops and counts for it, and its queue is put away.
@@ -89,6 +92,12 @@ final class Session {
         network.start(queue: DispatchQueue(label: "app.winters.octo.network"))
         trust.onConnectionFailure { [weak self] in
             Task { @MainActor in self?.callFailedToConnect() }
+        }
+        trust.onCertificateChange { [weak self] question in
+            Task { @MainActor in
+                guard let self, self.client != nil, self.certificateChange == nil else { return }
+                self.certificateChange = question
+            }
         }
         restore()
     }
@@ -637,6 +646,15 @@ final class Session {
         let target = place == .home ? home : server.address
         if target != now.baseURL { self.client = now.at(target) }
         atHome = place == .home
+    }
+
+    /// The answer to a changed certificate: trusted, its pin is kept for its host and the next
+    /// call goes through; said no to, it is not asked about again and the server stays out of
+    /// reach until it is signed in to again.
+    func answerCertificateChange(trusted: Bool) {
+        guard let question = certificateChange else { return }
+        trust.answerChange(question, trusted: trusted)
+        certificateChange = nil
     }
 
     /// After a call to the server could not connect: looks at the home address again, at most

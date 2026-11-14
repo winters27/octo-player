@@ -3,18 +3,24 @@ import Foundation
 import OctoKit
 import Security
 
-/// Decides whom the app trusts. The system's own trust comes first; after that, a certificate
-/// the person accepted for that host, kept by its SHA-256 fingerprint. A pinned certificate also
+/// Decides whom the app trusts. The system's own trust comes first (a private authority's root
+/// the person installed and turned on in Certificate Trust Settings counts); after that, a
+/// certificate the person accepted for that host, kept by its key's pin (`CertificatePins`), so a
+/// renewal with the same key still counts. When a host of the server in use shows another
+/// certificate than the one accepted there, the question is asked again (`onCertificateChange`)
+/// rather than every call failing. A pinned certificate also
 /// stands in for the host name, since a self-made certificate rarely names the address a phone
 /// uses. When the server in use asks the phone to prove itself, its client certificate answers,
 /// and only at the server's own hosts. Its headers never follow a redirect to another address,
 /// and a call to it that could not connect is reported, so the address in use can be looked at
 /// again.
 final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    /// A certificate the system does not trust, waiting for the person's answer.
+    /// A certificate the system does not trust, waiting for the person's answer: the fingerprint
+    /// they compare, and the pin kept when they trust it.
     struct Untrusted: Error, Equatable {
         let host: String
         let fingerprint: String
+        let pin: String
     }
 
     /// A client certificate as the system uses it: the identity and the chain sent with it.
@@ -32,6 +38,10 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private var scope = ServerScope()
     private var client: ClientIdentity?
     private var connectionFailed: (@Sendable () -> Void)?
+    private var certificateChanged: (@Sendable (Untrusted) -> Void)?
+    /// Pins of changed certificates the person said no to, not asked about again until the app
+    /// starts again or the server in use changes.
+    private var declined: Set<String> = []
 
     private static let pinsKey = "trust.pins"
 
@@ -70,9 +80,25 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
 
     func trust(_ question: Untrusted) {
         lock.withLock {
-            pins[question.host.lowercased()] = question.fingerprint
+            pins[question.host.lowercased()] = question.pin
             rejected[question.host.lowercased()] = nil
             UserDefaults.standard.set(pins, forKey: Self.pinsKey)
+        }
+    }
+
+    /// Runs `report` when a host of the server in use shows another certificate than the one the
+    /// person trusted there, unless they said no to that one already.
+    func onCertificateChange(_ report: @escaping @Sendable (Untrusted) -> Void) {
+        lock.withLock { certificateChanged = report }
+    }
+
+    /// The answer to a changed certificate: trusted, it is kept; said no to, it is not asked
+    /// about again.
+    func answerChange(_ question: Untrusted, trusted: Bool) {
+        if trusted {
+            trust(question)
+        } else {
+            _ = lock.withLock { declined.insert(question.pin) }
         }
     }
 
@@ -99,7 +125,10 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     /// gateway addresses.
     func useServer(main: URL?, home: URL?) {
         let next = main.map { ServerScope(main: $0, home: home) } ?? ServerScope()
-        lock.withLock { scope = next }
+        lock.withLock {
+            scope = next
+            declined = []
+        }
     }
 
     /// The certificate the phone shows the server in use when it asks for one, from a PKCS #12
@@ -146,10 +175,11 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         noteEnd(of: task.originalRequest, error)
     }
 
-    /// The one decision, shared with the audio loader.
+    /// The one decision, shared with the audio loader. These calls go to the server in use, so a
+    /// changed certificate on one of its hosts is asked about again.
     func answer(_ challenge: URLAuthenticationChallenge) -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let (now, identity) = lock.withLock { (self.scope, self.client) }
-        return answer(challenge, scope: now, client: identity)
+        return answer(challenge, scope: now, client: identity, inUse: true)
     }
 
     /// A redirect of a call through the shared trust: the server's own headers stay only while it
@@ -172,9 +202,10 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         return out
     }
 
-    /// Answers a challenge for a server with these addresses and this client certificate.
+    /// Answers a challenge for a server with these addresses and this client certificate. `inUse`
+    /// says the call goes to the server in use, rather than one a check looks at.
     fileprivate func answer(_ challenge: URLAuthenticationChallenge, scope: ServerScope,
-                            client: ClientIdentity?) -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+                            client: ClientIdentity?, inUse: Bool = false) -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         let space = challenge.protectionSpace
         switch space.authenticationMethod {
         case NSURLAuthenticationMethodServerTrust:
@@ -185,13 +216,19 @@ final class ServerTrust: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             guard let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else {
                 return (.cancelAuthenticationChallenge, nil)
             }
-            let fingerprint = Self.fingerprint(of: leaf)
+            let der = [UInt8](SecCertificateCopyData(leaf) as Data)
             let host = space.host.lowercased()
             let pinned = lock.withLock { pins[host] }
-            if pinned == fingerprint {
+            if let pinned, CertificatePins.matches(pinned, certificate: der) {
                 return (.useCredential, URLCredential(trust: trust))
             }
-            lock.withLock { rejected[host] = Untrusted(host: host, fingerprint: fingerprint) }
+            let question = Untrusted(host: host, fingerprint: Self.fingerprint(of: leaf), pin: CertificatePins.pin(ofCertificate: der))
+            let report: (@Sendable (Untrusted) -> Void)? = lock.withLock {
+                rejected[host] = question
+                let changed = inUse && pinned != nil && scope.isOwnHost(host) && !declined.contains(question.pin)
+                return changed ? certificateChanged : nil
+            }
+            report?(question)
             return (.cancelAuthenticationChallenge, nil)
         case NSURLAuthenticationMethodClientCertificate:
             // Shown only to the server's own hosts, never to any other.

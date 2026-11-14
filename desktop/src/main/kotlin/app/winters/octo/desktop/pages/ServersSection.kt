@@ -495,7 +495,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 asked,
                 onTrust = {
                     form.question = null
-                    app.accounts.security.trust(asked.host, asked.fingerprint)
+                    app.accounts.security.trust(asked.host, asked.pin)
                     again?.invoke()
                 },
                 onCancel = form::distrust,

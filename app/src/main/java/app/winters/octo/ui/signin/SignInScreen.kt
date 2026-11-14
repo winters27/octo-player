@@ -267,7 +267,7 @@ fun SignInScreen(
     // While the camera is open, Back and Escape close it (the handler
     // composed last wins).
     BackHandler(enabled = vm.scanning) { closeScanner() }
-    TrustSheet(vm.question, onTrust = vm::trust, onCancel = vm::distrust)
+    TrustSheet(vm.question?.let { TrustAsk(it.host, it.fingerprint) }, onTrust = vm::trust, onCancel = vm::distrust)
 }
 
 // The sign-in page: Octo's octopus in a soft glow over its name, then the
@@ -999,19 +999,24 @@ private fun ClientCertificate(vm: SignInViewModel) {
 private fun dateWords(date: Date): String =
     DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(date.toInstant().atZone(ZoneId.systemDefault()))
 
+// A certificate to ask about: the host that showed it and its fingerprint.
+internal data class TrustAsk(val host: String, val fingerprint: String)
+
 // Asks before trusting a certificate the phone does not. It shows the
 // host and the certificate's fingerprint, so the user can compare it with
 // the server's own. Nothing is trusted unless they say so. It floats in
 // the middle of the screen, above the bar. A tap outside its card leaves
-// the question waiting; Back and its own buttons answer it.
+// the question waiting; Back and its own buttons answer it. `changed` asks
+// about a host the user trusted another certificate for, met while in use.
 @Composable
-private fun TrustSheet(question: SignInError.Untrusted?, onTrust: () -> Unit, onCancel: () -> Unit) {
+internal fun TrustSheet(question: TrustAsk?, onTrust: () -> Unit, onCancel: () -> Unit, changed: Boolean = false) {
+    val title = if (changed) SignInWords.TRUST_CHANGED_TITLE else SignInWords.TRUST_TITLE
     GlassPopup(
         visible = question != null,
         anchor = null,
         onDismiss = {},
         backdrop = LocalHaze.current,
-        title = "Trust this certificate",
+        title = title,
         maxWidth = 380.dp,
         onBack = {
             onCancel()
@@ -1020,19 +1025,17 @@ private fun TrustSheet(question: SignInError.Untrusted?, onTrust: () -> Unit, on
     ) {
         val shown = rememberLast(question) ?: return@GlassPopup
         PopupQuestion(
-            "Trust this certificate?",
-            "This phone doesn't trust the certificate the server showed. If it's your own server's, " +
-                "check the fingerprint matches before you trust it. Octo will trust this one " +
-                "certificate, and only for this host.",
-            "Trust this certificate",
+            title,
+            if (changed) SignInWords.TRUST_CHANGED_DETAIL else SignInWords.trustDetail("phone"),
+            SignInWords.TRUST_CONFIRM,
             onConfirm = onTrust,
             onCancel = onCancel,
             modifier = Modifier.verticalScroll(rememberScrollState()),
             width = 380.dp,
         ) {
-            Text("Host", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 16.dp))
+            Text(SignInWords.TRUST_HOST, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 16.dp))
             Text(shown.host, style = OctoType.bodySmall, color = OctoColors.TextPrimary)
-            Text("SHA-256 fingerprint", style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 12.dp))
+            Text(SignInWords.TRUST_FINGERPRINT, style = OctoType.caption, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 12.dp))
             Text(
                 formatFingerprint(shown.fingerprint),
                 style = OctoType.caption.copy(fontFamily = FontFamily.Monospace),

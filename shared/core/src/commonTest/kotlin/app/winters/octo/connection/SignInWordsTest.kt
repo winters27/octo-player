@@ -93,6 +93,14 @@ class SignInWordsTest {
         put("link.afterAddressChange", SignInWords.LINK_AFTER_ADDRESS_CHANGE)
         put("link.whileSignInOpen", SignInWords.LINK_WHILE_SIGN_IN_OPEN)
         put("link.askWhileSignInOpen", SignInWords.askWhileSignInOpen("{name}"))
+        put("trust.title", SignInWords.TRUST_TITLE)
+        put("trust.changed.title", SignInWords.TRUST_CHANGED_TITLE)
+        put("trust.host", SignInWords.TRUST_HOST)
+        put("trust.fingerprint", SignInWords.TRUST_FINGERPRINT)
+        put("trust.confirm", SignInWords.TRUST_CONFIRM)
+        put("trust.refused", SignInWords.TRUST_REFUSED)
+        put("trust.detail", SignInWords.trustDetail("{device}"))
+        put("trust.changed.detail", SignInWords.TRUST_CHANGED_DETAIL)
         Gateway.entries.forEach { gateway ->
             for (sent in listOf(false, true)) {
                 put("inGroup.${gateway.name}.$sent", GatewayWords.inGroup(GatewayWords.failure(gateway, sent)))

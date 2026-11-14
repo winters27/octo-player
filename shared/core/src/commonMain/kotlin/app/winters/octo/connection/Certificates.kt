@@ -30,10 +30,45 @@ fun normalizeFingerprint(text: String): String = text.lowercase().filter { it in
 // Pins are kept by host alone, in lowercase.
 fun pinKey(host: String): String = host.lowercase()
 
+// A pin is kept as this mark and the SHA-256 of the certificate's public
+// key (its SubjectPublicKeyInfo), so a renewed certificate with the same
+// key still counts. A pin without the mark is the SHA-256 of a whole
+// certificate, as pins were kept before; those count for exactly that
+// certificate, as they always did.
+const val KEY_PIN_MARK = "spki:"
+
+// The pin a certificate the user trusts is kept as.
+fun X509Certificate.pin(): String = KEY_PIN_MARK + keyFingerprint()
+
+// A pin as it is kept: a key pin keeps its mark, and the hex after it (or
+// a whole-certificate pin's hex) loses any marks and spaces, like a
+// fingerprint.
+fun normalizePin(text: String): String {
+    val trimmed = text.trim()
+    return if (trimmed.startsWith(KEY_PIN_MARK, ignoreCase = true)) {
+        KEY_PIN_MARK + normalizeFingerprint(trimmed.substring(KEY_PIN_MARK.length))
+    } else {
+        normalizeFingerprint(trimmed)
+    }
+}
+
+// Whether a kept pin stands for this certificate.
+fun pinMatches(pin: String, leaf: X509Certificate): Boolean {
+    val kept = normalizePin(pin)
+    return if (kept.startsWith(KEY_PIN_MARK)) kept == leaf.pin() else kept == leaf.fingerprint()
+}
+
 // Whether a certificate the system does not trust may be used anyway: only
-// when the user trusted exactly this certificate for exactly this host.
-fun pinAllows(pins: Map<String, String>, host: String?, fingerprint: String): Boolean =
-    host != null && pins[pinKey(host)] == normalizeFingerprint(fingerprint)
+// when the user trusted this certificate (or its key) for exactly this host.
+fun pinAllows(pins: Map<String, String>, host: String?, leaf: X509Certificate): Boolean {
+    val pin = host?.let { pins[pinKey(it)] } ?: return false
+    return pinMatches(pin, leaf)
+}
+
+// Whether the user trusted a certificate for this host before, so a
+// different one there is a changed certificate to ask about again rather
+// than a stranger.
+fun isPinnedHost(pins: Map<String, String>, host: String?): Boolean = host != null && pins.containsKey(pinKey(host))
 
 // The system's own trust, with the certificates the user chose to trust
 // added, each for its own host only. Every certificate is first checked
@@ -74,7 +109,7 @@ class PinningTrustManager(
             // A distrusted authority is never a question for the user.
             if (e is DistrustedCertificateException) throw e
             val leaf = chain.firstOrNull() ?: throw e
-            if (pinAllows(pins(), host, leaf.fingerprint())) return
+            if (pinAllows(pins(), host, leaf)) return
             if (host != null) onRejected(host, leaf)
             throw e
         }
@@ -104,15 +139,19 @@ class PinningHostnameVerifier(
 ) : HostnameVerifier {
     override fun verify(host: String, session: SSLSession): Boolean {
         val leaf = runCatching { session.peerCertificates.firstOrNull() as? X509Certificate }.getOrNull()
-        if (leaf != null && pinAllows(pins(), host, leaf.fingerprint())) return true
+        if (leaf != null && pinAllows(pins(), host, leaf)) return true
         return usual.verify(host, session).also { ok -> if (!ok && leaf != null) onRejected(host, leaf) }
     }
 }
 
 // The system's own trust: its certificates, and on the phone as the
 // network security config allows.
-fun platformTrustManager(): X509TrustManager {
+fun platformTrustManager(): X509TrustManager = trustManagerFor(null)
+
+// Trust in the authorities of this key store, or the system's own with
+// none.
+fun trustManagerFor(store: KeyStore?): X509TrustManager {
     val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-    factory.init(null as KeyStore?)
+    factory.init(store)
     return factory.trustManagers.filterIsInstance<X509TrustManager>().first()
 }

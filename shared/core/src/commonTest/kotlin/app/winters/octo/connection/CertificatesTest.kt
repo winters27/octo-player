@@ -5,7 +5,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.tls.HeldCertificate
 import org.junit.Test
+import java.io.File
 import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -48,12 +53,84 @@ class CertificatesTest {
 
     @Test
     fun aPinCountsOnlyForItsOwnHost() {
-        val pins = mapOf("music.test" to cert.fingerprint())
-        assertTrue(pinAllows(pins, "music.test", cert.fingerprint()))
-        assertTrue(pinAllows(pins, "MUSIC.test", formatFingerprint(cert.fingerprint())))
-        assertFalse(pinAllows(pins, "other.test", cert.fingerprint()))
-        assertFalse(pinAllows(pins, null, cert.fingerprint()))
-        assertFalse(pinAllows(pins, "music.test", "00".repeat(32)))
+        val pins = mapOf("music.test" to cert.pin())
+        assertTrue(pinAllows(pins, "music.test", cert))
+        assertTrue(pinAllows(pins, "MUSIC.test", cert))
+        assertFalse(pinAllows(pins, "other.test", cert))
+        assertFalse(pinAllows(pins, null, cert))
+        assertFalse(pinAllows(mapOf("music.test" to KEY_PIN_MARK + "00".repeat(32)), "music.test", cert))
+    }
+
+    // Pins kept before key pins, the SHA-256 of the whole certificate in
+    // either way it was written, still load and count, for that
+    // certificate only.
+    @Test
+    fun anOldWholeCertificatePinStillCounts() {
+        assertTrue(pinAllows(mapOf("music.test" to cert.fingerprint()), "music.test", cert))
+        assertTrue(pinAllows(mapOf("music.test" to formatFingerprint(cert.fingerprint())), "music.test", cert))
+        val renewed = HeldCertificate.Builder().commonName("music.test").build().certificate
+        assertFalse(pinAllows(mapOf("music.test" to cert.fingerprint()), "music.test", renewed))
+    }
+
+    // A server that renews its certificate with the same key (step-ca's
+    // renew does) stays trusted; a new key does not.
+    @Test
+    fun aKeyPinSurvivesARenewalWithTheSameKey() {
+        val first = HeldCertificate.Builder().commonName("music.test").ecdsa256().serialNumber(1).build()
+        val renewed = HeldCertificate.Builder().commonName("music.test").keyPair(first.keyPair).serialNumber(2).build()
+        val newKey = HeldCertificate.Builder().commonName("music.test").serialNumber(3).build()
+        val pins = mapOf("music.test" to first.certificate.pin())
+        assertTrue(first.certificate.fingerprint() != renewed.certificate.fingerprint())
+        assertTrue(pinAllows(pins, "music.test", renewed.certificate))
+        assertFalse(pinAllows(pins, "music.test", newKey.certificate))
+    }
+
+    // The same pins every app keeps, from fixtures/certificate-pins (made
+    // with openssl; the iPhone's tests read it too).
+    @Test
+    fun pinsMatchTheSharedFixture() {
+        val folder = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "fixtures/certificate-pins") }
+            .first { it.isDirectory }
+        val certificates = Json.parseToJsonElement(File(folder, "pins.json").readText()).jsonObject.getValue("certificates").jsonObject
+        val read = { name: String ->
+            File(folder, "$name.pem").inputStream().use { CertificateFactory.getInstance("X.509").generateCertificate(it) as X509Certificate }
+        }
+        for ((name, values) in certificates) {
+            val leaf = read(name)
+            assertEquals(name, values.jsonObject.getValue("fingerprint").jsonPrimitive.content, leaf.fingerprint())
+            assertEquals(name, values.jsonObject.getValue("pin").jsonPrimitive.content, leaf.pin())
+        }
+        assertTrue(pinAllows(mapOf("music.example.com" to read("first").pin()), "music.example.com", read("renewed")))
+        assertFalse(pinAllows(mapOf("music.example.com" to read("first").pin()), "music.example.com", read("new-key")))
+    }
+
+    @Test
+    fun aKeyPinKeepsItsMark() {
+        val hex = "ab".repeat(32)
+        assertEquals(KEY_PIN_MARK + hex, normalizePin(" SPKI:" + formatFingerprint(hex)))
+        assertEquals(hex, normalizePin(formatFingerprint(hex)))
+        assertTrue(cert.pin().startsWith(KEY_PIN_MARK))
+        assertEquals(cert.pin(), normalizePin(cert.pin()))
+    }
+
+    // A pinned host showing another certificate is turned down and told
+    // about, and reads as a changed certificate rather than a stranger.
+    @Test
+    fun aChangedCertificateOnAPinnedHostIsTurnedDownAndKnownAsAChange() {
+        val pins = mapOf("music.test" to cert.pin())
+        val changed = HeldCertificate.Builder().commonName("music.test").build().certificate
+        var told: Pair<String, X509Certificate>? = null
+        val manager = PinningTrustManager(distrustful, { pins }) { host, leaf -> told = host to leaf }
+        try {
+            manager.checkServerTrusted(arrayOf(changed), "EC", engineFor("music.test"))
+            fail("A changed certificate is never let through by the old pin")
+        } catch (_: CertificateException) {
+        }
+        assertEquals("music.test" to changed, told)
+        assertTrue(isPinnedHost(pins, "MUSIC.test"))
+        assertFalse(isPinnedHost(pins, "other.test"))
+        assertFalse(isPinnedHost(pins, null))
     }
 
     @Test

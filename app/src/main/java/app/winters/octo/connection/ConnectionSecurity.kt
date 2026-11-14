@@ -13,7 +13,9 @@ import app.winters.octo.subsonic.serverOrigins
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import okhttp3.ConnectionPool
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -43,6 +45,11 @@ import javax.net.ssl.X509TrustManager
 fun needsHttps(main: HttpUrl, headers: List<ServerHeader>): Boolean =
     headers.any { GatewayNames.isGatewayName(it.name) } && gatewayOrigins(main, null).isEmpty()
 
+// A certificate a host showed in use in place of the one the user trusted
+// there: the host, the fingerprint they compare, and the pin kept if they
+// trust it.
+data class CertificateChange(val host: String, val fingerprint: String, val pin: String)
+
 // A connection made for another client certificate than the one in use
 // now: dropped, and the call made again on a fresh one.
 class StaleClientIdentity : IOException("made for another client certificate")
@@ -63,6 +70,9 @@ class ConnectionSecurity internal constructor(
     built: (X509TrustManager) -> BuiltChain?,
     private val keys: (String) -> PrivateKey?,
     private val chains: (String) -> Array<X509Certificate>?,
+    // The authorities the server's connections trust: on the phone its
+    // system ones and those the user installed (serverPlatformTrust).
+    serverTrust: X509TrustManager = platformTrustManager(),
 ) {
     @Inject constructor(@ApplicationContext context: Context, devices: DeviceIds) : this(
         context,
@@ -70,6 +80,7 @@ class ConnectionSecurity internal constructor(
         ::phoneBuiltChain,
         { KeyChain.getPrivateKey(context, it) },
         { KeyChain.getCertificateChain(context, it) },
+        serverPlatformTrust(),
     )
 
     // What decides who is signed in where: the addresses, the ones gateway
@@ -102,11 +113,41 @@ class ConnectionSecurity internal constructor(
     // A request to the server could not connect at all.
     val connectionErrors: SharedFlow<Unit> = _connectionErrors
 
+    // A host the user trusted a certificate for, showing another one while
+    // in use: the question to ask again, one at a time.
+    private val _certificateChange = MutableStateFlow<CertificateChange?>(null)
+    val certificateChange: StateFlow<CertificateChange?> = _certificateChange
+
+    // Pins of certificates the user said no to, not asked about again
+    // until the app starts again or the server is signed out of.
+    private val declined: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     private val pins: () -> Map<String, String> = { current?.identity?.pins.orEmpty() }
-    private val remember: (String, X509Certificate) -> Unit = { host, leaf -> rejected[pinKey(host)] = leaf }
+    private val remember: (String, X509Certificate) -> Unit = { host, leaf ->
+        rejected[pinKey(host)] = leaf
+        if (isPinnedHost(pins(), host)) askAgain(CertificateChange(pinKey(host), leaf.fingerprint(), leaf.pin()))
+    }
+
+    private fun askAgain(change: CertificateChange) {
+        if (change.pin in declined) return
+        _certificateChange.compareAndSet(null, change)
+    }
+
+    // The answer to a changed certificate: the question goes, and one said
+    // no to is not asked about again.
+    fun answered(change: CertificateChange, trusted: Boolean) {
+        if (!trusted) declined += change.pin
+        if (_certificateChange.compareAndSet(change, null) && trusted) _trustedChanges.tryEmit(Unit)
+    }
+
+    private val _trustedChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    // A changed certificate was trusted, so what waited on it (a song) can
+    // go on.
+    val trustedChanges: SharedFlow<Unit> = _trustedChanges
 
     // Distrusted authorities are turned down before a pin is looked at.
-    private val platform = platformTrustManager()
+    private val platform = serverTrust
     private val trustManager = DistrustingTrustManager(PinningTrustManager(platform, pins, remember), built(platform))
 
     // The client certificate the factory's context was made for. Kept apart
@@ -165,6 +206,9 @@ class ConnectionSecurity internal constructor(
         val before = current
         val cookies = before?.takeIf { it.identity == identity }?.cookies ?: GatewayCookies()
         current = Current(identity, addresses.mapTo(HashSet()) { pinKey(it.host) }, cookies)
+        // A question about a host this server has no pin for is another
+        // server's, and goes.
+        _certificateChange.value?.let { asked -> if (!isPinnedHost(identity.pins, asked.host)) _certificateChange.compareAndSet(asked, null) }
         if (settings.clientCertAlias != installedIdentity) {
             factory.delegate = contextFor().socketFactory
             installedIdentity = settings.clientCertAlias
@@ -177,6 +221,8 @@ class ConnectionSecurity internal constructor(
     fun clear() {
         current = null
         rejected.clear()
+        declined.clear()
+        _certificateChange.value = null
     }
 
     // Whether another device on the network could fetch from the server by

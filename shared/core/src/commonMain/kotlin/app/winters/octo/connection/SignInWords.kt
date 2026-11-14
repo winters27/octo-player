@@ -130,4 +130,23 @@ object SignInWords {
     const val LINK_WHILE_SIGN_IN_OPEN = "Finish or close the sign-in that's open, then try this link again."
 
     fun askWhileSignInOpen(name: String): String = "Sign in to $name when you're done here."
+
+    // The question about a server certificate the device does not trust:
+    // asked while signing in, and again in use when a host Octo trusted a
+    // certificate for shows a different one. `device` is "phone" or
+    // "computer".
+    const val TRUST_TITLE = "Trust this certificate?"
+    const val TRUST_CHANGED_TITLE = "The server's certificate changed"
+    const val TRUST_HOST = "Host"
+    const val TRUST_FINGERPRINT = "SHA-256 fingerprint"
+    const val TRUST_CONFIRM = "Trust this certificate"
+    const val TRUST_REFUSED = "Not connected. The server's certificate wasn't trusted."
+
+    fun trustDetail(device: String): String =
+        "This $device doesn't trust the certificate the server showed. If it's your own server's, check the fingerprint " +
+            "matches before you trust it. Octo trusts it for this host only, and keeps trusting it when it's renewed with the same key."
+
+    const val TRUST_CHANGED_DETAIL =
+        "This host showed a different certificate from the one you trusted. Servers renew their certificates, so this is " +
+            "often expected, but check the fingerprint matches your server's before you trust it. Until then Octo can't reach the server."
 }

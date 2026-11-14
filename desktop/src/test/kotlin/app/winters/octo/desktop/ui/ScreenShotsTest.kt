@@ -27,6 +27,7 @@ import app.winters.octo.desktop.listening.logged
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.ScrollSpot
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
+import app.winters.octo.desktop.pages.askAboutChangedCertificate
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.desktop.server.CertificateQuestion
@@ -267,7 +268,7 @@ class ScreenShotsTest {
             shot("signin", 2_000)
             SwingUtilities.invokeAndWait {
                 app.signInForm.typeAddress("music.example.com")
-                app.signInForm.question = CertificateQuestion("music.example.com", "d693f076d6d65fcb023dd052e3637561a6772c9cb3c51f9799d3b94e3c655443")
+                app.signInForm.question = CertificateQuestion("music.example.com", "d693f076d6d65fcb023dd052e3637561a6772c9cb3c51f9799d3b94e3c655443", "spki:" + "ab".repeat(32))
             }
             shot("signin-certificate")
             SwingUtilities.invokeAndWait {
@@ -303,6 +304,16 @@ class ScreenShotsTest {
             val done = runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done
             SwingUtilities.invokeAndWait { app.signedIn(done.connection) }
             shot("home", 3_000)
+            // The server's certificate changed while in use: asked about again.
+            SwingUtilities.invokeAndWait {
+                askAboutChangedCertificate(
+                    app.popups,
+                    accounts.security,
+                    CertificateQuestion("music.example.com", "3f9c0e5a7b2d4c6e8f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c0d2e", "spki:" + "cd".repeat(32)),
+                )
+            }
+            shot("certificate-changed")
+            SwingUtilities.invokeAndWait { app.popups.close() }
             // Further down Home: playlists and the rediscovery shelves, by
             // leaving it scrolled and coming back.
             val home = app.navigator.current

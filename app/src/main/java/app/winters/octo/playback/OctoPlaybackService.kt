@@ -171,6 +171,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var offlineDownloads: OfflineDownloads
     @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var sessions: SessionRepository
+    @Inject lateinit var security: app.winters.octo.connection.ConnectionSecurity
     @Inject lateinit var liveLookup: LiveLookup
     @Inject lateinit var carShelves: CarShelves
     @Inject lateinit var carSearch: CarSearch
@@ -229,6 +230,8 @@ class OctoPlaybackService : MediaLibraryService() {
     private val restored = CompletableDeferred<Unit>()
     // Set by Close, until something plays again.
     private var closed = false
+    // A song paused on a changed server certificate, until it is answered.
+    private var waitingOnCertificate = false
     // The home screen widgets: what they show, and what their buttons do.
     private val widgets by lazy { WidgetUpdates(this, scope) }
     private val widgetRemote by lazy { WidgetRemote(this, player, quickPicks) { spec, shuffle -> window.play(PlayRequest(spec, null, shuffle)) } }
@@ -364,6 +367,16 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
+        // A song that waited on a changed server certificate goes on once
+        // it is trusted.
+        scope.launch {
+            security.trustedChanges.collect {
+                if (!waitingOnCertificate) return@collect
+                waitingOnCertificate = false
+                player.prepare()
+                player.play()
+            }
+        }
         // A list that joined is in the server's copy of the queue too, even
         // when the window around the song playing did not change.
         scope.launch { window.rejoined.collect { queueChangedForServer() } }
@@ -717,6 +730,15 @@ class OctoPlaybackService : MediaLibraryService() {
                 }
             }
             if (!player.playWhenReady) return
+            // The server's certificate changed and the question is up
+            // (CertificateChangeHost): the song waits for the answer
+            // instead of the queue being skipped through, and plays once
+            // the certificate is trusted.
+            if (security.certificateChange.value != null && tlsFailureIn(error)) {
+                waitingOnCertificate = true
+                player.pause()
+                return
+            }
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
             val why = playFailureWords(error, isFind(player.currentMediaItem?.mediaId.orEmpty()))

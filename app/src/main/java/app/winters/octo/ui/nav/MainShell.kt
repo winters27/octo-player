@@ -426,6 +426,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                     ShareSheetHost(shareSheet)
                     FamilyRequestSheetHost()
                     app.winters.octo.ui.downloads.ServerDownloadsHost()
+                    // A changed server certificate, asked about again over whatever is open.
+                    app.winters.octo.ui.signin.CertificateChangeHost()
                     // Above the sheets, so an undo stays reachable while one is open.
                     FeedbackHost(feedback)
                 }

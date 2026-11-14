@@ -1,0 +1,17 @@
+{
+  "about": "Three self-made certificates for music.example.com, read by every app's pin tests. first and renewed share one RSA key (a renewal that keeps the key); new-key has a P-256 key of its own. fingerprint is the SHA-256 of the whole certificate, pin what the apps keep: spki: and the SHA-256 of its SubjectPublicKeyInfo. Both computed with openssl.",
+  "certificates": {
+    "first": {
+      "fingerprint": "d1228c73e1bfbc905a47f556521679e2d27acda392e25185eab506dff0d91501",
+      "pin": "spki:b0e747c5ecb19827907c105c885accfe75720c16c48ea4e51e6f0c759d799cf9"
+    },
+    "renewed": {
+      "fingerprint": "ae2046ce6b8a8aa11e05c6b907a9552b86d5dcef2021e515354f4e75158b2f36",
+      "pin": "spki:b0e747c5ecb19827907c105c885accfe75720c16c48ea4e51e6f0c759d799cf9"
+    },
+    "new-key": {
+      "fingerprint": "5dd6b28ab48c0d9c83611476cdd57a94823dcdff535b7914eacb98d1f2306fcd",
+      "pin": "spki:c660239f2b789a9ceb4bf394b34d89f8752875ce209ecfe1648c052a1c1d638d"
+    }
+  }
+}

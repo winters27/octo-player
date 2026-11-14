@@ -3,7 +3,6 @@ package app.winters.octo.data
 import app.winters.octo.connection.ConnectionSecurity
 import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.ServerClients
-import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.letGo
 import app.winters.octo.server.Reach
 import app.winters.octo.subsonic.AuthMode
@@ -96,7 +95,7 @@ internal fun untrusted(security: ConnectionSecurity, e: SubsonicException, varar
     if (e !is SubsonicException.Unreachable || e.cause !is SSLException) return null
     for (url in urls.filterNotNull()) {
         val leaf = security.takeRejected(url.host) ?: continue
-        return SignInError.Untrusted(url.host, leaf.fingerprint())
+        return SignInError.Untrusted(url.host, leaf)
     }
     return null
 }

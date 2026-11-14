@@ -4,6 +4,7 @@ import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.formatFingerprint
+import app.winters.octo.connection.pin
 import app.winters.octo.connection.pinKey
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
@@ -69,10 +70,10 @@ class ServerSecurityTest {
     fun trustingItConnectsAndTheTrustIsKept() = runTest {
         server.answer("ping")
         val asked = asked()
-        security.trust(asked.host.uppercase(), formatFingerprint(asked.fingerprint))
+        security.trust(asked.host.uppercase(), asked.pin)
         assertTrue(accounts.test(server.address, "winters", "pw") is TestOutcome.Reached)
-        // Kept by host, in lowercase, as the plain fingerprint.
-        assertEquals(mapOf(pinKey(host) to cert.fingerprint()), SettingsStore(settingsFile).current.trustedCertificates)
+        // Kept by host, in lowercase, as the pin of the certificate's key.
+        assertEquals(mapOf(pinKey(host) to cert.pin()), SettingsStore(settingsFile).current.trustedCertificates)
         // A later run trusts it too.
         val again = SettingsStore(settingsFile)
         val later = ServerSecurity(again)
@@ -141,7 +142,7 @@ class ServerSecurityTest {
     fun aKeptServerIsLookedAtWithItsTrustedCertificate() = runTest {
         server.answer("ping")
         val asked = asked()
-        security.trust(asked.host, asked.fingerprint)
+        security.trust(asked.host, asked.pin)
         val done = accounts.signIn(server.address, "winters", "pw") as SignInOutcome.Done
         assertEquals(Reach.Answers, accounts.check(done.connection.server.id).reach)
     }

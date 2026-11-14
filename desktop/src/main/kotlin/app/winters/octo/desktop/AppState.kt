@@ -44,6 +44,7 @@ import app.winters.octo.desktop.nav.SettingsUi
 import app.winters.octo.desktop.nav.Shortcut
 import app.winters.octo.desktop.nav.VOLUME_STEP
 import app.winters.octo.desktop.pages.SignInForm
+import app.winters.octo.desktop.pages.askAboutChangedCertificate
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
@@ -77,6 +78,7 @@ import app.winters.octo.desktop.liveradio.LiveHeart
 import app.winters.octo.desktop.search.FetchPhase
 import app.winters.octo.ui.family.outsideActions
 import app.winters.octo.playback.stoppedLine
+import app.winters.octo.playback.PlayFailure
 import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
@@ -211,6 +213,13 @@ class AppState(
     val inSettings: Boolean get() = navigator.current.page == Page.Settings
 
     init {
+        // A host of the server in use showing another certificate than the
+        // one trusted there: asked about again, over whatever is open.
+        scope.launch {
+            accounts.security.certificateChange.collect { asked ->
+                if (asked != null) askAboutChangedCertificate(popups, accounts.security, asked)
+            }
+        }
         navigator.onMove = { from, to ->
             // The side panel is not drawn in Settings, so it cannot keep the
             // keyboard; leaving Settings clears its search.
@@ -608,8 +617,25 @@ class AppState(
                     else -> skippedLine(song.title, problem.words)
                 }
                 noticeDetail = problem.detail
+                if (song != null && problem.words == PlayFailure.Unreachable.words) askServerAfterFailure()
             }
         }
+    }
+
+    // When the server was asked last after a song could not reach it.
+    private var serverAskedAt = 0L
+
+    // A song that could not reach the server: the server is asked once
+    // through the app's own client, which notices a certificate that
+    // changed there and asks about it again (ServerSecurity's
+    // certificateChange); the audio engine fetches songs with a client of
+    // its own. At most once every 10 s, and not while a question is up.
+    private fun askServerAfterFailure() {
+        val client = connection?.client ?: return
+        val now = System.currentTimeMillis()
+        if (now - serverAskedAt < 10_000 || accounts.security.certificateChange.value != null) return
+        serverAskedAt = now
+        scope.launch(Dispatchers.IO) { runCatching { client.ping() } }
     }
 
     // Each song's album and the next one's are asked about as it starts,

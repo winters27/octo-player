@@ -94,8 +94,9 @@ interface AudioEngine : AutoCloseable {
     // Sends a Position event this often while playing; 0 for none.
     fun setPositionInterval(ms: Int)
 
-    // The certificates the listener trusted, as SHA-256 fingerprints by
-    // host, so songs stream from the servers the app itself may reach.
+    // The certificates the listener trusted, as pins by host (a key's or,
+    // kept from before, a whole certificate's SHA-256), so songs stream from
+    // the servers the app itself may reach.
     // Replaces the ones given before.
     fun setTrustedCertificates(pins: Map<String, String>)
 

@@ -5,7 +5,6 @@ import app.winters.octo.ui.family.inviteProblem
 import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.subsonic.FamilyLink
-import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
@@ -566,7 +565,7 @@ class SignInViewModel @Inject constructor(
                 // signing in asks; trusting it tries again.
                 val leaf = security.takeRejected(base.host)
                 if (leaf != null) {
-                    question = SignInError.Untrusted(base.host, leaf.fingerprint())
+                    question = SignInError.Untrusted(base.host, leaf)
                 } else {
                     error = refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message
                     met(attempt, refused.gateway)
@@ -674,7 +673,7 @@ class SignInViewModel @Inject constructor(
                     // signing in asks; trusting it signs up again.
                     is JoinOutcome.Untrusted -> {
                         val leaf = security.takeRejected(joined.host)
-                        if (leaf != null) question = SignInError.Untrusted(joined.host, leaf.fingerprint()) else error = "This server's certificate is not trusted."
+                        if (leaf != null) question = SignInError.Untrusted(joined.host, leaf) else error = "This server's certificate is not trusted."
                         return@launchLink
                     }
                     // A sign-in page that turns the invite away opens Advanced
@@ -983,7 +982,7 @@ class SignInViewModel @Inject constructor(
     fun trust() {
         val asked = question ?: return
         useGatewayForm(sending(gatewayForm))
-        pins[pinKey(asked.host)] = asked.fingerprint
+        pins[pinKey(asked.host)] = asked.pin
         question = null
         when {
             handOver != null -> receive()
@@ -994,7 +993,7 @@ class SignInViewModel @Inject constructor(
 
     fun distrust() {
         question = null
-        error = "Not connected. The server's certificate wasn't trusted."
+        error = SignInWords.TRUST_REFUSED
     }
 
     // The page is gone for good: its request stops, and it leaves the app's

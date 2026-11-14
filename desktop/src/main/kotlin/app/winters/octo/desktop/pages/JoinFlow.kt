@@ -27,7 +27,6 @@ import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.ReceivedAction
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.signInOpen
-import app.winters.octo.connection.fingerprint
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.OctoColors
@@ -228,7 +227,7 @@ private fun joinAnswer(outcome: JoinOutcome, join: CheckClient, addresses: List<
     form.tried(sent)
     if (outcome is JoinOutcome.SignedUp) return outcome
     addresses.firstNotNullOfOrNull { at -> join.security.peekRejected(at.host)?.let { at.host to it } }?.let { (host, leaf) ->
-        form.question = CertificateQuestion(host, leaf.fingerprint())
+        form.question = CertificateQuestion(host, leaf)
         return JoinOutcome.Untrusted(host)
     }
     join.security.certificateWords(addresses)?.let { words ->
@@ -367,7 +366,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             TrustQuestion(
                 question,
                 onTrust = {
-                    app.accounts.security.trust(question.host, question.fingerprint)
+                    app.accounts.security.trust(question.host, question.pin)
                     form.question = null
                     asking = null
                     go()

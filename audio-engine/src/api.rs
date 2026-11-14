@@ -42,7 +42,7 @@ impl fmt::Debug for HttpHeader {
 pub struct TrustedCertificate {
     /// The host's name or address, in any case.
     pub host: String,
-    /// The SHA-256 of the certificate itself, in hex; colons and spaces are ignored.
+    /// The pin: `spki:` and the SHA-256 of the certificate's public key, or the SHA-256 of the whole certificate, in hex; colons and spaces are ignored.
     pub sha256: String,
 }
 
