@@ -578,6 +578,31 @@ impl Lift {
     }
 }
 
+// From output frame `at` of a block of `frames`, where frame `i` is made
+// from the mix frames from `from + i * step` up to `from + (i + 1) * step`:
+// whether any of those fall inside one of the blend `windows` (mix frames,
+// from and up to, in order), and the frame where that changes.
+fn blend_run(
+    windows: &VecDeque<(u64, u64)>,
+    from: f64,
+    step: f64,
+    at: usize,
+    frames: usize,
+) -> (bool, usize) {
+    let lo = from + at as f64 * step;
+    for &(a, b) in windows {
+        if (b as f64) <= lo {
+            continue;
+        }
+        // The first frame reaching past the window's start, and the first
+        // starting at or past its end.
+        let first = ((a as f64 - from) / step).floor().max(0.0) as usize;
+        let end = (((b as f64 - from) / step).ceil().max(0.0) as usize).min(frames);
+        return if first <= at { (true, end.max(at + 1)) } else { (false, first.min(frames)) };
+    }
+    (false, frames)
+}
+
 pub struct Mixer {
     rate: u32,
     lane: Option<Lane>,
@@ -878,15 +903,21 @@ impl Mixer {
                 }
                 break;
             }
-            // Whether this block holds mix frames of a blend, wherever the
-            // speed stage put them.
+            // Each output frame is shaped as a blend's when the mix frames the
+            // speed stage made it from fall inside a blend's window, so a
+            // block across a window's edge is shaped in two parts.
             let (from, to) = self.block_source;
-            let blending = self.blend_windows.iter().any(|&(a, b)| (a as f64) < to && (b as f64) > from);
             while self.blend_windows.front().is_some_and(|&(_, b)| (b as f64) <= from) {
                 self.blend_windows.pop_front();
             }
-            self.shaper.set_blending(blending);
-            self.shaper.process(&mut self.block, frames);
+            let step = (to - from) / frames as f64;
+            let mut at = 0;
+            while at < frames {
+                let (blending, until) = blend_run(&self.blend_windows, from, step, at, frames);
+                self.shaper.set_blending(blending);
+                self.shaper.process(&mut self.block[at * 2..until * 2], until - at);
+                at = until;
+            }
             out[made * 2..(made + frames) * 2].copy_from_slice(&self.block[..frames * 2]);
             made += frames;
             self.made += frames as u64;
@@ -1002,6 +1033,11 @@ impl Mixer {
                 (None, Some(at)) if at > fade.done => n = n.min((at - fade.done) as usize),
                 _ => {}
             }
+        }
+        // A lift ends on its exact frame too, so the blend's window, and the
+        // limiter run for it, end there.
+        if let Some(lift) = &self.lift {
+            n = n.min(lift.len.saturating_sub(lift.done).max(1));
         }
         let Some(lane) = &mut self.lane else {
             return (0, MixState::Ended);

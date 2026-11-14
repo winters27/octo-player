@@ -566,6 +566,90 @@ fn paced_blend_of(
     (out, begins.frame as usize)
 }
 
+// A on the left: hot (0.99) alone up to its blend at frame `start`, quiet
+// (0.2) in it, and ending 0.3 of the way through, so B climbs over 250 ms
+// after. B on the right: quiet through the blend and the climb, then hot.
+// Mixed with the Limiter off at `pace`.
+fn hot_either_side_of_a_lifted_blend(pace: Pace, start: usize) -> Vec<f32> {
+    const HOT: i16 = 32_440;
+    const QUIET: i16 = 6_554;
+    let a: Vec<i16> = (0..start + 14_400).flat_map(|n| [if n < start { HOT } else { QUIET }, 0]).collect();
+    let b: Vec<i16> = (0..96_000).flat_map(|n| [0, if n < 26_400 { QUIET } else { HOT }]).collect();
+    let dir = temp_dir();
+    let (pa, pb) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&pa, RATE, 2, &a);
+    write_wav(&pb, RATE, 2, &b);
+    let mut mixer = Mixer::new(RATE, 0, &limiter_off(), pace);
+    let mut lane = Lane::new(deck(1, &pa), Loudness::default(), &ReplayGainSettings::default(), RATE);
+    lane.last = true;
+    mixer.start(lane, Transition::Start);
+    let next = deck(2, &pb);
+    wait_ready(&next);
+    let shape = FadeShape { k: 0.4, ..Default::default() };
+    mixer.plan_fade(1, start as f64 / RATE as f64, 48_000, next, Loudness::default(), shape);
+    render_all(&mut mixer).0
+}
+
+#[test]
+fn a_song_alone_either_side_of_a_blend_is_never_limited() {
+    let hot = 32_440.0 / 32_768.0;
+    // At normal speed A comes out as it went in up to the blend's first
+    // frame, and B from the frame its climb ends on.
+    let out = hot_either_side_of_a_lifted_blend(Pace::default(), 48_000);
+    for i in LATENCY + 4_800..LATENCY + 48_000 {
+        assert_eq!(out[i * 2], hot, "A at {i}");
+    }
+    let climbed = LATENCY + 48_000 + 14_400 + 12_000;
+    for i in climbed..climbed + 4_800 {
+        assert_eq!(out[i * 2 + 1], hot, "B at {i}");
+    }
+    // At 1.25 times speed a block of the speed stage can fall across either
+    // edge (from 48,250 the blend's first frame comes 200 frames into a
+    // block), and the frames on the outside are still at the song's own
+    // level. The pitch moves with the speed, a plain rate change, so the
+    // songs' edges stay sharp.
+    let mut held = Vec::new();
+    for start in [48_000, 48_250] {
+        let out = hot_either_side_of_a_lifted_blend(Pace { speed: 1.25, pitch: 1.25 }, start);
+        let frames = out.len() / 2;
+        let quiet = (4_800..frames).find(|&i| out[i * 2].abs() < 0.5).expect("A quiet in the blend");
+        let hot_again = (quiet..frames).find(|&i| out[i * 2 + 1] > 0.5).expect("B hot after its climb");
+        if let Some(i) = (quiet - 1_500..quiet - 80).find(|&i| out[i * 2] <= 0.95) {
+            held.push(format!("from {start}: A {} before the blend at {}", quiet - i, out[i * 2]));
+        }
+        if let Some(i) = (hot_again + 80..hot_again + 1_500).find(|&i| out[i * 2 + 1] <= 0.95) {
+            held.push(format!("from {start}: B {} after its climb at {}", i - hot_again, out[i * 2 + 1]));
+        }
+    }
+    assert!(held.is_empty(), "{held:?}");
+}
+
+#[test]
+fn a_hot_song_is_turned_down_only_over_the_look_ahead_before_its_blend() {
+    // A at 0.99 alone and on into its blend at 1 s, with the Limiter off:
+    // the blend's first frames need the level down, and it comes down along
+    // the limiter's line over the 72 frames before them, no earlier, never
+    // stepping, to the ceiling at the blend.
+    let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
+    let hot = 32_440.0 / 32_768.0;
+    let a: Vec<i16> = (0..96_000).flat_map(|_| [32_440, 0]).collect();
+    let b: Vec<i16> = (0..96_000).flat_map(|_| [0, 6_554]).collect();
+    let out = blend_of(&a, &b, 24_000, FadeShape { k: 0.4, ..Default::default() }, &limiter_off());
+    let fade_start = 48_000 + LATENCY;
+    for i in LATENCY + 4_800..fade_start - LATENCY {
+        assert_eq!(out[i * 2], hot, "A at {i}, {} before the blend", fade_start - i);
+    }
+    // The steepest line is the true peak's, over the look-ahead less the
+    // 31 frames its reading looks back.
+    let line = (1.0 - ceiling / hot) / (LATENCY - 31) as f32;
+    for i in fade_start - LATENCY..fade_start {
+        let (was, now) = (out[(i - 1) * 2] / hot, out[i * 2] / hot);
+        assert!(now <= was && was - now <= line + 1e-6, "A at {i}: {was} to {now}, line {line}");
+    }
+    assert!(out[(fade_start - 1) * 2] < hot * 0.95, "down by the blend");
+    assert!(out[fade_start * 2] <= ceiling + 1e-6, "{}", out[fade_start * 2]);
+}
+
 #[test]
 fn a_blend_is_limited_on_every_block_at_speeds_below_one() {
     let ceiling = 10f32.powf(crate::sound::limiter::LIMITER_CEILING_DB / 20.0);
