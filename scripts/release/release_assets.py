@@ -7,6 +7,9 @@ it runs locally too (Python 3.11 or newer, nothing to install).
 
   release_assets.py stage-desktop --version 1.2.0 --artifacts DIR --out DIR
   release_assets.py stage-android --version 1.2.0 --apk FILE --out DIR
+  release_assets.py stage-ios --version 1.11.0 --ipa FILE --out DIR
+  release_assets.py verify-carrier --tag ios-v1.11.0 --ipa FILE
+  release_assets.py verify-release --tag ios-v1.11.0 --dir DIR --swift-keys FILE --sha256 HEX
   release_assets.py notes --app desktop --tag desktop-v1.2.0 --out FILE
   release_assets.py manifest --app desktop --tag desktop-v1.2.0 --notes FILE --dir DIR
   release_assets.py public-keys --keys FILE --out DIR
@@ -26,11 +29,13 @@ import hashlib
 import io
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 APPS = {
@@ -45,6 +50,11 @@ APPS = {
         "title": "Octo for Android",
         "paths": ["app", "design", "shared", "subsonic"],
     },
+    "ios": {
+        "prefix": "ios-v",
+        "title": "Octo for iPhone",
+        "paths": ["ios"],
+    },
 }
 VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?")
 # Commits about the build and its tools are not news for listeners.
@@ -55,6 +65,9 @@ AREA = re.compile(r"^[a-z][a-z0-9 /-]{0,30}: ")
 # Files the manifest describes, by name: Octo-<version>-<system>-<chip>[-portable].<type>
 DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|flatpak|zip)$")
 ANDROID_NAME = re.compile(r"^Octo-(?P<version>.+)-android\.apk$")
+IOS_NAME = re.compile(r"^Octo-(?P<version>.+)-iPhone\.ipa$")
+# Lines an iPhone release tag carries for the release workflow, never for people to read.
+TAG_LINES = re.compile(r"^ipa-(?:sha256|commit): .*$\n?", re.M)
 MANIFEST = "update.json"
 SIGNATURE = "update.json.sig"
 SUMS = "SHA256SUMS"
@@ -128,12 +141,25 @@ def stage_android(version: str, apk: Path, out: Path) -> Path:
     return target
 
 
+def stage_ios(version: str, ipa: Path, out: Path) -> Path:
+    check_version(version)
+    out.mkdir(parents=True, exist_ok=True)
+    target = out / f"Octo-{version}-iPhone.ipa"
+    shutil.copyfile(ipa, target)
+    return target
+
+
 def describe(name: str, app: str, version: str) -> dict:
     if app == "desktop":
         match = DESKTOP_NAME.match(name)
         if not match or match["version"] != version:
             fail(f"{name} is not named like Octo-{version}-<system>-<chip>.<type>")
         return {"os": match["os"], "arch": match["arch"], "kind": match["kind"]}
+    if app == "ios":
+        match = IOS_NAME.match(name)
+        if not match or match["version"] != version:
+            fail(f"{name} is not named like Octo-{version}-iPhone.ipa")
+        return {"os": "ios", "arch": "arm64", "kind": "ipa"}
     match = ANDROID_NAME.match(name)
     if not match or match["version"] != version:
         fail(f"{name} is not named like Octo-{version}-android.apk")
@@ -183,7 +209,8 @@ def release_notes(app: str, tag: str) -> str:
     kind = git("cat-file", "-t", tag).strip()
     if kind == "tag":
         message = git("tag", "-l", "--format=%(contents)", tag).strip()
-        message = re.sub(r"-----BEGIN [A-Z ]*SIGNATURE-----.*", "", message, flags=re.S).strip()
+        message = re.sub(r"-----BEGIN [A-Z ]*SIGNATURE-----.*", "", message, flags=re.S)
+        message = TAG_LINES.sub("", message).strip()
         if message and message != tag:
             return message
     try:
@@ -224,6 +251,81 @@ def public_keys(keys: Path, out: Path) -> list[Path]:
     if not written:
         fail(f"{keys} has no public key: add the release key's public half before publishing")
     return written
+
+
+def tag_lines(message: str) -> dict:
+    """The ipa-sha256: and ipa-commit: values an iPhone release tag carries."""
+    return {key: value.strip() for key, value in re.findall(r"^ipa-(sha256|commit): (.+)$", message, re.M)}
+
+
+def ipa_version(ipa: Path) -> str:
+    """The version the app in an IPA reads, from Payload/<app>.app/Info.plist."""
+    try:
+        with zipfile.ZipFile(ipa) as archive:
+            names = [n for n in archive.namelist() if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", n)]
+            info = plistlib.loads(archive.read(names[0])) if len(names) == 1 else None
+    except Exception:  # a damaged zip, plist or deflate stream: all mean it is no IPA we made
+        info = None
+    if not isinstance(info, dict):
+        fail(f"{ipa.name} is not an IPA with one app")
+    return str(info.get("CFBundleShortVersionString", ""))
+
+
+# The carrier IPA is the one the tag names, built from the commit the tag is on, and reads the
+# tag's version, so the updater never offers a release whose app calls itself older.
+def verify_carrier(tag: str, ipa: Path) -> None:
+    version = version_of(tag, "ios")
+    lines = tag_lines(git("tag", "-l", "--format=%(contents)", tag))
+    if set(lines) != {"sha256", "commit"}:
+        fail(f"{tag} lacks its ipa-sha256: and ipa-commit: lines (an annotated tag carries them)")
+    if sha256(ipa) != lines["sha256"]:
+        fail(f"the carrier's IPA is not the one {tag} names")
+    commit = git("rev-parse", f"{tag}^{{commit}}").strip()
+    if commit != lines["commit"]:
+        fail(f"{tag} is on {commit}, but its IPA was built from {lines['commit']}")
+    if ipa_version(ipa) != version:
+        fail(f"the carrier's app reads version {ipa_version(ipa)}, but the tag is {tag}")
+
+
+def swift_keys(path: Path) -> str:
+    """The keys the iPhone app trusts, read from its own copy (trustedKeysText in PlayerUpdates.swift)."""
+    match = re.search(r'trustedKeysText = """\n(.*?)\n\s*"""', path.read_text(encoding="utf-8"), re.S)
+    if not match:
+        fail(f"no trustedKeysText in {path}")
+    return "\n".join(line.strip() for line in match.group(1).splitlines()) + "\n"
+
+
+def key_lines(text: str) -> list[str]:
+    return [line.split("#", 1)[0].strip() for line in text.splitlines() if line.split("#", 1)[0].strip()]
+
+
+# A published iPhone release the app will take: signed by a key the app trusts, for ios at
+# this tag, and listing the IPA that was uploaded to TestFlight.
+def verify_release(tag: str, folder: Path, keys_swift: Path, want_sha256: str) -> None:
+    version = version_of(tag, "ios")
+    manifest_bytes = (folder / MANIFEST).read_bytes()
+    signature = base64.b64decode((folder / SIGNATURE).read_text().strip())
+    with tempfile.TemporaryDirectory() as temp:
+        keys = Path(temp) / "keys.txt"
+        keys.write_text(swift_keys(keys_swift), encoding="utf-8")
+        sig = Path(temp) / "sig"
+        sig.write_bytes(signature)
+        body = Path(temp) / "update.json"
+        body.write_bytes(manifest_bytes)
+        if not any(subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(pem), "-rawin",
+                                   "-in", str(body), "-sigfile", str(sig)], capture_output=True).returncode == 0
+                   for pem in public_keys(keys, Path(temp) / "pem")):
+            fail(f"{tag}'s update.json is not signed by a key the iPhone app trusts")
+    manifest = json.loads(manifest_bytes)
+    if (manifest.get("product"), manifest.get("tag"), manifest.get("version")) != ("ios", tag, version):
+        fail(f"{tag}'s manifest is for {manifest.get('product')} {manifest.get('tag')}")
+    ipas = [a for a in manifest.get("assets", []) if a.get("os") == "ios" and a.get("kind") == "ipa"]
+    if len(ipas) != 1 or ipas[0]["sha256"] != want_sha256:
+        fail(f"{tag} does not list the uploaded build's IPA")
+    path = folder / ipas[0]["name"]
+    if not path.exists() or path.stat().st_size != ipas[0]["size"] or sha256(path) != want_sha256:
+        fail(f"{tag}'s {ipas[0]['name']} is not the uploaded build's IPA")
+    print(f"{tag} verified: signed for the iPhone app, IPA {want_sha256[:12]}")
 
 
 # Whether a step stops the script (fail), keeping its message quiet.
@@ -314,6 +416,18 @@ def main() -> None:
     android.add_argument("--version", required=True)
     android.add_argument("--apk", type=Path, required=True)
     android.add_argument("--out", type=Path, required=True)
+    ios = commands.add_parser("stage-ios")
+    ios.add_argument("--version", required=True)
+    ios.add_argument("--ipa", type=Path, required=True)
+    ios.add_argument("--out", type=Path, required=True)
+    carrier = commands.add_parser("verify-carrier")
+    carrier.add_argument("--tag", required=True)
+    carrier.add_argument("--ipa", type=Path, required=True)
+    published = commands.add_parser("verify-release")
+    published.add_argument("--tag", required=True)
+    published.add_argument("--dir", type=Path, required=True)
+    published.add_argument("--swift-keys", type=Path, required=True)
+    published.add_argument("--sha256", required=True)
     notes = commands.add_parser("notes")
     notes.add_argument("--app", choices=APPS, required=True)
     notes.add_argument("--tag", required=True)
@@ -339,6 +453,13 @@ def main() -> None:
             print(path.name)
     elif args.command == "stage-android":
         print(stage_android(args.version, args.apk, args.out).name)
+    elif args.command == "stage-ios":
+        print(stage_ios(args.version, args.ipa, args.out).name)
+    elif args.command == "verify-carrier":
+        verify_carrier(args.tag, args.ipa)
+        print(f"{args.tag}: the carrier's IPA is the one the tag names")
+    elif args.command == "verify-release":
+        verify_release(args.tag, args.dir, args.swift_keys, args.sha256)
     elif args.command == "notes":
         version_of(args.tag, args.app)
         text = release_notes(args.app, args.tag)
