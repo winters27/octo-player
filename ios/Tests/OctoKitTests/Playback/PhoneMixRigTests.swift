@@ -1073,8 +1073,9 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             blend.run(10)
         }
         part("settings change", blend) {
+            // The same bands at another gain: the new filters carry on from the running ones.
             var next = MixRig.shapedSettings
-            next.graphicGains[5] = -3
+            next.graphicGains[3] = 2
             next.balance = 0.2
             blend.sound.set(next)
             blend.run(10)
