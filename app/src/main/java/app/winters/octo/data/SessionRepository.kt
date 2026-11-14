@@ -164,7 +164,8 @@ sealed interface SignInError {
     // The server showed a certificate the phone does not trust. The user
     // may choose to trust it, for this host only: its fingerprint is what
     // they compare, and its pin (the key's) what is kept.
-    class Untrusted(val host: String, val fingerprint: String, val pin: String) : SignInError {
+    // A pin left out is the whole certificate's, the fingerprint itself.
+    class Untrusted(val host: String, val fingerprint: String, val pin: String = fingerprint) : SignInError {
         constructor(host: String, leaf: X509Certificate) : this(host, leaf.fingerprint(), leaf.pin())
     }
 

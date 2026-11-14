@@ -53,8 +53,9 @@ import javax.net.ssl.X509TrustManager
 
 // A certificate the system does not trust, to ask the listener about: the
 // host that showed it, its SHA-256 fingerprint (what they compare) and its
-// pin (its key's, what is kept when they trust it).
-data class CertificateQuestion(val host: String, val fingerprint: String, val pin: String) {
+// pin (its key's, what is kept when they trust it). A pin left out is the
+// whole certificate's, the fingerprint itself.
+data class CertificateQuestion(val host: String, val fingerprint: String, val pin: String = fingerprint) {
     constructor(host: String, leaf: X509Certificate) : this(host, leaf.fingerprint(), leaf.pin())
 }
 
