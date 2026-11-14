@@ -54,6 +54,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -70,7 +71,6 @@ import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.LocalFocusVisibility
 import app.winters.octo.design.LocalOctoSurfaces
-import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
@@ -713,14 +713,23 @@ internal fun SchemeToggle(prefix: String, onClick: () -> Unit, enabled: Boolean 
 // they say so.
 @Composable
 internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, onCancel: () -> Unit, changed: Boolean = false) {
-    MenuTitle(if (changed) SignInWords.TRUST_CHANGED_TITLE else SignInWords.TRUST_TITLE)
     PopupPadding {
-        Txt(
-            if (changed) SignInWords.TRUST_CHANGED_DETAIL else SignInWords.trustDetail("computer"),
-            OctoType.bodySmall,
-            OctoColors.TextSecondary,
-            maxLines = 6,
-        )
+        // The question as a sheet's title, then what it means close under it.
+        Column(Modifier.fillMaxWidth().padding(top = Space.S), verticalArrangement = Arrangement.spacedBy(Space.M)) {
+            Txt(
+                if (changed) SignInWords.TRUST_CHANGED_TITLE else SignInWords.TRUST_TITLE,
+                SheetTitleWords,
+                OctoColors.TextPrimary,
+                Modifier.semantics { heading() },
+                maxLines = 2,
+            )
+            Txt(
+                if (changed) SignInWords.TRUST_CHANGED_DETAIL else SignInWords.trustDetail("computer"),
+                OctoType.bodySmall,
+                OctoColors.TextSecondary,
+                maxLines = 8,
+            )
+        }
         Column {
             Txt(SignInWords.TRUST_HOST, OctoType.caption, OctoColors.TextMuted)
             Txt(question.host, OctoType.bodySmall)

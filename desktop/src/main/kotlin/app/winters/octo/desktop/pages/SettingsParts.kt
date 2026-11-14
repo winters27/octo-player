@@ -785,7 +785,7 @@ internal fun SheetQuestion(question: String, detail: String) {
     }
 }
 
-private val SheetTitleWords = DesktopType.section.copy(fontWeight = FontWeight.SemiBold)
+internal val SheetTitleWords = DesktopType.section.copy(fontWeight = FontWeight.SemiBold)
 
 // Where the Settings page shown sits in the window while Settings is open,
 // for a sheet asked from it to sit in the middle of and shade.
