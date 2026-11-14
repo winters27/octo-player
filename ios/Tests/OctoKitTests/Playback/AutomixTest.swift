@@ -980,6 +980,34 @@ import Testing
         #expect(onBar("steady-100", fadeMiddle), "\(fadeMiddle): \(p.reason)")
     }
 
+    @Test func aLateBlendCappedTooShortToFadeTheOutgoingSongOutIsNotPlanned() {
+        // A's grid at 132 BPM (1818 ms bars, a downbeat at 201.45 s), the next song's at 35 BPM (a
+        // tagged slow song), 5.7% apart with no rate. The next song is silent until 1.6 s and its
+        // first beat is at 1.65 s, so it enters at 0 and a blend holds A through those 1.6 s. Started
+        // at 199 s, the late blend runs from A's downbeat at 201.45 s less that lead to the latest
+        // end, 1.95 s: within the drift bound, but only 350 ms after the hold to fade A out, and every
+        // cut is shorter still. Neither the capped blend nor a cut is planned.
+        let tail = AutomixCases.tail("steady-100")
+        let head = AutomixCases.head("steady-100-late-sound")
+        var fast = tail.features
+        fast.tempo!.bpm = 132
+        fast.tempo!.beatMs = 60_000.0 / 132
+        fast.tempo!.firstBeatMs = 1_470
+        fast.tempo!.downbeatMs = 1_470
+        var slow = head.features
+        slow.tempo!.bpm = 35
+        slow.tempo!.beatMs = 60_000.0 / 35
+        slow.tempo!.firstBeatMs = 1_650
+        slow.tempo!.downbeatMs = 1_650
+        let p = planTransition(current: FadeSong(albumId: "a", albumOrder: 1, durationMs: 202_000),
+                               next: FadeSong(albumId: "b", albumOrder: 1, durationMs: 40_000),
+                               tail: SectionAnalysis.fromFeatures(tail.envelope, fast),
+                               head: SectionAnalysis.fromFeatures(head.envelope, slow),
+                               settings: AutomixSettings(maxOverlapMs: 8_000), context: TransitionContext(nowMs: 199_000))
+        #expect(p.kind == .gapless, "\(p.reason)")
+        #expect(p.reason.hasPrefix("gapless: too late to blend"), "\(p.reason)")
+    }
+
     @Test func aBlendHoldsThroughTheNextSongsSilentLeadIn() {
         // Matched, it enters at 0 for its first bar line at 0.9 s, its first sound at 0.5 s: A alone
         // at its own level until then.

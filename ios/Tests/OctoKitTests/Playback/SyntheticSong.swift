@@ -268,6 +268,8 @@ enum AutomixCases {
         // 100 BPM from 0.5 s, its beats at 300 + 600 n and its bars at 900 + 2400 n: with a rate it
         // enters at 0, silent until 0.5 s.
         "steady-100-lead": song(44_100, 180_000, steady(500, 180_000, 100, 300, barMs: 900)),
+        // 100 BPM sounding from 1.6 s, its beats from 1.65 s.
+        "steady-100-late-sound": song(22_050, 40_000, steady(1_600, 40_000, 100, 1_650)),
         // 35 s at 95.24 BPM (beats every 630 ms from 15.9 s, bars from 15.27 s): silent for 16 s,
         // quiet until 27 s, then full level. Too short to ease back from a 5% rate after a long
         // intro.

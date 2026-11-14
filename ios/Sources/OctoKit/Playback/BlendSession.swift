@@ -758,10 +758,11 @@ public final class BlendSession: @unchecked Sendable {
     }
 
     /// An engine restart re-placed a start that has not played. Not yet committed, it simply moves
-    /// (the commit point decides). Committed and now inside the commit deadline, it moves to A's
-    /// next bar line, to the placement horizon with no bar grid, or, with no bar line before A's
-    /// end or within the plan's bar budget (or a budget of 0 with no bar grid), B starts at the
-    /// horizon by the clean cut (a committed start cannot be cancelled).
+    /// (the commit point decides). Committed and now inside the commit deadline, it moves to A's bar
+    /// line the fewest whole bars on that reaches the deadline, or to the placement horizon with no
+    /// bar grid; with no such bar line before A's end or within the plan's bar budget (with no bar
+    /// grid, a budget of 0 or a blend that would end past the latest end), B starts at the horizon
+    /// by the clean cut (a committed start cannot be cancelled).
     private func restarted(_ frame: Int64, _ s: Int64) {
         if head >= startFrame { return }
         if !committed && !handedOver() {
@@ -775,22 +776,23 @@ public final class BlendSession: @unchecked Sendable {
         }
         if !locked && lateMoveBars != 0 {
             let at = max(soonest + timing.placementHorizonFrames, s)
-            startMs += Double(at - s) * msPerFrame
-            action(.moveStart, frame, ms: startMs)
-            replace(at, commitNow: true)
-            moved(frame)
-            return
+            let movedMs = startMs + Double(at - s) * msPerFrame
+            if movedMs + overlapMs + extensionMs <= latestEndMs {
+                startMs = movedMs
+                action(.moveStart, frame, ms: startMs)
+                replace(at, commitNow: true)
+                moved(frame)
+                return
+            }
         }
         if locked {
             let bar = barMs / msPerFrame
-            var bars = max(1, (Double(earliest - s) / bar).rounded(.up))
-            var at = s + Self.frames(bars * bar)
-            if at < earliest {
-                bars += 1
-                at = s + Self.frames(bars * bar)
-            }
-            let movedMs = startMs + bars * barMs
-            if bars <= Double(allowedBars()) && movedMs < outgoingEndMs {
+            var bars = max(1, Int64((Double(earliest - s) / bar).rounded(.up)))
+            while bars > 1 && s + Self.frames(Double(bars - 1) * bar) >= earliest { bars -= 1 }
+            while s + Self.frames(Double(bars) * bar) < earliest { bars += 1 }
+            let at = s + Self.frames(Double(bars) * bar)
+            let movedMs = startMs + Double(bars) * barMs
+            if bars <= Int64(allowedBars()) && movedMs < outgoingEndMs {
                 movedBars += Int(bars)
                 startMs = movedMs
                 action(.moveStart, frame, ms: movedMs)
