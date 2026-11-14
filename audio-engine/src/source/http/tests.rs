@@ -1,5 +1,5 @@
 use super::*;
-use crate::source::trust::{Identity, Trust};
+use crate::source::trust::{Identity, Trust, identity_problem};
 use crate::testing::http_server::{
     Behaviour, ClientAuthServer, ClientCa, ClientIdentity, SelfSigned, TestServer,
 };
@@ -1336,4 +1336,33 @@ fn a_client_certificates_key_never_shows_in_debug_output() {
     trust.set_identity(Some(identity_for(&client, &[("https", "music.example.com", 443)])));
     let shown = format!("{trust:?}");
     assert!(shown.contains("music.example.com") && !shown.contains(&secret), "{shown}");
+}
+
+// The keys the desktop app makes from keys the JDK opened (its engineKeyOf,
+// checked by EngineKeyTest), with their certificates, as golden files.
+fn golden(name: &str) -> (Vec<u8>, Vec<u8>) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/gateway/certs/engine");
+    let read = |file: String| std::fs::read(dir.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+    (read(format!("{name}.leaf.der")), read(format!("{name}.key.der")))
+}
+
+// Red when: the engine stops taking a key in the form the desktop app makes
+// it (`identity_problem` refuses it, or no certificate is shown in the
+// handshake), for any of the four kinds, on TLS 1.2 or 1.3.
+#[test]
+fn keys_the_desktop_app_makes_from_jdk_keys_are_shown_to_their_server() {
+    let certificate = SelfSigned::new(&["127.0.0.1"]);
+    for name in ["rsa-2048", "ec-p256", "ec-p384", "ed25519"] {
+        let (leaf, key) = golden(name);
+        assert_eq!(identity_problem(std::slice::from_ref(&leaf), &key), None, "{name}");
+        let clients = [leaf.clone()];
+        for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+            let server = ClientAuthServer::start(b"song".to_vec(), &certificate, Some(&clients), version);
+            let trust = pinned(&certificate);
+            let origins = [("https".to_string(), "127.0.0.1".to_string(), server.port())];
+            trust.set_identity(Some(Identity::new(origins, vec![leaf.clone()], key.clone()).unwrap()));
+            assert!(fetched(&agent(trust), &server.url()), "{name} {version:?}");
+            assert_eq!(server.seen()[0].leaf.as_ref(), Some(&leaf), "{name} {version:?}");
+        }
+    }
 }
