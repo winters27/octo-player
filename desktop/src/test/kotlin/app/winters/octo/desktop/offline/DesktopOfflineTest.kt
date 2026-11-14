@@ -245,7 +245,8 @@ class DesktopOfflineTest {
         first.localFile("tr-1")!!.writeText("\n<!DOCTYPE html><html><body>Sign in</body></html>")
         server.answer("getSong", """"song":{"id":"tr-1","title":"One","artist":"Artist","album":"Album","track":1,"suffix":"flac"}""")
         val next = offline()
-        until("fetched again") { next.localFile("tr-1")?.readBytes()?.contentEquals(audio) == true }
+        // A refetch replaces the file, so it can go between the look and the read.
+        until("fetched again") { runCatching { next.localFile("tr-1")?.readBytes() }.getOrNull()?.contentEquals(audio) == true }
         assertEquals(2, server.calls.count { it.url.pathSegments.last() == "stream" })
     }
 }
