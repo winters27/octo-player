@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.ProvideOctoTheme
@@ -44,6 +45,10 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import javax.swing.SwingUtilities
 import kotlin.math.pow
+
+// How many steps of 255 the full player's wash may move a channel between
+// two starts of the same window.
+private const val WASH_STEPS = 2
 
 // The themes as the window draws them: the tokens follow the theme, what
 // sits over the full player keeps Octo's dark look, a theme switched while
@@ -78,7 +83,8 @@ class ThemeShotsTest {
         override fun toString() = if (count == 0) "the same" else "$count pixels differ, at most by $most of 255 at $at"
     }
 
-    private fun difference(a: Image, b: Image): Difference {
+    // Pixels inside `skip` are left out.
+    private fun difference(a: Image, b: Image, skip: List<Rect> = emptyList()): Difference {
         check(a.width == b.width && a.height == b.height) { "sizes differ" }
         val one = a.pixels()
         val two = b.pixels()
@@ -86,6 +92,9 @@ class ThemeShotsTest {
         var most = 0
         var mostAt = 0
         for (i in one.indices step 4) {
+            val x = (i / 4 % a.width).toFloat()
+            val y = (i / 4 / a.width).toFloat()
+            if (skip.any { x >= it.left && x < it.right && y >= it.top && y < it.bottom }) continue
             var differs = false
             for (c in 0 until 4) {
                 val delta = kotlin.math.abs((one[i + c].toInt() and 0xFF) - (two[i + c].toInt() and 0xFF))
@@ -102,13 +111,15 @@ class ThemeShotsTest {
 
     // `seen` matches `fresh` as closely as a second fresh start does: the
     // full player's wash is drawn from the clock, so two fresh starts may
-    // differ by a step or two in a channel; anything past that spread is the
-    // switch's.
-    private fun sameAsFresh(what: String, seen: Image, fresh: Image, again: Image): String? {
-        val spread = difference(fresh, again)
-        val found = difference(seen, fresh)
+    // differ by a step or two in a channel, whichever pair is measured;
+    // anything past that spread is the switch's. Pixels inside `skip` are
+    // left out.
+    private fun sameAsFresh(what: String, seen: Image, fresh: Image, again: Image, skip: List<Rect> = emptyList()): String? {
+        val spread = difference(fresh, again, skip)
+        val found = difference(seen, fresh, skip)
+        val allowed = maxOf(spread.most, WASH_STEPS)
         println("FLIP $what: against fresh $found; two fresh starts: $spread")
-        return if (found.most <= spread.most) null else "$what: $found, while two fresh starts differ at most by ${spread.most}"
+        return if (found.most <= allowed) null else "$what: $found, while two fresh starts differ at most by $allowed"
     }
 
     private fun keep(image: Image, name: String) {
@@ -150,9 +161,11 @@ class ThemeShotsTest {
     // While the full player shows, a song menu and a server sheet opened
     // over it, and the title bar, draw in Octo's dark look in a light theme,
     // as Octo itself draws them (as closely as two Octo starts agree).
+    // The field a sheet focuses draws a text cursor that blinks on its own
+    // clock, so that field's box is left out of the comparison.
     @Test(timeout = 180_000)
     fun overArtKeepsTheDarkLook() {
-        fun drawn(theme: ThemeChoice, popup: String): Image =
+        fun drawn(theme: ThemeChoice, popup: String): Pair<Image, Rect?> =
             A11yScene(folder.newFolder(), reduceMotion = true, look = inTheme(theme, AccentChoice.Coral)).use { s ->
                 s.onUi {
                     val songs = s.app.library!!.index!!.songs
@@ -166,15 +179,17 @@ class ThemeShotsTest {
                     if (popup == "menu") s.app.popups.showAt(IntOffset(400, 120)) { close -> SongMenu(s.app, listOf(s.app.library!!.index!!.songs[2]), close) } else addServer(s.app)
                 }
                 // Compared once the pop-up and the cover have stopped moving.
-                s.settleStill(1_200, quiet = CoverFadeMs).also { keep(it, "theme-over-art-$popup-${theme.name.lowercase()}") }
+                val image = s.settleStill(1_200, quiet = CoverFadeMs).also { keep(it, "theme-over-art-$popup-${theme.name.lowercase()}") }
+                image to s.focused()?.let { Rect(it.positionInRoot, it.size.toSize()) }
             }
         val problems = mutableListOf<String>()
         for (popup in listOf("menu", "sheet")) {
-            val octo = drawn(ThemeChoice.Octo, popup)
-            val again = drawn(ThemeChoice.Octo, popup)
+            val (octo, octoFocus) = drawn(ThemeChoice.Octo, popup)
+            val (again, againFocus) = drawn(ThemeChoice.Octo, popup)
             for (theme in listOf(ThemeChoice.Daylight, ThemeChoice.Paper)) {
-                val light = drawn(theme, popup)
-                sameAsFresh("${theme.label}, the $popup over the full player, against Octo", light, octo, again)?.let(problems::add)
+                val (light, lightFocus) = drawn(theme, popup)
+                val skip = listOfNotNull(octoFocus, againFocus, lightFocus)
+                sameAsFresh("${theme.label}, the $popup over the full player, against Octo", light, octo, again, skip)?.let(problems::add)
                 light.close()
             }
             octo.close()
