@@ -71,17 +71,20 @@ internal object RealSettingsDisk : SettingsDisk {
 
     override fun read(file: File): ByteArray = Files.readAllBytes(file.toPath())
 
+    // A move that is refused, for any reason, leaves the old file as it
+    // was and no temporary file beside it.
     override fun replace(file: File, bytes: ByteArray) {
         file.parentFile?.mkdirs()
         val temp = File(file.parentFile, file.name + ".tmp")
-        FileOutputStream(temp).use { out ->
-            out.write(bytes)
-            out.fd.sync()
-        }
         try {
+            FileOutputStream(temp).use { out ->
+                out.write(bytes)
+                out.fd.sync()
+            }
             Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
         } catch (e: IOException) {
-            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            runCatching { Files.deleteIfExists(temp.toPath()) }
+            throw e
         }
     }
 

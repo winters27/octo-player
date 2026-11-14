@@ -257,7 +257,15 @@ data class SavedServer(
     val label: String = "",
     // Signed out: still in the list, its password forgotten.
     val signedOut: Boolean = false,
+    // The person's own client certificate file, read each time Octo
+    // connects; its password is in the system's store, beside its path.
+    val certificate: CertFile? = null,
 )
+
+// A client certificate file where the person keeps it: its full path, and
+// the name the form shows for it.
+@Serializable
+data class CertFile(val path: String, val name: String)
 
 // The server's id, or the one it would get, for a server kept by an older
 // version of Octo.
@@ -680,6 +688,29 @@ class SettingsStore internal constructor(
                 return
             }
             if (save(settings)) unsaved = null else flushIn(writeRetryMs)
+        }
+    }
+
+    // Writes what is waiting at once, before the system's password store
+    // follows a change. True when the settings file, or the pending file
+    // beside it while the file is held, holds what is in memory now, so the
+    // next start reads it. False when neither does: both refuse, or a
+    // pending file from before that could not be moved aside still sits
+    // there, which no write goes over; and always for a store with no file.
+    // A write that fails is tried again as flush's are, so the files may
+    // still change after either answer.
+    fun flushNow(): Boolean {
+        if (file == null) return false
+        return synchronized(lock) {
+            // Only a write of the file itself that landed leaves nothing
+            // waiting.
+            val settings = unsaved ?: return true
+            if (save(settings)) {
+                unsaved = null
+                return true
+            }
+            flushIn(writeRetryMs)
+            _hold.value == SettingsHold.Kept
         }
     }
 

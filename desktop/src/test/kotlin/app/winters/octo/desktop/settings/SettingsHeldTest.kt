@@ -80,8 +80,8 @@ class SettingsHeldTest {
 
     private fun countIn(f: File): Long = Json.parseToJsonElement(f.readText()).jsonObject.getValue("saveCount").jsonPrimitive.long
 
-    private fun opened(disk: SettingsDisk, clock: SettingsClock = StepClock(), delay: Long = 0): SettingsStore {
-        val open = SettingsStore.openOn(disk, file(), writeDelayMs = delay, clock = clock)
+    private fun opened(disk: SettingsDisk, clock: SettingsClock = StepClock(), delay: Long = 0, writeRetryMs: Long = SettingsStore.WRITE_RETRY_MS): SettingsStore {
+        val open = SettingsStore.openOn(disk, file(), writeDelayMs = delay, clock = clock, writeRetryMs = writeRetryMs)
         assertTrue("opened: $open", open is SettingsOpen.Opened)
         return (open as SettingsOpen.Opened).store
     }
@@ -140,22 +140,31 @@ class SettingsHeldTest {
     }
 
     // A store that never reaches its exit (a crash, a power cut) has every
-    // change in the pending file already, written at the failed write.
+    // change in the pending file already, written at the failed write. Its
+    // retry waits a minute, so it never writes again inside the row; the
+    // row ends with the hold lifted and what waits written, so neither that
+    // retry nor the exit write finds anything left.
     @Test(timeout = 20_000)
     fun aStoreEndedUncleanlyMidHoldLosesNothing() {
         writeReal()
         val disk = HeldDisk().apply { refuseReplace += "settings.json" }
-        val store = opened(disk, delay = 20)
-        change(store)
-        // The writer's turn, waited on by its work, never a clock.
-        fun keptAll() = pending().exists() && decodeSettings(pending().readText()).settings.frame.pinnedPlaylists == listOf("p2")
-        val end = System.currentTimeMillis() + 10_000
-        while (!keptAll() && System.currentTimeMillis() < end) Thread.sleep(10)
-        assertTrue("every change is in the pending file", keptAll())
-        // No flush, no exit: the store is just left.
-        val next = SettingsStore(file())
-        assertEquals(store.current, next.current)
-        assertFalse(pending().exists())
+        val store = opened(disk, delay = 20, writeRetryMs = 60_000)
+        try {
+            change(store)
+            // The writer's turn, waited on by its work, never a clock.
+            fun keptAll() = pending().exists() && decodeSettings(pending().readText()).settings.frame.pinnedPlaylists == listOf("p2")
+            val end = System.currentTimeMillis() + 10_000
+            while (!keptAll() && System.currentTimeMillis() < end) Thread.sleep(10)
+            assertTrue("every change is in the pending file", keptAll())
+            // No flush, no exit: the store is just left.
+            val next = SettingsStore(file())
+            assertEquals(store.current, next.current)
+            assertFalse(pending().exists())
+        } finally {
+            disk.refuseReplace.clear()
+            store.flush()
+        }
+        assertEquals(SettingsHold.Free, store.hold.value)
     }
 
     // A pending file left by a failed delete, with later sessions writing
