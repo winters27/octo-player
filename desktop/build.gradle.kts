@@ -358,6 +358,10 @@ compose.desktop {
             // java.management lets the memory log read the JVM's memory
             // outside the heap and its direct buffers.
             modules("java.instrument", "jdk.security.auth", "jdk.unsupported", "jdk.crypto.ec", "java.naming", "java.xml", "jdk.accessibility", "java.management")
+            // Windows only: the Windows certificate store (Windows-ROOT), so
+            // a private authority installed there is trusted for the server
+            // (server/SystemTrust.kt). macOS's keychains are in java.base.
+            if (hostName.startsWith("windows")) modules("jdk.crypto.mscapi")
             windows {
                 iconFile = file("icons/octo.ico")
                 menuGroup = "Octo"
@@ -509,6 +513,11 @@ tasks.withType<org.jetbrains.compose.desktop.application.tasks.AbstractJLinkTask
         // tests run on a full JDK, so only this check sees it missing here.
         if ("java.management" !in modules) {
             throw GradleException("The runtime lacks java.management (MODULES: ${modules.ifEmpty { setOf("unreadable") }})")
+        }
+        // Without it the Windows certificate store can't be read, and a
+        // private authority installed there goes unseen (SystemTrust.kt).
+        if (hostName.startsWith("windows") && "jdk.crypto.mscapi" !in modules) {
+            throw GradleException("The runtime lacks jdk.crypto.mscapi (MODULES: ${modules.ifEmpty { setOf("unreadable") }})")
         }
         val security = File(runtime, "conf/security/java.security")
         if (modules.isNotEmpty() && security.isFile) {

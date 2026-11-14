@@ -3,7 +3,9 @@ package app.winters.octo.desktop.ui
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.askAboutChangedCertificate
 import app.winters.octo.desktop.pages.askForCopy
+import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.ui.family.FAMILY
 import kotlinx.coroutines.runBlocking
@@ -15,7 +17,9 @@ import javax.swing.SwingUtilities
 
 // Family as it looks, against a pretend Octo server with Family on: joining
 // with a code, a listener's plan, saved songs, requests and devices, the
-// request sheet, and a manager's members and waiting requests.
+// request sheet, a member whose music goes to the shared library, a
+// manager's members and waiting requests, and a changed server certificate
+// asked about again.
 // Only when asked: OCTO_SHOTS=1 ./gradlew :desktop:test --tests '*FamilyShotsTest*'.
 // Saved under build/shots/polish/family/.
 class FamilyShotsTest {
@@ -30,6 +34,13 @@ class FamilyShotsTest {
         "requestsThisWeek":3,"storageUsedBytes":5400000000,"place":"Home","deviceId":"d_7Qm2abc",
         "quality":{"home":"Original","away":"Standard","familyLimitKbps":0,"familyAwayLimitKbps":160}}}"""
 
+    // A member whose songs go to the shared library, with a limit kept for
+    // when they go back to their own.
+    private val sharedMember = """"family":{"me":{"username":"winters","displayName":"Alex","role":"Member","managed":true,
+        ${abilities.replace("\"Request\"", "\"Direct\"").replace("\"storageLimitGb\":10", "\"storageLimitGb\":0,\"musicGoesTo\":\"Shared\"")},
+        "requestsThisWeek":0,"storageUsedBytes":5400000000,"place":"Home","deviceId":"d_7Qm2abc",
+        "quality":{"home":"Original","away":"Standard","familyLimitKbps":0,"familyAwayLimitKbps":160}}}"""
+
     private val owner = """"family":{"me":{"username":"winters","displayName":"Jordan","role":"Owner","managed":false,
         "abilities":{"addToLibrary":"Direct","requestQuality":"Best","autoApprove":true,"weeklyRequestLimit":0,"streamCap":0,"awayCap":0,
         "away":true,"devicesAtOnce":0,"downloadFiles":true,"offlineCopies":true,"share":true,"importPlaylists":true,"cleanOnly":false,
@@ -38,7 +49,7 @@ class FamilyShotsTest {
         "manager":{"members":[
           {"username":"alex","displayName":"Alex","role":"Listener","suspended":false,"devices":2,"playingNow":true,"pendingRequests":2,"storageUsedBytes":5400000000,"storageLimitGb":10},
           {"username":"sam","displayName":"Sam","role":"Kid","suspended":false,"devices":1,"playingNow":false,"pendingRequests":0,"storageUsedBytes":800000000,"storageLimitGb":5},
-          {"username":"riley","displayName":"Riley","role":"Member","suspended":true,"devices":0,"playingNow":false,"pendingRequests":0,"storageUsedBytes":21000000000,"storageLimitGb":50}],
+          {"username":"riley","displayName":"Riley","role":"Member","suspended":true,"devices":0,"playingNow":false,"pendingRequests":0,"storageUsedBytes":21000000000,"storageLimitGb":0,"musicGoesTo":"Shared"}],
         "pendingRequests":2,"liveStreams":1}}"""
 
     private fun request(id: String, title: String, artist: String, state: String, outcome: String? = null, quality: String = "Flac", kind: String = "Song", who: String = "Alex", note: String = "") =
@@ -130,6 +141,16 @@ class FamilyShotsTest {
                         rig.shot(scene, "family/settings-$section", 2_000)
                     }
 
+                    // Music goes to the shared library: no library size or meter.
+                    server.answer("getFamily", sharedMember, type = "octo")
+                    runBlocking { app.family.refresh() }
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        showSection(FAMILY, "plan")
+                        app.navigator.go(Page.Family)
+                    }
+                    rig.shot(scene, "family/shared-plan", 2_000)
+
                     server.answer("getFamily", owner, type = "octo")
                     runBlocking { app.family.refresh() }
                     for (section in listOf("plan", "members", "inbox")) {
@@ -148,6 +169,20 @@ class FamilyShotsTest {
                         app.family.addMember("sam", "Sam", FamilyPreset.Kid)
                     }
                     rig.shot(scene, "family/owner-invite-qr", 2_500)
+
+                    // The server's certificate changed while in use: asked about again.
+                    rig.reset(scene)
+                    SwingUtilities.invokeAndWait {
+                        app.popups.close()
+                        app.navigator.go(Page.Home)
+                        askAboutChangedCertificate(
+                            app.popups,
+                            app.accounts.security,
+                            CertificateQuestion("music.example.com", "3f9c0e5a7b2d4c6e8f1a3b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c0d2e", "spki:" + "cd".repeat(32)),
+                        )
+                    }
+                    rig.shot(scene, "certificate/changed", 1_500)
+                    SwingUtilities.invokeAndWait { app.popups.close() }
                 }
             }
         }

@@ -730,7 +730,7 @@ class OctoPlaybackService : MediaLibraryService() {
                 }
             }
             if (!player.playWhenReady) return
-            // The server's certificate changed and the question is up
+            // A changed server certificate is being asked about
             // (CertificateChangeHost): the song waits for the answer
             // instead of the queue being skipped through, and plays once
             // the certificate is trusted.
