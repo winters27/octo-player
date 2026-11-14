@@ -17,6 +17,7 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.ScanStatus
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.User
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -24,7 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // How often a running scan is asked how far it is.
-private const val SCAN_POLL_MS = 2_000L
+internal const val SCAN_POLL_MS = 2_000L
 
 // What the Servers section says about the server in use, in words.
 data class ServerOverview(
@@ -149,29 +150,82 @@ class ServerFactsModel(
         }
     }
 
-    // Asks how the scan is going every 2 seconds until it has stopped. Some
-    // servers answer before a scan has begun, so "not scanning" counts only
-    // once it was seen running, or when said twice.
+    // Asks how the scan is going until it has stopped, as ScanFollow says:
+    // every 2 seconds, waiting longer after each failed ask, and giving up
+    // after too many in a row (the next refresh asks again).
     private fun follow(inUse: Connection?, onDone: () -> Unit) {
         inUse ?: return
         following?.cancel()
         following = scope.launch {
-            var seen = false
-            var quiet = 0
+            val follow = ScanFollow()
+            var wait = SCAN_POLL_MS
             while (true) {
-                delay(SCAN_POLL_MS)
+                delay(wait)
                 if (connection() !== inUse) return@launch
-                val now = runCatching { inUse.client.scanStatus() }.getOrNull() ?: continue
-                if (now.scanning) {
-                    seen = true
-                    quiet = 0
-                    scan = now
-                } else if (seen || ++quiet >= 2) {
-                    scan = now
-                    onDone()
-                    return@launch
+                val now = try {
+                    inUse.client.scanStatus()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                when (val step = follow.next(now)) {
+                    is ScanStep.Again -> {
+                        step.status?.let { scan = it }
+                        wait = step.waitMs
+                    }
+                    is ScanStep.Done -> {
+                        scan = step.status
+                        onDone()
+                        return@launch
+                    }
+                    ScanStep.GiveUp -> return@launch
                 }
             }
         }
+    }
+}
+
+// Failed asks in a row before following a scan gives up, and the longest
+// wait between two asks.
+internal const val SCAN_FAILURES_MAX = 8
+internal const val SCAN_WAIT_MAX_MS = 30_000L
+
+// What following a scan does after one ask.
+internal sealed interface ScanStep {
+    // Asks again after `waitMs`, showing `status` when it has news.
+    data class Again(val status: ScanStatus?, val waitMs: Long) : ScanStep
+
+    // The scan has stopped.
+    data class Done(val status: ScanStatus) : ScanStep
+
+    // Too many asks failed in a row.
+    data object GiveUp : ScanStep
+}
+
+// Follows a scan one answer at a time (null for an ask that failed). Some
+// servers answer before a scan has begun, so "not scanning" counts only
+// once it was seen running, or when said twice. Each failed ask in a row
+// doubles the wait, up to SCAN_WAIT_MAX_MS, and `maxFailures` of them end
+// it; an answer starts the count again.
+internal class ScanFollow(private val maxFailures: Int = SCAN_FAILURES_MAX) {
+    private var seen = false
+    private var quiet = 0
+    private var failures = 0
+
+    fun next(now: ScanStatus?): ScanStep {
+        if (now == null) {
+            failures++
+            if (failures >= maxFailures) return ScanStep.GiveUp
+            return ScanStep.Again(null, (SCAN_POLL_MS shl failures.coerceAtMost(4)).coerceAtMost(SCAN_WAIT_MAX_MS))
+        }
+        failures = 0
+        if (now.scanning) {
+            seen = true
+            quiet = 0
+            return ScanStep.Again(now, SCAN_POLL_MS)
+        }
+        if (seen || ++quiet >= 2) return ScanStep.Done(now)
+        return ScanStep.Again(null, SCAN_POLL_MS)
     }
 }
