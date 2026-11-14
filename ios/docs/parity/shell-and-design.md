@@ -349,7 +349,7 @@ Glass on iPhone: the 2026-10-07 decision (octo-ios-native-glass) is that every g
 - [x] Load states: Failed shows, centered with 32 dp padding, the message (14 sp regular, accent, centered) and 16 dp below it the accent button "Try again" (ui/common/LoadState.kt:48)
 - [x] Failure messages: unreachable "Couldn't reach the server. Check the address, and that you're on the right network." (data/UserMessages.kt:7)
 - [x] Failure messages: not Subsonic and busy "The server isn't answering right now. It may be restarting, so try again in a moment."; not Subsonic otherwise "That address answered, but not like a music server. Check the port." (data/UserMessages.kt:9)
-- [x] Failure messages: "Wrong username or password."; token sign-in refused with code 41 "This account can't sign in with a token. Turn on Legacy sign-in under Advanced.", other auth "The server doesn't take this way of signing in." (data/UserMessages.kt:12)
+- [x] Failure messages: "Wrong username or password."; token sign-in refused with code 41 "This account can't sign in with a token. Choose Legacy password under Advanced, Signing in.", other auth "The server doesn't take this way of signing in." (data/UserMessages.kt:12)
 - [x] Failure messages: not found "That isn't on the server any more."; server error "The server said: <message>"; anything else "Something went wrong." (data/UserMessages.kt:16)
 - [x] A load cancelled is not a failure (no message) (ui/common/LoadState.kt:31)
 - [x] Pull to refresh on library pages: Material 3 pull-to-refresh with its default indicator and threshold; the theme does not override its colours (ui/common/Refreshable.kt:66) (iPhone: the system pull to refresh)

@@ -416,7 +416,7 @@ final class SignInModel {
                 busy = false
                 await submit(session, sync: sync)
             case .unsafe:
-                self.error = legacyUnsafeMessage
+                self.error = SignInWords.legacyUnsafe
             case .none:
                 self.error = userMessage(plainError(error))
                 // A sign-in page in front of the server opens Advanced at its fields.

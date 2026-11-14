@@ -110,7 +110,3 @@ public func legacyRetry(_ error: Error?, mode: AuthMode, url: URL) -> LegacyRetr
     guard mode == .token, let error, case .authNotSupported(41, _) = SubsonicError(error) else { return .none }
     return url.scheme?.lowercased() == "https" || ServerAddress.isPrivate(url) ? .retry : .unsafe
 }
-
-/// Said when a server needs the password itself over plain http outside the home network.
-public let legacyUnsafeMessage =
-    "This server needs the password sent as it is, which isn't safe over http. Use https, or turn on Legacy sign-in under Advanced."

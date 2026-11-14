@@ -44,7 +44,7 @@ public func userMessage(for error: Error) -> String? {
         return "Wrong username or password."
     case .authUnsupported(let code, _):
         return code == 41
-            ? "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
+            ? SignInWords.legacyHint
             : "The server doesn't take this way of signing in."
     case .notFound:
         return "That isn't on the server any more."

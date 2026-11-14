@@ -141,7 +141,7 @@ import Testing
         #expect(userMessage(for: OctoError.http(404)) == "That address answered, but not like a music server. Check the port.")
         #expect(userMessage(for: OctoError.notSubsonic()) == "That address answered, but not like a music server. Check the port.")
         #expect(userMessage(for: OctoError.wrongCredentials("x")) == "Wrong username or password.")
-        #expect(userMessage(for: OctoError.authUnsupported(code: 41, message: "")) == "This account can't sign in with a token. Turn on Legacy sign-in under Advanced.")
+        #expect(userMessage(for: OctoError.authUnsupported(code: 41, message: "")) == "This account can't sign in with a token. Choose Legacy password under Advanced, Signing in.")
         #expect(userMessage(for: OctoError.authUnsupported(code: 42, message: "")) == "The server doesn't take this way of signing in.")
         #expect(userMessage(for: OctoError.notFound("")) == "That isn't on the server any more.")
         #expect(userMessage(for: OctoError.server(code: 0, message: "Disk full")) == "The server said: Disk full")

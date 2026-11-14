@@ -125,7 +125,7 @@ import Testing
             == "That address answered, but not like a music server. Check the port.")
         #expect(userMessage(plainError(SubsonicError.wrongCredentials("x"))) == "Wrong username or password.")
         #expect(userMessage(plainError(SubsonicError.authNotSupported(code: 41, message: "x")))
-            == "This account can't sign in with a token. Turn on Legacy sign-in under Advanced.")
+            == "This account can't sign in with a token. Choose Legacy password under Advanced, Signing in.")
         #expect(userMessage(plainError(SubsonicError.authNotSupported(code: 42, message: "x"))) == "The server doesn't take this way of signing in.")
         #expect(userMessage(plainError(SubsonicError.notFound("x"))) == "That isn't on the server any more.")
         #expect(userMessage(plainError(SubsonicError.server(code: 0, message: "No server signed in"))) == "The server said: No server signed in")

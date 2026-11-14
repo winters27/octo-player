@@ -457,6 +457,7 @@ struct SignInView: View {
     private var gatewaySection: some View {
         @Bindable var model = model
         let password = model.gatewayKind == .password
+        let labels = GatewayWords.fieldLabels(model.gatewayKind, detected: model.gatewayMet)
         return Section(GatewayWords.sectionLabel, GatewayWords.caption) {
             VStack(spacing: 8) {
                 ForEach(GatewayKind.allCases, id: \.self) { kind in
@@ -466,7 +467,7 @@ struct SignInView: View {
             if model.gatewayKind != .none {
                 GlassField {
                     FieldIcon(password ? "person" : "person.text.rectangle")
-                    TextField(password ? GatewayWords.usernameLabel : GatewayWords.clientIdLabel, text: $model.gatewayFirst)
+                    TextField(labels.first, text: $model.gatewayFirst)
                         .keyboardType(password ? .default : .asciiCapable)
                         .focused($focus, equals: .gatewayFirst)
                         .submitLabel(.next)
@@ -474,14 +475,14 @@ struct SignInView: View {
                 }
                 GlassField {
                     FieldIcon(password ? "key" : "lock")
-                    SecretField(password ? GatewayWords.passwordLabel : GatewayWords.clientSecretLabel, text: $model.gatewaySecond,
+                    SecretField(labels.second, text: $model.gatewaySecond,
                                 revealed: revealGateway)
                         .focused($focus, equals: .gatewaySecond)
                     RevealToggle(revealed: $revealGateway)
                 }
                 // The values saved for this kind stay while its fields are left empty.
                 if model.gatewayKind == model.gatewaySaved {
-                    Text(GatewayWords.savedLabel).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                    Text(SignInWords.unchanged).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 }
                 // A sign-in page's password never crosses the internet readable.
                 if model.gatewayInsecure {

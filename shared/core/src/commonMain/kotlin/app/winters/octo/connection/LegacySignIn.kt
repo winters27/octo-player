@@ -28,8 +28,3 @@ fun legacyRetry(error: Throwable?, mode: AuthMode, url: HttpUrl): LegacyRetry = 
     url.isHttps || isPrivateHost(url) -> LegacyRetry.Retry
     else -> LegacyRetry.Unsafe
 }
-
-// Said when a server needs the password itself over plain http outside the
-// home network.
-const val LEGACY_UNSAFE_MESSAGE =
-    "This server needs the password sent as it is, which isn't safe over http. Use https, or turn on Legacy sign-in under Advanced."

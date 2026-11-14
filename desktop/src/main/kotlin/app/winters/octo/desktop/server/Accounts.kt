@@ -3,10 +3,10 @@ package app.winters.octo.desktop.server
 import app.winters.octo.connection.DISTRUSTED_MESSAGE
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayWords
-import app.winters.octo.connection.LEGACY_UNSAFE_MESSAGE
 import app.winters.octo.connection.LegacyRetry
 import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.ServerHeader
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.gatewayAllowed
 import app.winters.octo.connection.isHeaderName
@@ -846,7 +846,7 @@ class Accounts(
                 untrusted(own, e, main, home)?.let { return Attempt.Untrusted(it) }
                 return when (legacyRetry(e, mode, main)) {
                     LegacyRetry.Retry -> attempt(request, editing, AuthMode.LegacyPassword)
-                    LegacyRetry.Unsafe -> Attempt.Failed(LEGACY_UNSAFE_MESSAGE)
+                    LegacyRetry.Unsafe -> Attempt.Failed(SignInWords.LEGACY_UNSAFE)
                     LegacyRetry.None -> Attempt.Failed(e.userMessage() + homeHttpsHint(main, e), (e as? SubsonicException.NotSubsonic)?.gateway)
                 }
             }
@@ -1036,16 +1036,16 @@ fun homeHttpsHint(url: HttpUrl, e: Throwable): String =
 fun Throwable.userMessage(): String = when (this) {
     is SubsonicException.Unreachable ->
         if (isDistrusted()) DISTRUSTED_MESSAGE
-        else "Couldn't reach the server. Check the address, and that you're on the right network."
+        else SignInWords.UNREACHABLE
     is SubsonicException.NotSubsonic ->
         GatewayWords.failureFor(this)
-            ?: if (serverBusy) "The server isn't answering right now. It may be restarting, so try again in a moment."
-            else "That address answered, but not like a music server. Check the port."
-    is SubsonicException.WrongCredentials -> "Wrong username or password."
+            ?: if (serverBusy) SignInWords.RESTARTING
+            else SignInWords.NOT_MUSIC
+    is SubsonicException.WrongCredentials -> SignInWords.WRONG_PASSWORD
     is SubsonicException.AuthNotSupported ->
-        if (code == 41) "This account can't sign in with a token. Turn on Legacy sign-in under Advanced."
-        else "The server doesn't take this way of signing in."
+        if (code == 41) SignInWords.LEGACY_HINT
+        else SignInWords.WAY_REFUSED
     is SubsonicException.NotFound -> "That isn't on the server any more."
     is SubsonicException.Server -> "The server said: $message"
-    else -> "Something went wrong."
+    else -> SignInWords.SOMETHING_WRONG
 }

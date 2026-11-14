@@ -38,8 +38,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.winters.octo.connection.LEGACY_UNSAFE_MESSAGE
 import app.winters.octo.connection.LegacyRetry
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.isHeaderName
 import app.winters.octo.connection.isHeaderValue
 import app.winters.octo.connection.legacyRetry
@@ -659,7 +659,7 @@ class SignInViewModel @Inject constructor(
                             submit()
                             return@launch
                         }
-                        LegacyRetry.Unsafe -> error = LEGACY_UNSAFE_MESSAGE
+                        LegacyRetry.Unsafe -> error = SignInWords.LEGACY_UNSAFE
                         LegacyRetry.None -> error = failed.userMessage()
                     }
                 }

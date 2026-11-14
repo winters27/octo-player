@@ -876,7 +876,3 @@ private struct SeenNetwork: Equatable, Sendable {
         gateways = path.gateways.map { "\($0)" }
     }
 }
-
-extension SignInWords {
-    static let gone = "That server isn't in your list any more."
-}

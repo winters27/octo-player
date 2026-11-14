@@ -7,15 +7,16 @@ import Testing
 
 /// Every gateway word against the fixture the other apps test against too.
 @Suite struct GatewayWordsTests {
+    /// Every sign-in page met, and none.
+    static let detected: [Gateway?] = [nil] + Gateway.allCases.map { Optional($0) }
+
     static func swiftWords() -> [String: String] {
         var words: [String: String] = [
             "label.section": GatewayWords.sectionLabel,
             "label.caption": GatewayWords.caption,
-            "label.username": GatewayWords.usernameLabel,
-            "label.password": GatewayWords.passwordLabel,
             "label.clientId": GatewayWords.clientIdLabel,
             "label.clientSecret": GatewayWords.clientSecretLabel,
-            "label.saved": GatewayWords.savedLabel,
+            "pointer": GatewayWords.pointer,
             "join.hint": GatewayWords.joinHint,
             "share.line": GatewayWords.shareLine,
             "play.failure": GatewayWords.playFailure,
@@ -33,7 +34,19 @@ import Testing
             for sent in [false, true] { words["failure.\(gateway.rawValue).\(sent)"] = GatewayWords.failure(gateway, loginSent: sent) }
             for sent in [false, true] { words["row.\(gateway.rawValue).\(sent)"] = GatewayWords.row(gateway, loginSent: sent) }
         }
-        for kind in GatewayKind.allCases { words["label.kind.\(kind.rawValue)"] = GatewayWords.kindLabel(kind) }
+        for kind in GatewayKind.allCases {
+            words["label.kind.\(kind.rawValue)"] = GatewayWords.kindLabel(kind)
+            if let helper = GatewayWords.kindHelper(kind) { words["label.helper.\(kind.rawValue)"] = helper }
+            if let tip = GatewayWords.tip(kind) { words["tip.\(kind.rawValue)"] = tip }
+        }
+        for kind in [GatewayKind.password, .cloudflareToken] {
+            for met in detected {
+                let labels = GatewayWords.fieldLabels(kind, detected: met)
+                let key = "field.\(kind.rawValue).\(met?.rawValue ?? "none")"
+                words["\(key).first"] = labels.first
+                words["\(key).second"] = labels.second
+            }
+        }
         return words
     }
 
@@ -48,6 +61,18 @@ import Testing
         for (key, text) in Self.swiftWords() {
             #expect(text.unicodeScalars.allSatisfy { $0.isASCII }, "\(key)")
             #expect(!text.contains("\u{2014}") && !text.contains("\u{2013}"), "\(key)")
+        }
+    }
+
+    /// Red when a sign-in page field row reads like the server's own username or password again.
+    @Test func noSignInPageFieldIsNamedLikeTheServersOwnLogin() {
+        for kind in GatewayKind.allCases {
+            for met in Self.detected {
+                let labels = GatewayWords.fieldLabels(kind, detected: met)
+                for label in [labels.first, labels.second] {
+                    #expect(label != SignInWords.username && label != SignInWords.password, "\(kind) \(String(describing: met))")
+                }
+            }
         }
     }
 

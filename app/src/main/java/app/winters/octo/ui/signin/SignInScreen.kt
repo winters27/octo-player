@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.R
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.formatFingerprint
 import app.winters.octo.data.SignInError
 import app.winters.octo.design.AccentButton
@@ -88,6 +89,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.glassPanel
+import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.Scheme
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.ui.common.BackButton
@@ -618,7 +620,7 @@ private fun Advanced(vm: SignInViewModel) {
         if (!vm.joining) {
             SwitchRow(
                 "Legacy sign-in",
-                "Only for older servers that reject the normal sign-in.",
+                SignInWords.methodHelper(AuthMode.LegacyPassword, vm.takesApiKeys),
                 checked = vm.legacyPassword && !vm.useApiKey,
                 enabled = !vm.useApiKey,
             ) { vm.legacyPassword = it }
@@ -628,7 +630,7 @@ private fun Advanced(vm: SignInViewModel) {
             if (vm.takesApiKeys != false || vm.useApiKey) {
                 SwitchRow(
                     "Sign in with an API key",
-                    if (vm.takesApiKeys == true) "Your server gives out API keys." else "For servers that give out API keys.",
+                    SignInWords.methodHelper(AuthMode.ApiKey, vm.takesApiKeys),
                     checked = vm.useApiKey,
                 ) { vm.useApiKey = it }
                 if (vm.useApiKey) {
@@ -644,7 +646,7 @@ private fun Advanced(vm: SignInViewModel) {
             }
         }
 
-        Section("Home network address", "Optional. On Wi-Fi, Octo uses it when it answers, and the main address otherwise.") {
+        Section("Home network address", "Optional. ${SignInWords.HOME_NOTE}") {
             GlassInput(
                 value = vm.home,
                 onValueChange = { vm.home = it },
@@ -653,7 +655,7 @@ private fun Advanced(vm: SignInViewModel) {
             )
         }
 
-        Section("Custom headers", "Sent with every request to this server, such as an access token for a proxy in front of it.") {
+        Section(SignInWords.CUSTOM_HEADERS, SignInWords.HEADERS_DESCRIPTION) {
             vm.headers.forEachIndexed { index, header ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     GlassInput(
@@ -705,24 +707,25 @@ private fun GatewaySignIn(vm: SignInViewModel) {
         )
         if (vm.gatewayKind != GatewayKind.None) {
             val password = vm.gatewayKind == GatewayKind.Password
+            val labels = GatewayWords.fieldLabels(vm.gatewayKind, vm.gateway)
             GlassInput(
                 value = vm.gatewayFirst,
                 onValueChange = { vm.gatewayFirst = it },
-                placeholder = if (password) GatewayWords.LABEL_USERNAME else GatewayWords.LABEL_CLIENT_ID,
+                placeholder = labels.first,
                 keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Text else KeyboardType.Ascii, imeAction = ImeAction.Next),
                 leading = { FieldIcon(if (password) OctoIcons.Artist else OctoIcons.Key) },
             )
             GlassInput(
                 value = vm.gatewaySecond,
                 onValueChange = { vm.gatewaySecond = it },
-                placeholder = if (password) GatewayWords.LABEL_PASSWORD else GatewayWords.LABEL_CLIENT_SECRET,
+                placeholder = labels.second,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
                 visualTransformation = if (revealSecond) VisualTransformation.None else PasswordVisualTransformation(),
                 leading = { FieldIcon(if (password) OctoIcons.Key else OctoIcons.Lock) },
                 trailing = { RevealToggle(revealSecond) { revealSecond = !revealSecond } },
             )
             // Values saved for this kind stay while its fields are left empty.
-            if (vm.gatewayKind == vm.gatewaySaved) Text(GatewayWords.LABEL_SAVED, style = OctoType.caption, color = OctoColors.TextMuted)
+            if (vm.gatewayKind == vm.gatewaySaved) Text(SignInWords.UNCHANGED, style = OctoType.caption, color = OctoColors.TextMuted)
             // A sign-in page's password never crosses the internet readable.
             if (vm.insecure) Text(GatewayWords.NEEDS_HTTPS, style = OctoType.caption, color = OctoColors.Error)
         }

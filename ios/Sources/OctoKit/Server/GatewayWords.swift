@@ -3,23 +3,23 @@ import Foundation
 /// Every word the iPhone app says about a sign-in page in front of a server. Android and the
 /// desktop say the same; both are checked against fixtures/gateway/words.json.
 public enum GatewayWords {
-    public static let sectionLabel = "Sign-in page in front of the server"
-    public static let caption = "For Authentik, Authelia, a proxy password or Cloudflare Access in front of the server."
-    public static let usernameLabel = "Username"
-    public static let passwordLabel = "Password"
+    public static let sectionLabel = "Sign-in page in front"
+    public static let caption = "For Authentik, Authelia, a proxy password or Cloudflare Access"
     public static let clientIdLabel = "Client ID"
     public static let clientSecretLabel = "Client Secret"
-    public static let savedLabel = "Saved. Leave empty to keep it."
     public static let joinHint = "If you don't have an account on this sign-in page, ask who invited you."
     public static let shareLine = "This server has a sign-in page in front of it, so people need an account there to open this link."
     public static let playFailure = "A sign-in page answered instead of the server."
     public static let needsHttps = "Use https for this address. The sign-in page password would cross the internet readable."
     public static let rowNeedsHttps = "Needs https for its sign-in page"
-    public static let bothPassword = "Enter both the username and the password."
+    public static let bothPassword = "Enter both the sign-in page username and the sign-in page password."
     public static let bothToken = "Enter both the Client ID and the Client Secret."
-    public static let colon = "The username can't contain a colon."
+    public static let colon = "The sign-in page username can't contain a colon."
     public static let control = "Remove the line break or special character from the sign-in page fields."
     public static let reservedRow = "That header is set by the sign-in page fields. Remove the row."
+    /// The line under Sign in while the sign-in page's group calls out a failure: a button that
+    /// brings the group back into view.
+    public static let pointer = "Your server's sign-in page needs its own login, below."
 
     public static func name(_ gateway: Gateway) -> String {
         switch gateway {
@@ -62,6 +62,13 @@ public enum GatewayWords {
         }
     }
 
+    /// A failure's words as the sign-in page group's own error note shows them, under the fields
+    /// it names: "under Advanced" there reads "above".
+    public static func inGroup(_ text: String) -> String {
+        text.replacingOccurrences(of: "Otherwise fill in the sign-in page fields under Advanced.", with: "Otherwise fill in the fields above.")
+            .replacingOccurrences(of: "Fill in the sign-in page fields under Advanced.", with: "Fill in the fields above.")
+    }
+
     /// How to fill in the fields for that gateway.
     public static func hint(_ gateway: Gateway) -> String {
         switch gateway {
@@ -78,11 +85,38 @@ public enum GatewayWords {
         }
     }
 
+    /// The note under the sign-in page group when a kind is picked and no sign-in page was met: how
+    /// to get a service token. Nil when there is nothing to add.
+    public static func tip(_ kind: GatewayKind) -> String? {
+        kind == .cloudflareToken ? hint(.cloudflareAccess) : nil
+    }
+
     public static func kindLabel(_ kind: GatewayKind) -> String {
         switch kind {
         case .none: "None"
         case .password: "Username and password"
-        case .cloudflareToken: "Cloudflare service token"
+        case .cloudflareToken: "Service token"
+        }
+    }
+
+    /// The line under a kind in the choice: what each is for. None has none.
+    public static func kindHelper(_ kind: GatewayKind) -> String? {
+        switch kind {
+        case .none: nil
+        case .password: "Authentik, Authelia or a proxy password"
+        case .cloudflareToken: "Cloudflare Access"
+        }
+    }
+
+    /// The names of a kind's two field rows: Cloudflare's own for a service token, the met sign-in
+    /// page's own when it is one whose words are known, and otherwise names that never read like
+    /// the server's own username and password.
+    public static func fieldLabels(_ kind: GatewayKind, detected: Gateway?) -> (first: String, second: String) {
+        if kind == .cloudflareToken { return (clientIdLabel, clientSecretLabel) }
+        switch detected {
+        case .authentik?: return ("Authentik username", "App password")
+        case .authelia?: return ("Authelia username", "Authelia password")
+        default: return ("Sign-in page username", "Sign-in page password")
         }
     }
 

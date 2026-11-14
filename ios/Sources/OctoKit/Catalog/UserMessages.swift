@@ -8,7 +8,7 @@ public func userMessage(_ error: Error) -> String {
     if let octo = error as? OctoError {
         switch octo {
         case .wrongCredentials: return SignInWords.wrongPassword
-        case .authUnsupported(41, _): return SignInWords.needsLegacy
+        case .authUnsupported(41, _): return SignInWords.legacyHint
         case .authUnsupported: return SignInWords.wayRefused
         case .notFound: return "That isn't on the server any more."
         case .server(_, let message): return "The server said: \(message)"

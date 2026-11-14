@@ -92,6 +92,7 @@ import app.winters.octo.desktop.ui.keyRim
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.shownAddress
 import dev.chrisbanes.haze.HazeState
@@ -403,13 +404,14 @@ internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit, joining:
 private fun GatewaySection(form: SignInForm, submit: () -> Unit, joining: Boolean) {
     Section(GatewayWords.LABEL_SECTION, GatewayWords.LABEL_CAPTION) {
         KindChoice(form.gatewayKind, form::pickGateway)
-        val saved = if (form.keepsSavedGateway) GatewayWords.LABEL_SAVED else ""
+        val saved = if (form.keepsSavedGateway) SignInWords.UNCHANGED else ""
+        val labels = GatewayWords.fieldLabels(form.gatewayKind, form.detected)
         when (form.gatewayKind) {
             GatewayKind.None -> Unit
             GatewayKind.Password -> {
-                Label(GatewayWords.LABEL_USERNAME)
+                Label(labels.first)
                 GlassField(form.gatewayFirst, form::typeGatewayFirst, Modifier.fillMaxWidth(), placeholder = saved, onSubmit = submit)
-                Label(GatewayWords.LABEL_PASSWORD)
+                Label(labels.second)
                 SecretField(form.gatewaySecond, form::typeGatewaySecond, saved, submit)
             }
             GatewayKind.CloudflareToken -> {

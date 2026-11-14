@@ -8,6 +8,7 @@ import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.ServerClients
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.StoredConnection
 import app.winters.octo.connection.decodeConnection
 import app.winters.octo.connection.encodeConnection
@@ -450,7 +451,7 @@ class SessionRepository @Inject constructor(
     // reach leaves everything as it was; what it says about itself is kept
     // fresh. The server in use puts its things away before the new one is.
     suspend fun switchTo(id: String): SwitchResult = changes.withLock {
-        val server = _servers.value.find(id) ?: return@withLock SwitchResult.Failed("That server isn't in your list any more.")
+        val server = _servers.value.find(id) ?: return@withLock SwitchResult.Failed(SignInWords.GONE)
         val from = current
         if (from?.id == id) return@withLock SwitchResult.Done(from, null)
         if (server.signedOut || server.passwordSealed.isEmpty()) return@withLock SwitchResult.NeedsPassword(server)
