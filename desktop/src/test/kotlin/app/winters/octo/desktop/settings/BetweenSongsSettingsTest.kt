@@ -244,6 +244,38 @@ class BetweenSongsSettingsTest {
         assertEquals(10, decodeBetweenSongsFile(choiceFile().readBytes())?.crossfadeLength)
     }
 
+    // A Between songs file that failed to be written goes at the session's
+    // end (the exit's flush) with no later write to carry it: Gapless whose
+    // hidden Crossfade length went from 12 to 6 is read back at 6 after an
+    // older Octo wrote over the file, never at the stale 12. A session that
+    // wrote no settings file writes no Between songs file.
+    @Test
+    fun aFailedBetweenSongsWriteGoesAtTheSessionsEnd() {
+        older()
+        SettingsStore(file()).flush()
+        assertFalse("nothing written, so nothing beside it", choiceFile().exists())
+
+        startOver()
+        val disk = HeldDisk()
+        val store = (SettingsStore.openOn(disk, file(), clock = StepClock()) as SettingsOpen.Opened).store
+        store.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        store.editBetweenSongs(BetweenSongsChange.Length(12))
+        store.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Gapless))
+        assertEquals(12, decodeBetweenSongsFile(choiceFile().readBytes())?.crossfadeLength)
+        disk.refuseReplace += "settings.between-songs.json"
+        store.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Crossfade))
+        store.editBetweenSongs(BetweenSongsChange.Length(6))
+        store.editBetweenSongs(BetweenSongsChange.Choose(BetweenSongs.Gapless))
+        assertEquals("still the stale one", 12, decodeBetweenSongsFile(choiceFile().readBytes())?.crossfadeLength)
+        disk.refuseReplace.clear()
+        store.flush()
+        assertEquals(BetweenSongsFile.of(store.current.playback), decodeBetweenSongsFile(choiceFile().readBytes()))
+        olderOctoWritesOver()
+        val read = SettingsStore(file()).current.playback
+        assertEquals(BetweenSongs.Gapless, read.betweenSongs)
+        assertEquals("the last length, not the stale one", 6, read.crossfadeLength)
+    }
+
     // The Between songs file is read only for a file an older Octo wrote;
     // while it is held, that file waits as a held settings file does.
     @Test

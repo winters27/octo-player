@@ -574,8 +574,10 @@ class SettingsStore internal constructor(
     // could not be moved.
     private var stuckPending = start.stuckPending
 
-    // The Between songs file as this store last wrote it.
+    // The Between songs file as this store last wrote it, and whether a
+    // write of it failed since the file was last written.
     private var betweenSongsWritten: BetweenSongsFile? = null
+    private var betweenSongsOwed = false
 
     // The settings changed since the file was last written, if any.
     private var unsaved: AppSettings? = null
@@ -672,6 +674,9 @@ class SettingsStore internal constructor(
             if (settings == null) {
                 if (pendingLeft) dropPending()
                 moveStuckAside()
+                // The file holds this state: a Between songs file that
+                // failed to go with it goes now.
+                if (betweenSongsOwed) keepBetweenSongs(_state.value)
                 return
             }
             if (save(settings)) unsaved = null else flushIn(writeRetryMs)
@@ -730,7 +735,8 @@ class SettingsStore internal constructor(
     }
 
     // The Between songs file, written when what it holds changed; a write
-    // that fails is tried again after the next.
+    // that fails is tried again after the next, or at the next flush with
+    // nothing waiting (the app's exit among them).
     private fun keepBetweenSongs(settings: AppSettings) {
         val at = betweenSongsFile ?: return
         val now = BetweenSongsFile.of(settings.playback)
@@ -738,8 +744,10 @@ class SettingsStore internal constructor(
         try {
             disk.replace(at, encodeBetweenSongsFile(now))
             betweenSongsWritten = now
+            betweenSongsOwed = false
         } catch (e: IOException) {
             betweenSongsWritten = null
+            betweenSongsOwed = true
         }
     }
 
