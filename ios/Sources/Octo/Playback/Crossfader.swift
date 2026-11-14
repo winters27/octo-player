@@ -74,18 +74,19 @@ final class Crossfader {
     /// The silence gate the playing song was armed with, for an early fade.
     private var outgoingGate: Double?
 
-    /// The generation registered with the session and not yet handed over, its plan, its next song
-    /// and whether its start commits before main's acknowledgement (AirPlay's quiet starts).
-    private var nextGeneration: Int64 = 1
-    private var registered: Int64 = -1
+    /// Main's side of the blend's rules (OctoKit's `PhoneBlendMain`): the generations registered
+    /// and handed over, the phase rule's disarm, the old song's kept frames through a pause, and a
+    /// blend end that waits for them.
+    private let main: PhoneBlendMain
+    private var registered: Int64 { main.registered }
+    private var handedOver: Int64 { main.handedOver }
+    private var leaving: Bool { main.leaving }
+    private var followUpFor: Int64 { main.followUpFor }
+    /// The registered generation's plan and next song, and the generations whose start commits
+    /// before main's acknowledgement (AirPlay's quiet starts).
     private var registeredPlan: TransitionPlan?
     private var registeredNext: (entryId: String?, uri: String)?
     private var quietStarts: Set<Int64> = []
-    /// The generation handed over and not yet finished, and whether its old song was told to leave.
-    private var handedOver: Int64 = -1
-    private var leaving = false
-    /// An undone generation owed its follow-up, once the edit's own write has applied.
-    private var followUpFor: Int64 = -1
 
     /// During the blend: the deck playing out the old song, and the plan.
     private(set) var outgoing: Deck?
@@ -172,12 +173,17 @@ final class Crossfader {
         var tail: Bool
         var head: Bool
         var reading: Bool
+        /// Whether each deck has read its song's own loudness tags (the incoming song's gain).
+        var currentTags: Bool
+        var nextTags: Bool
 
         var core: PlanKey {
             var c = self
             c.tail = false
             c.head = false
             c.reading = false
+            c.currentTags = false
+            c.nextTags = false
             return c
         }
     }
@@ -191,6 +197,8 @@ final class Crossfader {
         self.scout = scout
         self.profiles = profiles
         self.lengths = lengths
+        main = PhoneBlendMain(mix: mix)
+        main.onLost = { _ in playbackLog.error("automix: the mix's message ring was full; a message was lost") }
         spare.parked = true
     }
 
@@ -224,47 +232,26 @@ final class Crossfader {
     /// skip, new items, a stop, an edit that leaves another song on now): only it drops those kept
     /// frames. Every caller calls `followUp()` once its own change has applied.
     func interrupt(_ reason: BlendDisarm = .edit, releasing: Bool = true) {
-        if releasing {
-            keptOn?.dropKept()
-            keptOn = nil
-        }
-        if reason == .pause {
-            // A pause while the kept frames play pauses them too, and they wait again.
-            keptOn?.playWhenReady = false
-        }
-        let pausedPastHandover = reason == .pause && handedOver >= 0 && !leaving ? outgoing : nil
-        pausedPastHandover?.playWhenReady = false
-        disarm(reason)
-        if let pausedPastHandover { keptOn = pausedPastHandover }
+        let wasRegistered = registered >= 0
+        main.interrupt(reason, releasing: releasing)
+        if wasRegistered { clearRegistration() }
         dropPlan()
         unloadSpare()
         schedule(0)
     }
 
-    /// The deck holding the old song's frames up to the start through a pause past the handover.
-    private var keptOn: Deck?
-
     /// Playing again: the old song's kept frames play first, then the new song comes in where they
     /// end. Called before the song on now plays.
     func resumed() {
-        keptOn?.playWhenReady = true
+        main.resumed()
     }
 
     /// "Pause at the end of this song" changes to `stop`: a start not yet handed over is undone
     /// first, so the song on now ends where it stops; then the flag is written; then the undone
     /// start hears what follows the song. A blend already handed over plays on, the flag landing
     /// on the song on screen.
-    func endOfSongChanged(to stop: Bool, write: () -> Void) {
-        switch endOfSongWrite(old: player.deck.pauseAtEndOfSong, new: stop, registered: registered >= 0) {
-        case .skip:
-            return
-        case .write:
-            write()
-        case .disarmThenWrite:
-            interrupt(.edit, releasing: false)
-            write()
-            followUp()
-        }
+    func endOfSongChanged(to stop: Bool) {
+        main.endOfSongChanged(on: player.deck.render, to: stop, undo: { interrupt(.edit, releasing: false) }, pass: followUpPass)
     }
 
     /// An edit of the queue that left the song on now unchanged: on the iPhone the spare holds no
@@ -289,16 +276,21 @@ final class Crossfader {
     /// past its end: sent once the change that undid it has applied (its follower brought in line
     /// with the queue), so a song put next by that change is the one heard.
     func followUp() {
-        let g = followUpFor
-        guard g >= 0 else { return }
-        followUpFor = -1
-        send(.followUp(generation: g, pass: followUpPass()))
+        main.followUp(pass: followUpPass)
     }
 
     /// The listener's speed and pitch changed: every deck plays at them, except that a
     /// tempo-matched song (in its blend, or easing back after it) plays at its rate times them,
-    /// and a parked spare at its plan's. During a blend the session hears of it.
+    /// and a parked spare at its plan's. A start registered and not handed over is undone first,
+    /// before any deck's rate or latency moves; during a blend the session hears of it.
     func paceChanged(_ pace: Pace) {
+        if main.paceChanged(Double(pace.speed)) {
+            clearRegistration()
+            followUp()
+            dropPlan()
+            unloadSpare()
+            schedule(0)
+        }
         let ease = easing.flatMap { $0.deck === player.deck ? $0 : nil }
         for deck in [player.deck, spare] + (outgoing.map { [$0] } ?? []) {
             if deck === outgoing {
@@ -311,7 +303,6 @@ final class Crossfader {
                 deck.setPace(pace)
             }
         }
-        if outgoing != nil && handedOver >= 0 { send(.paceChanged(Double(pace.speed))) }
     }
 
     /// Runs `write` now, or, while a blend is under way, once it is over. For the app's own queue
@@ -344,7 +335,7 @@ final class Crossfader {
     var armed: Bool { registered >= 0 }
 
     /// Whether the ticker must keep running: a generation is live or owes main something.
-    var live: Bool { registered >= 0 || handedOver >= 0 || followUpFor >= 0 || !waiting.isEmpty || outgoing != nil }
+    var live: Bool { registered >= 0 || handedOver >= 0 || followUpFor >= 0 || !waiting.isEmpty || outgoing != nil || main.endWaits }
 
     // MARK: The ticker
 
@@ -359,6 +350,8 @@ final class Crossfader {
         }
         lastTickMs = now
         drainEvents()
+        // A blend end that waited for the old song's kept frames, once they are out.
+        if let ease = main.endDue() { finishFade(easeFromMs: ease) }
         #if DEBUG
         MixTapReport.shared.poll(player.output)
         #endif
@@ -412,24 +405,25 @@ final class Crossfader {
                 playbackLog.info("automix: the blend moved to \(Int(event.ms)) ms, \(Int(event.ms2)) ms longer")
             }
         case .blendEnd:
-            if g == handedOver { finishFade(easeFromMs: event.ms) }
+            // Once the old song's kept frames are out, after a pause past the handover.
+            if let ease = main.blendEnded(g, easeFromMs: event.ms) { finishFade(easeFromMs: ease) }
         case .cancelled:
             canceled(g, event.cause)
         case .followUpNeeded:
-            if g == followUpFor { followUpFor = -1 }
-            send(.followUp(generation: g, pass: followUpPass()))
+            main.followUpNeeded(g, pass: followUpPass())
         }
     }
 
     private func proposed(_ g: Int64) {
-        // A second proposal for a generation handed over does nothing.
-        guard g != handedOver, g == registered else { return }
-        if mix.word.ack(g) || mix.word.state(of: g) == .acked {
+        switch main.proposed(g, from: player.deck.render, into: spare.render) {
+        case .ignored:
+            return
+        case .handedOver:
             handOver(g)
-        } else {
+        case .cancelled:
             // The render cancelled the start itself (at its commit deadline): the playing song goes
             // on and the rest of it is planned again.
-            forgetRegistration()
+            clearRegistration()
             dropPlan()
             idle()
             schedule(0)
@@ -441,51 +435,38 @@ final class Crossfader {
             playbackLog.info("automix: the blend was cancelled (\(cause.rawValue, privacy: .public))")
             forgetRegistration()
             // A deck's own pause undid it: what the playing song plays after its end is told now.
-            if cause == .paused { send(.followUp(generation: g, pass: followUpPass())) }
+            if cause == .paused { main.send(.followUp(generation: g, pass: followUpPass())) }
             dropPlan()
             unloadSpare()
             schedule(0)
-        } else if g == handedOver {
-            finishFade()
+        } else if let ease = main.blendEnded(g, easeFromMs: .nan) {
+            finishFade(easeFromMs: ease)
         }
-    }
-
-    /// Hands a message to the render thread. The ring fills only when the engine has not rendered
-    /// for a long while; a message lost there is logged.
-    private func send(_ input: BlendMainInput) {
-        if !mix.send(input) { playbackLog.error("automix: the mix's message ring was full; a message was lost") }
     }
 
     // MARK: The phase rule
 
     /// Forgets the registered generation, its word left cancelled unless main acknowledged it.
     private func forgetRegistration() {
-        if registered >= 0 {
-            _ = mix.word.cancel(registered)
-            // The playing song's part in a start that did not happen.
-            player.deck.processor.arm(nil)
-        }
-        registered = -1
+        let wasRegistered = registered >= 0
+        main.forget()
+        if wasRegistered { clearRegistration() }
+    }
+
+    /// The registered generation is gone: the playing song's part in a start that did not happen,
+    /// and its plan and next song.
+    private func clearRegistration() {
+        player.deck.processor.arm(nil)
         registeredPlan = nil
         registeredNext = nil
     }
 
-    /// Main's side of the phase rule: a registered start has its commit word cancelled before the
-    /// disarm goes, so every edit handled before this lands on the old song; a handed-over one has
-    /// its old song leave.
+    /// Main's side of the phase rule (`PhoneBlendMain.disarm`): a registered start is undone, a
+    /// handed-over one has its old song leave.
     private func disarm(_ reason: BlendDisarm) {
-        let g = registered
-        if g >= 0 {
-            _ = mix.word.cancel(g)
-            followUpFor = g
-            forgetRegistration()
-            send(.disarm(reason, generation: g))
-            return
-        }
-        if handedOver >= 0 && !leaving {
-            leaving = true
-            send(.disarm(reason, generation: handedOver))
-        }
+        let wasRegistered = registered >= 0
+        main.disarm(reason)
+        if wasRegistered { clearRegistration() }
     }
 
     /// What the outgoing deck plays after its end: nothing when it stops there, else the follower
@@ -504,32 +485,27 @@ final class Crossfader {
     func deckFailed(_ deck: Deck) {
         if deck === outgoing && handedOver >= 0 {
             // The old song failed mid-blend: the new one plays on alone.
-            send(.failed(.a, generation: handedOver, followUp: blendNoAnswer))
+            main.failedAfterHandover(.a)
         } else if deck === player.deck && handedOver >= 0 && !leaving {
             // The new song failed after the handover: the player hears it as the song on screen,
             // and the old one leaves at once.
-            leaving = true
-            send(.failed(.b, generation: handedOver, followUp: blendNoAnswer))
+            main.failedAfterHandover(.b)
         } else if deck === spare && loadedFor != nil {
             // The next song failed in the spare: the playing deck reaches it by its own advance
             // instead, once, and the spare is not loaded with it again for this transition.
             if let entry = loadedFor { failed.failed(entry) }
             playbackLog.info("automix: the next song could not start in the spare")
-            let g = registered
-            if g >= 0 {
-                _ = mix.word.cancel(g)
-                forgetRegistration()
-                send(.failed(.b, generation: g, followUp: followUpPass()))
+            if registered >= 0 {
+                main.failedBeforeHandover(.b, followUp: followUpPass())
+                clearRegistration()
             }
             unloadSpare()
             schedule(0)
         } else if deck === player.deck && registered >= 0 {
             // The playing song failed before the handover: the start is undone, and the player's
             // own failure handling plays the next song once on this deck.
-            let g = registered
-            _ = mix.word.cancel(g)
-            forgetRegistration()
-            send(.failed(.a, generation: g, followUp: blendNoAnswer))
+            main.failedBeforeHandover(.a, followUp: blendNoAnswer)
+            clearRegistration()
             dropPlan()
             unloadSpare()
         }
@@ -752,7 +728,8 @@ final class Crossfader {
             settings: settings, repeatOne: repeatOne, stopAtEnd: stopAtEnd, speed: speed, skipSilence: skipSilence,
             tail: tail?.entryId == currentEntry && tail?.done == true,
             head: head?.entryId == nextEntry && head?.done == true,
-            reading: reading?.entryId == currentEntry && reading?.done == true)
+            reading: reading?.entryId == currentEntry && reading?.done == true,
+            currentTags: Self.tagsRead(player.deck, current), nextTags: Self.tagsRead(spare, next))
     }
 
     /// A plan is made once everything it could use is in, or when there is no more time to
@@ -794,13 +771,27 @@ final class Crossfader {
     /// will be judged following it. 0 without the sound shaping.
     private func incomingGainDb(_ deck: Deck, _ current: QueueItem, _ next: QueueItem) -> Double {
         guard let sound else { return 0 }
+        let queue = player.queue
+        let previous = queue.previousForSkip.map { soundSong(queue.items[$0]) }
         let currentSong = soundSong(current)
-        let playing = deck.current.flatMap { source in
-            source.item.entryId == current.entryId ? source.setUp?.loudness(tags: source.loudness) : nil
-        }
-        let now = playing ?? sound.queuedLoudness(currentSong, after: nil)
-        let following = sound.queuedLoudness(soundSong(next), after: currentSong)
+        let now = Self.ownLoudness(deck, current) ?? sound.queuedLoudness(currentSong, after: previous)
+        let following = Self.ownLoudness(spare, next) ?? sound.queuedLoudness(soundSong(next), after: currentSong, previousLoudness: now)
         return blendIncomingGainDb(sound.settings.read().settings, current: now, next: following)
+    }
+
+    /// How `deck` judges `item`'s loudness when it holds it: as it was set up, with the file's own
+    /// tags once the song has opened and they carry a gain.
+    private static func ownLoudness(_ deck: Deck, _ item: QueueItem) -> SongLoudness? {
+        guard let source = deck.current, source.item.entryId == item.entryId, source.item.uri == item.uri, let setUp = source.setUp else {
+            return nil
+        }
+        return setUp.loudness(tags: source.loudness)
+    }
+
+    /// Whether `deck` holds `item` and has opened it (its own tags are known).
+    private static func tagsRead(_ deck: Deck, _ item: QueueItem) -> Bool {
+        guard let source = deck.current, source.item.entryId == item.entryId, source.item.uri == item.uri else { return false }
+        return source.opened
     }
 
     // MARK: The spare
@@ -849,24 +840,21 @@ final class Crossfader {
     /// left behind the new one.
     private func arm(_ p: TransitionPlan, _ deck: Deck, _ current: QueueItem, _ nextItem: QueueItem) {
         drainEvents()
-        spare.playWhenReady = true
-        let g = nextGeneration
-        nextGeneration += 1
         // Main hears of an interrupt up to the proposal lead late: its window covers that too.
         let quiet = commitsBeforeAck(p, outputDelayMs: mix.outputDelayMs, speed: Double(player.pace.speed), lateMs: mix.proposalLeadMs)
-        let arm = BlendArm(generation: g, startMs: Double(p.startMs), overlapMs: Double(p.overlapMs),
-                           latestEndMs: Double(p.latestEndMs), outgoingEndMs: Double(lengthOf(deck, current)),
-                           lateMoveBars: p.lateMoveBars, barMs: p.barMs(), holdShare: p.holdShare,
-                           speed: Double(player.pace.speed), bothHeardStartMs: Double(p.bothHeardStartMs),
-                           bothHeardEndMs: Double(p.bothHeardEndMs), lockMs: p.lockMs, driftGap: p.driftGap, commitBeforeAck: quiet)
-        registered = g
+        let entry = current.entryId ?? current.trackId
+        deck.processor.arm(DeckTransition(entryId: entry, plan: p, incoming: false, gateDb: outgoingGate))
+        let outgoingEndMs = Double(lengthOf(deck, current))
+        let speed = Double(player.pace.speed)
+        let g = main.register(from: deck.render, into: spare.render, entryMs: Double(p.entryMs)) { g in
+            BlendArm(generation: g, startMs: Double(p.startMs), overlapMs: Double(p.overlapMs), latestEndMs: Double(p.latestEndMs),
+                     outgoingEndMs: outgoingEndMs, lateMoveBars: p.lateMoveBars, barMs: p.barMs(), holdShare: p.holdShare,
+                     speed: speed, bothHeardStartMs: Double(p.bothHeardStartMs), bothHeardEndMs: Double(p.bothHeardEndMs),
+                     lockMs: p.lockMs, driftGap: p.driftGap, commitBeforeAck: quiet)
+        }
         registeredPlan = p
         registeredNext = (entryId: nextItem.entryId, uri: nextItem.uri)
         if quiet { quietStarts.insert(g) }
-        let entry = current.entryId ?? current.trackId
-        deck.processor.arm(DeckTransition(entryId: entry, plan: p, incoming: false, gateDb: outgoingGate))
-        mix.word.open(g)
-        send(.arm(arm, outgoing: deck.render.index, entryMs: Double(p.entryMs)))
         #if DEBUG
         MixTapReport.shared.planned(generation: g, startMs: Double(p.startMs), entryMs: Double(p.entryMs), rate: p.incomingRate(),
                                     pace: Double(player.pace.speed), outgoing: deck.render.index)
@@ -879,11 +867,8 @@ final class Crossfader {
     /// everything from here lands on the song on screen. The handover is marked first, so a
     /// listener writing inside it (a sleep timer's end of song) never undoes it.
     private func handOver(_ g: Int64) {
-        handedOver = g
-        leaving = false
         let p = registeredPlan
         let next = registeredNext
-        registered = -1
         registeredPlan = nil
         registeredNext = nil
         let from = player.deck
@@ -897,7 +882,6 @@ final class Crossfader {
         loadedPlan = nil
         plan = nil
         planKey = nil
-        into.parked = false
         if let p { playbackLog.info("automix: \(p.reason, privacy: .public)") }
         if let p, let rate = p.beatMatchRate { easing = Easing(deck: into, entryId: next?.entryId, plan: p, rate: rate) }
         player.handOver(into: into, from: from)
@@ -940,10 +924,7 @@ final class Crossfader {
         let plan = blending
         outgoing = nil
         blending = nil
-        handedOver = -1
-        leaving = false
         quietStarts.remove(g)
-        if keptOn === from { keptOn = nil }
         if let easing { easing.easeFromMs = easeFromMs.isNaN ? easing.sinceEntryMs : easeFromMs }
         if let plan, plan.overlapMs > 0, !easeFromMs.isNaN {
             let progress = easeFromMs * plan.incomingRate() / Double(plan.overlapMs)
@@ -953,7 +934,7 @@ final class Crossfader {
         from.clear()
         from.pauseAtEndOfSong = false
         from.parked = true
-        if g >= 0 { send(.outgoingStopped(generation: g)) }
+        main.finished()
         lastPosition = -1
         player.endFade()
         idle()

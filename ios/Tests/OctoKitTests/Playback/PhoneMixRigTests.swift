@@ -201,31 +201,93 @@ final class RigStage {
     /// The first bus frame from `from` on where song frame `f` is heard.
     func bus(of f: Int64, from: Int = 0, volume: Float = 1) -> Int? { (from..<raw.count).first { frame(at: $0, volume: volume) == f } }
 
+    /// The first song frame heard untouched from bus frame `from` on.
+    func firstFrame(from: Int, volume: Float = 1) -> Int64? {
+        for bus in from..<raw.count { if let f = frame(at: bus, volume: volume) { return f } }
+        return nil
+    }
+
+    /// How many frames the deck's last sound before bus frame `before` took to die away: from its
+    /// last untouched sample to its last sound (0 when it stopped dead).
+    func fadeFrames(endingBefore before: Int, volume: Float = 1) -> Int {
+        guard let last = lastSound(before: before) else { return 0 }
+        var i = last
+        while i >= 3 && !untouchedRun(endingAt: i, volume: volume) { i -= 1 }
+        return last - i
+    }
+
+    /// Four untouched samples in a row ending at `i`, each the same song frame as the one before
+    /// or the next (a faded sample can happen to read as a frame, never four in a row).
+    private func untouchedRun(endingAt i: Int, volume: Float) -> Bool {
+        var before: Int64?
+        for j in (i - 3)...i {
+            guard let f = frame(at: j, volume: volume) else { return false }
+            if let before, f - before < 0 || f - before > 1 { return false }
+            before = f
+        }
+        return true
+    }
+
     /// The highest song frame heard untouched in the bus frames `range`.
     func highestFrame(_ range: Range<Int>, volume: Float = 1) -> Int64? {
         range.clamped(to: 0..<raw.count).compactMap { frame(at: $0, volume: volume) }.max()
     }
 }
 
-/// The phone's mix as the engine runs it, with main's side as the crossfader drives it: deck A
-/// plays out, deck B comes in. Each cycle the mix steps before the pull, both decks are pulled
-/// through their stages (B first when `bFirst`), and the mix steps after with their sum; main's
-/// ticker runs every other cycle (about 43 ms).
+/// A deck's sound stage as the app's: Octo's own shaping, following the rig's sound settings.
+final class RigSoundStage: DeckSoundStage {
+    let step: ShapingStep
+
+    init(_ settings: SoundSettingsBox) {
+        step = ShapingStep(settings: settings)
+    }
+
+    @discardableResult
+    func configure(sampleRate: Double, channels: Int) -> Bool { step.configure(sampleRate: sampleRate, channels: channels) }
+    func flush() { step.flush() }
+    func process(_ input: [UnsafeMutablePointer<Float>], frames: Int, output: [UnsafeMutablePointer<Float>]) -> Int {
+        step.process(input, frames: frames, output: output)
+    }
+    func endOfStream(into output: [UnsafeMutablePointer<Float>]) -> Int { step.endOfStream(into: output) }
+    var latency: Int { step.latency }
+}
+
+/// The phone's mix as the engine runs it, with main's side run by the app's own rules
+/// (`PhoneBlendMain`): deck A plays out, deck B comes in. Each cycle the mix steps before the
+/// pull, both decks are pulled through their stages (B first when `bFirst`), and the mix steps
+/// after with their sum; main's ticker runs every other cycle (about 43 ms). Shaped, both decks
+/// run Octo's shaping with the equalizer, ReplayGain and the limiter on.
 final class MixRig {
     static let frames = 1_024
+    static var shapedSettings: SoundSettings {
+        var settings = SoundSettings()
+        settings.eqEnabled = true
+        settings.graphicGains[3] = 4
+        settings.replayGain = .track
+        settings.limiter = true
+        return settings
+    }
+
     let a: DeckRender
     let b: DeckRender
     let mix: PhoneMix
+    let main: PhoneBlendMain
     let stageA: RigStage
     let stageB: RigStage
     let songA: RigSong
     let songB: RigSong
+    let sound: SoundSettingsBox
     var bFirst = false
     /// Main acknowledges a proposal at its next tick.
     var acks = true
+    /// Main holds this deck's orders, from another thread, through the mix's step before the pull.
+    var ordersBusyInPull: DeckRender?
     private(set) var events: [BlendEvent] = []
     private(set) var handedOver = false
     private(set) var generation: Int64 = 0
+    /// Where main finished the blend (stopped the old deck), -1 before.
+    private(set) var finishedAt = -1
+    private var endsWaiting: [BlendEvent] = []
     private var cycles = 0
     private var restartPending = false
     private let sum: [UnsafeMutablePointer<Float>]
@@ -246,11 +308,24 @@ final class MixRig {
          stageB.levelAllocations]
     }
 
-    init(a la: Double, _ ra: Double, b lb: Double, _ rb: Double, seed: UInt64 = 1, songA: RigSong? = nil) {
-        a = DeckRender(processor: DeckProcessor(keepActive: { false }, tap: nil, stage: nil))
-        b = DeckRender(processor: DeckProcessor(keepActive: { false }, tap: nil, stage: nil))
+    init(a la: Double, _ ra: Double, b lb: Double, _ rb: Double, seed: UInt64 = 1, songA: RigSong? = nil, shaped: Bool = false) {
+        let box = SoundSettingsBox(shaped ? Self.shapedSettings : SoundSettings())
+        sound = box
+        let stages = shaped ? [RigSoundStage(box), RigSoundStage(box)] : []
+        a = DeckRender(processor: DeckProcessor(keepActive: { false }, tap: nil, stage: stages.first))
+        b = DeckRender(processor: DeckProcessor(keepActive: { false }, tap: nil, stage: stages.last))
+        if shaped {
+            // Each song's loudness reaches its deck's shaping as its stream starts, as the app's
+            // hook does.
+            let loudness = SongLoudness(ReplayGainInfo(trackGain: -6, trackPeak: nil, albumGain: nil, albumPeak: nil), followsSameAlbum: false)
+            let stepA = stages[0].step
+            let stepB = stages[1].step
+            a.onNewSong = { _ in stepA.setNextSong(loudness) }
+            b.onNewSong = { _ in stepB.setNextSong(loudness) }
+        }
         mix = PhoneMix(decks: [a, b])
         mix.prepare(sampleRate: blendBusRate, channels: 2)
+        main = PhoneBlendMain(mix: mix)
         stageA = RigStage(a, latency: la, rate: ra, seed: seed)
         stageB = RigStage(b, latency: lb, rate: rb, seed: seed &+ 99)
         let first = songA ?? RigSong(serial: 1, entryId: "a", fromFrame: 400_000)
@@ -290,27 +365,41 @@ final class MixRig {
         b.processor.arm(DeckTransition(entryId: "b", plan: plan, incoming: true))
     }
 
-    /// Main registers a blend of A into B: A's start at `startMs`, B entering at `entryMs`.
+    /// Main registers a blend of A into B (`PhoneBlendMain.register`): A's start at `startMs`, B
+    /// entering at `entryMs`.
     func arm(startMs: Double = 10_000, overlapMs: Double = 8_000, entryMs: Double = 2_000) {
-        generation += 1
-        mix.word.open(generation)
-        let arm = BlendArm(generation: generation, startMs: startMs, overlapMs: overlapMs, latestEndMs: startMs + overlapMs + 4_000,
-                           outgoingEndMs: 25_000, lateMoveBars: lateMoveUnbounded)
-        _ = mix.send(.arm(arm, outgoing: 0, entryMs: entryMs))
+        generation = main.register(from: a, into: b, entryMs: entryMs) { g in
+            BlendArm(generation: g, startMs: startMs, overlapMs: overlapMs, latestEndMs: startMs + overlapMs + 4_000,
+                     outgoingEndMs: 25_000, lateMoveBars: lateMoveUnbounded)
+        }
         handedOver = false
     }
 
-    /// The crossfader's pause after the handover: the old deck paused, the disarm sent, then the
-    /// player's deck paused.
+    /// A generation armed straight, acknowledged by the rig itself.
+    private var rawGeneration: Int64 = -1
+
+    /// The arm sent straight to the render, with the spare left as it is: for the render's own
+    /// guard against a spare not yet playing.
+    func armRaw() {
+        generation += 100
+        rawGeneration = generation
+        mix.word.open(generation)
+        let arm = BlendArm(generation: generation, startMs: 10_000, overlapMs: 8_000, latestEndMs: 22_000, outgoingEndMs: 25_000,
+                           lateMoveBars: lateMoveUnbounded)
+        _ = mix.send(.arm(arm, outgoing: 0, entryMs: 2_000))
+    }
+
+    /// The player's pause after the handover, as `PlaybackEngine.pause`: the crossfader's
+    /// interrupt (the old deck paused, its frames to the start kept), then the player's deck.
     func pauseAfterHandover() {
-        a.orders.withLock { $0.playing = false }
-        _ = mix.send(.disarm(.pause, generation: generation))
+        main.interrupt(.pause, releasing: false)
         b.orders.withLock { $0.playing = false }
     }
 
-    /// Playing again: the old deck's kept frames first, then the player's deck.
+    /// Playing again, as `PlaybackEngine.play`: the old deck's kept frames first, then the player's
+    /// deck.
     func resume() {
-        a.orders.withLock { $0.playing = true }
+        main.resumed()
         b.orders.withLock { $0.playing = true }
     }
 
@@ -326,9 +415,13 @@ final class MixRig {
     func cycle() {
         songA.fill()
         songB.fill()
-        if counting { octo_alloc_arm() }
-        mix.willPull(frames: Self.frames)
-        if counting { pullAllocations += octo_alloc_disarm() }
+        if let busy = ordersBusyInPull {
+            Self.holding(busy) { mix.willPull(frames: Self.frames) }
+        } else {
+            if counting { octo_alloc_arm() }
+            mix.willPull(frames: Self.frames)
+            if counting { pullAllocations += octo_alloc_disarm() }
+        }
         let first = mix.cycleBus
         if restartPending {
             restartPending = false
@@ -362,37 +455,72 @@ final class MixRig {
         }
     }
 
-    /// The blend's end, drained and not yet due.
-    private var endWaiting: BlendEvent?
+    /// Runs `body` while another thread holds `deck`'s orders.
+    static func holding(_ deck: DeckRender, _ body: () -> Void) {
+        let taken = DispatchSemaphore(value: 0)
+        let done = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        Thread {
+            deck.orders.withLock { _ in
+                taken.signal()
+                done.wait()
+            }
+            finished.signal()
+        }.start()
+        taken.wait()
+        body()
+        done.signal()
+        finished.wait()
+    }
 
     /// Main's ticker, as the crossfader's: every event drained; a proposal acknowledged (when
-    /// `acks`) and handed over, so main no longer parks B; once the blend's end is due (its bus
-    /// frame reached; the rig's output adds no delay) the old deck stops.
+    /// `acks`) and handed over by main's rules; a blend's end (or a cancel after the handover)
+    /// acted on once due (the rig's output adds no delay), and the old deck stopped only once its
+    /// kept frames are out.
     func tick() {
         while let event = mix.events.pop() {
             events.append(event)
             switch event.kind {
             case .proposed:
-                guard acks, !handedOver else { break }
-                if mix.word.ack(event.generation) || mix.word.state(of: event.generation) == .acked {
+                guard acks else { break }
+                if event.generation == rawGeneration {
+                    if mix.word.ack(event.generation) {
+                        handedOver = true
+                        b.orders.withLock { $0.parked = false }
+                    }
+                } else if main.proposed(event.generation, from: a, into: b) == .handedOver {
                     handedOver = true
-                    b.orders.withLock { $0.parked = false }
                 }
-            case .blendEnd:
-                endWaiting = event
+            case .blendEnd, .cancelled:
+                endsWaiting.append(event)
             default:
                 break
             }
         }
-        if let end = endWaiting, blendEventDue(end, nowBus: mix.nowBus, outputDelayFrames: 0, quietStart: false) {
-            endWaiting = nil
-            a.orders.withLock {
-                $0.current = nil
-                $0.playing = false
-                $0.parked = true
+        var i = 0
+        while i < endsWaiting.count {
+            let event = endsWaiting[i]
+            if blendEventDue(event, nowBus: mix.nowBus, outputDelayFrames: 0, quietStart: false) {
+                endsWaiting.remove(at: i)
+                if main.blendEnded(event.generation, easeFromMs: event.ms) != nil { finish() }
+            } else {
+                i += 1
             }
-            _ = mix.send(.outgoingStopped(generation: end.generation))
         }
+        if main.endDue() != nil { finish() }
+    }
+
+    /// The crossfader's end of the blend: the old deck stopped and parked, then main's rules.
+    private func finish() {
+        a.orders.withLock {
+            $0.current = nil
+            $0.following = nil
+            $0.playing = false
+            $0.pauseAtEnd = false
+            $0.parked = true
+        }
+        main.finished()
+        finishedAt = nextBus
     }
 
     var cancelled: Bool { events.contains { $0.kind == .cancelled || $0.kind == .incomingNotReady } }
@@ -446,7 +574,9 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             let resumedAt = rig.nextBus
             rig.resume()
             rig.run(160)
-            // Silent through the pause, once each stage has let out what it held.
+            // Into the pause A fades over its 10 ms, never stopping dead; then silence, once each
+            // stage has let out what it held.
+            #expect(rig.stageA.fadeFrames(endingBefore: resumedAt) >= 300, "setup \(n): A stops in \(rig.stageA.fadeFrames(endingBefore: resumedAt)) frames")
             #expect(rig.stageA.silent(from: pausedAt + Int(s.la) + 4_000, to: resumedAt), "setup \(n)")
             #expect(rig.stageB.silent(from: 0, to: resumedAt), "setup \(n)")
             // A plays its kept frames, up to its start and never past it; B comes in where they
@@ -467,31 +597,37 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
 
     @Test(arguments: [false, true])
     func aPauseOnceTheIncomingSongHasStartedLeavesItAlone(bFirst: Bool) throws {
-        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94)
-        rig.bFirst = bFirst
-        // Shaped as the crossfader arms them: early in the blend B is under its own level.
-        rig.shape(rigPlan())
-        rig.arm()
-        // B's first frames are rendered and in its stage, none heard yet: the pause comes before
-        // S is heard, with B already under way.
-        rig.run(until: { rig.mix.stages[1].started })
-        try #require(rig.mix.stages[1].started)
-        #expect(rig.stageB.firstHeard == nil)
-        rig.pauseAfterHandover()
-        rig.run(48)
-        let resumedAt = rig.nextBus
-        rig.resume()
-        rig.run(100)
-        // Nothing of A once playing again.
-        #expect(rig.stageA.silent(from: resumedAt, to: rig.nextBus))
-        // B plays on alone and, past its 250 ms ramp, at its own level: its frames come out
-        // untouched and run on at its rate.
-        let back = try #require(rig.stageB.firstSound(from: resumedAt))
-        #expect(back < resumedAt + 4_320 + 2_400)
-        let probe = back + 12_000 + 2_400
-        let f = try #require(rig.stageB.frame(at: probe), "B's sample \(rig.stageB.raw[probe]) is not at its own level")
-        let g = try #require(rig.stageB.frame(at: probe + 100))
-        #expect(abs(Double(g - f) - 100 * 0.94) <= 2)
+        for (n, s) in Self.setups.enumerated() {
+            let rig = MixRig(a: s.la, s.ra, b: s.lb, s.rb, seed: UInt64(n + 11))
+            rig.bFirst = bFirst
+            // Shaped as the crossfader arms them: early in the blend B is under its own level.
+            rig.shape(rigPlan())
+            rig.arm()
+            // B's first frames are rendered and in its stage, none heard yet: the pause comes
+            // before S is heard, with B already under way.
+            rig.run(until: { rig.mix.stages[1].started })
+            try #require(rig.mix.stages[1].started, "setup \(n)")
+            #expect(rig.stageB.firstHeard == nil, "setup \(n)")
+            rig.pauseAfterHandover()
+            rig.run(48)
+            let resumedAt = rig.nextBus
+            rig.resume()
+            rig.run(100)
+            // A fades into the pause over its 10 ms, never cut mid-cycle, and nothing of it is
+            // heard once playing again.
+            let fade = rig.stageA.fadeFrames(endingBefore: resumedAt)
+            let last = rig.stageA.lastSound(before: resumedAt) ?? -1
+            #expect(fade >= 300, "setup \(n): A stops in \(fade) frames, its last sound at \(last), raw \(last >= 8 ? Array(rig.stageA.raw[(last - 8)...last]) : [])")
+            #expect(rig.stageA.silent(from: resumedAt, to: rig.nextBus), "setup \(n)")
+            // B plays on alone and, past its 250 ms ramp, at its own level: its frames come out
+            // untouched and run on at its rate.
+            let back = try #require(rig.stageB.firstSound(from: resumedAt), "setup \(n)")
+            #expect(back < resumedAt + 4_320 + 2_400, "setup \(n)")
+            let probe = back + 12_000 + 2_400
+            let f = try #require(rig.stageB.frame(at: probe), "setup \(n): B's sample \(rig.stageB.raw[probe]) is not at its own level")
+            let g = try #require(rig.stageB.frame(at: probe + 100), "setup \(n)")
+            #expect(abs(Double(g - f) - 100 * s.rb) <= 2, "setup \(n)")
+        }
     }
 
     /// The spec's restart row: delays 0 and 4320, and 2400 and 4320, the restart a few thousand
@@ -517,6 +653,16 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             let b2 = try #require(rig.stageB.frame(at: probeAfter, volume: 0.5), "setup \(n)")
             let expected = Double(b1) + Double(a2 - a1) * s.3 / s.1
             #expect(abs(Double(b2) - expected) <= 3, "setup \(n): B at \(b2), lined up at \(expected)")
+            // Both replay the shorter latency: that deck neither skips nor repeats a frame across
+            // the restart; the other skips the difference.
+            let shorter = s.0 <= s.2 ? rig.stageA : rig.stageB
+            let longer = s.0 <= s.2 ? rig.stageB : rig.stageA
+            let skip = (max(s.0, s.2) - min(s.0, s.2)) * (s.0 <= s.2 ? s.3 : s.1)
+            for (stage, skipped, name) in [(shorter, 0.0, "shorter"), (longer, skip, "longer")] {
+                let before = try #require(stage.frame(at: restartAt - 1, volume: 0.5), "setup \(n) \(name)")
+                let after = try #require(stage.firstFrame(from: restartAt, volume: 0.5), "setup \(n) \(name)")
+                #expect(abs(Double(after - before - 1) - skipped) <= 3, "setup \(n) \(name): \(before) then \(after)")
+            }
             if s.0 > 0 {
                 // The replayed frames come out once turned down, and run on from the song.
                 let replayed = restartAt + Int(s.0) + 200
@@ -530,6 +676,206 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             let lastFrame = try #require(rig.stageA.frame(at: last, volume: 0.5), "setup \(n)")
             #expect(abs(lastFrame - (480_000 + 192_000 - 1)) <= 2, "setup \(n): A's last frame \(lastFrame)")
             #expect(!rig.cancelled)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func aPauseLongPastTheStartStillPlaysTheKeptFramesThenTheIncomingSong(bFirst: Bool) throws {
+        for (n, s) in Self.setups.enumerated() {
+            let rig = MixRig(a: s.la, s.ra, b: s.lb, s.rb, seed: UInt64(n + 31))
+            rig.bFirst = bFirst
+            rig.arm()
+            rig.run(until: { rig.handedOver })
+            let start = try #require(rig.events.first { $0.kind == .proposed }?.frame, "setup \(n)")
+            rig.pauseAfterHandover()
+            // Paused until a second past the start: the blend's end comes due meanwhile, and main
+            // leaves the old deck alone while its kept frames wait.
+            rig.run(until: { rig.nextBus > Int(start) + 48_000 })
+            #expect(rig.events.contains { $0.kind == .blendEnd }, "setup \(n)")
+            #expect(rig.finishedAt < 0, "setup \(n): main stopped the old deck in the pause")
+            let resumedAt = rig.nextBus
+            rig.resume()
+            rig.run(160)
+            let bStart = try #require(rig.stageB.firstSound(), "setup \(n)")
+            let aEnd = try #require(rig.stageA.lastSound(), "setup \(n)")
+            #expect(aEnd > resumedAt, "setup \(n)")
+            #expect(abs(bStart - (aEnd + 1)) <= 3, "setup \(n): A ends at \(aEnd), B starts at \(bStart)")
+            let highest = try #require(rig.stageA.highestFrame(resumedAt..<max(resumedAt, aEnd + 1)), "setup \(n)")
+            #expect(highest < 480_000 && highest > 480_000 - 1_200, "setup \(n): A's last frame \(highest)")
+            // Main stopped the old deck once its kept frames were out.
+            #expect(rig.finishedAt > resumedAt, "setup \(n)")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func aSecondPauseInsideTheKeptFramesHoldsTheIncomingSongBackUntilTheyAreOut(bFirst: Bool) throws {
+        for (n, s) in Self.setups.enumerated() {
+            let rig = MixRig(a: s.la, s.ra, b: s.lb, s.rb, seed: UInt64(n + 41))
+            rig.bFirst = bFirst
+            rig.arm()
+            rig.run(until: { rig.handedOver })
+            rig.pauseAfterHandover()
+            rig.run(24)
+            rig.resume()
+            // A plays part of its kept frames, then pauses again.
+            rig.run(1)
+            rig.pauseAfterHandover()
+            rig.run(48)
+            let resumedAt = rig.nextBus
+            rig.resume()
+            rig.run(160)
+            #expect(rig.stageB.silent(from: 0, to: resumedAt), "setup \(n): B came in during a pause")
+            let bStart = try #require(rig.stageB.firstSound(), "setup \(n)")
+            let aEnd = try #require(rig.stageA.lastSound(), "setup \(n)")
+            #expect(aEnd > resumedAt, "setup \(n)")
+            #expect(abs(bStart - (aEnd + 1)) <= 3, "setup \(n): A ends at \(aEnd), B starts at \(bStart)")
+            let highest = try #require(rig.stageA.highestFrame(resumedAt..<max(resumedAt, aEnd + 1)), "setup \(n)")
+            #expect(highest < 480_000 && highest > 480_000 - 1_200, "setup \(n): A's last frame \(highest)")
+        }
+    }
+
+    @Test func theIncomingSongsLatencyTurnedOnInTheRunUpStillStartsItOnItsFrame() throws {
+        let rig = MixRig(a: 2_400, 1, b: 0, 1)
+        rig.arm()
+        rig.run(until: { rig.mix.stages[1].startIndex >= 0 })
+        try #require(rig.mix.stages[1].startIndex >= 0)
+        // B is tempo-matched now: its stage turns on, 90 ms late at 0.94, before its start.
+        rig.stageB.set(rate: 0.94, latency: 4_320)
+        rig.run(until: { rig.stageB.firstHeard.map { $0 + 4_800 < rig.nextBus } ?? false })
+        #expect(!rig.cancelled)
+        let bStart = try #require(rig.stageB.firstSound())
+        let s = try #require(rig.stageA.bus(of: 480_000))
+        #expect(abs(bStart - s) <= 1, "B first heard at \(bStart), A's start at \(s)")
+        let entry = try #require(rig.stageB.frame(at: bStart))
+        #expect(abs(entry - 96_000) <= 1)
+    }
+
+    @Test func theOutgoingSongsLatencyTurnedOnInTheRunUpMovesTheStartWithIt() throws {
+        let rig = MixRig(a: 0, 1, b: 4_320, 0.94)
+        rig.arm()
+        rig.run(until: { rig.mix.stages[0].startPosted && rig.mix.stages[1].startIndex >= 0 })
+        try #require(rig.mix.stages[1].startIndex >= 0)
+        // A's stage turns on (50 ms) before the start: A's frame at the start is heard later.
+        rig.stageA.set(rate: 1, latency: 2_400)
+        rig.run(until: { rig.stageB.firstHeard.map { $0 + 4_800 < rig.nextBus } ?? false })
+        let bStart = try #require(rig.stageB.firstSound())
+        let s = try #require(rig.stageA.bus(of: 480_000))
+        #expect(abs(bStart - s) <= 1, "B first heard at \(bStart), A's start at \(s)")
+    }
+
+    @Test func aPaceSetInTheRunUpUndoesTheStartAtOnce() throws {
+        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94)
+        rig.arm()
+        rig.run(until: { rig.mix.stages[1].startIndex >= 0 })
+        #expect(rig.main.paceChanged(1.1))
+        rig.run(200)
+        #expect(rig.stageB.firstHeard == nil)
+        #expect(rig.main.registered < 0)
+        #expect(rig.mix.session.state == .idle)
+    }
+
+    @Test func aSpareWhoseOrdersAreBusyAsItIsRegisteredKeepsTheRegistration() throws {
+        // The arm comes as B's song is taken, and main holds B's orders through that step: B takes
+        // its song only as it renders, after the registration.
+        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94)
+        rig.ordersBusyInPull = rig.b
+        rig.arm()
+        rig.cycle()
+        rig.ordersBusyInPull = nil
+        rig.run(until: { rig.stageB.firstHeard.map { $0 + 4_800 < rig.nextBus } ?? false })
+        #expect(!rig.cancelled)
+        let bStart = try #require(rig.stageB.firstSound())
+        let s = try #require(rig.stageA.bus(of: 480_000))
+        #expect(abs(bStart - s) <= 1, "B first heard at \(bStart), A's start at \(s)")
+    }
+
+    @Test func aRestartWhileTheKeptFramesPlayMovesWhereTheyEndWithThem() throws {
+        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94, seed: 51)
+        rig.arm()
+        rig.run(until: { rig.handedOver })
+        rig.pauseAfterHandover()
+        rig.run(24)
+        rig.resume()
+        rig.run(1)
+        // The cut is placed; the engine restarts before it.
+        try #require(rig.mix.stages[0].cutBus >= 0)
+        rig.restart()
+        rig.run(160)
+        let bStart = try #require(rig.stageB.firstSound())
+        let aEnd = try #require(rig.stageA.lastSound())
+        #expect(abs(bStart - (aEnd + 1)) <= 3, "A ends at \(aEnd), B starts at \(bStart)")
+    }
+
+    @Test func aRestartWithNoBlendLosesNothingOfTheSongPlaying() throws {
+        // A plays alone through a 90 ms stage; the idle spare's stage is bypassed.
+        let rig = MixRig(a: 4_320, 0.94, b: 0, 1, seed: 61)
+        rig.run(60)
+        let restartAt = rig.nextBus
+        rig.restart()
+        rig.run(20)
+        let before = try #require(rig.stageA.frame(at: restartAt - 1))
+        let after = try #require(rig.stageA.firstFrame(from: restartAt))
+        #expect(abs(after - before - 1) <= 1, "\(before) then \(after)")
+    }
+
+    @Test func aPauseJustBeforeTheStartWithTheIncomingDeckPulledFirstLandsItOnTheCut() throws {
+        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94, seed: 71)
+        rig.bFirst = true
+        rig.arm()
+        rig.run(until: { rig.handedOver })
+        // Paused on the last cycles before B's start: as little of A kept as can be.
+        rig.run(until: {
+            let b = rig.mix.stages[1]
+            return b.committed && b.startIndex - b.clock.source < 1_500
+        })
+        try #require(!rig.mix.stages[1].started)
+        rig.pauseAfterHandover()
+        rig.run(24)
+        rig.resume()
+        rig.run(120)
+        let aEnd = try #require(rig.stageA.lastSound())
+        let cut = aEnd + 1
+        // B's song lands as if it came in on the cut: its frames run from its entry there.
+        let probe = cut + 4_000
+        let sample = rig.stageB.raw[probe]
+        let late = rig.mix.stages[1].startLate
+        let f = try #require(rig.stageB.frame(at: probe), "B's sample \(sample) on \(probe), cut at \(cut), late \(late)")
+        #expect(abs(Double(f) - (96_000 + 4_000 * 0.94)) <= 3, "B at \(f) on \(probe), cut at \(cut)")
+    }
+
+    @Test func pauseAtTheEndOfTheSongInTheRunUpEndsTheSongWithNoBlend() throws {
+        let songA = RigSong(serial: 1, entryId: "a", fromFrame: 400_000, endFrame: 500_000)
+        let follower = RigSong(serial: 3, entryId: "f", fromFrame: 0)
+        let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94, songA: songA)
+        rig.a.orders.withLock { $0.following = follower }
+        rig.arm()
+        rig.run(until: { rig.mix.stages[1].startIndex >= 0 })
+        // "Pause at the end of this song", as the crossfader takes it.
+        rig.main.endOfSongChanged(on: rig.a, to: true, undo: { rig.main.interrupt(.edit, releasing: false) }, pass: { blendPassNone })
+        rig.run(200)
+        #expect(rig.stageB.firstHeard == nil)
+        let (endings, advances, playing) = rig.a.orders.withLock { ($0.endings, $0.advances, $0.playing) }
+        #expect(endings == 1)
+        #expect(advances == 0)
+        #expect(!playing)
+    }
+
+    @Test func anEditKeepingTheSongOnNowKeepsTheKeptFramesAndASkipDropsThem() throws {
+        for releasing in [false, true] {
+            let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94, seed: releasing ? 81 : 82)
+            rig.arm()
+            rig.run(until: { rig.handedOver })
+            rig.pauseAfterHandover()
+            rig.run(12)
+            // An edit while paused: one that keeps the song on now, or a releasing one.
+            rig.main.interrupt(.edit, releasing: releasing)
+            rig.run(12)
+            let resumedAt = rig.nextBus
+            rig.resume()
+            rig.run(160)
+            let aPlayed = !rig.stageA.silent(from: resumedAt, to: rig.nextBus)
+            #expect(aPlayed == !releasing, "releasing \(releasing)")
+            #expect(rig.stageB.firstHeard != nil, "releasing \(releasing)")
         }
     }
 
@@ -549,7 +895,8 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
     @Test func aSpareToldToPlayJustAfterItsRegistrationIsNeverTakenForPaused() throws {
         let rig = MixRig(a: 2_400, 1, b: 4_320, 0.94)
         rig.b.orders.withLock { $0.playing = false }
-        rig.arm()
+        // Armed straight, the spare told to play only after its registration.
+        rig.armRaw()
         rig.cycle()
         rig.b.orders.withLock { $0.playing = true }
         rig.run(until: { rig.stageB.firstHeard != nil })
@@ -568,12 +915,11 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
         rig.arm()
         rig.run(until: { rig.events.contains { $0.kind == .proposed } })
         try #require(rig.events.contains { $0.kind == .proposed })
-        _ = rig.mix.word.cancel(1)
-        _ = rig.mix.send(.disarm(.edit, generation: 1))
+        rig.main.disarm(.edit)
         rig.run(until: { rig.mix.stages[0].holdingForAnswer }, max: 200)
         #expect(rig.mix.stages[0].holdingForAnswer)
         // Nothing follows (the song stops at its end), told while main holds the orders.
-        _ = rig.mix.send(.followUp(generation: 1, pass: blendPassNone))
+        rig.main.followUp { blendPassNone }
         rig.stageA.ordersBusy = true
         rig.cycle()
         rig.stageA.ordersBusy = false
@@ -615,6 +961,40 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
         // The window: the delay less the ack's lead, plus main's lateness, plus the 250 ms fade.
         #expect(abs(plain - (edge - blendDisarmRampMs + airPlayAckLeadMs)) <= 20, "longest \(plain), edge \(edge)")
         #expect(abs((plain - longest(400)) - 400) <= 10)
+    }
+
+    @Test func aTransitionMadeAfterAnotherIsFreedRunsOnItsOwnTimeEvenAtTheSameAddress() {
+        let processor = DeckProcessor(keepActive: { false }, tap: nil, stage: nil)
+        processor.configure(sampleRate: 48_000, channels: 2)
+        processor.flush(streamStartMs: 10_000, entryId: "a")
+        func render() {
+            var l = [Float](repeating: 0.5, count: 4_800)
+            var r = l
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in processor.process([lp.baseAddress!, rp.baseAddress!], frames: 4_800) }
+            }
+        }
+        func transition() -> DeckTransition {
+            DeckTransition(entryId: "a", plan: rigPlan(startMs: 10_000, overlapMs: 8_000), incoming: false)
+        }
+        processor.arm(transition())
+        render()
+        #expect(processor.shaping)
+        // The blend's rules disarm it: not taken up again until another plan is armed.
+        processor.disarmTransition(frames: 0)
+        render()
+        #expect(!processor.shaping)
+        // Main lets it go and frees it (two later ones replaced after it), with no render between.
+        processor.arm(nil)
+        processor.arm(transition())
+        processor.arm(nil)
+        processor.arm(transition())
+        processor.arm(nil)
+        // Another plan, likely made where the freed one was: it is a new plan and shapes.
+        processor.arm(transition())
+        render()
+        #expect(processor.shaping)
+        #expect(abs(processor.blendMs - processor.songMs) < 1e-6)
     }
 
     @Test func aReplacedTransitionIsFreedOnMainNeverByTheRender() {
@@ -662,9 +1042,12 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
         }
     }
 
-    /// A blend from its arm through its start, a pace change and an engine restart in it, to its
-    /// end (the limiter off); an undo with its follow-up; a pause after the handover with its kept
-    /// frames and the resume; and kept frames dropped.
+    /// Every rig shaped (Octo's shaping with the equalizer, ReplayGain and the limiter on each
+    /// deck, the transition shaping on both): a blend from its arm through its start, a pace
+    /// change, a settings change and an engine restart in it, to its end (the limiter off); an
+    /// undo before the start is known and one after it is proposed, with the outgoing song's end
+    /// held for its follow-up; a pause after the handover with its kept frames, a second pause in
+    /// them, and the resume; a pause once the incoming song has started; and kept frames dropped.
     func script(counting: Bool) -> [(String, [Int])] {
         var counts: [(String, [Int])] = []
         func part(_ name: String, _ rig: MixRig, _ body: () -> Void) {
@@ -673,16 +1056,27 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             counts.append((name, zip(rig.allocationsByPart, before).map { $0 - $1 }))
         }
         let plan = rigPlan(startMs: 10_000, entryMs: 2_000, overlapMs: 4_000)
+        func rig(_ la: Double, _ ra: Double, _ lb: Double, _ rb: Double, seed: UInt64, songA: RigSong? = nil) -> MixRig {
+            let made = MixRig(a: la, ra, b: lb, rb, seed: seed, songA: songA, shaped: true)
+            made.counting = counting
+            made.shape(plan)
+            return made
+        }
 
-        let blend = MixRig(a: 2_400, 1, b: 4_320, 0.94)
-        blend.counting = counting
-        blend.shape(plan)
+        let blend = rig(2_400, 1, 4_320, 0.94, seed: 1)
         blend.arm(overlapMs: 4_000)
         part("arm to start", blend) { blend.run(until: { blend.stageB.firstHeard != nil }) }
         part("pace", blend) {
-            _ = blend.mix.send(.paceChanged(1.05))
+            blend.main.paceChanged(1.05)
             blend.stageA.set(rate: 1.05, latency: 2_600)
             blend.stageB.set(rate: 0.94 * 1.05, latency: 4_500)
+            blend.run(10)
+        }
+        part("settings change", blend) {
+            var next = MixRig.shapedSettings
+            next.graphicGains[5] = -3
+            next.balance = 0.2
+            blend.sound.set(next)
             blend.run(10)
         }
         part("restart", blend) {
@@ -690,30 +1084,41 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
             blend.run(10)
         }
         part("blend end, limiter off", blend) {
-            blend.run(until: { blend.events.contains { $0.kind == .blendEnd } }, max: 600)
+            blend.run(until: { blend.finishedAt >= 0 }, max: 600)
             blend.run(10)
         }
-        precondition(blend.events.contains { $0.kind == .blendEnd }, "the script reaches the blend's end")
+        precondition(blend.finishedAt >= 0, "the script reaches the blend's end")
 
-        let undo = MixRig(a: 2_400, 1, b: 4_320, 0.94, seed: 3)
-        undo.counting = counting
-        undo.shape(plan)
-        part("undo and follow-up", undo) {
-            undo.arm()
-            undo.run(4)
-            _ = undo.mix.word.cancel(1)
-            _ = undo.mix.send(.disarm(.edit, generation: 1))
-            undo.run(4)
-            _ = undo.mix.send(.followUp(generation: 1, pass: blendPassNone))
-            undo.run(20)
+        let early = rig(2_400, 1, 4_320, 0.94, seed: 3)
+        part("undo before the start is known", early) {
+            early.arm()
+            early.run(4)
+            early.main.disarm(.edit)
+            early.run(20)
         }
 
-        let pause = MixRig(a: 4_320, 0.94, b: 2_400, 1, seed: 5)
-        pause.counting = counting
-        pause.shape(plan)
+        let songA = RigSong(serial: 1, entryId: "a", fromFrame: 400_000, endFrame: 490_000)
+        let late = rig(2_400, 1, 4_320, 0.94, seed: 4, songA: songA)
+        late.acks = false
+        late.a.orders.withLock { $0.following = RigSong(serial: 3, entryId: "f", fromFrame: 0) }
+        late.arm()
+        part("undo at the proposal, the end held for its follow-up", late) {
+            late.run(until: { late.events.contains { $0.kind == .proposed } })
+            late.main.disarm(.edit)
+            late.run(until: { late.mix.stages[0].holdingForAnswer }, max: 200)
+            late.main.followUp { blendPassNone }
+            late.run(20)
+        }
+        precondition(late.a.orders.withLock { $0.endings } == 1, "the script reaches the outgoing song's held end")
+
+        let pause = rig(4_320, 0.94, 2_400, 1, seed: 5)
         pause.arm()
         part("to the handover", pause) { pause.run(until: { pause.handedOver }) }
-        part("pause, kept frames, resume", pause) {
+        part("pause, kept frames, a second pause, resume", pause) {
+            pause.pauseAfterHandover()
+            pause.run(20)
+            pause.resume()
+            pause.run(1)
             pause.pauseAfterHandover()
             pause.run(20)
             pause.resume()
@@ -721,14 +1126,23 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
         }
         precondition(pause.stageB.firstHeard != nil, "the script reaches the incoming song after the kept frames")
 
-        let drop = MixRig(a: 2_400, 1, b: 4_320, 0.94, seed: 7)
-        drop.counting = counting
+        let started = rig(2_400, 1, 4_320, 0.94, seed: 6)
+        started.arm()
+        part("pause once the incoming song has started", started) {
+            started.run(until: { started.mix.stages[1].started })
+            started.pauseAfterHandover()
+            started.run(20)
+            started.resume()
+            started.run(40)
+        }
+
+        let drop = rig(2_400, 1, 4_320, 0.94, seed: 7)
         drop.arm()
         part("drop the kept frames", drop) {
             drop.run(until: { drop.handedOver })
             drop.pauseAfterHandover()
             drop.run(10)
-            drop.a.orders.withLock { $0.dropKept += 1 }
+            drop.main.interrupt(.edit, releasing: true)
             drop.run(30)
         }
         return counts

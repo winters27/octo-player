@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// The volume never moves faster than from silence to full in this long, so an armed or dropped
 /// transition never clicks.
@@ -27,6 +28,9 @@ public let headroomRamp = 0.15
 /// the beat when the plan is locked to the bar. `gateDb`, for the outgoing deck, is the level
 /// below which the song counts as silent.
 public final class DeckTransition: Sendable {
+    private static let made = Atomic<Int64>(0)
+    /// Tells this transition apart from every other ever made, even one at the same address.
+    public let id = DeckTransition.made.add(1, ordering: .relaxed).newValue
     public let entryId: String?
     public let plan: TransitionPlan
     public let incoming: Bool
@@ -212,11 +216,8 @@ public final class TransitionShaper {
     /// Whether a transition or what is left of one still changes the sound.
     public var shaping: Bool { current != nil || gain != 1 || wet != 0 }
 
-    /// The transition held now, by address (0 for none), so its owner can keep it alive.
-    public var holdingAddress: UInt {
-        guard let current else { return 0 }
-        return UInt(bitPattern: Unmanaged.passUnretained(current).toOpaque())
-    }
+    /// The transition held now, by its id (0 for none), so its owner can keep it alive.
+    public var holdingId: Int64 { current?.id ?? 0 }
 
     public init(sampleRate: Int, channels: Int) {
         self.sampleRate = sampleRate

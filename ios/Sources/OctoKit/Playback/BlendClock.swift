@@ -73,20 +73,23 @@ public final class DeckClock: @unchecked Sendable {
     /// `frames` source frames were pulled.
     public func pulled(_ frames: Int) { source += Int64(max(0, frames)) }
 
-    /// The stage's rate or latency changed from the next source frame on.
-    public func set(rate: Double, latency: Double) {
+    /// The stage's rate or latency changed from the next source frame on. Answers whether the
+    /// mapping changed.
+    @discardableResult
+    public func set(rate: Double, latency: Double) -> Bool {
         let now = pieces[newest]
         let rate = max(rate, 1e-6)
         let latency = max(0, latency)
-        if now.rate == rate && now.latency == latency { return }
+        if now.rate == rate && now.latency == latency { return false }
         let piece = Piece(source: source, bus: now.bus + Double(source - now.source) / now.rate, rate: rate, latency: latency)
         if now.source == source {
             pieces[newest] = piece
-            return
+            return true
         }
         newest = (newest + 1) % Self.slots
         count = min(count + 1, Self.slots)
         pieces[newest] = piece
+        return true
     }
 
     /// The bus frame where source frame `index` is heard, unrounded.

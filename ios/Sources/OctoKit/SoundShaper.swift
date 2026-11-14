@@ -68,11 +68,15 @@ public final class SoundShaper: @unchecked Sendable {
     private var mono = Glide(0)
 
     private var bank: FilterBank
-    private var bankCoefficients: [Coefficients] = []
+    /// The shaping the running filters came from (its bank is `bank`, or carried on into it).
+    private var prep: ShapingPrep?
     /// While the curve changes, the old filters keep running and fade out.
     private var fadingFrom: FilterBank?
     private var fadeLeft = 0
-    private var fadeScratch: [[Float]] = []
+    /// Room for the old filters' sound while they fade out, made with the shaper; a longer buffer
+    /// is shaped in pieces of this size.
+    private var fadeScratch: [[Float]]
+    public static let fadeScratchFrames = 8_192
 
     /// The crossfeed on the first two channels, `CrossfeedCoefficients.none` while it is off.
     private var feed = CrossfeedCoefficients.none
@@ -94,39 +98,48 @@ public final class SoundShaper: @unchecked Sendable {
         glideFrames = max(1, Int((sampleRate * glideMs / 1_000).rounded()))
         bank = FilterBank(channels: channels, coefficients: [])
         limiter = Limiter(channels: channels, sampleRate: sampleRate)
+        fadeScratch = (0..<channels).map { _ in [Float](repeating: 0, count: Self.fadeScratchFrames) }
     }
 
+    /// Whether old filters still fade out under the new ones.
+    public var fadingFilters: Bool { fadingFrom != nil }
+
     /// Takes up new settings or a new song. Changes glide in, unless `instant`, as at the very
-    /// start of a song.
+    /// start of a song. Works the shaping out on the spot (see `adopt` for the audio thread).
     public func apply(_ settings: SoundSettings, song: SongLoudness?, instant: Bool) {
+        adopt(ShapingPrep(settings: settings, sampleRate: sampleRate, channels: channels), song: song, instant: instant)
+    }
+
+    /// Takes up a shaping worked out elsewhere, and the song's level. Nothing is made here: the
+    /// shaping's own filter bank takes over, carrying on from the running one (and the running one
+    /// fades out under it when the curve changed); a bank let go here is still the shaping's, so
+    /// whoever handed it over frees it.
+    public func adopt(_ next: ShapingPrep, song: SongLoudness?, instant: Bool) {
         let now = instant || !started
         started = true
         let frames = now ? 0 : glideFrames
 
-        let bands = bandCoefficients(settings.activeFilters(), sampleRate: sampleRate)
-        if bands != bankCoefficients {
-            let next = FilterBank(channels: channels, coefficients: bands)
-            next.continueFrom(bank)
-            fadingFrom = now ? nil : bank
-            fadeLeft = now ? 0 : glideFrames
-            bank = next
-            bankCoefficients = bands
+        if next !== prep {
+            let curveChanged = next.bands != (prep?.bands ?? [])
+            next.bank.continueFrom(bank)
+            fadingFrom = curveChanged && !now ? bank : nil
+            fadeLeft = curveChanged && !now ? glideFrames : 0
+            bank = next.bank
+            prep = next
         }
 
-        let preamp = Float(pow(10, settings.effectivePreampDb(sampleRate: sampleRate) / 20))
-        let level = Float(replayGainFactor(settings, song)) * preamp
+        let level = Float(replayGainFactor(next.settings, song)) * next.preamp
         gain.to(level, frames: frames)
 
-        let stereo = channels >= 2
-        let balance = stereo ? Float(min(1, max(-1, settings.balance))) : 0
+        let balance = next.balance
         left.to(balance > 0 ? 1 - balance : 1, frames: frames)
         right.to(balance < 0 ? 1 + balance : 1, frames: frames)
-        let toMono = stereo && settings.mono
+        let toMono = next.toMono
         mono.to(toMono ? 1 : 0, frames: frames)
 
-        // With mono on there is nothing to blend.
-        let feeds = stereo && settings.crossfeed.on && !settings.mono
-        let nextFeed = feeds ? CrossfeedCoefficients(settings.crossfeed, sampleRate: sampleRate) : .none
+        let nextFeed = next.feed
+        let feeds = nextFeed != .none
+        let bands = next.bands
         if nextFeed != feed {
             // Switched on from off, the filter starts from silence; otherwise it carries on.
             if feed == .none && feedFadeLeft == 0 { feedFilter.clear() }
@@ -139,7 +152,7 @@ public final class SoundShaper: @unchecked Sendable {
         // Sound that is left as it is passes through untouched; the limiter only catches peaks
         // the shaping could push over.
         let untouched = bands.isEmpty && level == 1 && balance == 0 && !toMono && !feeds
-        limiter.enabled = settings.limiter && !untouched
+        limiter.enabled = next.settings.limiter && !untouched
     }
 
     /// Shapes `frames` frames of `input` (changed on the way) and writes what comes out of the
@@ -182,23 +195,25 @@ public final class SoundShaper: @unchecked Sendable {
             for ch in 0..<channels { bank.process(buffers[ch], frames: frames, channel: ch) }
             return
         }
-        if fadeScratch.count != channels || (fadeScratch.first?.count ?? 0) < frames {
-            fadeScratch = Array(repeating: Array(repeating: 0, count: frames), count: channels)
-        }
-        for ch in 0..<channels {
-            fadeScratch[ch].withUnsafeMutableBufferPointer { scratch in
-                scratch.baseAddress!.update(from: buffers[ch], count: frames)
-                old.process(scratch.baseAddress!, frames: frames, channel: ch)
-            }
-            bank.process(buffers[ch], frames: frames, channel: ch)
-        }
-        for i in 0..<frames {
-            let w: Float = fadeLeft > 0 ? 1 - Float(fadeLeft) / Float(glideFrames) : 1
-            if fadeLeft > 0 { fadeLeft -= 1 }
+        var done = 0
+        while done < frames {
+            let n = min(frames - done, Self.fadeScratchFrames)
             for ch in 0..<channels {
-                let faded = fadeScratch[ch][i]
-                buffers[ch][i] = faded + (buffers[ch][i] - faded) * w
+                fadeScratch[ch].withUnsafeMutableBufferPointer { scratch in
+                    scratch.baseAddress!.update(from: buffers[ch] + done, count: n)
+                    old.process(scratch.baseAddress!, frames: n, channel: ch)
+                }
+                bank.process(buffers[ch] + done, frames: n, channel: ch)
             }
+            for i in 0..<n {
+                let w: Float = fadeLeft > 0 ? 1 - Float(fadeLeft) / Float(glideFrames) : 1
+                if fadeLeft > 0 { fadeLeft -= 1 }
+                for ch in 0..<channels {
+                    let faded = fadeScratch[ch][i]
+                    buffers[ch][done + i] = faded + (buffers[ch][done + i] - faded) * w
+                }
+            }
+            done += n
         }
         if fadeLeft == 0 { fadingFrom = nil }
     }

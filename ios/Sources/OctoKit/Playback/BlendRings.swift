@@ -78,15 +78,21 @@ public struct BlendMainInput: Sendable, Equatable {
     public var deck = BlendDeck.a
     public var value: Int64 = 0
     public var pace = 1.0
+    /// For an arm: the songs it was made for on the outgoing and the incoming deck (-1 unknown).
+    public var outgoingSerial: Int64 = -1
+    public var incomingSerial: Int64 = -1
 
     public init(kind: BlendMainKind) { self.kind = kind }
 
-    public static func arm(_ arm: BlendArm, outgoing: Int, entryMs: Double) -> BlendMainInput {
+    public static func arm(_ arm: BlendArm, outgoing: Int, entryMs: Double, outgoingSerial: Int64 = -1,
+                           incomingSerial: Int64 = -1) -> BlendMainInput {
         var m = BlendMainInput(kind: .arm)
         m.generation = arm.generation
         m.arm = arm
         m.outgoing = outgoing
         m.entryMs = entryMs
+        m.outgoingSerial = outgoingSerial
+        m.incomingSerial = incomingSerial
         return m
     }
 

@@ -148,6 +148,14 @@ public final class DeckRender: @unchecked Sendable {
     private var keptDrained = false
     private var cutPublished = false
     private var keptDropped = 0
+    /// Whether this deck played as the orders were last taken, to see a pause inside the kept
+    /// frames.
+    private var wasPlaying = false
+    /// Main's view: the outgoing song still has kept frames to play (the blend's end waits).
+    public let keptPending = Atomic<Bool>(false)
+    /// The song the registered blend was armed for on this deck (-1 for none): taking it never
+    /// lets go of the registration.
+    private var registeredSerial: Int64 = -1
 
     /// The last frames handed to the time-pitch stage, before the deck's volume, replayed after an
     /// engine restart reset the stage.
@@ -200,15 +208,7 @@ public final class DeckRender: @unchecked Sendable {
             processor.configure(sampleRate: Int(blendBusRate), channels: 2)
             configured = true
         }
-        if let fresh = orders.withLockIfAvailable({ $0 }) { held = fresh }
-        if held.current !== source { takeSong(held.current) }
-        if held.dropKept != keptDropped {
-            // Superseded (a skip, a seek, a stop while paused): the kept frames never play, and a
-            // song waiting to come in after them comes in now.
-            keptDropped = held.dropKept
-            dropKeptFrames()
-        }
-        stage.clock.set(rate: Double(held.speed), latency: held.latencyFrames)
+        takeOrders()
         playingNow = held.playing
         volumeNow = held.volume
         if held.playing { seenPlaying = true }
@@ -264,6 +264,46 @@ public final class DeckRender: @unchecked Sendable {
         rendered.add(frames, ordering: .relaxed)
     }
 
+    /// Before either deck renders a cycle: the orders are taken now, so the cycle's timing reads
+    /// this deck's rate and latency as it will render, and kept frames about to play again fix
+    /// where they end before the incoming deck renders, whichever is pulled first.
+    public func prepareCycle() {
+        takeOrders()
+        if keptActive && !cutPublished && held.playing { publishCut() }
+    }
+
+    /// Takes main's orders when they are free (never waiting), and what follows from them: a new
+    /// song, kept frames dropped, a new rate or latency, a pause inside the kept frames.
+    private func takeOrders() {
+        if let fresh = orders.withLockIfAvailable({ $0 }) { held = fresh }
+        if held.current !== source { takeSong(held.current) }
+        if held.dropKept != keptDropped {
+            // Superseded (a skip, a seek, a stop while paused): the kept frames never play, and a
+            // song waiting to come in after them comes in now.
+            keptDropped = held.dropKept
+            dropKeptFrames()
+        }
+        if stage.clock.set(rate: Double(held.speed), latency: held.latencyFrames) {
+            stage.mappingChanged()
+            // The outgoing song's start is heard elsewhere now: told again, as after a restart.
+            if stage.role == .outgoing && stage.startPosted { replaceStart = true }
+        }
+        if keptActive && cutPublished && wasPlaying && !held.playing && keptOut < keptTotal { pausedInKept() }
+        wasPlaying = held.playing
+    }
+
+    /// Paused again inside the kept frames. With the incoming song not yet started, where they
+    /// end is withdrawn and fixed again from what is left when this deck plays again; with it
+    /// started, the rest is dropped past this deck's fade into the pause.
+    private func pausedInKept() {
+        if stage.partner?.started == true {
+            keptTotal = min(keptTotal, keptOut + DeckFlow.rampFrames(ms: DeckFlow.pauseFadeMs, rate: Double(held.speed)))
+        } else {
+            cutPublished = false
+            stage.cutBus = -1
+        }
+    }
+
     /// Silent and consuming nothing: parked by main, or by the blend's rules.
     private var silentNow: Bool { stage.silent || (held.parked && !stage.started) }
 
@@ -294,9 +334,12 @@ public final class DeckRender: @unchecked Sendable {
         endTold = false
         if next == nil {
             phaseCode.store(DeckState.idle.code, ordering: .relaxed)
+        } else if let next, Int64(next.serial) == registeredSerial {
+            // The song the registered blend was armed for: its registration stands.
         } else {
             // A song loaded plays as itself until a blend registers it; the outgoing song's kept
             // frames belong to the blend it left.
+            registeredSerial = -1
             stage.release()
             clearKept()
         }
@@ -308,7 +351,8 @@ public final class DeckRender: @unchecked Sendable {
         stage.startingNow = false
         guard let source else { return }
         source.ring.dropStale()
-        source.ring.drop(beforeSongFrame: Self.songFrame(stage.entryMs))
+        // A start that came past the cut drops as much more, so its song lands where planned.
+        source.ring.drop(beforeSongFrame: Self.songFrame(stage.entryMs) + stage.startLate)
         started = true
         rebuffering = false
         needsFlush = true
@@ -519,7 +563,7 @@ public final class DeckRender: @unchecked Sendable {
     }
 
     /// Frames the volume takes from silence to full.
-    private static let gainFadeFrames = 0.01 * blendBusRate
+    private static let gainFadeFrames = DeckFlow.pauseFadeMs * blendBusRate / 1_000
 
     /// Moves the volume toward `target` no faster than silence to full in 10 ms.
     private func applyGain(_ target: Float, _ frames: Int) {
@@ -605,17 +649,28 @@ public final class DeckRender: @unchecked Sendable {
     }
 
     /// The bus frame up to which this deck's sound is decided, for the session: a deck the engine
-    /// did not pull this cycle counts as caught up.
+    /// did not pull this cycle counts as caught up. How far past the cycle and its own latency the
+    /// stage pulled (it pulls in chunks of its own) is kept, the most seen, for the timing.
     public func renderedBus(cycle: Int, cycleBus: Int64, cycleFrames: Int64) -> Int64 {
         let bus = stage.clock.renderedBus
-        if renderedCycle == cycle { return bus }
+        if renderedCycle == cycle {
+            let lead = bus - cycleBus - cycleFrames - Int64(stage.clock.current.latency.rounded(.up))
+            if lead > pullLead { pullLead = lead }
+            return bus
+        }
         return max(bus, cycleBus + cycleFrames + Int64(stage.clock.current.latency))
     }
 
-    /// A new blend registers this deck, before its stage is armed. The orders are taken as they
-    /// are now, so a song main loaded just before the arm is the one registered and taking it
-    /// later never lets go of the registration; whether it plays is read from them too.
-    public func registered() {
+    /// The most the time-pitch stage was seen to pull past a cycle's end beyond its latency, in
+    /// bus frames.
+    public private(set) var pullLead: Int64 = 0
+
+    /// A new blend registers this deck, before its stage is armed, for the song of `serial` (-1
+    /// when unknown). The orders are taken as they are now, so a song main loaded just before the
+    /// arm is the one registered; and that song, taken later (the orders were busy), never lets go
+    /// of the registration. Whether it plays is read from the orders too.
+    public func registered(serial: Int64 = -1) {
+        registeredSerial = serial
         if let fresh = orders.withLockIfAvailable({ $0 }) {
             held = fresh
             if held.current !== source { takeSong(held.current) }
@@ -651,18 +706,26 @@ public final class DeckRender: @unchecked Sendable {
         }
         // The processor's own held frames come out first, then the kept ones, then its tail.
         keptTotal = keptRaw + processor.latency
+        keptPending.store(keptTotal > 0, ordering: .releasing)
+    }
+
+    /// Where the kept frames left end, fixed as the deck plays them again: the incoming song comes
+    /// in there.
+    private func publishCut() {
+        cutPublished = true
+        stage.cutBus = stage.clock.bus(ofSource: stage.clock.source + Int64(keptTotal - keptOut))
+        if keptTotal > keptOut { stage.rampIn(DeckFlow.rampFrames(rate: Double(held.speed))) }
     }
 
     /// Hands out kept frames, shaped as they go. The first call while the deck plays again fixes
-    /// where those left end, which is where the incoming song comes in; frames played as the deck
+    /// where those left end (unless the cycle's start already did); frames played as the deck
     /// fades into its pause fix nothing.
     private func playKept(at offset: Int, _ room: Int) -> Int {
-        if !cutPublished && held.playing {
-            cutPublished = true
-            stage.cutBus = stage.clock.bus(ofSource: stage.clock.source + Int64(keptTotal - keptOut))
-            if keptTotal > keptOut { stage.rampIn(DeckFlow.rampFrames(rate: Double(held.speed))) }
+        if !cutPublished && held.playing { publishCut() }
+        guard keptOut < keptTotal else {
+            keptPending.store(false, ordering: .releasing)
+            return 0
         }
-        guard keptOut < keptTotal else { return 0 }
         var n = 0
         if keptRead < keptRaw {
             let take = min(keptRaw - keptRead, room, Self.block)
@@ -680,6 +743,7 @@ public final class DeckRender: @unchecked Sendable {
             n = drainTail(at: offset, frames: offset + min(room, keptTotal - keptOut))
             if n == 0 {
                 keptOut = keptTotal
+                keptPending.store(false, ordering: .releasing)
                 return 0
             }
         }
@@ -694,6 +758,7 @@ public final class DeckRender: @unchecked Sendable {
             }
         }
         keptOut += n
+        if keptOut >= keptTotal { keptPending.store(false, ordering: .releasing) }
         return n
     }
 
@@ -713,6 +778,7 @@ public final class DeckRender: @unchecked Sendable {
         keptOut = 0
         keptDrained = false
         cutPublished = false
+        keptPending.store(false, ordering: .releasing)
     }
 
     // MARK: Engine restarts
@@ -730,6 +796,7 @@ public final class DeckRender: @unchecked Sendable {
         replayAt = (historyAt - replayLeft + Self.historyCapacity) % Self.historyCapacity
         stage.clock.reset(atBus: bus, rate: piece.rate, latency: piece.latency)
         stage.shift(by: Int64(replayLeft))
+        stage.shift(byBus: Int64(max(0, replayBus).rounded()))
         replaceStart = stage.role == .outgoing && stage.startPosted
     }
 

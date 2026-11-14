@@ -42,9 +42,11 @@ final class SoundProcessor: @unchecked Sendable {
 
     /// How a song queued after `previous` would be judged for loudness, as `songSetUp` judges it
     /// but without moving the album run: the values its source keeps, and whether it comes from
-    /// the same album.
-    func queuedLoudness(_ song: Song, after previous: Song?) -> SongLoudness {
-        queuedSongLoudness(stored: Self.stored(song), album: Self.album(song), afterAlbum: previous.flatMap(Self.album))
+    /// the same album; the same song again keeps the answer `previousLoudness` had.
+    func queuedLoudness(_ song: Song, after previous: Song?, previousLoudness: SongLoudness? = nil) -> SongLoudness {
+        queuedSongLoudness(stored: Self.stored(song), album: Self.album(song), afterAlbum: previous.flatMap(Self.album),
+                           songId: song.id.isEmpty ? nil : song.id, afterSongId: previous.flatMap { $0.id.isEmpty ? nil : $0.id },
+                           afterFollows: previousLoudness?.followsSameAlbum ?? false)
     }
 
     private static func album(_ song: Song) -> String? {

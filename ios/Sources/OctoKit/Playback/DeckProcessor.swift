@@ -72,19 +72,17 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
         if let old { retired.append(old) }
         let holds = renderHolds.load(ordering: .acquiring)
         var kept: [DeckTransition] = []
-        for i in retired.indices where i >= retired.count - 2 || Self.address(retired[i]) == holds { kept.append(retired[i]) }
+        for i in retired.indices where i >= retired.count - 2 || retired[i].id == holds { kept.append(retired[i]) }
         retired = kept
     }
 
     /// Main thread only: transitions replaced that the render may still hold.
     private var retired: [DeckTransition] = []
-    /// The transition the render's shaping holds now, by address (0 for none).
-    private let renderHolds = Atomic<UInt>(0)
+    /// The transition the render's shaping holds now, by its id (0 for none).
+    private let renderHolds = Atomic<Int64>(0)
 
     /// How many replaced transitions are kept, for checks.
     public var retiredCount: Int { retired.count }
-
-    static func address(_ transition: DeckTransition) -> UInt { UInt(bitPattern: Unmanaged.passUnretained(transition).toOpaque()) }
 
     public func reading(_ entryId: String?, tagBpm: Double?) -> TapReading? { tap?.reading(entryId, tagBpm: tagBpm) }
 
@@ -180,9 +178,9 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
             guard let armedNow = found else { return nil }
             return armedNow.entryId == nil || current == nil || armedNow.entryId == current ? armedNow : nil
         }
-        if transition !== blendFor {
+        if (transition?.id ?? 0) != blendFor {
             // A new plan runs on its own time from its start.
-            blendFor = transition
+            blendFor = transition?.id ?? 0
             startShiftMs = 0
             extensionMs = 0
             frozenMs = nil
@@ -192,15 +190,15 @@ public final class DeckProcessor: DeckSound, @unchecked Sendable {
         if dropped { transition = nil }
         let blendMs = frozenMs ?? songMs - startShiftMs - extensionMs
         shaping.arm(transition, songMs: blendMs)
-        renderHolds.store(shaping.holdingAddress, ordering: .releasing)
+        renderHolds.store(shaping.holdingId, ordering: .releasing)
         shaping.process(buffers, frames: frames, songMs: blendMs, msPerFrame: frozenMs == nil ? msPerFrame : 0)
     }
 
     // MARK: The blend's rules, on the render thread
 
-    /// The transition the blend time below belongs to (compared by identity only, never owned
-    /// here), and whether the blend's rules disarmed it.
-    private unowned(unsafe) var blendFor: DeckTransition?
+    /// The transition the blend time below belongs to, by its id (0 for none), and whether the
+    /// blend's rules disarmed it.
+    private var blendFor: Int64 = 0
     private var dropped = false
     private var startShiftMs = 0.0
     private var extensionMs = 0.0

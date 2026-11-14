@@ -94,10 +94,11 @@ public final class PhoneMix: @unchecked Sendable {
     /// The limiter's delay, in hardware frames, for the output delay.
     public var limiterLatencyFrames: Int { limiter?.latencyFrames ?? 0 }
 
-    /// The larger of the decks' time-pitch latencies as their stages run now, in bus frames.
+    /// How far ahead of the bus the decks' sound is decided as their stages run now, in bus
+    /// frames: the larger of each time-pitch's latency plus how far past a cycle it pulls.
     public var decksLatencyFrames: Double {
         var largest = 0.0
-        for i in 0..<decks.count { largest = max(largest, decks[i].stage.clock.current.latency) }
+        for i in 0..<decks.count { largest = max(largest, decks[i].stage.clock.current.latency + Double(decks[i].pullLead)) }
         return largest
     }
 
@@ -109,16 +110,22 @@ public final class PhoneMix: @unchecked Sendable {
         let restartsNow = restarts.load(ordering: .acquiring)
         if restartsNow != seenRestarts {
             seenRestarts = restartsNow
-            // Both stages were reset: each deck replays the shorter of the two delays, so both
-            // move by the same stretch and stay lined up.
+            // Both stages were reset: the decks in a live generation replay the shorter of their
+            // delays, so both move by the same stretch and stay lined up; a deck in none replays
+            // its own and loses nothing.
             var replay = Double.infinity
-            for i in 0..<decks.count { replay = min(replay, decks[i].stage.clock.current.latency) }
-            if replay == .infinity { replay = 0 }
-            for i in 0..<decks.count { decks[i].restarted(atBus: cycleBus, replayBus: replay) }
-            observer?.note(restartAt: cycleBus, replayBus: replay)
+            for i in 0..<decks.count where decks[i].stage.live {
+                replay = min(replay, decks[i].stage.clock.current.latency)
+            }
+            for i in 0..<decks.count {
+                let own = decks[i].stage.clock.current.latency
+                decks[i].restarted(atBus: cycleBus, replayBus: decks[i].stage.live && replay != .infinity ? replay : own)
+            }
+            observer?.note(restartAt: cycleBus, replayBus: replay == .infinity ? 0 : replay)
         }
-        // The decks' own latencies as they run now: a tempo-matched song's stage is on whatever
-        // main last measured.
+        // Each deck takes its orders before the timing is worked out, so the cycle reads both
+        // decks' rates and latencies as they render now.
+        for i in 0..<decks.count { decks[i].prepareCycle() }
         let latency = Int64(decksLatencyFrames.rounded(.up))
         timing = phoneBlendTiming(latencyFrames: latency, cycleFrames: cycleBusFrames, tickerMs: blendTickerMs,
                                   mainLagMs: Double(bitPattern: mainLagBits.load(ordering: .relaxed)),
@@ -172,8 +179,8 @@ public final class PhoneMix: @unchecked Sendable {
             outgoing = input.outgoing
             let into = 1 - input.outgoing
             // The decks take the songs they were given first: a song taken lets go of its stage.
-            decks[outgoing].registered()
-            decks[into].registered()
+            decks[outgoing].registered(serial: input.outgoingSerial)
+            decks[into].registered(serial: input.incomingSerial)
             stages[outgoing].armOutgoing(session, startMs: input.arm.startMs, overlapMs: input.arm.overlapMs)
             stages[into].armIncoming(session, entryMs: input.entryMs)
             session.arm(input.arm)

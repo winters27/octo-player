@@ -407,6 +407,9 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
         // A queued song follows the one on now from the same album only with a known album.
         #expect(queuedSongLoudness(stored: nil, album: "a", afterAlbum: "a").followsSameAlbum)
         #expect(!queuedSongLoudness(stored: nil, album: nil, afterAlbum: nil).followsSameAlbum)
+        // The same song again (repeat one) keeps the answer it had, as the album run does.
+        #expect(queuedSongLoudness(stored: nil, album: nil, afterAlbum: nil, songId: "s", afterSongId: "s", afterFollows: true).followsSameAlbum)
+        #expect(!queuedSongLoudness(stored: nil, album: "a", afterAlbum: "a", songId: "s", afterSongId: "s", afterFollows: false).followsSameAlbum)
     }
 
     @Test func pauseAtTheEndOfTheSongSetInTheRunUpUndoesTheStartBeforeItIsWritten() {
@@ -598,6 +601,29 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
             if !b.started { b.clock.pulled(b.framesUntilNext(1_024)) }
         }
         #expect(b.clock.renderedBus == a.cutBus)
+    }
+
+    @Test func anIncomingStartPastTheCutDropsAsMuchOfItsSongToLandOnIt() {
+        let (session, word, a, b) = setUp()
+        var events: [BlendEvent] = []
+        run(session, word, a, b, until: 476_000, ack: { _ in true }, events: &events)
+        session.disarm(.pause)
+        while let action = session.takeAction() {
+            a.take(action, as: .outgoing)
+            b.take(action, as: .incoming)
+        }
+        a.endOfActions()
+        b.endOfActions()
+        #expect(b.startsAfterPartner)
+        // B renders on, silent, past where the cut turns out to be.
+        for _ in 0..<5 {
+            b.crossDue(nil)
+            b.clock.pulled(1_024)
+        }
+        a.cutBus = b.clock.renderedBus - 600
+        b.crossDue(nil)
+        #expect(b.started)
+        #expect(b.startLate == 600)
     }
 
     @Test func anUndoneStartWaitsForTheNamedFollowerAtTheOutgoingSongsEnd() {

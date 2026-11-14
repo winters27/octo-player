@@ -114,7 +114,7 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
     /// stops); the same value again changes nothing.
     var pauseAtEndOfSong: Bool {
         get { deck.pauseAtEndOfSong }
-        set { crossfader.endOfSongChanged(to: newValue) { deck.pauseAtEndOfSong = newValue } }
+        set { crossfader.endOfSongChanged(to: newValue) }
     }
 
     var currentKey: String? { queue.currentItem?.entryId }

@@ -14,6 +14,9 @@ public func wantedMusic(playWhenReady: Bool, ended: Bool, stoppedAtEnd: Bool) ->
 /// or its stream has ended, so a feed at real time after a stall plays on instead of fading out
 /// and in every few frames.
 public enum DeckFlow {
+    /// A deck's volume goes from full to silence (a pause) and back no faster than this.
+    public static let pauseFadeMs = 10.0
+
     /// Whether the frames a render has left should fade out because the sound is running dry.
     public static func fadesOut(decodedToEnd: Bool, hasFollowing: Bool, deliveredSinceLast: Bool) -> Bool {
         !decodedToEnd && !hasFollowing && !deliveredSinceLast
@@ -115,10 +118,14 @@ public func blendIncomingGainDb(_ settings: SoundSettings, current: SongLoudness
     songGainDb(settings, next) - songGainDb(settings, current)
 }
 
-/// How a song about to follow `after` would be judged for loudness, without the album run's
-/// state: the values its source keeps, and whether it comes from the same album.
-public func queuedSongLoudness(stored: ReplayGainInfo?, album: String?, afterAlbum: String?) -> SongLoudness {
-    SongLoudness(stored, followsSameAlbum: album != nil && album == afterAlbum)
+/// How a song about to follow another would be judged for loudness, by the album run's rules but
+/// without its state: the values its source keeps, and whether it comes from the same album as
+/// the one before (`afterAlbum`). The same song again (`songId` equal to `afterSongId`, as with
+/// repeat one) keeps the answer that one had (`afterFollows`).
+public func queuedSongLoudness(stored: ReplayGainInfo?, album: String?, afterAlbum: String?, songId: String? = nil,
+                               afterSongId: String? = nil, afterFollows: Bool = false) -> SongLoudness {
+    if let songId, songId == afterSongId { return SongLoudness(stored, followsSameAlbum: afterFollows) }
+    return SongLoudness(stored, followsSameAlbum: album != nil && album == afterAlbum)
 }
 
 /// How a write of "pause at the end of this song" lands.

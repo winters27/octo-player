@@ -30,8 +30,13 @@ public final class DeckBlendStage: @unchecked Sendable {
     public private(set) var started = false
     /// The start may be rendered (main acknowledged it, or it commits without waiting).
     public private(set) var committed = false
-    /// The source frame where its first frame lands, once decided.
+    /// The source frame where its first frame lands, once decided, and the bus frame it is heard
+    /// at, from which the index is placed again whenever the mapping changes.
     public private(set) var startIndex: Int64 = -1
+    private var startBus: Int64 = -1
+    /// How many source frames past the outgoing song's cut the start came (it was rendered past
+    /// the cut before the cut was known): that much of its song is dropped, so it lands on the cut.
+    public private(set) var startLate: Int64 = 0
     /// Held for placement on a bar: consumes nothing.
     public private(set) var held = false
     /// Where it comes in, in its own song: frames before are dropped at the start.
@@ -146,6 +151,8 @@ public final class DeckBlendStage: @unchecked Sendable {
         started = false
         committed = false
         startIndex = -1
+        startBus = -1
+        startLate = 0
         held = false
         startsAfterPartner = false
         startingNow = false
@@ -177,15 +184,20 @@ public final class DeckBlendStage: @unchecked Sendable {
         switch (action.kind, part) {
         case (.startB, .incoming):
             startIndex = at
+            startBus = action.frame
         case (.commitB, .incoming):
             committed = true
-            if startIndex < 0 { startIndex = at }
+            if startIndex < 0 {
+                startIndex = at
+                startBus = action.frame
+            }
             startIndex = max(startIndex, clock.source)
         case (.undoStart, .incoming):
             parked = true
             started = false
             committed = false
             startIndex = -1
+            startBus = -1
             held = false
             queue(clock.source, .undoStart)
         case (.undoStart, .outgoing):
@@ -197,7 +209,9 @@ public final class DeckBlendStage: @unchecked Sendable {
         case (.aLeave, .outgoing):
             gain.leave(atBus: action.frame, frames: action.value)
         case (.aEnd, .outgoing):
-            queue(remixing ? clock.source : at, .aEnd)
+            // Paused past the handover (the actions come remixed): the song ends once the deck's
+            // own fade into the pause is out, never cut mid-cycle.
+            queue(remixing ? clock.source + Int64(DeckFlow.rampFrames(ms: DeckFlow.pauseFadeMs, rate: rate)) : at, .aEnd)
         case (.aHoldNext, .outgoing):
             holdingForAnswer = true
         case (.aFollow, .outgoing):
@@ -216,8 +230,9 @@ public final class DeckBlendStage: @unchecked Sendable {
                 gain.leave(atBus: action.frame, frames: action.value)
             } else if partner?.started == true {
                 // Paused past the handover with the incoming song already under way: it plays on
-                // alone, and nothing more of this song is heard.
-                queue(clock.source, .aEnd)
+                // alone, and nothing more of this song is heard once the deck's own 10 ms fade into
+                // the pause is out.
+                queue(clock.source + Int64(DeckFlow.rampFrames(ms: DeckFlow.pauseFadeMs, rate: rate)), .aEnd)
             } else {
                 cutAtStart = true
             }
@@ -255,6 +270,26 @@ public final class DeckBlendStage: @unchecked Sendable {
         if startIndex >= clock.source { startIndex += frames }
     }
 
+    /// The deck's sound is heard `frames` bus frames later from now on (an engine restart): what
+    /// was placed on a bus frame ahead (the start's frame, the cut, the level's leave) moves with
+    /// it, and the blend's end is told again from the new mapping.
+    public func shift(byBus frames: Int64) {
+        guard frames > 0 else { return }
+        if startBus >= 0 { startBus += frames }
+        if cutBus >= 0 { cutBus += frames }
+        gain.shift(byBus: frames)
+        endPostedMs = .nan
+    }
+
+    /// The deck's rate or latency changed: a start placed on a bus frame and not yet reached is
+    /// placed again on the source frame heard there now; the outgoing song's blend end is told
+    /// again from the new mapping.
+    public func mappingChanged() {
+        if role == .outgoing { endPostedMs = .nan }
+        guard role == .incoming, parked, !started, !startsAfterPartner, startBus >= 0 else { return }
+        startIndex = max(clock.source, clock.source(ofBus: startBus))
+    }
+
     private func queue(_ index: Int64, _ kind: BlendActionKind, _ frames: Int = 0, ms: Double = 0) {
         if pendingCount == Self.slots {
             lost += 1
@@ -283,7 +318,10 @@ public final class DeckBlendStage: @unchecked Sendable {
         if startsAfterPartner {
             guard let partner, partner.cutBus >= 0 else { return }
             let at = clock.source(ofBus: partner.cutBus)
-            if clock.source >= at { begin(rampFrames: DeckFlow.rampFrames(rate: clock.current.rate), shaping) }
+            if clock.source >= at {
+                startLate = clock.source - at
+                begin(rampFrames: DeckFlow.rampFrames(rate: clock.current.rate), shaping)
+            }
             return
         }
         if committed && startIndex >= 0 && clock.source >= startIndex { begin(rampFrames: 0, shaping) }
@@ -354,6 +392,10 @@ public final class DeckBlendStage: @unchecked Sendable {
         }
         return Int(max(1, n))
     }
+
+    /// Whether the deck is part of a blend still sounding or waiting: registered, or past its
+    /// session with kept frames to play or a start waiting on them.
+    public var live: Bool { role != .none || cutAtStart || startsAfterPartner }
 
     /// Whether the deck renders silence and consumes nothing now: parked before its start, held
     /// for placement, or past the blend's end of the outgoing song.

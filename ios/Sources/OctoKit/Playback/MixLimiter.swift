@@ -97,6 +97,12 @@ public final class DeckGainRamp: @unchecked Sendable {
         from = gain
     }
 
+    /// The deck's sound is heard `frames` bus frames later from now on (an engine restart's
+    /// replay): a leave placed ahead moves with it.
+    public func shift(byBus frames: Int64) {
+        if rampAt != Int64.max && frames > 0 { rampAt += frames }
+    }
+
     /// Back to the deck's own level at once: the deck plays as itself again.
     public func open() {
         gain = 1

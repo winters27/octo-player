@@ -352,8 +352,12 @@ public final class FilterBank: @unchecked Sendable {
     /// curve does not restart them from silence.
     public func continueFrom(_ other: FilterBank) {
         guard other.b0.count == b0.count, other.channels == channels else { return }
-        z1 = other.z1
-        z2 = other.z2
+        // Copied value by value: memory shared with the other bank would be copied at the first
+        // filtered sample, on the audio thread.
+        for i in z1.indices {
+            z1[i] = other.z1[i]
+            z2[i] = other.z2[i]
+        }
     }
 
     /// Forgets the filters' memory.
