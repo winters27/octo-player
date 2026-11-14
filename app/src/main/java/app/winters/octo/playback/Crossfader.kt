@@ -25,6 +25,7 @@ import app.winters.octo.sound.TapReading
 import app.winters.octo.sound.chooseReplayGain
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToLong
 
 // The planner needs the end of the playing song and the start of the next
 // once the song has played this long.
@@ -229,8 +230,9 @@ internal class Crossfader(
     }
 
     // Everything a plan depends on besides the clock. A change means a new
-    // plan. Once a blend is registered, the scouts' readiness never changes
-    // it (`core`).
+    // plan. Once a blend is registered, the scouts' readiness and the next
+    // song's own tags being read never change it (`core`); the gain between
+    // the two songs, to a tenth of a dB, does.
     private data class PlanKey(
         val current: String?,
         val next: String?,
@@ -245,8 +247,10 @@ internal class Crossfader(
         val head: Boolean,
         val reading: Boolean,
         val levelHeard: Boolean,
+        val gainTenthsDb: Long,
+        val nextTagsRead: Boolean,
     ) {
-        val core: PlanKey get() = copy(tail = false, head = false, reading = false, levelHeard = false)
+        val core: PlanKey get() = copy(tail = false, head = false, reading = false, levelHeard = false, nextTagsRead = false)
     }
 
     // The player's own events: the song on screen.
@@ -608,20 +612,21 @@ internal class Crossfader(
             schedule(times.farCheckMs)
             return
         }
-        val key = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, deck.skipSilenceEnabled)
+        val gain = incomingGain(deck, nextItem, next)
+        val key = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, deck.skipSilenceEnabled, gain)
         if (registered >= 0 && key.core != planKey?.core) {
             // What the blend was planned from changed before its handover
-            // (a speed, Skip silence, a length): undone by the phase rule,
-            // and planned again.
+            // (a speed, Skip silence, a length, the gain between the songs):
+            // undone by the phase rule, and planned again.
             disarm(BlendDisarm.EDIT)
             followUp()
             dropPlan()
         }
         if (registered < 0) {
             scoutAhead(deck, current, nextItem, position, currentSong.durationMs)
-            val fresh = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, deck.skipSilenceEnabled)
+            val fresh = keyFor(current, nextItem, currentSong, nextSong, repeatOne, stopAtEnd, speed, deck.skipSilenceEnabled, gain)
             if (fresh != planKey && readyToPlan(fresh, remaining)) {
-                makePlan(deck, fresh, currentSong, nextSong, position, atHead, repeatOne, stopAtEnd, pace, nextItem)
+                makePlan(deck, fresh, currentSong, nextSong, position, atHead, repeatOne, stopAtEnd, pace, nextItem, gain.db)
             }
         }
         val p = plan
@@ -809,6 +814,7 @@ internal class Crossfader(
         stopAtEnd: Boolean,
         speed: Float,
         skipSilence: Boolean,
+        gain: IncomingGain,
     ): PlanKey {
         val currentEntry = current.entryId ?: current.mediaId
         val nextEntry = next.entryId ?: next.mediaId
@@ -826,7 +832,34 @@ internal class Crossfader(
             head = head?.entryId == nextEntry && head?.done == true,
             reading = reading?.entryId == currentEntry && reading?.done == true,
             levelHeard = reading?.entryId == currentEntry && reading?.levelHeard == true,
+            gainTenthsDb = (gain.db * 10).roundToLong(),
+            nextTagsRead = gain.tagsRead,
         )
+    }
+
+    // The next song's gain less the playing one's, in dB, as the decks apply
+    // them: ReplayGain under the settings and the EQ's preamp at each song's
+    // sample rate. The playing song's is its deck's own; the next song's is
+    // its deck's own choice once the spare has opened it (the sound's own
+    // tags win there), else its stored loudness at 48 kHz. The same song
+    // next keeps the playing one's album rule.
+    private class IncomingGain(val db: Double, val tagsRead: Boolean)
+
+    private fun incomingGain(deck: ExoPlayer, nextItem: MediaItem, next: Int): IncomingGain {
+        val sound = soundOf(deck) ?: return IncomingGain(0.0, false)
+        val current = deck.currentMediaItem
+        val opener = if (loadedFor == next && spare.currentMediaItem?.entryId == nextItem.entryId) soundOf(spare) else null
+        val opened = opener?.loudnessOf(nextItem.entryId)
+        val stored = SongLoudness(
+            chooseReplayGain(null, nextItem.mediaMetadata.storedLoudness()),
+            followsSameAlbum = albumKey(nextItem) != null && albumKey(nextItem) == current?.let(::albumKey),
+        )
+        val sameSong = current != null && nextItem.mediaId == current.mediaId
+        val view = (opened ?: stored).let { b ->
+            if (sameSong) b.copy(followsSameAlbum = sound.loudnessOf(current?.entryId)?.followsSameAlbum == true) else b
+        }
+        val rate = opener?.takeIf { opened != null }?.sampleRate?.takeIf { it > 0 } ?: 48_000
+        return IncomingGain(sound.replayGainDb(view, rate) - sound.replayGainDb(), opened != null)
     }
 
     // A plan is made once everything it could use is in, or when there is
@@ -848,6 +881,7 @@ internal class Crossfader(
         stopAtEnd: Boolean,
         pace: PlaybackParameters,
         nextItem: MediaItem,
+        incomingGainDb: Double,
     ) {
         val speed = pace.speed
         val heard = reading?.takeIf { it.entryId == key.current }?.value
@@ -863,15 +897,6 @@ internal class Crossfader(
         } else {
             position
         }
-        // The next song's ReplayGain less the playing one's, as the decks
-        // apply them: both decks share the preamp, so the difference is the
-        // whole gain between the two songs as heard.
-        val sound = soundOf(deck)
-        val nextLoudness = SongLoudness(
-            chooseReplayGain(null, nextItem.mediaMetadata.storedLoudness()),
-            followsSameAlbum = albumKey(nextItem) != null && albumKey(nextItem) == deck.currentMediaItem?.let(::albumKey),
-        )
-        val incomingGainDb = sound?.let { it.replayGainDb(nextLoudness) - it.replayGainDb() } ?: 0.0
         val context = TransitionContext(
             nowMs = now,
             playedMs = heard?.let { (it.heardMs * speed).toLong() } ?: position,

@@ -29,6 +29,8 @@ class MixedPlayerTest {
 
     private fun twoSongs() = listOf(PcmSong("a", 5_000), PcmSong("b", 2_500, sign = -1))
 
+    private fun threeSongs() = twoSongs() + PcmSong("c", 2_500, flip = true)
+
     // Every plan starts 300 ms inside the mixer's proposal lead and may not
     // move: the mixer refuses it as late.
     private val tooLate: Planner = { a, b, t, h, s, c -> planTransition(a, b, t, h, s, c).let { it.copy(startMs = c.nowMs - 300, lateMoveBars = 0) } }
@@ -403,24 +405,55 @@ class MixedPlayerTest {
     // playing song a lone deck again: a seek plays the new place at once,
     // and, switched to Gapless, so does a Next, nothing of the old place
     // heard after either past what the output had already taken.
-    private fun movesAfterTheBlendEnded(rig: PlayerRig) {
-        val target = 500 * 48 % SAW
+    private fun movesAfterTheBlendEnded(rig: PlayerRig, next: (PlayerRig) -> Unit = { it.player.seekToNextMediaItem() }) {
+        // Well away from where the song is, so the seek is a jump.
+        val targetMs = if (rig.player.currentPosition < 1_500) 2_500L else 500L
+        val target = (targetMs * 48 % SAW).toInt()
         val seekAt = rig.heardCount
-        rig.player.seekTo(500)
-        assertTrue("the new place: ${rig.notes}", rig.runUntil(2_000) { rig.framesOf(1, from = seekAt).any { near(it, target) } })
+        rig.player.seekTo(targetMs)
+        rig.runFor(1_000)
+        // The old place runs on until the song's first break after the seek;
+        // from there it runs on, unbroken, from the target for more than a
+        // saw's period, so no old frame can pass for the new place.
         val s = rig.heardSongs()
-        val landed = (seekAt until rig.heardCount).first { s[it].first == 1 && near(s[it].second, target) }
+        // From the old place's last frames before the seek.
+        val scanFrom = maxOf(0, seekAt - 2_000)
+        assertTrue(
+            "a jump after the seek to $targetMs (heard ${rig.heardCount} from $seekAt, at ${rig.player.currentPosition} ms, " +
+                "state ${rig.player.playbackState}, playing ${rig.player.isPlaying}): ${rig.notes} ${rig.told()}",
+            rig.breakFrames(1, from = scanFrom).isNotEmpty(),
+        )
+        var lastAt = -1
+        var lastFrame = -1
+        var landed = -1
+        for (i in scanFrom until rig.heardCount) {
+            val (kind, f) = s[i]
+            if (kind == 1) {
+                if (lastAt >= 0 && f != (lastFrame + (i - lastAt)) % SAW) {
+                    landed = i
+                    break
+                }
+                lastAt = i
+                lastFrame = f
+            } else if (kind != 0) {
+                lastAt = -1
+            }
+        }
+        assertTrue("landed near the target: ${s[landed].second} for $target", near(s[landed].second, target))
+        assertEquals("unbroken from the target: ${rig.notes}", emptyList<String>(), rig.breaksOf(1, from = landed, to = minOf(rig.heardCount, landed + SAW + 960)))
+        assertTrue("ran on a period: ${rig.heardCount - landed}", rig.heardCount - landed > SAW + 960)
+        assertTrue("the jump after the seek: $landed from $seekAt", landed >= seekAt)
         val oldAfterSeek = (seekAt until landed).count { s[it].first == 1 }
         assertTrue("old place after the seek: $oldAfterSeek frames, ${rig.told()}, ${rig.notes}", oldAfterSeek <= moveFrames)
         rig.player.automix = AutomixSettings(maxOverlapMs = 0)
         rig.runFor(300)
         val nextAt = rig.heardCount
-        rig.player.seekToNextMediaItem()
+        next(rig)
         rig.runFor(1_000)
-        // The old song's frames after the Next (the next song, if it plays,
-        // is told apart by its sign).
+        // The old song's frames after the move (the next songs are told
+        // apart by their sign or their flipped saw).
         val oldAfterNext = rig.framesOf(1, from = nextAt).size
-        assertTrue("old song after Next: $oldAfterNext frames, ${rig.notes}", oldAfterNext <= moveFrames)
+        assertTrue("old song after the move on: $oldAfterNext frames, ${rig.notes}", oldAfterNext <= moveFrames)
     }
 
     // Main switches to Gapless as it hears `kind` with `cause`, so nothing is
@@ -441,12 +474,13 @@ class MixedPlayerTest {
 
     @Test
     fun afterANotReadyStartASeekAndANextPlayTheNewPlaceAtOnce() {
-        val rig = PlayerRig(twoSongs(), stalled = setOf("b"))
-        rig.play("a", "b", settings = crossfade)
+        val rig = PlayerRig(threeSongs(), stalled = setOf("b"))
+        rig.play("a", "b", "c", settings = crossfade)
         // Gapless from the moment main hears it: nothing is armed again.
         gaplessAt(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.NOT_READY)
         until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.NOT_READY)
-        movesAfterTheBlendEnded(rig)
+        // The stalled song is passed over: the move goes to the one after.
+        movesAfterTheBlendEnded(rig) { it.player.seekTo(2, 0) }
     }
 
     @Test
@@ -459,13 +493,14 @@ class MixedPlayerTest {
 
     @Test
     fun afterAFloorCancelASeekAndANextPlayTheNewPlaceAtOnce() {
-        val rig = PlayerRig(twoSongs(), latencyCycles = 10)
-        rig.play("a", "b", settings = crossfade)
+        val rig = PlayerRig(threeSongs(), latencyCycles = 10)
+        rig.play("a", "b", "c", settings = crossfade)
         // Main acks 500 ms late, and is Gapless from the moment it hears the
         // cancel: nothing is armed again.
         gaplessAt(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.FLOOR, ackAfterMs = 500)
         until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.FLOOR)
-        movesAfterTheBlendEnded(rig)
+        // The old song already holds its next pass: the move goes past it.
+        movesAfterTheBlendEnded(rig) { it.player.seekTo(2, 0) }
     }
 
     @Test
@@ -473,6 +508,9 @@ class MixedPlayerTest {
         val rig = PlayerRig(twoSongs(), planner = tooLate)
         rig.play("a", "b", settings = crossfade)
         until(rig, BlendEventKind.INCOMING_NOT_READY, BlendCause.LATE)
+        // Refused before anything was heard: the song plays a while first,
+        // never armed again.
+        rig.runFor(1_000)
         movesAfterTheBlendEnded(rig)
     }
 
@@ -496,6 +534,20 @@ class MixedPlayerTest {
         rig.play("a", "b", settings = crossfade)
         assertTrue("armed and failed: ${rig.told()}", rig.runUntil(6_000) { rig.mix.mixer.commitWord.stateOf(1) == CommitState.CANCELLED })
         rig.runFor(50)
+        movesAfterTheBlendEnded(rig)
+    }
+
+    @Test
+    fun afterThePlayingSongFailedBeforeTheStartASeekAndANextPlayTheNewPlaceAtOnce() {
+        // Its decoder fails once at 3 s of it: after the arm, before the start.
+        val rig = PlayerRig(listOf(PcmSong("a", 5_000, failAtMs = 3_000, failOnce = true), PcmSong("b", 2_500, sign = -1)))
+        rig.play("a", "b", settings = crossfade)
+        assertTrue("armed, then failed: ${rig.told()}", rig.runUntil(6_000) { rig.player.playerError != null })
+        assertEquals(CommitState.CANCELLED, rig.mix.mixer.commitWord.stateOf(1))
+        rig.player.automix = AutomixSettings(maxOverlapMs = 0)
+        rig.player.prepare()
+        rig.player.play()
+        rig.runFor(200)
         movesAfterTheBlendEnded(rig)
     }
 

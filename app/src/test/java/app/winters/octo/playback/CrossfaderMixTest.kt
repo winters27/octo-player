@@ -5,6 +5,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import app.winters.octo.sound.GraphicBands
 import app.winters.octo.sound.MixEvent
 import app.winters.octo.sound.ReplayGainMode
 import app.winters.octo.sound.SoundSettings
@@ -264,8 +265,9 @@ class CrossfaderMixTest {
             rig.runUntil(9_000) { rig.decks[1].playbackParameters.speed == 1.25f },
         )
         // The next plan is made at the listener's pace.
+        val planned = contexts.size
         rig.player.addMediaItems(listOf(rig.song("c").item()))
-        assertTrue(rig.runUntil(3_000) { contexts.size > 1 })
+        assertTrue(rig.runUntil(3_000) { contexts.size > planned })
         assertEquals(1.25, contexts.last().pace, 1e-9)
     }
 
@@ -396,6 +398,69 @@ class CrossfaderMixTest {
             assertEquals("$mode", want, contexts.last().incomingGainDb, 1e-3)
             rig.close()
         }
+    }
+
+    // Plays `songs[0]`, adds the rest a second in, and returns every plan's
+    // context once the spare has opened the next song.
+    private fun gainsPlanned(songs: List<PcmSong>, next: List<MediaItem>, settings: () -> SoundSettings, during: (PlayerRig) -> Unit = {}): List<Double> {
+        val contexts = ArrayList<TransitionContext>()
+        val rig = PlayerRig(
+            songs,
+            planner = { a, b, t, h, s, c ->
+                contexts += c
+                planTransition(a, b, t, h, s, c)
+            },
+            sound = settings,
+        )
+        rig.play(songs[0].id, settings = crossfade)
+        rig.runFor(1_000)
+        rig.player.addMediaItems(next)
+        assertTrue("planned", rig.runUntil(1_000) { contexts.isNotEmpty() })
+        during(rig)
+        rig.runFor(400)
+        return contexts.map { it.incomingGainDb }
+    }
+
+    @Test
+    fun theGainBetweenTheSongsIsAsTheirDecksApplyIt() {
+        // Each song's own sound is tagged, nothing stored: A's level is what
+        // its deck applies, B's its stored one (none) until the spare opens
+        // it, then its own tag.
+        val songs = listOf(PcmSong("a", 5_000, streamGainDb = -8f), PcmSong("b", 2_500, sign = -1, streamGainDb = -3f))
+        val gains = gainsPlanned(songs, listOf(songs[1].item()), { SoundSettings(replayGain = ReplayGainMode.Track) })
+        assertEquals("before the spare opens it: $gains", 8.0, gains.first(), 1e-3)
+        assertEquals("planned again once it has: $gains", 5.0, gains.last(), 1e-3)
+    }
+
+    @Test
+    fun theSameSongNextKeepsThePlayingOnesAlbumRule() {
+        // Smart: the song first in its album plays its track gain, and played
+        // again next it is still not following its album.
+        val a = PcmSong("a", 5_000, albumId = "x", trackGainDb = -8f, albumGainDb = -2f)
+        val gains = gainsPlanned(listOf(a), listOf(a.item(entry = "q:a2")), { SoundSettings(replayGain = ReplayGainMode.Smart) })
+        assertEquals("$gains", 0.0, gains.first(), 1e-3)
+        assertEquals("$gains", 0.0, gains.last(), 1e-3)
+    }
+
+    @Test
+    fun theEqPreampIsTakenAtEachSongsOwnRate() {
+        // A 6 dB boost at 16 kHz: above a 22.05 kHz song's highest frequency,
+        // so its preamp takes back less than a 48 kHz song's.
+        val eq = SoundSettings(eqEnabled = true, graphicGains = List(GraphicBands.size) { if (it == GraphicBands.lastIndex) 6f else 0f })
+        val want = (eq.effectivePreampDb(48_000) - eq.effectivePreampDb(22_050)).toDouble()
+        assertTrue("the preamps differ: $want", kotlin.math.abs(want) > 0.5)
+        val songs = listOf(PcmSong("a", 5_000, rate = 22_050), PcmSong("b", 2_500, sign = -1))
+        val gains = gainsPlanned(songs, listOf(songs[1].item()), { eq })
+        assertEquals("$gains", want, gains.last(), 0.01)
+    }
+
+    @Test
+    fun aReplayGainChangePlansTheBlendAgainWithTheNewGain() {
+        var mode = ReplayGainMode.Off
+        val songs = listOf(PcmSong("a", 5_000, trackGainDb = -8f), PcmSong("b", 2_500, sign = -1))
+        val gains = gainsPlanned(songs, listOf(songs[1].item()), { SoundSettings(replayGain = mode) }) { mode = ReplayGainMode.Track }
+        assertEquals("$gains", 0.0, gains.first(), 1e-3)
+        assertEquals("$gains", 8.0, gains.last(), 1e-3)
     }
 
     @Test

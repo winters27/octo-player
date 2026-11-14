@@ -8,6 +8,7 @@ import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -28,6 +29,7 @@ import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.extractor.metadata.vorbis.VorbisComment
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.media3.test.utils.FakeSampleStream.FakeSampleStreamItem
 import androidx.media3.test.utils.FakeTimeline
@@ -86,6 +88,10 @@ class PcmSong(
     val failOnce: Boolean = false,
     // The track gain it is queued with, in dB, when it has one.
     val trackGainDb: Float? = null,
+    // The track gain its own sound is tagged with, in dB, when it has one.
+    val streamGainDb: Float? = null,
+    // Its album gain as queued.
+    val albumGainDb: Float? = null,
 ) {
     val frames: Long get() = realMs * rate / 1_000
 
@@ -95,6 +101,7 @@ class PcmSong(
             albumId?.let { putString(EXTRA_ALBUM_ID, it) }
             albumOrder?.let { putInt(EXTRA_ALBUM_ORDER, it) }
             trackGainDb?.let { putFloat(EXTRA_TRACK_GAIN, it) }
+            albumGainDb?.let { putFloat(EXTRA_ALBUM_GAIN, it) }
         }
         return MediaItem.Builder()
             .setMediaId(id)
@@ -132,6 +139,7 @@ class PcmSources(songs: List<PcmSong>, private val failing: Set<String> = emptyS
             .setPcmEncoding(C.ENCODING_PCM_16BIT)
             .setSampleRate(song.rate)
             .setChannelCount(song.channels)
+            .setMetadata(song.streamGainDb?.let { Metadata(VorbisComment("REPLAYGAIN_TRACK_GAIN", "$it dB")) })
             .build()
         val window = FakeTimeline.TimelineWindowDefinition.Builder()
             .setUid(mediaItem.entryId ?: mediaItem.mediaId)
@@ -182,7 +190,7 @@ class PcmSources(songs: List<PcmSong>, private val failing: Set<String> = emptyS
 // run a thread of their own, which would race the rig's clock).
 @UnstableApi
 class PcmDecoder(format: Format, private val failAtUs: Long = -1) : Decoder<DecoderInputBuffer, SimpleDecoderOutputBuffer, DecoderException> {
-    val outputFormat: Format = Util.getPcmFormat(C.ENCODING_PCM_16BIT, format.channelCount, format.sampleRate)
+    val outputFormat: Format = Util.getPcmFormat(C.ENCODING_PCM_16BIT, format.channelCount, format.sampleRate).buildUpon().setMetadata(format.metadata).build()
     private val input = DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_DIRECT)
     private var inputOut = false
     private val ready = ArrayDeque<SimpleDecoderOutputBuffer>()

@@ -38,7 +38,7 @@ private const val ATTRIBUTE_PRESENT = 1L
 // A song's stored loudness, for when the sound itself carries no tags.
 internal const val EXTRA_TRACK_GAIN = "app.winters.octo.trackGain"
 private const val EXTRA_TRACK_PEAK = "app.winters.octo.trackPeak"
-private const val EXTRA_ALBUM_GAIN = "app.winters.octo.albumGain"
+internal const val EXTRA_ALBUM_GAIN = "app.winters.octo.albumGain"
 private const val EXTRA_ALBUM_PEAK = "app.winters.octo.albumPeak"
 
 // Artwork for the lock screen and notification, in a form the playback

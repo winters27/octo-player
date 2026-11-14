@@ -466,6 +466,7 @@ class OctoPlayer(
     override fun handleStop(): ListenableFuture<*> = edit(releasing = true) {
         releaseFocus()
         mixer?.resetContinuation(slotOf(deck))
+        mixer?.stop()
         moving(deck) { super.handleStop() }
     }
 
