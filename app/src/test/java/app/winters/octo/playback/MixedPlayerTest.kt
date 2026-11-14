@@ -411,7 +411,8 @@ class MixedPlayerTest {
         val target = (targetMs * 48 % SAW).toInt()
         val seekAt = rig.heardCount
         rig.player.seekTo(targetMs)
-        rig.runFor(1_000)
+        // Long enough for a seek through a fresh output's gate, then a period.
+        rig.runFor(2_000)
         // The old place runs on until the song's first break after the seek;
         // from there it runs on, unbroken, from the target for more than a
         // saw's period, so no old frame can pass for the new place.
