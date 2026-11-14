@@ -36,7 +36,7 @@ const val EXTRA_IS_EXPLICIT = "android.media.IS_EXPLICIT"
 private const val ATTRIBUTE_PRESENT = 1L
 
 // A song's stored loudness, for when the sound itself carries no tags.
-private const val EXTRA_TRACK_GAIN = "app.winters.octo.trackGain"
+internal const val EXTRA_TRACK_GAIN = "app.winters.octo.trackGain"
 private const val EXTRA_TRACK_PEAK = "app.winters.octo.trackPeak"
 private const val EXTRA_ALBUM_GAIN = "app.winters.octo.albumGain"
 private const val EXTRA_ALBUM_PEAK = "app.winters.octo.albumPeak"
@@ -146,6 +146,15 @@ fun MediaMetadata.storedLoudness(): ReplayGainInfo? {
     val extras = extras ?: return null
     fun value(key: String) = if (extras.containsKey(key)) extras.getFloat(key) else null
     return storedReplayGain(value(EXTRA_TRACK_GAIN), value(EXTRA_TRACK_PEAK), value(EXTRA_ALBUM_GAIN), value(EXTRA_ALBUM_PEAK))
+}
+
+// The album a song belongs to: the catalog's id, or its album and artist
+// names when it has none.
+fun albumKey(item: MediaItem): String? {
+    val meta = item.mediaMetadata
+    meta.extras?.getString(EXTRA_ALBUM_ID)?.let { return it }
+    val title = meta.albumTitle?.toString()?.trim()?.ifEmpty { null } ?: return null
+    return "$title/${meta.albumArtist ?: meta.artist ?: ""}"
 }
 
 // How long a song is: what a Media3 player measured of its sound

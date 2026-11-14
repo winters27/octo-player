@@ -11,6 +11,7 @@ import app.winters.octo.playback.entryId
 import java.nio.ByteBuffer
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -200,6 +201,10 @@ interface DeckSound {
     fun arm(transition: DeckTransition?)
 
     fun reading(entryId: String?, tagBpm: Double? = null): TapReading?
+
+    // The deck's ReplayGain in dB under the current settings, for `song`
+    // or, with none, for the song it plays now.
+    fun replayGainDb(song: SongLoudness? = null): Double
 }
 
 // Octo's own sound shaping, as a step in the player's audio path. It takes
@@ -241,7 +246,9 @@ class OctoDspProcessor(
     private var streamSpeed = 1.0
     private var streamStarted = false
     private var pendingSong: SongLoudness? = null
-    private var song: SongLoudness? = null
+
+    // Read on main too, for a plan's gain between the two songs.
+    @Volatile private var song: SongLoudness? = null
     private var shaper: SoundShaper? = null
     private var transitions: TransitionShaper? = null
 
@@ -270,6 +277,9 @@ class OctoDspProcessor(
     }
 
     override fun reading(entryId: String?, tagBpm: Double?): TapReading? = tap?.reading(entryId, tagBpm)
+
+    override fun replayGainDb(song: SongLoudness?): Double =
+        20.0 * log10(replayGainFactor(settings(), song ?: this.song).toDouble())
 
     // The playback speed; the stream starts again at it right after.
     fun setSpeed(value: Float) {

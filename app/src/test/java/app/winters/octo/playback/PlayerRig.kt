@@ -84,6 +84,8 @@ class PcmSong(
     val flip: Boolean = false,
     // Its decoder fails (at failAtMs) only the first time it opens.
     val failOnce: Boolean = false,
+    // The track gain it is queued with, in dB, when it has one.
+    val trackGainDb: Float? = null,
 ) {
     val frames: Long get() = realMs * rate / 1_000
 
@@ -92,6 +94,7 @@ class PcmSong(
             putString(EXTRA_QUEUE_ENTRY, entry)
             albumId?.let { putString(EXTRA_ALBUM_ID, it) }
             albumOrder?.let { putInt(EXTRA_ALBUM_ORDER, it) }
+            trackGainDb?.let { putFloat(EXTRA_TRACK_GAIN, it) }
         }
         return MediaItem.Builder()
             .setMediaId(id)
@@ -262,8 +265,13 @@ class PcmRenderer(handler: Handler?, listener: AudioRendererEventListener?, sink
 // A deck's renderers as the app builds them, into the rig's mixer, with
 // the rig's PCM renderer in place of the phone's decoders.
 @UnstableApi
-class PcmRenderers(context: Context, rig: MixRig, slot: Int, private val failAtUs: (String?) -> Long = { -1 }) :
-    OctoRenderersFactory(context, { SoundSettings() }, AlbumRun(), { true }, rig.mixer, slot) {
+class PcmRenderers(
+    context: Context,
+    rig: MixRig,
+    slot: Int,
+    private val failAtUs: (String?) -> Long = { -1 },
+    sound: () -> SoundSettings = { SoundSettings() },
+) : OctoRenderersFactory(context, sound, AlbumRun(), { true }, rig.mixer, slot) {
     override fun buildAudioRenderers(
         context: Context,
         extensionRendererMode: Int,
@@ -293,6 +301,8 @@ class PlayerRig(
     planner: Planner = ::planTransition,
     // Songs whose source never opens, so a deck playing one waits buffering.
     stalled: Set<String> = emptySet(),
+    // The sound settings both decks shape with.
+    sound: () -> SoundSettings = { SoundSettings() },
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val mix = MixRig(latencyCycles = latencyCycles, tuning = tuning)
@@ -302,7 +312,7 @@ class PlayerRig(
         val song = songs.firstOrNull { it.id == id }
         if (song == null || song.failAtMs < 0 || (song.failOnce && !failedOnce.add(song.id))) -1 else song.failAtMs * 1_000
     }
-    val renderers = listOf(PcmRenderers(context, mix, 0, failAtUs), PcmRenderers(context, mix, 1, failAtUs))
+    val renderers = listOf(PcmRenderers(context, mix, 0, failAtUs, sound), PcmRenderers(context, mix, 1, failAtUs, sound))
     val decks: List<ExoPlayer> = renderers.map { r ->
         buildDeck(context, sources, r, 7, OctoLoadControl(), PlaybackLooperProvider(Looper.getMainLooper()), releaseTimeoutMs = 0)
     }

@@ -6,6 +6,8 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.sound.MixEvent
+import app.winters.octo.sound.ReplayGainMode
+import app.winters.octo.sound.SoundSettings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -372,6 +374,28 @@ class CrossfaderMixTest {
         // Heard half a second after the head: the blend itself.
         rig.runFor(2_000)
         assertTrue("blended: ${rig.told()}", rig.mixedCount() > 0)
+    }
+
+    @Test
+    fun anUntaggedNextSongAfterOneTagged8DbDownIsPlanned8DbUpWithReplayGainOnTrackAndLevelWithItOff() {
+        for ((mode, want) in listOf(ReplayGainMode.Track to 8.0, ReplayGainMode.Off to 0.0)) {
+            val contexts = ArrayList<TransitionContext>()
+            val rig = PlayerRig(
+                listOf(PcmSong("a", 5_000, trackGainDb = -8f), PcmSong("b", 2_500, sign = -1)),
+                planner = { a, b, t, h, s, c ->
+                    contexts += c
+                    planTransition(a, b, t, h, s, c)
+                },
+                sound = { SoundSettings(replayGain = mode) },
+            )
+            rig.play("a", settings = crossfade)
+            // Planned once the playing song's loudness is taken up.
+            rig.runFor(1_000)
+            rig.player.addMediaItems(listOf(rig.song("b").item()))
+            assertTrue("$mode: planned", rig.runUntil(1_000) { contexts.isNotEmpty() })
+            assertEquals("$mode", want, contexts.last().incomingGainDb, 1e-3)
+            rig.close()
+        }
     }
 
     @Test

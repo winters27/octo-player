@@ -19,8 +19,10 @@ import app.winters.octo.sound.GateRecord
 import app.winters.octo.sound.MixBlend
 import app.winters.octo.sound.MixEvent
 import app.winters.octo.sound.MixListener
+import app.winters.octo.sound.SongLoudness
 import app.winters.octo.sound.TAP_LEVEL_HEARD_MS
 import app.winters.octo.sound.TapReading
+import app.winters.octo.sound.chooseReplayGain
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -861,6 +863,15 @@ internal class Crossfader(
         } else {
             position
         }
+        // The next song's ReplayGain less the playing one's, as the decks
+        // apply them: both decks share the preamp, so the difference is the
+        // whole gain between the two songs as heard.
+        val sound = soundOf(deck)
+        val nextLoudness = SongLoudness(
+            chooseReplayGain(null, nextItem.mediaMetadata.storedLoudness()),
+            followsSameAlbum = albumKey(nextItem) != null && albumKey(nextItem) == deck.currentMediaItem?.let(::albumKey),
+        )
+        val incomingGainDb = sound?.let { it.replayGainDb(nextLoudness) - it.replayGainDb() } ?: 0.0
         val context = TransitionContext(
             nowMs = now,
             playedMs = heard?.let { (it.heardMs * speed).toLong() } ?: position,
@@ -872,6 +883,7 @@ internal class Crossfader(
             nextGenre = nextItem.mediaMetadata.genre?.toString(),
             bodyLevelDb = level,
             tempoPrior = tempoPrior,
+            incomingGainDb = incomingGainDb,
         )
         val tailAnalysis = tail?.takeIf { it.entryId == key.current }?.analysis
         val headAnalysis = head?.takeIf { it.entryId == key.next }?.analysis
