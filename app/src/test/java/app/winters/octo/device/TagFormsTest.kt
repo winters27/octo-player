@@ -331,6 +331,8 @@ class TagFormsTest {
         assertEquals(listOf(artistA, artistB), musicIds(listOf("$artistA; $artistB")))
         assertEquals(listOf(artistA), musicIds(listOf(" ${artistA.uppercase()} ", artistA)))
         assertEquals(emptyList<String>(), musicIds(listOf("not an id", "")))
+        // Blank and short values beside a real one are passed over.
+        assertEquals(listOf(artistB), musicIds(listOf("", "   ", artistA.drop(1), artistB)))
     }
 
     @Test

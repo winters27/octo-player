@@ -198,9 +198,15 @@ fun explicitOf(text: String): Boolean? = when (text.trim().lowercase()) {
 
 private val musicId = Regex("""[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}""")
 
-// Every MusicBrainz id in some values, however they are joined, in lower case.
+// How long one MusicBrainz id is.
+private const val MUSIC_ID_LENGTH = 36
+
+// Every MusicBrainz id in some values, however they are joined, in lower
+// case. A value too short to hold one (a blank one most of all, which most
+// songs' id tags are) is passed over without running the pattern.
 fun musicIds(values: List<String>?): List<String> =
-    values.orEmpty().flatMap { value -> musicId.findAll(value).map { it.value.lowercase() }.toList() }.distinct()
+    values.orEmpty().filter { it.length >= MUSIC_ID_LENGTH }
+        .flatMap { value -> musicId.findAll(value).map { it.value.lowercase() }.toList() }.distinct()
 
 // What joins several genres into one tag value. "&" is not one, so "R&B"
 // and "Drum & Bass" stay whole.
