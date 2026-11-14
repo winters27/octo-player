@@ -93,4 +93,12 @@ import Testing
         #expect(ProvisioningProfile.grants(nil).isEmpty)
         #expect(ProvisioningProfile.grants(Data("no plist".utf8)).isEmpty)
     }
+
+    @Test func aStoreCopyIsTakenToHaveEveryEntitlementTheAppAsksFor() throws {
+        let ios = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: ios.appendingPathComponent("Octo.entitlements"))
+        let asked = try #require(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(Set(asked.keys) == ProvisioningProfile.distributed)
+    }
 }

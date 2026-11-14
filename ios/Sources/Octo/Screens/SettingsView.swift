@@ -25,7 +25,7 @@ struct SettingsView: View {
                 accountCard
                 searchField
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    results(searchSettings(query))
+                    results(searchSettings(query, in: SettingsIndex.searchable(updaterOn: AppUpdates.shared.state.off == nil)))
                 } else {
                     categories
                 }

@@ -502,25 +502,27 @@ import Testing
     let ownFolder = "file:///var/mobile/Containers/Data/Application/A/Documents/Music/Song.flac"
 
     @Test func aMusicAppSongThatWouldNotPlayTriesItsOtherCopies() {
-        #expect(triesAnotherCopy(trackId: "device:8436015236589124501", uri: musicApp, isFind: false, tried: []))
+        #expect(triesAnotherCopy(trackId: "device:8436015236589124501", uri: musicApp, isFind: false, code: .decodingFailed))
+        #expect(triesAnotherCopy(trackId: "device:8436015236589124501", uri: musicApp, isFind: false, code: .fileNotFound))
     }
 
     @Test func aFileInOctosFolderThatWouldNotPlayTriesItsOtherCopies() {
-        #expect(triesAnotherCopy(trackId: "device:12", uri: ownFolder, isFind: false, tried: []))
+        #expect(triesAnotherCopy(trackId: "device:12", uri: ownFolder, isFind: false, code: .parsingContainerMalformed))
     }
 
-    @Test func eachCopyIsTriedOnce() {
-        #expect(!triesAnotherCopy(trackId: "device:8436015236589124501", uri: musicApp, isFind: false, tried: [musicApp]))
+    @Test func aSoundDeviceThatWouldNotStartIsNotTheFilesFault() {
+        #expect(!triesAnotherCopy(trackId: "device:8436015236589124501", uri: musicApp, isFind: false, code: .audioTrackInitFailed))
+        #expect(!triesAnotherCopy(trackId: "device:12", uri: ownFolder, isFind: false, code: .audioTrackWriteFailed))
     }
 
     @Test func aStreamIsPassedOverAtOnce() {
         let stream = streamUri(StreamRef(sourceId: "server:music.example", serverId: "abc", mimeType: "audio/flac", bitrate: 900))
-        #expect(!triesAnotherCopy(trackId: "server:music.example:abc", uri: stream, isFind: false, tried: []))
+        #expect(!triesAnotherCopy(trackId: "server:music.example:abc", uri: stream, isFind: false, code: .decodingFailed))
     }
 
     @Test func aFindAStationAndAnOpenedFileArePassedOverAtOnce() {
-        #expect(!triesAnotherCopy(trackId: "find:1", uri: musicApp, isFind: true, tried: []))
-        #expect(!triesAnotherCopy(trackId: "radio:https://example.com/live", uri: "https://example.com/live", isFind: false, tried: []))
-        #expect(!triesAnotherCopy(trackId: "file:opened", uri: ownFolder, isFind: false, tried: []))
+        #expect(!triesAnotherCopy(trackId: "find:1", uri: musicApp, isFind: true, code: .decodingFailed))
+        #expect(!triesAnotherCopy(trackId: "radio:https://example.com/live", uri: "https://example.com/live", isFind: false, code: .decodingFailed))
+        #expect(!triesAnotherCopy(trackId: "file:opened", uri: ownFolder, isFind: false, code: .decodingFailed))
     }
 }

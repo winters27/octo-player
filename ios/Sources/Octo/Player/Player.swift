@@ -888,7 +888,7 @@ final class Player {
         guard engine.playWhenReady else { return }
         playbackLog.notice("playback failed: \(error.detail, privacy: .public)")
         if data != nil, let entry = item.entryId,
-           triesAnotherCopy(trackId: item.trackId, uri: item.uri, isFind: item.isFind, tried: PlayableItems.unplayableCopies) {
+           triesAnotherCopy(trackId: item.trackId, uri: item.uri, isFind: item.isFind, code: error.code) {
             PlayableItems.unplayableCopies.insert(item.uri)
             Task { await playOtherCopy(item, entry: entry, error) }
             return
@@ -906,6 +906,8 @@ final class Player {
         playbackLog.notice("playing \(item.title, privacy: .public) from another copy")
         engine.update(at: at) { $0 = other.withSource(item.source) }
         engine.seek(to: at)
+        // A sound device that stopped meanwhile is asked again, as a skip does.
+        if !engine.output.isRunning { engine.play() }
     }
 
     private func skip(_ item: QueueItem, _ error: PlayError) {

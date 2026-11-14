@@ -17,6 +17,14 @@ private let longDashes: [Character] = ["\u{2014}", "\u{2013}"]
         #expect(SettingsIndex.byId("crossfade") == SettingsIndex.betweenSongs)
     }
 
+    @Test func searchLeavesOutTheUpdaterWhileItIsOff() {
+        let off = searchSettings("update", in: SettingsIndex.searchable(updaterOn: false)).map(\.id)
+        #expect(off.allSatisfy { !SettingsIndex.updaterRows.contains($0) }, "\(off)")
+        let on = searchSettings("update", in: SettingsIndex.searchable(updaterOn: true)).map(\.id)
+        #expect(SettingsIndex.updaterRows.isSubset(of: Set(on)), "\(on)")
+        #expect(SettingsIndex.updaterRows == ["check_updates", "early_versions", "check_now"])
+    }
+
     @Test func betweenSongsKeepsTheCrossfadeRowsIds() {
         // Between songs keeps the id the Crossfade switch had; Crossfade's length keeps its id
         // under its new title; Smart transitions is gone, its words folded into Between songs.

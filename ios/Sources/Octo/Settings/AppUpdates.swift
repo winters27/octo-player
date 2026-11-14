@@ -4,9 +4,10 @@ import Observation
 import OctoKit
 
 /// Looks for a newer Octo for iPhone on the public repository a while after start and every six
-/// hours, and when asked. A release counts only through its signed manifest. The phone cannot
-/// install it itself: Octo is put on an iPhone from a computer, so a found update says where it
-/// is, and goes in the way Octo first did.
+/// hours, and when asked, on a copy put on the phone from a computer. A release counts only
+/// through its signed manifest. The phone cannot install it itself, so a found update says
+/// where it is, and goes in the way Octo first did. A copy from TestFlight or the App Store
+/// leaves its updates to them.
 @MainActor
 @Observable
 final class AppUpdates {
@@ -62,15 +63,11 @@ final class AppUpdates {
         #else
         let debug = false
         #endif
-        state = State(off: Self.updaterOff(debug: debug, version: Session.appVersion, hasKeys: !UpdateFiles.trustedKeys.isEmpty))
-    }
-
-    /// Whether this build looks for updates, and if not, why not.
-    static func updaterOff(debug: Bool, version: String, hasKeys: Bool) -> String? {
-        if PlayerVersion.parse(version) == nil { return "This is a test build, so it doesn't update itself." }
-        if !hasKeys { return "This build has no key to check updates with." }
-        if debug { return "This is a test build, so it doesn't update itself." }
-        return nil
+        let source = Bundle.main.object(forInfoDictionaryKey: UpdaterRule.sourceKey) as? String
+        // A profile that is there but cannot be read still marks a copy from a computer.
+        let profile = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision").map { (try? Data(contentsOf: $0)) ?? Data() }
+        state = State(off: UpdaterRule.off(source: source, profile: profile, debug: debug, version: Session.appVersion,
+                                           hasKeys: !UpdateFiles.trustedKeys.isEmpty))
     }
 
     /// The first check waits 90 seconds after start so opening the app stays quick; then every
@@ -132,32 +129,10 @@ final class AppUpdates {
         case .wait(let reason, let retryAt): return .unavailable(reason: reason, retryAt: retryAt)
         case .releases(let list, _): releases = list
         }
-        guard let candidate = newestUpdate(releases, app: .ios, running: running, early: early) else { return .upToDate }
-        let tag = candidate.release.tag
-        do {
-            guard let manifestAsset = candidate.release.asset(UpdateFiles.manifestName) else {
-                throw UpdateRefused("the release has no \(UpdateFiles.manifestName)")
-            }
-            guard let signatureAsset = candidate.release.asset(UpdateFiles.signatureName) else {
-                throw UpdateRefused("the release has no \(UpdateFiles.signatureName)")
-            }
-            guard let bytes = try await fetchSmall(manifestAsset.url, limit: UpdateFiles.manifestLimit),
-                  let signatureBytes = try await fetchSmall(signatureAsset.url, limit: UpdateFiles.signatureLimit)
-            else { return .unavailable(reason: "the download stopped", retryAt: nil) }
-            let manifest = try UpdateFiles.verifiedManifest(bytes, signature: String(decoding: signatureBytes, as: UTF8.self), keys: keys,
-                                                            app: .ios, tag: tag, verify: Self.verify)
-            guard let file = manifest.assets.first(where: { $0.os == "ios" && $0.kind == "ipa" }) else {
-                return .noInstaller(version: candidate.version)
-            }
-            guard let listed = candidate.release.asset(file.name), listed.size == file.size else {
-                throw UpdateRefused("the release is missing \(file.name)")
-            }
-            return .available(version: candidate.version, tag: tag, notes: manifest.notes, page: candidate.release.page)
-        } catch let refused as UpdateRefused {
-            return .refused(reason: refused.reason)
-        } catch {
-            return .unavailable(reason: "the download stopped", retryAt: nil)
-        }
+        let session = self.session
+        return await UpdateFiles.decide(releases, running: running, early: early, keys: keys,
+                                        fetch: { address, limit in try await Self.fetchSmall(session, address, limit: limit) },
+                                        verify: Self.verify)
     }
 
     /// GitHub's list of releases, remembered with its ETag so an unchanged list costs nothing
@@ -192,7 +167,7 @@ final class AppUpdates {
 
     /// A small file (the manifest or its signature), refusing one too big. Nil when it could not
     /// be fetched.
-    private func fetchSmall(_ address: String, limit: Int) async throws -> Data? {
+    private nonisolated static func fetchSmall(_ session: URLSession, _ address: String, limit: Int) async throws -> Data? {
         guard let url = URL(string: address), let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
         else { return nil }

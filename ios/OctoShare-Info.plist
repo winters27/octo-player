@@ -5,9 +5,13 @@
     <key>CFBundleDisplayName</key>
     <string>Octo</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>1.12.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

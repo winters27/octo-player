@@ -355,6 +355,15 @@ public enum SettingsIndex {
     ]
 
     public static func byId(_ id: String) -> SettingEntry? { all.first { $0.id == id } }
+
+    /// The updater's own rows, which a copy that does not update itself never shows.
+    public static let updaterRows: Set<String> = [checkUpdates.id, earlyVersions.id, checkNow.id]
+
+    /// What Settings search looks through: every setting, less the updater's rows while the
+    /// updater is off.
+    public static func searchable(updaterOn: Bool) -> [SettingEntry] {
+        updaterOn ? all : all.filter { !updaterRows.contains($0.id) }
+    }
 }
 
 /// How well a setting matches, best first: the title begins with what was typed, every word is

@@ -106,16 +106,36 @@ import Testing
 
 @Suite struct WhatsNewTests {
     @Test func aFreshInstallHasNoNews() {
-        #expect(!WhatsNew.due(lastSeen: nil, current: 3, freshInstall: true))
+        #expect(!WhatsNew.due(lastSeen: nil, current: "1.11.0", freshInstall: true))
     }
 
     @Test func theFirstUpdateSinceTheCardExistedShowsIt() {
-        #expect(WhatsNew.due(lastSeen: nil, current: 3, freshInstall: false))
+        #expect(WhatsNew.due(lastSeen: nil, current: "1.11.0", freshInstall: false))
     }
 
     @Test func itShowsOncePerVersion() {
-        #expect(WhatsNew.due(lastSeen: 2, current: 3, freshInstall: false))
-        #expect(!WhatsNew.due(lastSeen: 3, current: 3, freshInstall: false))
+        #expect(WhatsNew.due(lastSeen: "1.10.0", current: "1.11.0", freshInstall: false))
+        #expect(!WhatsNew.due(lastSeen: "1.11.0", current: "1.11.0", freshInstall: false))
+    }
+
+    @Test func aLaterBuildOfTheSameVersionHasNoNews() {
+        // TestFlight's build 2 of 1.11.0 reads the same version as build 1.
+        #expect(!WhatsNew.due(lastSeen: "1.11.0", current: "1.11.0", freshInstall: false))
+        #expect(!WhatsNew.due(lastSeen: "1.12.0", current: "1.11.0", freshInstall: false))
+    }
+
+    @Test func aNewVersionShowsItWhateverItsBuild() {
+        #expect(WhatsNew.due(lastSeen: "1.11.0", current: "1.12.0", freshInstall: false))
+        #expect(WhatsNew.due(lastSeen: "1.9.0", current: "1.10.0", freshInstall: false))
+        #expect(WhatsNew.due(lastSeen: "0.1.0", current: "1.11.0", freshInstall: false))
+    }
+
+    @Test func aStoredBuildNumberCountsAsHavingSeenThisVersion() {
+        #expect(WhatsNew.seenVersion(stored: nil, storedBuild: 7, current: "1.11.0") == "1.11.0")
+        #expect(WhatsNew.seenVersion(stored: "1.10.0", storedBuild: 7, current: "1.11.0") == "1.10.0")
+        #expect(WhatsNew.seenVersion(stored: nil, storedBuild: nil, current: "1.11.0") == nil)
+        #expect(!WhatsNew.due(lastSeen: WhatsNew.seenVersion(stored: nil, storedBuild: 7, current: "1.11.0"),
+                              current: "1.11.0", freshInstall: false))
     }
 
     @Test func theNotesArePlainWords() {
@@ -130,7 +150,7 @@ import Testing
             if case .heading(_, let text) = block { return Markdown.plainText(text) }
             return nil
         }
-        #expect(headings == ["Sound", "Library", "Playback", "Server", "Lyrics", "Offline", "Everyday touches", "Settings"])
+        #expect(headings == ["Playing", "Your server", "Your phone", "Lyrics", "Sound", "Look", "iPhone"])
         for (index, block) in blocks.enumerated() {
             guard case .heading(_, let text) = block else { continue }
             if index + 1 < blocks.count, case .bullets(let items) = blocks[index + 1] {
@@ -157,8 +177,8 @@ import Testing
             #expect(items.allSatisfy { $0.children.isEmpty })
             counts.append(items.count)
         }
-        #expect(counts == [4, 8, 9, 10, 4, 5, 10, 4])
-        #expect(counts.reduce(0, +) == 54)
+        #expect(counts == [5, 8, 4, 2, 2, 2, 4])
+        #expect(counts.reduce(0, +) == 27)
     }
 
     @Test func theHomeCardLineIsShort() {
