@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -78,6 +79,7 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.scrollFades
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.family.clipboardText
@@ -246,7 +248,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
     // The sign-in page group and the key row are brought into view from
     // here, outside Advanced, so closing it never ends a wait.
-    val host = content?.let { CalloutHost(scroll, PageTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
+    val host = content?.let { CalloutHost(scroll, PageTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus, fade = PageFade) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
     CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
@@ -269,6 +271,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 Modifier
                     .fillMaxSize()
                     .scrollbar(scroll)
+                    .scrollFades(scroll, PageFade, eased = true)
                     .verticalScroll(scroll)
                     .heightIn(min = maxHeight)
                     .onGloballyPositioned { content = it }
@@ -342,11 +345,13 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                             GlazeCapsule(null, "Test connection", ::test, enabled = form.ready && !held)
                             AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready && !held, loading = form.busy, size = ButtonSize.Medium)
                         }
-                        // An invite, or a sign-in link from another device, copied anywhere.
+                        // An invite, or a sign-in link from another device, copied
+                        // anywhere. Under the buttons, on their right edge: its words,
+                        // not its hover pill, end there.
                         TextAction("Paste a family link", {
                             val text = clipboardText()
                             if (text == null || !form.takeJoinLink(text, app.switching != null)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
-                        }, Modifier.align(Alignment.CenterHorizontally), enabled = !held, icon = OctoIcons.Family)
+                        }, Modifier.align(Alignment.End).offset(x = Space.L), enabled = !held, icon = OctoIcons.Family)
 
                         Advanced(app, form, ::signIn, places, replacingId = form.signsInAgainTo, url = form.url, home = form.homeUrl)
                     }

@@ -67,9 +67,9 @@ import app.winters.octo.design.RowHeight
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
-import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
+import app.winters.octo.design.scrollFades
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.NoticeAction
@@ -338,8 +338,12 @@ private fun serverSheet(
 ) {
     // Each opening starts afresh, even straight after another sheet. The form
     // is made here, so the pop-up can tell when its sign-in is committing
-    // (closing waits) or open (a link does not replace it).
+    // (closing waits) or open (a link does not replace it). So is the field
+    // that takes the keyboard first: the pop-up gives it the keyboard once the
+    // sheet's rows are drawn, however the sheet was opened. The page behind is
+    // shaded, and on a light theme the sheet's cards are trays.
     val opening = Any()
+    val first = FocusRequester()
     val form = SignInForm(server, keepsSecret = keepsSecret).also { f ->
         note?.let { f.result = false to it }
         if (certificate) f.askForCertificate()
@@ -347,12 +351,14 @@ private fun serverSheet(
     app.popups.showCentred(
         width = SettingsSize.Sheet,
         maxHeight = SettingsSize.SheetMax,
+        scrim = true,
         scrollsItself = true,
+        first = first,
         busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },
         open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },
         noteLink = form::noteLink,
     ) { close ->
-        key(opening) { ServerSheet(app, kind, server, form, close) }
+        key(opening) { CompositionLocalProvider(LocalInSheet provides true) { ServerSheet(app, kind, server, form, first, close) } }
     }
 }
 
@@ -384,11 +390,11 @@ internal fun askSignIn(app: AppState, kind: SheetKind, server: SavedServer, note
 // the window. The fields and Advanced scroll; the result line and the
 // buttons stay at its foot. The API key takes the password's place in every
 // kind of sheet, and signing in again shows Advanced's head, closed. A
-// certificate the system does not trust is asked about in its place.
+// certificate the system does not trust is asked about in its place. `first`
+// is the field the pop-up gives the keyboard as it opens.
 @Composable
-private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: SavedServer?, form: SignInForm, close: () -> Unit) {
+private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: SavedServer?, form: SignInForm, first: FocusRequester, close: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val first = remember { FocusRequester() }
     val scroll = rememberScrollState()
     val places = remember { FormPlaces() }
     val calloutFocus = remember { CalloutFocus() }
@@ -471,15 +477,13 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         }
     }
 
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-
     // A kept server's sign-in page shows as its kind, saved, without its
     // values.
     LaunchedEffect(form) { if (server != null) form.knowSavedGateway(server, app.accounts.savedGateway(server)) }
 
     // The sign-in page group and the key row are brought into view from
     // here, outside Advanced, so closing it never ends a wait.
-    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
+    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus, fade = SheetFade) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
     CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
@@ -501,7 +505,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         return
     }
 
-    MenuTitle(
+    FormSheetTitle(
         when (kind) {
             SheetKind.Add -> "Add a server"
             SheetKind.Edit -> "Edit ${server?.name.orEmpty()}"
@@ -513,6 +517,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
             Modifier
                 .weight(1f, fill = false)
                 .scrollbar(scroll)
+                .scrollFades(scroll, SheetFade, eased = true)
                 .verticalScroll(scroll)
                 .onGloballyPositioned { content = it }
                 .padding(horizontal = Space.Xl, vertical = Space.M),
@@ -569,7 +574,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         ResultLine(form)
         LinkNote(form)
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically) {
-            if (kind != SheetKind.SignIn) TextAction("Test connection", ::test, enabled = form.ready)
+            if (kind != SheetKind.SignIn) GlazeCapsule(null, "Test connection", ::test, enabled = form.ready, height = ControlHeight.L)
             Spacer(Modifier.weight(1f))
             if (form.busy) Spinner(size = IconSize.Table)
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)

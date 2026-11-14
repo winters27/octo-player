@@ -30,12 +30,12 @@ import app.winters.octo.connection.signInOpen
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
-import app.winters.octo.design.MenuTitle
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.TextAction
+import app.winters.octo.design.scrollFades
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.NoticeAction
@@ -292,12 +292,13 @@ fun AppState.openFamilyLink(link: FamilyLink) {
     popups.showCentred(
         width = SettingsSize.Sheet,
         maxHeight = SettingsSize.SheetMax,
+        scrim = true,
         scrollsItself = true,
         busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },
         open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },
         noteLink = form::noteLink,
         link = true,
-    ) { close -> LinkSheet(this@openFamilyLink, form, close) }
+    ) { close -> CompositionLocalProvider(LocalInSheet provides true) { LinkSheet(this@openFamilyLink, form, close) } }
 }
 
 // The sheet a link opens while signed in: the link's card and Advanced
@@ -356,7 +357,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
     }
     // A hand-over starts at once: there is nothing to type.
     LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null) go() }
-    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
+    val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus, fade = SheetFade) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
     CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
@@ -380,7 +381,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
         }
         return
     }
-    MenuTitle(
+    FormSheetTitle(
         when {
             form.invite != null -> "Join a family"
             form.handOver != null -> "Signing in from your other device"
@@ -392,6 +393,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             Modifier
                 .weight(1f, fill = false)
                 .scrollbar(scroll)
+                .scrollFades(scroll, SheetFade, eased = true)
                 .verticalScroll(scroll)
                 .onGloballyPositioned { content = it }
                 .padding(horizontal = 16.dp, vertical = 8.dp),

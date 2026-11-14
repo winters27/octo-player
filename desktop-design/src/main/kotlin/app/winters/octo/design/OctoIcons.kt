@@ -56,8 +56,9 @@ object OctoIcons {
     val Ascending by sym("sym_arrow_upward")
     val Descending by sym("sym_arrow_downward")
     val Info by sym("sym_info")
-    // What an error note leads with.
-    val Error by sym("sym_error")
+    // What an error note leads with: filled, a shape of its own beside the
+    // info circle, whatever the accent.
+    val Error by sym("sym_error_fill")
     val Select by sym("sym_check_circle")
     val Close by sym("sym_close")
     val History by sym("sym_history")

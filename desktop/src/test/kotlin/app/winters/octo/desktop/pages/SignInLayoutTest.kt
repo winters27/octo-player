@@ -1,9 +1,11 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.pointer.PointerButtons
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -11,28 +13,40 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
+import app.winters.octo.design.IconSize
 import app.winters.octo.design.POPUP_TAG
+import app.winters.octo.design.Space
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SignInPages
 import app.winters.octo.desktop.a11y.A11yScene
+import app.winters.octo.desktop.a11y.clickable
 import app.winters.octo.desktop.a11y.name
+import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.FamilyHandOverLink
 import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.subsonic.FamilySignInPrefill
 import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.GatewayKind
+import app.winters.octo.theme.ThemeChoice
+import app.winters.octo.theme.errorWordsFor
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.Image
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 // The sign-in page and its sheets as drawn: Advanced opening moves nothing
 // above it, a failure that met a sign-in page brings its group under the
@@ -210,9 +224,11 @@ class SignInLayoutTest {
     }
 
     // On a short window the sign-in page group, its two fields and its notes
-    // are taller than the view: its last note ends 8 above the bottom.
+    // are taller than the view: its last note ends 8 above where the page's
+    // 24 soft bottom rows start. Red when the callout leaves the fade out
+    // (the note ends 8 above the bottom, inside the fade).
     @Test(timeout = 120_000)
-    fun aTallGroupEndsItsLastNoteEightAboveTheBottom() {
+    fun aTallGroupEndsItsLastNoteEightAboveTheSoftEdge() {
         page(height = 360).use { s ->
             s.onUi {
                 val form = s.app.signInForm
@@ -225,7 +241,7 @@ class SignInLayoutTest {
             val last = s.text(SignInWords.HOME_NOTE)
             val scroll = scrollOf(last)
             assertTrue("the group is taller than the view", s.text(SignInWords.GROUP_GETTING_THERE).boundsInRoot.top < scroll.boundsInRoot.top + PageTopInset.value)
-            assertEquals(scroll.boundsInRoot.bottom - CalloutEnd.value, last.boundsInRoot.bottom, 1f)
+            assertEquals(scroll.boundsInRoot.bottom - CalloutEnd.value - 24f, last.boundsInRoot.bottom, 1f)
         }
     }
 
@@ -573,6 +589,555 @@ class SignInLayoutTest {
             val note = s.inPopup(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
             assertTrue(note.boundsInRoot.top < s.inPopup("Sign in").boundsInRoot.top)
             s.shot("link-sheet-link-note")
+        }
+    }
+
+    // Scrolls so the node's top is at `top` in the window, and checks it got
+    // there. As bringUp: the glide starts on a frame at 0 and is drawn to its
+    // end on the real clock.
+    private fun A11yScene.placeTop(node: SemanticsNode, top: Float) {
+        val scroll = scrollOf(node)
+        val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+        val by = node.positionInRoot.y - top
+        val goal = range.value() + by
+        assertTrue("the scroll reaches $goal of ${range.maxValue()}", goal >= 0f && goal <= range.maxValue())
+        onUi { scroll.config[SemanticsActions.ScrollBy].action?.invoke(0f, by) }
+        render(1)
+        val end = System.currentTimeMillis() + 10_000
+        do {
+            check(System.currentTimeMillis() < end) { "waited too long" }
+            frameAt(System.nanoTime()).close()
+        } while (abs(range.value() - goal) > 0.5f)
+        assertEquals(top, node.positionInRoot.y, 1f)
+    }
+
+    // The open pop-up's left edge.
+    private fun A11yScene.popupLeft(): Float = nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == POPUP_TAG }.positionInRoot.x
+
+    // A box of the window's pixels: columns left until right, rows top until
+    // bottom.
+    private class Area(val left: Int, val top: Int, val right: Int, val bottom: Int)
+
+    // A node's box as laid out, wherever its scroll has it.
+    private fun SemanticsNode.area(): Area {
+        val x = positionInRoot.x.toInt()
+        val y = positionInRoot.y.toInt()
+        return Area(x, y, x + size.width, y + size.height)
+    }
+
+    private fun brightness(c: Int): Int = (c shr 16 and 0xFF) * 299 + (c shr 8 and 0xFF) * 587 + (c and 0xFF) * 114
+
+    private fun distance(a: Int, b: Int): Double {
+        val r = (a shr 16 and 0xFF) - (b shr 16 and 0xFF)
+        val g = (a shr 8 and 0xFF) - (b shr 8 and 0xFF)
+        val bl = (a and 0xFF) - (b and 0xFF)
+        return sqrt((r * r + g * g + bl * bl).toDouble())
+    }
+
+    // How far each pixel of the area stands from the area's background (the
+    // middle color, by brightness, of its edge), row by row.
+    private fun inkOf(image: Image, area: Area): List<DoubleArray> {
+        val bitmap = Bitmap.makeFromImage(image)
+        val edge = ArrayList<Int>()
+        for (x in area.left until area.right) {
+            edge += bitmap.getColor(x, area.top)
+            edge += bitmap.getColor(x, area.bottom - 1)
+        }
+        for (y in area.top until area.bottom) {
+            edge += bitmap.getColor(area.left, y)
+            edge += bitmap.getColor(area.right - 1, y)
+        }
+        val back = edge.sortedBy { brightness(it) }[edge.size / 2]
+        val rows = (area.top until area.bottom).map { y -> DoubleArray(area.right - area.left) { i -> distance(bitmap.getColor(area.left + i, y), back) } }
+        bitmap.close()
+        return rows
+    }
+
+    // How far the area's most inked pixel stands from its background.
+    private fun ink(image: Image, area: Area): Double = inkOf(image, area).maxOf { it.max() }
+
+    // The rows of the area holding ink (a pixel at least half as inked as the
+    // most inked one), as offsets from the area's top.
+    private fun inkRows(image: Image, area: Area): List<Int> {
+        val rows = inkOf(image, area)
+        val most = rows.maxOf { it.max() }
+        return rows.indices.filter { y -> rows[y].any { it >= most / 2 } }
+    }
+
+    // The middle, in the window, of the area's ink, top to bottom.
+    private fun inkMiddle(image: Image, area: Area): Float {
+        val rows = inkRows(image, area)
+        return area.top + (rows.first() + rows.last() + 1) / 2f
+    }
+
+    // The share of the area's pixels drawn in ink.
+    private fun inkShare(image: Image, area: Area): Double {
+        val all = inkOf(image, area).flatMap { it.toList() }
+        val most = all.max()
+        return all.count { it >= most / 2 }.toDouble() / all.size
+    }
+
+    // One pixel of a frame.
+    private fun pixel(image: Image, x: Int, y: Int): Int {
+        val bitmap = Bitmap.makeFromImage(image)
+        return bitmap.getColor(x, y).also { bitmap.close() }
+    }
+
+    // WCAG's relative luminance.
+    private fun luminance(c: Int): Double {
+        fun ch(v: Int): Double {
+            val x = v / 255.0
+            return if (x <= 0.04045) x / 12.92 else ((x + 0.055) / 1.055).pow(2.4)
+        }
+        return 0.2126 * ch(c shr 16 and 0xFF) + 0.7152 * ch(c shr 8 and 0xFF) + 0.0722 * ch(c and 0xFF)
+    }
+
+    // CIE lightness, 0 to 100.
+    private fun lightness(c: Int): Double {
+        val y = luminance(c)
+        return if (y > 0.008856) 116 * Math.cbrt(y) - 16 else 903.3 * y
+    }
+
+    // The 16 square of the mark a note draws before its words.
+    private fun markOf(words: SemanticsNode): Area {
+        val x = words.positionInRoot.x.toInt() - 24
+        val y = words.positionInRoot.y.toInt() + 2
+        return Area(x, y, x + 16, y + 16)
+    }
+
+    // The words' top four ink rows: their ink 40 under the view's top, then
+    // 1 under it.
+    private fun A11yScene.fadesUnderTheTop(words: String) {
+        val node = text(words)
+        val view = scrollOf(node).boundsInRoot.top
+        placeTop(node, view + 40f)
+        val shown = settle(300)
+        val first = inkRows(shown, node.area()).first()
+        val left = node.positionInRoot.x.toInt()
+        val full = ink(shown, Area(left, node.positionInRoot.y.toInt() + first, left + node.size.width, node.positionInRoot.y.toInt() + first + 4))
+        shown.close()
+        placeTop(node, view + 1f - first)
+        val faded = settle(300)
+        val top = view.toInt() + 1
+        val under = ink(faded, Area(left, top, left + node.size.width, top + 4))
+        faded.close()
+        assertTrue("'$words' 1 under the top edge keeps $under of its $full", under < 0.6 * full)
+    }
+
+    // Words scrolled up under the top of the page's view fade out rather than
+    // end on a straight line: the top four ink rows of a group title, 1 under
+    // the view's top, keep under 0.6 of the ink they have in full view. Red
+    // without the page's soft edges (they keep all of it).
+    @Test(timeout = 120_000)
+    fun wordsUnderThePagesTopEdgeFadeOut() {
+        page(height = 600).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            s.fadesUnderTheTop(SignInWords.GROUP_GETTING_THERE)
+        }
+    }
+
+    // The same in a sheet's scroll. Red without the sheet's soft edges.
+    @Test(timeout = 120_000)
+    fun wordsUnderASheetsTopEdgeFadeOut() {
+        signedIn(height = 700).use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            s.click(s.inPopup(SignInWords.ADVANCED))
+            s.settle(400).close()
+            s.fadesUnderTheTop(SignInWords.PASSWORD)
+        }
+    }
+
+    // The Add sheet's title is its loudest heading, on its cards' edge: taller
+    // than Advanced's head. Red with the menu title (14 under a 22 Advanced).
+    @Test(timeout = 120_000)
+    fun theAddSheetsTitleIsItsLoudestHeading() {
+        signedIn().use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            val title = s.inPopup("Add a server")
+            val advanced = s.inPopup(SignInWords.ADVANCED)
+            assertTrue("a heading", title.config.contains(SemanticsProperties.Heading))
+            assertTrue("${title.size.height} against Advanced's ${advanced.size.height}", title.size.height > advanced.size.height + 4)
+            assertEquals(s.popupLeft() + Space.Xl.value, title.positionInRoot.x, 0.5f)
+        }
+    }
+
+    // Advanced's head starts on the groups' content edge, its title the size
+    // of a group's title. Red with the head's 4 inset (516 against 528) or its
+    // 22 bold title.
+    @Test(timeout = 120_000)
+    fun advancedsHeadIsAGroupTitleOnTheContentEdge() {
+        page(height = 1_600).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(600).close()
+            val group = s.text(SignInWords.GROUP_GETTING_THERE)
+            val advanced = s.text(SignInWords.ADVANCED)
+            assertEquals(group.positionInRoot.x, advanced.positionInRoot.x, 0.5f)
+            assertEquals(group.size.height.toFloat(), advanced.size.height.toFloat(), 0.5f)
+        }
+    }
+
+    // Advanced's chevron sits on its title: its ink's middle within 1 of the
+    // middle of the title's capitals (the A's ink). Red with the chevron
+    // centered on the title and its line (about 8 under).
+    @Test(timeout = 120_000)
+    fun advancedsChevronSitsOnItsTitle() {
+        page(height = 1_200).use { s ->
+            s.settle(600).close()
+            val title = s.text(SignInWords.ADVANCED)
+            val head = generateSequence(title) { it.parent }.first { it.config.getOrNull(SemanticsProperties.StateDescription) != null }
+            val image = s.settle(300)
+            val box = title.area()
+            val caps = inkMiddle(image, Area(box.left, box.top, box.left + 7, box.bottom))
+            val right = head.positionInRoot.x.toInt() + head.size.width - RowInset.value.toInt()
+            val top = head.positionInRoot.y.toInt()
+            val chevron = inkMiddle(image, Area(right - IconSize.Toolbar.value.toInt(), top, right, top + head.size.height))
+            image.close()
+            assertEquals(caps, chevron, 1f)
+        }
+    }
+
+    // Remember password's switch sits on its name: its middle within 1 of
+    // the middle of the name's capitals (the R's ink). Red with the switch
+    // centered on the name and its line (8.5 under).
+    @Test(timeout = 120_000)
+    fun theRememberSwitchSitsOnItsName() {
+        page().use { s ->
+            s.settle(600).close()
+            val name = s.text("Remember password")
+            val switch = s.nodes().first { it.config.getOrNull(SemanticsProperties.Role) == Role.Switch && it.config.getOrNull(SemanticsProperties.HideFromAccessibility) != null }
+            val image = s.settle(300)
+            val box = name.area()
+            val caps = inkMiddle(image, Area(box.left, box.top, box.left + 7, box.bottom))
+            image.close()
+            assertEquals(caps, switch.positionInRoot.y + switch.size.height / 2f, 1f)
+        }
+    }
+
+    // A choice's value keeps one line where the name leaves it room: Username
+    // and password beside Sign-in page in front. Red with the value held to
+    // 45% of the row (two lines).
+    @Test(timeout = 120_000)
+    fun aValueKeepsOneLineWhereTheNameLeavesItRoom() {
+        page(height = 1_600).use { s ->
+            s.onUi {
+                s.app.signInForm.advancedOpen = true
+                s.app.signInForm.pickGateway(GatewayKind.Password)
+            }
+            s.settle(600).close()
+            val name = s.text(GatewayWords.LABEL_SECTION)
+            val value = s.text(GatewayWords.kindLabel(GatewayKind.Password))
+            assertEquals(name.size.height.toFloat(), value.size.height.toFloat(), 1f)
+        }
+    }
+
+    // An error note's mark is solid, a shape of its own, where a note's info
+    // mark is a ring: over 0.35 of the error mark's square is ink, under 0.3
+    // of the info mark's. Red with the outlined error mark (about 0.2).
+    @Test(timeout = 120_000)
+    fun anErrorsMarkIsSolidAndANotesIsARing() {
+        page(height = 1_600).use { s ->
+            s.onUi {
+                s.app.signInForm.advancedOpen = true
+                s.app.signInForm.result = false to SignInWords.WRONG_PASSWORD
+            }
+            s.settle(600).close()
+            val image = s.settle(300)
+            val error = inkShare(image, markOf(s.text(SignInWords.WRONG_PASSWORD)))
+            val info = inkShare(image, markOf(s.text(SignInWords.HOME_NOTE)))
+            image.close()
+            assertTrue("the error mark's ink $error", error > 0.35)
+            assertTrue("the info mark's ink $info", info < 0.3)
+        }
+    }
+
+    // A group called out for a failure is ringed in the red of its error
+    // note. Red with the accent ring.
+    @Test(timeout = 120_000)
+    fun theCalloutRingIsTheErrorRed() {
+        page(height = 1_600).use { s ->
+            s.onUi {
+                val form = s.app.signInForm
+                form.typeAddress("https://music.example.com")
+                form.result = false to GatewayWords.failure(Gateway.Authentik, false)
+                form.failed(form.attemptAddress, Gateway.Authentik)
+            }
+            s.until { s.app.signInForm.showsCallout && !s.app.signInForm.calloutPending }
+            s.render(4)
+            val title = s.text(SignInWords.GROUP_GETTING_THERE)
+            val left = title.positionInRoot.x.toInt() - RowInset.value.toInt()
+            val top = title.positionInRoot.y.toInt() + title.size.height + GroupTitleGap.value.toInt()
+            val image = s.settle(300)
+            val ring = pixel(image, left + 1, top + 30)
+            image.close()
+            assertTrue("the ring is ${Integer.toHexString(ring)}", distance(ring, errorWordsFor(false)) < 40.0)
+        }
+    }
+
+    // Paste a family link sits under the buttons, its words ending on Sign
+    // in's right edge. Red when it is centered.
+    @Test(timeout = 120_000)
+    fun pasteAFamilyLinkEndsOnTheButtonsRightEdge() {
+        page().use { s ->
+            s.settle(600).close()
+            val words = s.text("Paste a family link")
+            val button = generateSequence(s.text("Sign in")) { it.parent }.first { it.clickable }
+            assertEquals(button.positionInRoot.x + button.size.width, words.positionInRoot.x + words.size.width, 1f)
+        }
+    }
+
+    // The Add sheet shades the page behind it, as Change password does: the
+    // page under the shade keeps under half its light. Red without the shade.
+    @Test(timeout = 120_000)
+    fun theAddSheetShadesThePageBehindIt() {
+        signedIn().use { s ->
+            s.onUi {
+                s.app.settings.pickTheme(ThemeChoice.Paper)
+                s.app.navigator.go(Page.Songs)
+            }
+            val before = s.settle(800).let { image -> pixel(image, 300, 600).also { image.close() } }
+            s.onUi { addServer(s.app) }
+            val after = s.settleStill(700, quiet = 150).let { image -> pixel(image, 300, 600).also { image.close() } }
+            assertTrue("the page behind: ${luminance(after)} against ${luminance(before)}", luminance(after) < 0.5 * luminance(before))
+        }
+    }
+
+    // On a light theme a sheet's group card is a tray a step darker than the
+    // sheet: on Paper at least 3 under it in lightness. Red with the card
+    // color there (1.6 over the sheet).
+    @Test(timeout = 120_000)
+    fun aSheetsCardIsATrayOnALightTheme() {
+        signedIn().use { s ->
+            s.onUi { s.app.settings.pickTheme(ThemeChoice.Paper) }
+            s.settle(600).close()
+            s.onUi { addServer(s.app) }
+            val image = s.settleStill(700, quiet = 150)
+            val left = s.popupLeft().toInt()
+            val name = s.inPopup(SignInWords.USERNAME)
+            val y = (name.positionInRoot.y + name.size.height / 2f).toInt()
+            val sheet = pixel(image, left + 8, y)
+            val card = pixel(image, left + Space.Xl.value.toInt() + 4, y)
+            image.close()
+            assertTrue("card ${lightness(card)} on sheet ${lightness(sheet)}", lightness(sheet) - lightness(card) >= 3.0)
+        }
+    }
+
+    // The Add sheet's Test connection is a capsule like the page's, starting
+    // on the cards' edge. Red with the bare text link (no capsule named for
+    // it; its words 12 in from that edge).
+    @Test(timeout = 120_000)
+    fun theSheetsTestConnectionIsACapsuleOnTheCardsEdge() {
+        signedIn().use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            val capsule = s.named("Test connection").filter { it.inPopup() }
+            assertEquals("a capsule named Test connection", 1, capsule.size)
+            assertEquals(s.popupLeft() + Space.Xl.value, capsule.single().positionInRoot.x, 0.5f)
+        }
+    }
+
+    // The Add sheet gives the keyboard to Server address when opened from the
+    // keyboard. Red when the pop-up finds its own first row (Name).
+    @Test(timeout = 120_000)
+    fun theAddSheetGivesTheKeyboardToTheAddressFromTheKeyboard() {
+        signedIn().use { s ->
+            assertTrue(s.keyboard.keyboard)
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            assertEquals(SignInWords.SERVER_ADDRESS, s.focused()?.name())
+        }
+    }
+
+    // And opened with a click. Red when the sheet asks before its rows exist
+    // (nothing in it takes the keyboard).
+    @Test(timeout = 120_000)
+    fun theAddSheetGivesTheKeyboardToTheAddressAfterAClick() {
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            assertEquals(SignInWords.SERVER_ADDRESS, s.focused()?.name())
+        }
+    }
+
+    // The Sign in sheet gives it to the password. Red as above.
+    @Test(timeout = 120_000)
+    fun theSignInSheetGivesTheKeyboardToThePassword() {
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { signInTo(s.app, s.app.connection!!.server) }
+            s.settle(600).close()
+            assertEquals(SignInWords.PASSWORD, s.focused()?.name())
+        }
+    }
+
+    // Pictures for the polish pass, in desktop/build/shots. They run only
+    // with OCTO_SHOTS=1, and each first checks the state it pictures.
+
+    // The page: at rest, ready, under the pointer, with the keyboard on Sign
+    // in, with API key, and with Advanced open on a picked sign-in page.
+    @Test(timeout = 300_000)
+    fun picturesOfThePage() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page().use { s ->
+            s.shot("polish-page")
+            s.fill("https://music.example.com")
+            s.render(3)
+            assertTrue(s.app.signInForm.ready)
+            s.shot("polish-page-ready")
+            val test = s.named("Test connection").single()
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, test.boundsInRoot.center) }
+            s.shot("polish-page-hover")
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(5f, 895f)) }
+            s.onUi { s.keyboard.keyboard = true }
+            assertTrue(s.tabTo("Sign in"))
+            s.shot("polish-page-focus")
+            s.onUi { s.app.signInForm.pickMethod(AuthMode.ApiKey) }
+            s.until { s.app.signInForm.useApiKey && !s.app.signInForm.keyPending }
+            s.shot("polish-page-api-key")
+            s.onUi {
+                s.app.signInForm.pickMethod(AuthMode.Token)
+                s.app.signInForm.advancedOpen = true
+                s.app.signInForm.pickGateway(GatewayKind.Password)
+            }
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            s.shot("polish-page-advanced")
+        }
+    }
+
+    // The page scrolled with Advanced open: a title under the top edge, then
+    // the last note under the bottom edge.
+    @Test(timeout = 300_000)
+    fun picturesOfThePageScrolled() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page(height = 600).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            val title = s.text(SignInWords.GROUP_GETTING_THERE)
+            s.placeTop(title, scrollOf(title).boundsInRoot.top + 6f)
+            s.shot("polish-page-scrolled-top")
+            val last = s.text(SignInWords.HOME_NOTE)
+            s.placeTop(last, scrollOf(last).boundsInRoot.bottom - 10f)
+            s.shot("polish-page-scrolled-bottom")
+        }
+    }
+
+    // The callout in Octo, Paper and Dusk (the accents nearest the error red).
+    @Test(timeout = 300_000)
+    fun picturesOfTheCallout() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page().use { s ->
+            s.onUi {
+                val form = s.app.signInForm
+                form.typeAddress("https://music.example.com")
+                form.result = false to GatewayWords.failure(Gateway.Authentik, false)
+                form.failed(form.attemptAddress, Gateway.Authentik)
+            }
+            s.until { s.app.signInForm.showsCallout && !s.app.signInForm.calloutPending }
+            for (theme in listOf(ThemeChoice.Octo, ThemeChoice.Paper, ThemeChoice.Dusk)) {
+                s.onUi { s.app.settings.pickTheme(theme) }
+                s.shot("polish-page-callout-${theme.name.lowercase()}")
+            }
+        }
+    }
+
+    // The invite's card and the hand-over's card on the page.
+    @Test(timeout = 300_000)
+    fun picturesOfTheLinkCards() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page(height = 1_000).use { s ->
+            s.onUi { s.app.signInForm.take(FamilyInviteLink("https://music.example.com", "t1")) }
+            s.settle(600).close()
+            assertNotNull(s.app.signInForm.invite)
+            s.shot("polish-page-invite")
+            s.onUi {
+                val form = s.app.signInForm
+                form.leaveLink()
+                // The result is written before the page draws, so the hand-over does not start.
+                form.take(FamilyHandOverLink(base = "https://music.example.com", token = "t2", key = "k", server = "https://music.example.com"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+            }
+            s.settle(600).close()
+            assertNotNull(s.app.signInForm.handOver)
+            s.shot("polish-page-hand-over")
+        }
+    }
+
+    // The page with the words set 130% larger, closed and with Advanced open.
+    @Test(timeout = 300_000)
+    fun picturesAtLargerText() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        A11yScene(folder.newFolder(), height = 900, reduceMotion = true, signedOut = true, textScale = 1.3f).use { s ->
+            s.shot("polish-page-text-130")
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            s.shot("polish-page-text-130-advanced")
+        }
+    }
+
+    // The server sheets over Songs: Add in Octo, Paper and Daylight; Add with
+    // Advanced open and scrolled; Edit; Sign in; and a family invite's sheet.
+    @Test(timeout = 300_000)
+    fun picturesOfTheSheets() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        signedIn().use { s ->
+            for (theme in listOf(ThemeChoice.Octo, ThemeChoice.Paper, ThemeChoice.Daylight)) {
+                s.onUi {
+                    s.app.popups.close()
+                    s.app.settings.pickTheme(theme)
+                    s.app.navigator.go(Page.Songs)
+                    addServer(s.app)
+                }
+                s.settle(600).close()
+                assertTrue(s.app.popups.open)
+                s.shot("polish-sheet-add-${theme.name.lowercase()}")
+            }
+            s.onUi { s.app.settings.pickTheme(ThemeChoice.Octo) }
+            s.settle(400).close()
+            s.click(s.inPopup(SignInWords.ADVANCED))
+            s.settle(400).close()
+            s.bringUp(s.inPopup(SignInWords.GROUP_SIGNING_IN))
+            s.shot("polish-sheet-add-advanced")
+            s.onUi {
+                s.app.popups.close()
+                editServer(s.app, s.app.connection!!.server)
+            }
+            s.settle(600).close()
+            assertTrue(s.app.popups.open)
+            s.shot("polish-sheet-edit")
+            s.onUi {
+                s.app.popups.close()
+                signInTo(s.app, s.app.connection!!.server)
+            }
+            s.settle(600).close()
+            assertTrue(s.app.popups.open)
+            s.shot("polish-sheet-sign-in")
+            s.onUi {
+                s.app.popups.close()
+                s.app.openFamilyLink(FamilyInviteLink(s.server.address, "t1"))
+            }
+            s.settle(600).close()
+            assertTrue(s.app.popups.open)
+            s.shot("polish-sheet-invite")
+        }
+    }
+
+    // The Edit sheet calling a sign-in page failure out.
+    @Test(timeout = 300_000)
+    fun pictureOfASheetsCallout() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        signedIn(height = 760, serve = authentik).use { s ->
+            s.onUi { editServer(s.app, s.app.connection!!.server) }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.PASSWORD).single(), "pw")
+            s.click(s.inPopup("Test connection"))
+            s.until { s.withText(GatewayWords.POINTER).isNotEmpty() }
+            s.render(6)
+            s.shot("polish-sheet-callout")
         }
     }
 }

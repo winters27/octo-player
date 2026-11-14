@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
@@ -82,6 +83,7 @@ import app.winters.octo.design.OctoSwitch
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
+import app.winters.octo.design.WholeTxt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.design.motionScale
 import kotlinx.coroutines.CancellationException
@@ -100,10 +102,7 @@ import kotlin.math.roundToInt
 
 // The kinds of words a form shows, each in one style.
 internal object FormType {
-    // Advanced's head.
-    val section: TextStyle = DesktopType.body.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-    // A group's title.
+    // A group's title, and Advanced's head.
     val group: TextStyle = DesktopType.body.copy(fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
 
     // A setting's name, at the start of its row.
@@ -133,10 +132,15 @@ internal val GroupGap = 26.dp
 internal val PageTopInset = 16.dp
 internal val PopupTopInset = 8.dp
 
-// How far above the bottom of the view a tall group's last note ends.
+// How far a tall group's last note ends above the view's soft bottom edge.
 internal val CalloutEnd = 8.dp
 
-// The most of a choice row a value may take beside its name.
+// How tall the soft edges are where the page's scroll, and a sheet's, fade
+// what runs on past them.
+internal val PageFade = 24.dp
+internal val SheetFade = 12.dp
+
+// The least of a choice row a value may take beside its name.
 private const val VALUE_SHARE = 0.45f
 
 // Descriptions and values keep to two lines at the usual text size, and
@@ -148,10 +152,18 @@ internal fun twoLines(): Int = if (LocalDensity.current.fontScale <= 1f) 2 else 
 @Composable
 internal fun advancedFade(): FiniteAnimationSpec<Float> = tween(motionScale().ms(OctoDuration.Neutral))
 
+// A form sheet's title: its loudest words, in the main words and always
+// whole, on its cards' edge. It takes no more of the sheet's height than a
+// menu's title did, so the sheet's scroll keeps its room.
+@Composable
+internal fun FormSheetTitle(text: String) {
+    WholeTxt(text, DesktopType.pageTitle, OctoColors.TextPrimary, Modifier.padding(start = Space.Xl, end = Space.Xl, top = Space.Xxs))
+}
+
 // A group: its title (a heading) when it has one, its rows on the Rows glaze,
 // and its notes under the card, errors first. `outlined` rings the card in
-// the accent while it calls a failure out. `place` hears where the group is,
-// from its title through its last note, for the callout.
+// the error red while it calls a failure out. `place` hears where the group
+// is, from its title through its last note, for the callout.
 @Composable
 internal fun FormGroup(
     title: String?,
@@ -184,10 +196,11 @@ private fun Modifier.roomAboveWhenShown(gap: Dp): Modifier = layout { measurable
     layout(placeable.width, placeable.height + top) { placeable.place(0, top) }
 }
 
-// The accent ring round a group's card while it calls a failure out.
+// The ring round a group's card while it calls a failure out, in the red of
+// the error note under it.
 @Composable
 private fun Modifier.calloutOutline(): Modifier {
-    val color = OctoColors.Accent
+    val color = OctoColors.ErrorWords
     return drawWithContent {
         drawContent()
         val width = Focus.Ring.toPx()
@@ -218,7 +231,9 @@ internal fun FormRow(title: String, description: String? = null, modifier: Modif
 }
 
 // A switch row: its name and the line saying what it does as it is set. The
-// whole row flips it, and is the one stop a screen reader hears.
+// whole row flips it, and is the one stop a screen reader hears. The switch
+// sits on the name's line, its middle on the middle of the name's capitals,
+// where a choice row's chevron sits on its name.
 @Composable
 internal fun FormSwitchRow(title: String, description: String, on: Boolean, change: (Boolean) -> Unit) {
     Row(
@@ -227,16 +242,19 @@ internal fun FormSwitchRow(title: String, description: String, on: Boolean, chan
             .hoverLift(Corner.RowShape)
             .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change)
             .padding(horizontal = RowInset, vertical = Space.L),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(Space.Xl),
     ) {
         Column(Modifier.weight(1f)) {
             Txt(title, FormType.name, OctoColors.TextPrimary, maxLines = 2)
             Txt(description, FormType.description, OctoColors.TextSecondary, maxLines = twoLines())
         }
-        OctoSwitch(on, change, Modifier.focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
+        OctoSwitch(on, change, Modifier.offset(y = -SwitchLift).focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
     }
 }
+
+// How far a switch rises above the top of its name's line.
+private val SwitchLift = 1.dp
 
 // A titled field: its name with the Optional tag when it may stay empty, a
 // line under the name, then the entry on the line below. `leading` holds the
@@ -425,8 +443,10 @@ internal fun FormNote(text: String, kind: NoteKind = NoteKind.Info, modifier: Mo
     }
 }
 
-// Advanced's head: its title at one size whether open or not, the line
-// naming what is inside, and a chevron that alone turns.
+// Advanced's head: its title, set as a group's title and at one size whether
+// open or not, the line naming what is inside, and a chevron that alone
+// turns. Its words start on the groups' content edge and its chevron ends on
+// the rows' right edge, its middle on the middle of the title's capitals.
 @Composable
 internal fun AdvancedHead(open: Boolean, onClick: () -> Unit) {
     val turn by animateFloatAsState(if (open) 90f else 0f, if (LocalReduceMotion.current) snap() else spring(), label = "advanced chevron")
@@ -439,17 +459,20 @@ internal fun AdvancedHead(open: Boolean, onClick: () -> Unit) {
                 heading()
                 stateDescription = if (open) "Expanded" else "Collapsed"
             }
-            .padding(horizontal = Space.Xs, vertical = Space.M),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = RowInset, vertical = Space.M),
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
         Column(Modifier.weight(1f)) {
-            Txt(SignInWords.ADVANCED, FormType.section, OctoColors.TextPrimary)
+            Txt(SignInWords.ADVANCED, FormType.group, OctoColors.TextPrimary)
             Txt(SignInWords.ADVANCED_LINE, FormType.description, OctoColors.TextSecondary, maxLines = twoLines())
         }
-        Glyph(OctoIcons.Chevron, Modifier.rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
+        Glyph(OctoIcons.Chevron, Modifier.padding(top = ChevronDrop).rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
     }
 }
+
+// How far Advanced's chevron sits under the top of its title's line.
+private val ChevronDrop = 3.dp
 
 // A choice: its name, the line under it, and the chosen option's words at
 // the row's end (under the name when the two do not fit side by side).
@@ -510,18 +533,22 @@ internal fun <T> ChoiceFormRow(
 }
 
 // A choice row's name and line, and its value: side by side while the value
-// fits its share of the row in two lines, else the value under the name.
+// fits beside the name in two lines, else the value under the name. The value
+// may take all the room the name's own line leaves it, and never less than
+// its share of the row.
 @Composable
 private fun NameAndValue(title: String, description: String?, value: String) {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val share = (constraints.maxWidth * VALUE_SHARE).toInt()
+        val gap = with(density) { Space.Xl.roundToPx() }
         val wide = remember(value, measurer) { measurer.measure(value, FormType.value).size.width }
-        if (wide <= share * 2) {
+        val name = remember(title, measurer) { measurer.measure(title, FormType.name).size.width }
+        val room = maxOf((constraints.maxWidth * VALUE_SHARE).toInt(), constraints.maxWidth - name - gap)
+        if (wide <= room * 2) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.Xl)) {
                 NameLines(title, description, Modifier.weight(1f))
-                Txt(value, FormType.value, OctoColors.TextSecondary, Modifier.widthIn(max = with(density) { share.toDp() }), maxLines = twoLines(), align = TextAlign.End)
+                Txt(value, FormType.value, OctoColors.TextSecondary, Modifier.widthIn(max = with(density) { room.toDp() }), maxLines = twoLines(), align = TextAlign.End)
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
@@ -586,8 +613,8 @@ internal class CalloutFocus {
 // What a callout needs from the place a form scrolls in: its scroll, how far
 // under the top a group's title lands, the scroll's direct child (taken
 // before its padding), whether the form has settled, the on-screen
-// keyboard's height, and the focus mark. The desktop has settled at once
-// and has no on-screen keyboard.
+// keyboard's height, the focus mark, and how tall the scroll's soft bottom
+// edge is. The desktop has settled at once and has no on-screen keyboard.
 internal class CalloutHost(
     val scroll: ScrollState,
     val topInset: Dp,
@@ -595,6 +622,7 @@ internal class CalloutHost(
     val settled: () -> Boolean,
     val imeBottom: () -> Int,
     val focus: CalloutFocus,
+    val fade: Dp = 0.dp,
 )
 
 internal val LocalCalloutHost = compositionLocalOf<CalloutHost?> { null }
@@ -637,7 +665,7 @@ internal fun CalloutEffect(pending: Boolean, host: CalloutHost?, group: () -> La
             if (!at.settled() || !coordinates.isAttached || !at.content.isAttached) return@snapshotFlow null
             val top = at.content.localPositionOf(coordinates, Offset.Zero).y
             val target = with(density) {
-                calloutTarget(top, coordinates.size.height, at.scroll.viewportSize, at.topInset.roundToPx(), CalloutEnd.roundToPx())
+                calloutTarget(top, coordinates.size.height, at.scroll.viewportSize, at.topInset.roundToPx(), (CalloutEnd + at.fade).roundToPx())
             }
             CalloutStep.Go(at, target)
         }.filterNotNull().first()

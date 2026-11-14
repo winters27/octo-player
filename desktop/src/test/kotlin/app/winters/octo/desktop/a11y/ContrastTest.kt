@@ -392,7 +392,7 @@ class ContrastTest {
                 keep(sheet, "contrast-theme-sheet-${theme.name.lowercase()}")
                 val sheetBox = s.popup()
                 list + inMenu + s.spots(sheet, "${theme.label} sheet", listOf(
-                    Triple("Add a server", "sheet title (secondary)", 7.0),
+                    Triple("Add a server", "sheet title (main)", 7.0),
                     Triple(SignInWords.SERVER_ADDRESS, "field name (main)", 7.0),
                     Triple(SignInWords.SERVER_NAME, "field name (main)", 7.0),
                     Triple(SignInWords.NAME_PLACEHOLDER, "field hint (muted)", 4.5),
@@ -456,7 +456,7 @@ class ContrastTest {
                 val open = s.settle(700)
                 keep(open, "contrast-theme-sign-in-advanced-${theme.name.lowercase()}")
                 val advanced = s.spots(open, "${theme.label} Advanced", listOf(
-                    Triple(SignInWords.ADVANCED, "section title (main)", 7.0),
+                    Triple(SignInWords.ADVANCED, "Advanced's head (main)", 7.0),
                     Triple(SignInWords.ADVANCED_LINE, "section line (secondary)", 7.0),
                     Triple(SignInWords.GROUP_GETTING_THERE, "group title (main)", 7.0),
                     Triple(SignInWords.HOME_NOTE, "note (secondary)", 7.0),

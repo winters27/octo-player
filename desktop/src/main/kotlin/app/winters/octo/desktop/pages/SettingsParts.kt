@@ -413,6 +413,11 @@ internal fun Group(name: String? = null, footer: String? = null, action: (@Compo
 // inside it do not draw a second one.
 private val LocalInCard = staticCompositionLocalOf { false }
 
+// Whether the cards being drawn sit in a sheet over the page. On a light
+// theme the sheet shares the card color, so there a card is a tray of the
+// words' ink a step darker than the sheet; Settings' cards keep their lift.
+internal val LocalInSheet = staticCompositionLocalOf { false }
+
 // A card: the glaze, holding whatever is put in it. A card with nothing in
 // it draws nothing.
 @Composable
@@ -424,10 +429,11 @@ internal fun Card(modifier: Modifier = Modifier, content: @Composable ColumnScop
 }
 
 // The glaze: a faint fill of the words' ink, a hairline edge, and a finer
-// light along its top inside edge.
+// light along its top inside edge. In a sheet on a light theme the fill is
+// the tray (LocalInSheet).
 @Composable
 private fun Modifier.cardSurface(flash: SettingsFlash? = null): Modifier {
-    val fill = CardFill
+    val fill = if (LocalInSheet.current && LocalOctoSurfaces.current.light) OctoColors.TextPrimary.copy(alpha = SHEET_TRAY) else CardFill
     val edge = CardEdge
     val top = glassRim(TOP_LIGHT)
     return this
@@ -444,6 +450,10 @@ private fun Modifier.cardSurface(flash: SettingsFlash? = null): Modifier {
 }
 
 private const val TOP_LIGHT = 0.055f
+
+// How much of the words' ink a sheet's card takes on a light theme: Paper's
+// and Daylight's trays sit 4.4 and 4.7 under their sheets in lightness.
+private const val SHEET_TRAY = 0.06f
 
 // Rows one under another in a card, with a hairline between each. A row
 // that draws nothing takes no place and gets no line; with no rows at all

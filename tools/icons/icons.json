@@ -56,6 +56,7 @@
     "sym_arrow_downward": { "icon": "arrow-down", "weight": "regular" },
     "sym_info": { "icon": "info", "weight": "regular" },
     "sym_error": { "icon": "warning-circle", "weight": "regular" },
+    "sym_error_fill": { "icon": "warning-circle", "weight": "fill" },
     "sym_check_circle": { "icon": "check-circle", "weight": "regular" },
     "sym_close": { "icon": "x", "weight": "regular" },
     "sym_history": { "icon": "clock-counter-clockwise", "weight": "regular" },
