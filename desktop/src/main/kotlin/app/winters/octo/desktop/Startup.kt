@@ -3,14 +3,17 @@ package app.winters.octo.desktop
 import app.winters.octo.desktop.audio.AudioEngine
 import app.winters.octo.desktop.audio.NativeAudioEngine
 import app.winters.octo.desktop.secrets.SecretStore
+import app.winters.octo.desktop.secrets.secretsForRun
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerSecurity
+import app.winters.octo.desktop.server.certificateAccountFor
 import app.winters.octo.desktop.server.desktopUserAgent
 import app.winters.octo.desktop.server.userAgentOf
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.separateProfile
 import app.winters.octo.desktop.settings.systemReducesMotion
 import app.winters.octo.desktop.settings.systemTextScale
 import app.winters.octo.desktop.update.DesktopUpdates
@@ -47,6 +50,10 @@ class Startup(
     settings: SettingsStore,
     places: AppPlaces,
     os: DesktopOs,
+    // Opens the password store; the tests give a pretend one. It comes
+    // before openEngine, so a call that gives the engine as a trailing
+    // lambda still opens the engine.
+    openSecrets: () -> SecretStore = { SecretStore.forSystem(os) },
     // Opens the engine; the tests give a pretend one.
     openEngine: () -> AudioEngine = { NativeAudioEngine.open() },
 ) {
@@ -67,7 +74,17 @@ class Startup(
         val http = security.install(base()).build()
         // The computer's name can take a moment to read; read it here.
         security.deviceHeaders()
-        val accounts = Accounts(settings, SecretStore.forSystem(os), http, security, base)
+        // A read-only run (Open without my settings) keeps every change to
+        // the password store in memory, chosen once here; a run with a
+        // folder of its own files its certificate items apart.
+        val accounts = Accounts(
+            settings,
+            secretsForRun(settings, openSecrets()),
+            http,
+            security,
+            base,
+            certificateAccount = certificateAccountFor(if (separateProfile()) places.config else null, os),
+        )
         val restored = accounts.restore()
         Rest(http, accounts, restored, DesktopUpdates.forThisApp(settings, places.cache, os), systemReducesMotion(os), systemTextScale(os))
     }, thread("octo-start"))

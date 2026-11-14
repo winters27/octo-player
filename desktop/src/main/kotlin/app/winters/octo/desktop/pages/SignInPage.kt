@@ -93,6 +93,8 @@ import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.shownAddress
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 // Signing in to a server, as on the phone: its address (with https or
 // http in front), a username and password or an API key, a test of the
@@ -123,14 +125,17 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
         form.result = null
         val tried = form.attemptAddress
         scope.launch {
-            when (val tested = app.accounts.test(form.request())) {
+            when (val tested = app.accounts.test(form.request(), keptId = form.signsInAgainTo)) {
                 is TestOutcome.Reached -> {
+                    form.tried(tested.tried)
                     form.worked(tested.mode)
                     form.result = true to tested.facts.summary()
                 }
                 is TestOutcome.Failed -> {
                     form.result = false to tested.message
                     form.failed(tried, tested.gateway)
+                    form.tried(tested.tried)
+                    if (tested.certificate) form.askForCertificate()
                 }
                 is TestOutcome.Untrusted -> form.question = tested.question
             }
@@ -157,6 +162,8 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 is SignInOutcome.Failed -> {
                     form.result = false to done.message
                     form.failed(tried, done.gateway)
+                    form.tried(done.tried)
+                    if (done.certificate) form.askForCertificate()
                 }
                 is SignInOutcome.Untrusted -> form.question = done.question
             }
@@ -220,6 +227,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
     val host = content?.let { CalloutHost(scroll, PageTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
+    CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
 
     // While the certificate is asked about, the card steps back behind it.
     val asking by animateFloatAsState(if (form.question != null) 0.35f else 1f, label = "asking")
@@ -279,7 +287,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                         if (form.invite != null || form.handOver != null) {
                             LinkCard(form, ::go, places, address = address, addressNotes = { ConnectionNotes(form) })
                             LinkFooter(form, ::go, onLeave = form::leaveLink)
-                            Advanced(form, ::go, places)
+                            Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
                             return@SignInCard
                         }
 
@@ -315,7 +323,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                             if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
                         }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
 
-                        Advanced(form, ::signIn, places)
+                        Advanced(app, form, ::signIn, places, replacingId = form.signsInAgainTo, url = form.url, home = form.homeUrl)
                     }
                     OtherServers(app)
                 }
@@ -344,7 +352,11 @@ private fun OtherServers(app: AppState) {
                         app.fillSignIn(server)
                     } else {
                         app.switchTo(server.id) { outcome ->
-                            if (outcome is SwitchOutcome.NeedsPassword) app.fillSignIn(outcome.server, outcome.note)
+                            when (outcome) {
+                                is SwitchOutcome.NeedsPassword -> app.fillSignIn(outcome.server, outcome.note)
+                                is SwitchOutcome.NeedsCertificate -> app.fillSignIn(outcome.server, outcome.words, certificate = true)
+                                else -> Unit
+                            }
                         }
                     }
                 }, enabled = app.switching == null)
@@ -454,10 +466,19 @@ internal fun ResultLine(form: SignInForm) {
 // The settings most servers never need, under their head: getting to the
 // server (the sign-in page in front of it, its two fields once a kind is
 // picked, and the home address), signing in (the Method, left out while
-// joining, where the link decides), and special setups (custom headers).
-// Groups come in the shared order and fade in and out.
+// joining, where the link decides), and special setups (custom headers and
+// the client certificate, whose row resolves `replacingId`, `url` and `home`
+// as the request does). Groups come in the shared order and fade in and out.
 @Composable
-internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit, places: FormPlaces) {
+internal fun ColumnScope.Advanced(
+    app: AppState,
+    form: SignInForm,
+    submit: () -> Unit,
+    places: FormPlaces,
+    replacingId: String?,
+    url: HttpUrl?,
+    home: HttpUrl?,
+) {
     AdvancedHead(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
     AnimatedVisibility(form.advancedOpen, enter = fadeIn(advancedFade()), exit = fadeOut(advancedFade())) {
         val layout = form.layout
@@ -467,7 +488,7 @@ internal fun ColumnScope.Advanced(form: SignInForm, submit: () -> Unit, places: 
                     when (group.group) {
                         AdvancedGroup.GettingThere -> GettingThere(form, submit, group.rows, places)
                         AdvancedGroup.SigningIn -> SigningIn(form, layout.methods)
-                        AdvancedGroup.SpecialSetups -> SpecialSetups(form, submit, group.rows, places)
+                        AdvancedGroup.SpecialSetups -> SpecialSetups(app, form, submit, group.rows, places, replacingId, url, home)
                     }
                 }
             }
@@ -561,7 +582,16 @@ private fun SigningIn(form: SignInForm, methods: List<AuthMode>) {
 // screen; a Remove from the keyboard gives the keyboard to Add header, and
 // one with the mouse leaves nothing focused.
 @Composable
-private fun SpecialSetups(form: SignInForm, submit: () -> Unit, rows: List<AdvancedRow>, places: FormPlaces) {
+private fun SpecialSetups(
+    app: AppState,
+    form: SignInForm,
+    submit: () -> Unit,
+    rows: List<AdvancedRow>,
+    places: FormPlaces,
+    replacingId: String?,
+    url: HttpUrl?,
+    home: HttpUrl?,
+) {
     val visibility = LocalFocusVisibility.current
     var focusNewHeader by remember { mutableStateOf(false) }
     val newHeaderFocus = remember { FocusRequester() }
@@ -589,7 +619,7 @@ private fun SpecialSetups(form: SignInForm, submit: () -> Unit, rows: List<Advan
                         GlazeCapsule(null, SignInWords.ADD_HEADER, { form.addHeader(); focusNewHeader = true }, Modifier.focusRequester(addHeaderFocus), height = ControlHeight.M)
                     }
                 }
-                AdvancedRow.Certificate -> Unit
+                AdvancedRow.Certificate -> CertificateRow(app, form, replacingId, url, home)
                 else -> Unit
             }
         }

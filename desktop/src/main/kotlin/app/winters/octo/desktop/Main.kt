@@ -269,6 +269,7 @@ fun main(args: Array<String>) {
                 params = { made?.streamParams() ?: mapOf("format" to "raw") },
                 kept = { id -> made?.offline?.localFile(id) },
                 gatewayOrigins = { made?.connection?.gatewayOrigins.orEmpty() },
+                identity = parts.accounts.engineIdentity,
                 opened = parts.engine,
             )
             val app = AppState(settings, parts.accounts, parts.http, scope, os, player.player, restored = parts.restored, listeningRoot = places.config, updates = parts.updates, homeShelves = File(places.cache, "home"), deviceDark = deviceDark, portal = portal).also {

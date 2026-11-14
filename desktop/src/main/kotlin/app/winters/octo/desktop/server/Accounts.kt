@@ -16,11 +16,14 @@ import app.winters.octo.connection.legacyRetry
 import app.winters.octo.connection.mask
 import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.data.HeaderDraft
+import app.winters.octo.desktop.secrets.RunOnlySecrets
 import app.winters.octo.desktop.secrets.SecretStore
 import app.winters.octo.desktop.secrets.SecretStoreException
 import app.winters.octo.desktop.secrets.secretAccount
+import app.winters.octo.desktop.settings.CertFile
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.settings.currentOs
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.server.Reach
@@ -44,6 +47,7 @@ import app.winters.octo.subsonic.gateway.savedGatewayNames
 import app.winters.octo.subsonic.gatewayOrigins
 import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.normalizeServerUrl
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -53,6 +57,9 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -135,8 +142,9 @@ class ServerFacts(val info: ServerInfo, val extensions: List<Extension>) {
 // when signing in with an API key. A saved header left without a value
 // keeps its saved value; when editing a kept server, an empty secret keeps
 // its saved one. `gateway` is the sign-in page fields; a saved kind left
-// with both fields empty keeps its saved values.
-class SignInRequest(
+// with both fields empty keeps its saved values. `certificate` is what the
+// form asks for the client certificate; every form passes its own.
+data class SignInRequest(
     val address: String,
     val username: String,
     val secret: String,
@@ -145,10 +153,11 @@ class SignInRequest(
     val headers: List<HeaderDraft> = emptyList(),
     val rememberPassword: Boolean = true,
     val gateway: GatewayDraft = GatewayDraft(),
+    val certificate: CertificateDraft = CertificateDraft.None,
 ) {
-    fun withSecret(secret: String) = SignInRequest(address, username, secret, mode, home, headers, rememberPassword, gateway)
+    fun withSecret(secret: String) = copy(secret = secret)
 
-    override fun toString() = "SignInRequest(address=$address, username=$username, secret=${mask(secret)}, mode=$mode)"
+    override fun toString() = "SignInRequest(address=$address, username=$username, secret=${mask(secret)}, mode=$mode, certificate=$certificate)"
 }
 
 sealed interface SignInOutcome {
@@ -160,8 +169,10 @@ sealed interface SignInOutcome {
     // not in use edited.
     class Saved(val server: SavedServer, val note: String? = null) : SignInOutcome
 
-    // Why not, and the sign-in page that answered, if one did.
-    class Failed(val message: String, val gateway: Gateway? = null) : SignInOutcome
+    // Why not, and the sign-in page that answered, if one did. With
+    // `certificate`, the client certificate is why, and the form opens on
+    // it. `tried` is the certificate the try sent and how loading it went.
+    class Failed(val message: String, val gateway: Gateway? = null, val certificate: Boolean = false, val tried: CertificateTry? = null) : SignInOutcome
 
     // The server showed a certificate the system does not trust.
     class Untrusted(val question: CertificateQuestion) : SignInOutcome
@@ -170,8 +181,8 @@ sealed interface SignInOutcome {
 sealed interface TestOutcome {
     // `mode` is the way of signing in that worked, which may be the
     // password itself for a server that cannot check tokens.
-    class Reached(val facts: ServerFacts, val mode: AuthMode = AuthMode.Token) : TestOutcome
-    class Failed(val message: String, val gateway: Gateway? = null) : TestOutcome
+    class Reached(val facts: ServerFacts, val mode: AuthMode = AuthMode.Token, val tried: CertificateTry? = null) : TestOutcome
+    class Failed(val message: String, val gateway: Gateway? = null, val certificate: Boolean = false, val tried: CertificateTry? = null) : TestOutcome
     class Untrusted(val question: CertificateQuestion) : TestOutcome
 }
 
@@ -184,6 +195,10 @@ sealed interface SwitchOutcome {
 
     class Failed(val message: String) : SwitchOutcome
 
+    // Its client certificate can't be read now: its sign-in form opens on
+    // the certificate, saying why, with the saved password kept.
+    class NeedsCertificate(val server: SavedServer, val words: String) : SwitchOutcome
+
     // A sign-out or removal of the server in use was asked for after this
     // switch began: the window has left already, so nothing changes.
     data object Overtaken : SwitchOutcome
@@ -192,6 +207,10 @@ sealed interface SwitchOutcome {
 // The sign-in page kind a kept server's saved headers make up, and which of
 // its saved headers make it up, for the form. No value leaves Accounts.
 class SavedGateway(val kind: GatewayKind, val names: Set<String>)
+
+// The kept server whose sign-in page opens at start, and why; with
+// `certificate`, it is its client certificate that could not be read.
+class StartAsk(val id: String, val words: String, val certificate: Boolean = false)
 
 // A client of its own for one check of a server: its own headers, trusted
 // certificates (read from the settings, so a saved one holds) and sign-in
@@ -232,10 +251,20 @@ class Accounts(
     // What each check's client starts from: the app's name and time limits,
     // with none of the shared client's headers, cookies or certificates.
     private val base: () -> OkHttpClient.Builder = { OkHttpClient.Builder() },
+    // Reads a client certificate file where the person keeps it; the tests
+    // count, hold or fail reads with their own.
+    readCertificateBytes: (Path) -> ByteArray = ::readCapped,
+    // Where each server's certificate item is filed in the system's store.
+    private val certificateAccount: (String) -> String = certificateAccountFor(null, currentOs()),
+    // The time, for whether a certificate is in date.
+    private val clock: () -> Instant = Instant::now,
+    // How long reading a certificate file may take.
+    certificateReadMs: Long = CERT_READ_MS,
 ) {
-    // What a try at a server found, or why it failed.
+    // What a try at a server found, or why it failed. `tried` is the client
+    // certificate it sent and how loading it went.
     private sealed interface Attempt {
-        class Failed(val message: String, val gateway: Gateway? = null) : Attempt
+        class Failed(val message: String, val gateway: Gateway? = null, val certificate: Boolean = false, val tried: CertificateTry? = null) : Attempt
         class Untrusted(val question: CertificateQuestion) : Attempt
         class Reached(
             val main: HttpUrl,
@@ -243,8 +272,23 @@ class Accounts(
             val credentials: Credentials,
             val headers: Map<String, String>,
             val facts: ServerFacts,
+            val tried: CertificateTry,
         ) : Attempt
     }
+
+    // The client certificate the audio engine offers, as the connection in
+    // use has it.
+    val engineIdentity = EngineIdentity()
+
+    // Certificate items the store would not keep, for this run, by server
+    // id. Read before the store; a sign-out leaves them.
+    private val memoryCerts = ConcurrentHashMap<String, CertSecret>()
+
+    // The certificate files' reads, one per path at a time.
+    private val certificateReads = CertificateReads(readCertificateBytes, certificateReadMs)
+
+    // The certificate files being read now, for tests.
+    internal val certificateReading: Set<Path> get() = certificateReads.reading
 
     // Every server kept here, in order.
     val servers: List<SavedServer> get() = settings.current.servers
@@ -309,11 +353,17 @@ class Accounts(
         test(SignInRequest(address, username, password, mode))
 
     // Asks the server who it is and which extensions it lists, without
-    // keeping anything.
-    suspend fun test(request: SignInRequest): TestOutcome = when (val tried = attempt(request)) {
-        is Attempt.Failed -> TestOutcome.Failed(tried.message, tried.gateway)
-        is Attempt.Untrusted -> TestOutcome.Untrusted(tried.question)
-        is Attempt.Reached -> TestOutcome.Reached(tried.facts, tried.credentials.mode)
+    // keeping anything. With `keptId`, the kept server the form signs in to
+    // again: an empty password or key is its saved one, as signing in fills
+    // it, and its saved headers and certificate count.
+    suspend fun test(request: SignInRequest, keptId: String? = null): TestOutcome {
+        val kept = keptId?.let(::find)
+        val asked = if (kept == null) request else filled(kept, request) ?: return TestOutcome.Failed(missingSecretWords(request))
+        return when (val tried = attempt(asked, kept)) {
+            is Attempt.Failed -> TestOutcome.Failed(tried.message, tried.gateway, tried.certificate, tried.tried)
+            is Attempt.Untrusted -> TestOutcome.Untrusted(tried.question)
+            is Attempt.Reached -> TestOutcome.Reached(tried.facts, tried.credentials.mode, tried.tried)
+        }
     }
 
     suspend fun signIn(address: String, username: String, password: String, mode: AuthMode = AuthMode.Token): SignInOutcome =
@@ -363,10 +413,14 @@ class Accounts(
     private suspend fun filled(old: SavedServer, request: SignInRequest): SignInRequest? = when {
         request.secret.isNotEmpty() -> request
         old.signedOut -> null
+        // A saved password is never sent as a key, nor a key as a password.
+        (old.authMode == AuthMode.ApiKey) != (request.mode == AuthMode.ApiKey) -> null
         else -> savedSecret(old)?.let(request::withSecret)
     }
 
-    private fun missingSecret(request: SignInRequest) = SignInOutcome.Failed(if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password.")
+    private fun missingSecretWords(request: SignInRequest) = if (request.mode == AuthMode.ApiKey) "Enter the API key." else "Enter the password."
+
+    private fun missingSecret(request: SignInRequest) = SignInOutcome.Failed(missingSecretWords(request))
 
     // Gives a kept server a name of its own; an empty one shows its host.
     fun rename(id: String, label: String) {
@@ -382,7 +436,7 @@ class Accounts(
         sameAccount: Boolean = false,
     ): SignInOutcome {
         val reached = when (val tried = attempt(request, replacing)) {
-            is Attempt.Failed -> return SignInOutcome.Failed(tried.message, tried.gateway)
+            is Attempt.Failed -> return SignInOutcome.Failed(tried.message, tried.gateway, tried.certificate, tried.tried)
             is Attempt.Untrusted -> return SignInOutcome.Untrusted(tried.question)
             is Attempt.Reached -> tried
         }
@@ -404,6 +458,11 @@ class Accounts(
             base.username != username -> freshId(username, address, except = base.id)
             else -> base.id
         }
+        // What becomes of the client certificate, read before anything is
+        // written: a carried certificate whose item can't be read stops the
+        // keep here, with nothing changed.
+        val certs = certificatesFor(request.certificate, reached, replacing, edited, twin, id, use)
+            ?: return SignInOutcome.Failed(CertificateWords.CARRY_UNREAD)
         val saved = SavedServer(
             address = address,
             username = username,
@@ -417,13 +476,9 @@ class Accounts(
             extensions = facts.extensionKeys,
             id = id,
             label = label?.trim() ?: base?.label.orEmpty(),
+            certificate = certs.file,
         )
         val (note, headersKept) = withContext(keychain) {
-            if (base != null && (base.address != address || base.username != username)) {
-                runCatching { secrets.delete(secretAccount(base.username, base.address)) }
-            }
-            // An account edited under a new id leaves its old header values behind.
-            if (base != null && base.id != id) runCatching { secrets.delete(headersAccount(base)) }
             val headersNote = keepHeaders(saved, reached.headers)
             val passwordNote = if (!request.rememberPassword) {
                 // Kept only in memory, so any copy in the store goes.
@@ -432,7 +487,7 @@ class Accounts(
             } else {
                 try {
                     secrets.write(secretAccount(username, address), secret)
-                    if (secrets.lasting) null else "This computer has no password store, so Octo will ask for the password each time it opens."
+                    if (secrets.lasting || settings.readOnly) null else "This computer has no password store, so Octo will ask for the password each time it opens."
                 } catch (e: SecretStoreException) {
                     "Octo couldn't save the password (${e.message}), so it will ask for it next time."
                 }
@@ -463,7 +518,7 @@ class Accounts(
                 }
                 s.copy(servers = list, activeServer = inUse)
             }
-            stored to if (activates) activate(stored, secret, reached.headers, generation) else null
+            stored to if (activates) activate(stored, secret, reached.headers, generation, certs.identity) else null
         }
         // Removed or signed out of meanwhile: nothing of this sign-in is
         // kept, in memory or in the store, whatever address it was for; a
@@ -471,22 +526,52 @@ class Accounts(
         if (made == null || made.first.signedOut) {
             memory.remove(id)
             memoryHeaders.remove(id)
+            if (made == null) memoryCerts.remove(id)
             withContext(keychain) {
                 runCatching { secrets.delete(secretAccount(username, address)) }
                 if (made == null) runCatching { secrets.delete(headersAccount(saved)) }
             }
         }
-        val (kept, connection) = made ?: return SignInOutcome.Failed("That server isn't in your list any more.")
-        // Header values an older version filed by address go once no kept
-        // server reads them there.
-        if (headersKept) {
-            withContext(keychain) {
+        // The settings that name the new state go to disk (the settings
+        // file, or the pending file beside it while the file is held) before
+        // the store follows them. Whatever this gives, the store work goes
+        // on: a write that failed is tried again, and again when Octo closes.
+        val flushed = withContext(Dispatchers.IO) { settings.flushNow() }
+        val storeNotes = withContext(keychain) {
+            // The old account's password and header values, once the
+            // settings name the new one.
+            if (base != null && (base.address != address || base.username != username)) {
+                runCatching { secrets.delete(secretAccount(base.username, base.address)) }
+            }
+            // An account edited under a new id leaves its old header values behind.
+            if (base != null && base.id != id) runCatching { secrets.delete(headersAccount(base)) }
+            // Removed meanwhile: nothing of its certificate is written.
+            if (made == null) return@withContext emptyList<String>()
+            // First the item the settings now name, then the ones they no
+            // longer name.
+            val notes = listOfNotNull(certs.item?.let { writeCertItem(id, it) }) + certs.deletes.mapNotNull { deleteCertItem(it) }
+            certs.memoryDrop?.let { memoryCerts.remove(it) }
+            // Header values an older version filed by address go once no kept
+            // server reads them there.
+            if (headersKept) {
                 dropAddressHeaders(address)
                 if (base != null && base.address != address) dropAddressHeaders(base.address)
             }
+            notes
         }
-        if (connection == null) return SignInOutcome.Saved(kept, note)
-        return SignInOutcome.Done(connection, remembered = request.rememberPassword && note == null, note = note)
+        val (kept, connection) = made ?: return SignInOutcome.Failed("That server isn't in your list any more.")
+        // Settings neither settings file would take yet, with a certificate
+        // item already changed: what the next start finds if they never are.
+        // A read-only run saves no settings, and its banner says so.
+        val unsaved = when {
+            flushed || settings.readOnly || (certs.item == null && certs.deletes.isEmpty()) -> null
+            certs.removed -> CertificateWords.unsavedRemove(kept.name)
+            base == null -> CertificateWords.unsavedAdd(kept.name)
+            else -> CertificateWords.UNSAVED_KEEP
+        }
+        val said = (listOfNotNull(note, certs.words.takeIf { connection != null }) + storeNotes + listOfNotNull(unsaved)).joinToString(" ").ifEmpty { null }
+        if (connection == null) return SignInOutcome.Saved(kept, said)
+        return SignInOutcome.Done(connection, remembered = request.rememberPassword && note == null, note = said)
     }
 
     // An id for a new server: the account's key, as older versions named its
@@ -511,19 +596,33 @@ class Accounts(
         // A sign-in page's password that would cross the internet readable
         // is never sent: its sign-in form opens saying why, as on the phones.
         if (needsHttps(main, headers)) return SwitchOutcome.NeedsPassword(server, GatewayWords.NEEDS_HTTPS)
+        // Its client certificate, when one can go to these addresses: read
+        // after its password, before the server is asked anything.
+        val file = server.certificate?.takeIf { sendsCertificate(server, main, home) }
+        val certificate = when (val load = file?.let { loadSaved(server.id, it) }) {
+            null -> null
+            is CertificateLoad.Found -> load.certificate
+            is CertificateLoad.Unreadable -> return SwitchOutcome.NeedsCertificate(server, load.words)
+        }
         val creds = Credentials(server.username, secret, server.authMode)
         // Each call gets as long as a look at a server's row (GLANCE_SECONDS,
         // the phone's switch limit too): the switch holds the other changes
         // while it asks, so a sign-in page that never answers holds them for
         // seconds, not the minute the base client's read limit would allow.
-        val (info, extensions) = checkClient(listOfNotNull(main, home), headers, GLANCE_SECONDS).use { own ->
+        val (info, extensions) = checkClient(listOfNotNull(main, home), headers, certificate, GLANCE_SECONDS).use { own ->
             val (reachedUrl, info) = try {
                 reach(own.http, main, home, creds)
             } catch (e: SubsonicException) {
                 if (e is SubsonicException.WrongCredentials) {
                     return SwitchOutcome.NeedsPassword(server, passwordRefusedWords(server.name))
                 }
-                return SwitchOutcome.Failed(switchFailedWords(server.name, e.userMessage()))
+                // A certificate the system does not trust keeps today's
+                // words; otherwise what the server said about the client
+                // certificate, when it asked for one.
+                val urls = listOfNotNull(main, home)
+                val rejected = urls.any { own.security.peekRejected(it.host) != null }
+                val why = (if (rejected) null else own.security.certificateWords(urls)) ?: e.userMessage()
+                return SwitchOutcome.Failed(switchFailedWords(server.name, why))
             }
             val extensions = if (info.openSubsonic) {
                 runCatching { SubsonicClient(reachedUrl, creds, own.http).extensions() }.getOrNull()
@@ -551,16 +650,17 @@ class Accounts(
                     memory[id] = secret
                     memoryHeaders[id] = headers
                     settings.update { s -> s.copy(servers = s.servers.map { if (it.id == id) fresh else it }, activeServer = id) }
-                    SwitchOutcome.Done(activate(fresh, secret, headers, generation))
+                    SwitchOutcome.Done(activate(fresh, secret, headers, generation, certificate))
                 }
             }
         }
     }
 
-    // The server in use, ready to use, or null when there is none or its
-    // password is not in the store. Nothing is asked of the server here.
-    // The store can wait on the listener (a locked keyring asks to be
-    // unlocked), so this is called before the window opens, not on it.
+    // The server in use, ready to use, or null when there is none, its
+    // password is not in the store, or its client certificate can't be read
+    // now. Nothing is asked of the server here. The store can wait on the
+    // listener (a locked keyring asks to be unlocked), so this is called
+    // before the window opens, not on it.
     fun restore(): Connection? {
         val saved = active ?: return null
         if (saved.signedOut) return null
@@ -572,10 +672,23 @@ class Accounts(
         val main = saved.address.toHttpUrlOrNull()
         if (main != null && needsHttps(main, headers)) {
             settings.update { it.copy(activeServer = null) }
-            startAsk = saved.id to GatewayWords.NEEDS_HTTPS
+            startAsk = StartAsk(saved.id, GatewayWords.NEEDS_HTTPS)
             return null
         }
-        return activate(saved, password, headers, ticket())
+        // A certificate that can't be read now leaves the server the one in
+        // use, so a drive connected later is used at the next start; its
+        // sign-in page opens saying why, with the saved password kept.
+        val home = saved.home?.toHttpUrlOrNull()?.takeIf { it != main }
+        val file = saved.certificate?.takeIf { sendsCertificate(saved, main, home) }
+        val certificate = when (val load = file?.let { loadSavedNow(saved.id, it) }) {
+            null -> null
+            is CertificateLoad.Found -> load.certificate
+            is CertificateLoad.Unreadable -> {
+                startAsk = StartAsk(saved.id, load.words, certificate = true)
+                return null
+            }
+        }
+        return activate(saved, password, headers, ticket(), certificate)
     }
 
     // What the server in use offers is saved at sign-in, and a server gains
@@ -597,10 +710,10 @@ class Accounts(
 
     // The kept server whose sign-in page opens at start, and why: the one
     // in use when Octo closed, which could not be signed in to as kept.
-    @Volatile private var startAsk: Pair<String, String>? = null
+    @Volatile private var startAsk: StartAsk? = null
 
     // The same, taken once.
-    fun takeStartAsk(): Pair<String, String>? = startAsk.also { startAsk = null }
+    fun takeStartAsk(): StartAsk? = startAsk.also { startAsk = null }
 
     // The server to fill the sign-in page with: the one in use, else the one
     // signed out of last, else the first kept.
@@ -647,6 +760,7 @@ class Accounts(
             if (old != null) {
                 signedOutAt[old.id] = stop ?: ticket()
                 forgetInMemory(old)
+                memoryCerts.remove(old.id)
                 if (recent == old.id) recent = null
                 settings.update { s -> s.copy(servers = s.servers.filterNot { it.id == old.id }, activeServer = s.activeServer.takeIf { it != old.id }) }
             }
@@ -655,9 +769,14 @@ class Accounts(
         }
         if (old != null) {
             writer.withLock {
+                // The list without it goes to disk before its items go.
+                withContext(Dispatchers.IO) { settings.flushNow() }
                 withContext(keychain) {
                     runCatching { secrets.delete(secretAccount(old.username, old.address)) }
                     runCatching { secrets.delete(headersAccount(old)) }
+                    // Whether or not it names a certificate, so an item left
+                    // behind earlier goes with its server.
+                    runCatching { secrets.delete(certificateAccount(old.id)) }
                     dropAddressHeaders(old.address)
                 }
             }
@@ -673,6 +792,7 @@ class Accounts(
             route?.close()
             route = null
             security.clear()
+            engineIdentity.use(null, emptySet())
         }
     }
 
@@ -685,6 +805,7 @@ class Accounts(
         route?.close()
         route = null
         security.clear()
+        engineIdentity.use(null, emptySet())
         settings.update { it.copy(activeServer = null) }
     }
 
@@ -696,10 +817,15 @@ class Accounts(
             if (result != PasswordChange.Changed) return@withLock PasswordOutcome(result)
             val server = find(connection.server.id) ?: connection.server
             memory[server.id] = new
-            if (!server.rememberSignIn) return@withLock PasswordOutcome(result)
+            // A read-only run keeps the new password where the old one is
+            // kept, whatever this run's Remember says, so the next start
+            // never signs in with one the server no longer takes.
+            val runOnly = secrets as? RunOnlySecrets
+            if (!server.rememberSignIn && runOnly == null) return@withLock PasswordOutcome(result)
             val note = withContext(keychain) {
                 try {
-                    secrets.write(secretAccount(server.username, server.address), new)
+                    val account = secretAccount(server.username, server.address)
+                    if (runOnly != null) runOnly.writeThrough(account, new) else secrets.write(account, new)
                     null
                 } catch (e: SecretStoreException) {
                     "Octo couldn't save the new password (${e.message}), so it will ask for it next time."
@@ -725,7 +851,14 @@ class Accounts(
         val headers = memoryHeaders[id] ?: withContext(keychain) { readHeaders(server) } ?: return ServerCheck(Reach.Unknown)
         val main = server.address.toHttpUrlOrNull() ?: return ServerCheck(Reach.Unreachable)
         if (needsHttps(main, headers)) return ServerCheck(Reach.NeedsHttps)
-        return checkClient(listOf(main), headers, GLANCE_SECONDS).use { glance ->
+        // The look goes to the main address alone, so a certificate counts
+        // only when that is https; one that can't be read asks nothing.
+        val certificate = when (val load = server.certificate?.takeIf { main.isHttps }?.let { loadSaved(server.id, it) }) {
+            null -> null
+            is CertificateLoad.Found -> load.certificate
+            is CertificateLoad.Unreadable -> return ServerCheck(Reach.Unknown)
+        }
+        return checkClient(listOf(main), headers, certificate, GLANCE_SECONDS).use { glance ->
             look(id, server, SubsonicClient(main, Credentials(server.username, secret, server.authMode), glance.http))
         }
     }
@@ -760,12 +893,13 @@ class Accounts(
         }
     }
 
-    // Whether a server's sign-in outlasts this run of Octo.
-    fun remembers(server: SavedServer): Boolean = server.rememberSignIn && secrets.lasting
+    // Whether a server's sign-in outlasts this run of Octo. Nothing does in
+    // a read-only run.
+    fun remembers(server: SavedServer): Boolean = !settings.readOnly && server.rememberSignIn && secrets.lasting
 
     // Whether the sign-in in use outlasts this run of Octo, for the settings page.
     val remembersSignIn: Boolean
-        get() = active?.let(::remembers) ?: secrets.lasting
+        get() = !settings.readOnly && (active?.let(::remembers) ?: secrets.lasting)
 
     // The sign-in page kind a kept server's saved headers make up, for the
     // form to show as saved. The store is read off the window's thread.
@@ -775,13 +909,72 @@ class Accounts(
         return SavedGateway(kind, savedGatewayNames(headers, kind))
     }
 
+    // The certificate a request sends: none when no address is https; the
+    // file just picked; or a kept server's, when the request replaces that
+    // server (whatever its addresses are now) or first goes, over https, to
+    // one of that server's own https addresses (its main, else its home; the
+    // host as HttpUrl names it, and the port). Plain http addresses neither
+    // match nor stop a match.
+    fun certificateFor(draft: CertificateDraft, replacingId: String?, url: HttpUrl?, home: HttpUrl?): CertificateChoice {
+        if (url == null) return CertificateChoice.None
+        val first = listOfNotNull(url, home).firstOrNull(HttpUrl::isHttps) ?: return CertificateChoice.None
+        return when (draft) {
+            CertificateDraft.None, is CertificateDraft.Remove -> CertificateChoice.None
+            is CertificateDraft.Use -> CertificateChoice.Picked(draft.path, draft.password)
+            is CertificateDraft.Keep -> {
+                val kept = find(draft.serverId)
+                val file = kept?.certificate
+                when {
+                    kept == null || file == null -> CertificateChoice.None
+                    replacingId == kept.id -> CertificateChoice.Saved(kept.id, file)
+                    TlsOrigin.of(first) in certificateOrigins(kept.address.toHttpUrlOrNull(), kept.home?.toHttpUrlOrNull()) -> CertificateChoice.Saved(kept.id, file)
+                    else -> CertificateChoice.None
+                }
+            }
+        }
+    }
+
+    // What the form's certificate row shows for a request: what it sends;
+    // else, for a request with no https address, a file the record it lands
+    // on keeps (one picked now, or the replaced server's), which only https
+    // ever carries; else nothing.
+    fun certificateShown(draft: CertificateDraft, replacingId: String?, url: HttpUrl?, home: HttpUrl?): CertificateShown {
+        if (url == null) return CertificateShown.None
+        val choice = certificateFor(draft, replacingId, url, home)
+        if (choice != CertificateChoice.None) return CertificateShown.Sends(choice)
+        if (url.isHttps || home?.isHttps == true) return CertificateShown.None
+        return when {
+            draft is CertificateDraft.Use -> CertificateShown.HttpsOnly(certificateName(draft.path))
+            draft is CertificateDraft.Keep && draft.serverId == replacingId ->
+                find(draft.serverId)?.certificate?.let { CertificateShown.HttpsOnly(it.name) } ?: CertificateShown.None
+            else -> CertificateShown.None
+        }
+    }
+
+    // Loads what a request sends, for the form's row; null for none.
+    suspend fun loadChoice(choice: CertificateChoice): CertificateLoad? = when (choice) {
+        CertificateChoice.None -> null
+        is CertificateChoice.Picked -> opening(certificateName(choice.path), choice.password, readBytes(choice.path))
+        is CertificateChoice.Saved -> loadSaved(choice.serverId, choice.file)
+    }
+
+    // Opens a file the person just chose, with `password` (the form tries an
+    // empty one first): the certificate, or why not.
+    suspend fun openPicked(path: String, password: String): CertificateOpened {
+        val name = certificateName(path)
+        val bytes = readBytes(path).getOrElse { return CertificateOpened.Refused(unreadableRead(it, name).words) }
+            ?: return CertificateOpened.Refused(CertificateWords.notFound(name))
+        return openCertificate(bytes, password, name, clock(), engineIdentity::problemWith)
+    }
+
     // A client for checking a server at these addresses (the main one
-    // first, then the home one) with these headers, built from the base
-    // with a security of its own; `seconds` limits each call. With no
-    // address it carries no headers at all.
-    fun checkClient(addresses: List<HttpUrl>, headers: Map<String, String>, seconds: Long? = null): CheckClient {
+    // first, then the home one) with these headers and this client
+    // certificate, built from the base with a security of its own; `seconds`
+    // limits each call. With no address it carries no headers and offers no
+    // certificate at all.
+    fun checkClient(addresses: List<HttpUrl>, headers: Map<String, String>, certificate: LoadedCertificate?, seconds: Long? = null): CheckClient {
         val own = security.forCheck()
-        addresses.firstOrNull()?.let { main -> own.configure(main, addresses.getOrNull(1), headers) }
+        addresses.firstOrNull()?.let { main -> own.configure(main, addresses.getOrNull(1), headers, certificate) }
         val builder = own.install(base())
         if (seconds != null) builder.callTimeout(seconds, TimeUnit.SECONDS)
         return CheckClient(own, builder.build())
@@ -810,6 +1003,237 @@ class Accounts(
     private suspend fun savedSecret(server: SavedServer): String? =
         memory[server.id] ?: withContext(keychain) { runCatching { secrets.read(secretAccount(server.username, server.address)) }.getOrNull() }
 
+    // A kept server's certificate item: this run's copy, else the store's.
+    // A store that fails is a failure, never "no item".
+    private fun certItemNow(id: String): Result<CertSecret?> {
+        memoryCerts[id]?.let { return Result.success(it) }
+        return try {
+            val text = secrets.read(certificateAccount(id)) ?: return Result.success(null)
+            Result.success(runCatching { certJson.decodeFromString(CertSecret.serializer(), text) }.getOrNull())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun certItem(id: String): Result<CertSecret?> = withContext(keychain) { certItemNow(id) }
+
+    private fun storeUnread(e: Throwable) =
+        CertificateLoad.Unreadable(CertificateWords.storeUnread(secrets.label, e.message ?: e.javaClass.simpleName), again = false)
+
+    // A kept server's certificate: its item, then the file where the person
+    // keeps it, opened with the item's password. An item that is not there,
+    // or names another file, asks for the file again.
+    private suspend fun loadSaved(id: String, file: CertFile): CertificateLoad {
+        val item = certItem(id).getOrElse { return storeUnread(it) }
+        if (item == null || item.path != file.path) return CertificateLoad.Unreadable(CertificateWords.needsPassword(file.name), again = true)
+        return opening(file.name, item.password, readBytes(file.path))
+    }
+
+    // The same, waiting on this thread, for the start.
+    private fun loadSavedNow(id: String, file: CertFile): CertificateLoad {
+        val item = certItemNow(id).getOrElse { return storeUnread(it) }
+        if (item == null || item.path != file.path) return CertificateLoad.Unreadable(CertificateWords.needsPassword(file.name), again = true)
+        return opening(file.name, item.password, readBytesNow(file.path))
+    }
+
+    private suspend fun readBytes(path: String): Result<ByteArray?> {
+        val at = certificatePath(path) ?: return Result.failure(NoSuchFileException(path))
+        return try {
+            Result.success(certificateReads.bytes(at))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun readBytesNow(path: String): Result<ByteArray?> {
+        val at = certificatePath(path) ?: return Result.failure(NoSuchFileException(path))
+        return try {
+            Result.success(certificateReads.bytesNow(at))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Opens the bytes of a file named `name` with `password`: Found, or
+    // Unreadable with why. No bytes is a read past the bound.
+    private fun opening(name: String, password: String, read: Result<ByteArray?>): CertificateLoad {
+        val bytes = read.getOrElse { return unreadableRead(it, name) }
+            ?: return CertificateLoad.Unreadable(CertificateWords.notFound(name), again = false)
+        return when (val opened = openCertificate(bytes, password, name, clock(), engineIdentity::problemWith)) {
+            is CertificateOpened.Found -> CertificateLoad.Found(opened.certificate)
+            is CertificateOpened.Refused -> CertificateLoad.Unreadable(if (opened.wrongPassword) CertificateWords.needsPassword(name) else opened.words, again = true)
+        }
+    }
+
+    // Writes a certificate item under `id`, after the settings: the run
+    // keeps it when the store refuses. The keep note's words, if any.
+    private fun writeCertItem(id: String, item: CertSecret): String? = try {
+        secrets.write(certificateAccount(id), certJson.encodeToString(CertSecret.serializer(), item))
+        memoryCerts.remove(id)
+        if (secrets.lasting || settings.readOnly) null else CertificateWords.SESSION_ONLY
+    } catch (e: Exception) {
+        memoryCerts[id] = item
+        CertificateWords.writeRefused(e.message ?: e.javaClass.simpleName)
+    }
+
+    // Deletes a certificate item no settings entry names any more.
+    private fun deleteCertItem(id: String): String? = try {
+        secrets.delete(certificateAccount(id))
+        null
+    } catch (e: Exception) {
+        CertificateWords.deleteRefused(secrets.label, e.message ?: e.javaClass.simpleName)
+    }
+
+    // What a keep does with client certificates: the file the saved record
+    // names, the certificate the connection is made with, the item written
+    // under the record's id after the settings (a file picked, or a copy
+    // carried from another server), the servers whose items go after that,
+    // the server whose run copy goes, whether a Remove was done, and the
+    // words for the keep's note when the connection is made without the
+    // record's own certificate.
+    private class CertKeep(
+        val file: CertFile?,
+        val identity: LoadedCertificate?,
+        val item: CertSecret? = null,
+        val deletes: List<String> = emptyList(),
+        val memoryDrop: String? = null,
+        val removed: Boolean = false,
+        val words: String? = null,
+    )
+
+    // What the keep does with certificates, by what the form asked and the
+    // record the keep lands on: the replaced server, a twin, or a new one.
+    // Null when a carried certificate's item could not be read.
+    private suspend fun certificatesFor(
+        draft: CertificateDraft,
+        reached: Attempt.Reached,
+        replacing: SavedServer?,
+        edited: SavedServer?,
+        twin: SavedServer?,
+        id: String,
+        use: Boolean,
+    ): CertKeep? {
+        val tried = reached.tried
+        return when (draft) {
+            is CertificateDraft.Use -> {
+                // The server replaced under a new id leaves the list, and its item goes.
+                val leaves = edited?.id?.takeIf { it != id }
+                CertKeep(
+                    CertFile(draft.path, certificateName(draft.path)),
+                    tried.certificate,
+                    item = CertSecret(draft.path, draft.password),
+                    deletes = listOfNotNull(leaves),
+                    memoryDrop = leaves,
+                    words = (tried.load as? CertificateLoad.Unreadable)?.words.takeIf { use },
+                )
+            }
+            // Only the server the row showed loses its certificate; on any
+            // other record this is None.
+            is CertificateDraft.Remove ->
+                if ((edited ?: twin)?.id == draft.serverId) {
+                    CertKeep(null, null, deletes = listOf(draft.serverId), memoryDrop = draft.serverId, removed = true)
+                } else {
+                    twinsOwn(twin, reached, use)
+                }
+            is CertificateDraft.Keep -> keepCertificate(draft.serverId, reached, replacing, edited, twin, id, use)
+            // A kept server's own form starts with Keep; an edit asked with
+            // None keeps what the server had.
+            CertificateDraft.None ->
+                if (edited != null) keepCertificate(edited.id, reached, replacing, edited, twin, id, use) else twinsOwn(twin, reached, use)
+        }
+    }
+
+    // None, or what acts like it: a new server gets no certificate, and a
+    // twin keeps its own, which the connection is made with when it can be
+    // read now.
+    private suspend fun twinsOwn(twin: SavedServer?, reached: Attempt.Reached, use: Boolean): CertKeep {
+        val file = twin?.certificate ?: return CertKeep(null, null)
+        return when (val load = twinLoad(twin, reached, use)) {
+            null -> CertKeep(file, null)
+            is CertificateLoad.Found -> CertKeep(file, load.certificate)
+            is CertificateLoad.Unreadable -> CertKeep(file, null, words = load.words)
+        }
+    }
+
+    // A twin's own certificate, loaded only when the keep makes the twin the
+    // one in use and the certificate can go to the addresses just reached.
+    private suspend fun twinLoad(twin: SavedServer, reached: Attempt.Reached, use: Boolean): CertificateLoad? {
+        val file = twin.certificate ?: return null
+        if (!use || !sendsCertificate(twin, reached.main, reached.home)) return null
+        return loadSaved(twin.id, file)
+    }
+
+    // Keep(k): the certificate of k, the server the form showed.
+    private suspend fun keepCertificate(
+        k: String,
+        reached: Attempt.Reached,
+        replacing: SavedServer?,
+        edited: SavedServer?,
+        twin: SavedServer?,
+        id: String,
+        use: Boolean,
+    ): CertKeep? {
+        val tried = reached.tried
+        // k's certificate, when the try sent it.
+        val sentFile = (tried.choice as? CertificateChoice.Saved)?.takeIf { it.serverId == k }?.file
+        val sent = tried.certificate.takeIf { sentFile != null }
+        val words = (tried.load as? CertificateLoad.Unreadable)?.words.takeIf { sentFile != null && use }
+        val kFile = find(k)?.certificate ?: sentFile
+        // A kept server's form names that server; one naming another acts as
+        // the edited server's own.
+        if (edited != null && edited.id != k) return keepCertificate(edited.id, reached, replacing, edited, twin, id, use)
+        // The server the request replaces keeps its certificate, under a new
+        // id too; an API key of another account takes it to the new server
+        // and leaves k its own.
+        if (replacing?.id == k && (edited != null || twin == null)) {
+            if (kFile == null) return CertKeep(null, null)
+            if (id == k) return CertKeep(kFile, sent, words = words)
+            return carry(k, kFile, id, sent, leaves = edited != null, words = words)
+        }
+        // A new server at k's own origin gets k's certificate when the try
+        // sent it.
+        if (twin == null) return if (sentFile != null && kFile != null) carry(k, kFile, id, sent, leaves = false, words = null) else CertKeep(null, null)
+        // k itself, found again: nothing is written, and the certificate the
+        // try sent is the one in use.
+        if (twin.id == k) return if (sentFile != null) CertKeep(twin.certificate, sent, words = words) else twinsOwn(twin, reached, use)
+        // Another twin T, and the try sent nothing of k's: T keeps its own.
+        if (sentFile == null || kFile == null) return twinsOwn(twin, reached, use)
+        // T with none takes the one that just worked.
+        val own = twin.certificate ?: return carry(k, kFile, id, sent, leaves = false, words = null)
+        // An Add keeps T's own without reading it.
+        if (!use) return CertKeep(own, null)
+        return when (val load = twinLoad(twin, reached, use)) {
+            null -> CertKeep(own, null)
+            is CertificateLoad.Found -> CertKeep(own, load.certificate)
+            // T's own needs choosing again: T takes the one that just worked.
+            is CertificateLoad.Unreadable -> if (load.again) {
+                carry(k, kFile, id, sent, leaves = false, words = null)
+            } else {
+                // T's file is only out of reach now: T keeps it, and this
+                // run goes on with the one that just worked.
+                CertKeep(own, sent, words = load.words)
+            }
+        }
+    }
+
+    // k's certificate carried to `id`: the same file, and k's item (this
+    // run's copy first) copied there after the settings. An item that is
+    // not there, or names another file, carries the file alone, and whatever
+    // sits under `id` goes. Null when the store failed to read it.
+    private suspend fun carry(k: String, file: CertFile, id: String, sent: LoadedCertificate?, leaves: Boolean, words: String?): CertKeep? {
+        val item = certItem(k).getOrElse { return null }?.takeIf { it.path == file.path }
+        return CertKeep(
+            file,
+            sent,
+            item = item,
+            deletes = listOfNotNull(k.takeIf { leaves }, id.takeIf { item == null }),
+            memoryDrop = k.takeIf { leaves },
+            words = words,
+        )
+    }
+
     // The system's store is slow at times, and can wait on the listener,
     // so it is only used off the window's thread, one call at a time so a
     // sign-out's delete cannot land after the next sign-in's write.
@@ -818,9 +1242,10 @@ class Accounts(
     private fun SignInRequest.secretFor(): String = if (mode == AuthMode.ApiKey) secret.trim() else secret
 
     // Tries the server the way the request asks, through a client of its
-    // own. A server that cannot check tokens is tried again with the
-    // password itself where that is safe.
-    private suspend fun attempt(request: SignInRequest, editing: SavedServer? = null, mode: AuthMode = request.mode): Attempt {
+    // own that offers the certificate the request sends. A server that
+    // cannot check tokens is tried again with the password itself where that
+    // is safe, with the same certificate, loaded once.
+    private suspend fun attempt(request: SignInRequest, editing: SavedServer? = null, mode: AuthMode = request.mode, loaded: CertificateTry? = null): Attempt {
         val main = normalizeServerUrl(request.address) ?: return Attempt.Failed("That doesn't look like a server address.")
         val home = if (request.home.isBlank()) {
             null
@@ -838,16 +1263,22 @@ class Accounts(
             is ResolvedHeaders.Problem -> return Attempt.Failed(resolved.text)
             is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
         }
+        val tried = loaded ?: certificateFor(request.certificate, editing?.id, main, home).let { choice -> CertificateTry(choice, loadChoice(choice)) }
         var creds = Credentials(request.username.trim(), secret, mode)
-        return checkClient(listOfNotNull(main, home), headers).use { own ->
+        return checkClient(listOfNotNull(main, home), headers, tried.certificate).use { own ->
             val (reachedUrl, info) = try {
                 reach(own.http, main, home, creds)
             } catch (e: SubsonicException) {
                 untrusted(own, e, main, home)?.let { return Attempt.Untrusted(it) }
+                // The server asked for a client certificate, or turned one
+                // down; one that could not be read says why first.
+                own.security.certificateWords(listOfNotNull(main, home))?.let { words ->
+                    return Attempt.Failed((tried.load as? CertificateLoad.Unreadable)?.words ?: words, certificate = true, tried = tried)
+                }
                 return when (legacyRetry(e, mode, main)) {
-                    LegacyRetry.Retry -> attempt(request, editing, AuthMode.LegacyPassword)
-                    LegacyRetry.Unsafe -> Attempt.Failed(SignInWords.LEGACY_UNSAFE)
-                    LegacyRetry.None -> Attempt.Failed(e.userMessage() + homeHttpsHint(main, e), (e as? SubsonicException.NotSubsonic)?.gateway)
+                    LegacyRetry.Retry -> attempt(request, editing, AuthMode.LegacyPassword, tried)
+                    LegacyRetry.Unsafe -> Attempt.Failed(SignInWords.LEGACY_UNSAFE, tried = tried)
+                    LegacyRetry.None -> Attempt.Failed(e.userMessage() + homeHttpsHint(main, e), (e as? SubsonicException.NotSubsonic)?.gateway, tried = tried)
                 }
             }
             // A home address with a certificate the system does not trust is
@@ -864,7 +1295,7 @@ class Accounts(
                 if (!owner.isNullOrBlank()) creds = creds.named(owner)
             }
             val extensions = if (info.openSubsonic) runCatching { client.extensions() }.getOrDefault(emptyList()) else emptyList()
-            Attempt.Reached(main, home, creds, headers, ServerFacts(info, extensions))
+            Attempt.Reached(main, home, creds, headers, ServerFacts(info, extensions), tried)
         }
     }
 
@@ -919,17 +1350,21 @@ class Accounts(
     // home address watched when there is one (through a client of its own,
     // closed with the route), and a client whose calls follow it. It is
     // stamped with the ticket of the change that made it.
-    private fun activate(saved: SavedServer, secret: String, headers: Map<String, String>, generation: Long): Connection {
+    private fun activate(saved: SavedServer, secret: String, headers: Map<String, String>, generation: Long, certificate: LoadedCertificate?): Connection {
         val main = saved.address.toHttpUrlOrNull() ?: normalizeServerUrl(saved.address)!!
         val home = saved.home?.toHttpUrlOrNull()?.takeIf { it != main }
         val creds = Credentials(saved.username, secret, saved.authMode)
         route?.close()
         val chooser = home?.let { at ->
-            val checks = checkClient(listOf(main, at), headers, HOME_PING_SECONDS)
+            val checks = checkClient(listOf(main, at), headers, certificate, HOME_PING_SECONDS)
             HomeRoute(main, at, { url -> answersAt(checks, url, creds) }, moved = { onRouteMoved?.invoke() }, closing = checks)
         }
         route = chooser
-        security.configure(main, home, headers)
+        // The client certificate goes to the server's own https addresses
+        // only, for the app's calls and the audio engine's, before anything is
+        // made with it.
+        security.configure(main, home, headers, certificate)
+        engineIdentity.use(certificate, certificateOrigins(main, home))
         security.onConnectionError = chooser?.let { it::connectionFailed }
         // Open connections were made for the old server; start fresh.
         http.connectionPool.evictAll()
@@ -1024,6 +1459,7 @@ fun headersAccount(address: String): String = "headers@$address"
 
 private val headersJson = Json { ignoreUnknownKeys = true }
 private val headerList = ListSerializer(ServerHeader.serializer())
+private val certJson = Json { ignoreUnknownKeys = true }
 
 // A hint for an https address on the home network that could not be
 // reached: servers at home often speak only plain http. A certificate from

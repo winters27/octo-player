@@ -3,6 +3,7 @@ package app.winters.octo.desktop.audio
 import app.winters.octo.desktop.player.DEFAULT_OUTPUT
 import app.winters.octo.desktop.player.DesktopPlayer
 import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.server.EngineIdentity
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.playback.TransitionProfiles
 import app.winters.octo.subsonic.SubsonicClient
@@ -35,6 +36,9 @@ fun openPlayer(
     kept: (String) -> java.io.File? = { null },
     // The addresses the server's sign-in page headers may go to.
     gatewayOrigins: () -> Set<String> = { emptySet() },
+    // The client certificate of the connection in use, which the engine
+    // offers when it fetches songs.
+    identity: EngineIdentity? = null,
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
@@ -44,6 +48,8 @@ fun openPlayer(
         val engine = opened.getOrThrow()
         keepTrust(engine, settings, scope)
         keepStartAfter(engine, settings, scope)
+        // The certificate in use, before the player can ask for any song.
+        identity?.attach(engine)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
         val profiles = EngineProfiles(scope, ServerTransitions(client, transitions)::current, { serverSongId(it, landed) }, engine::setSongProfile)
         val sources = LocalOrServer(ServerSongs(headers, landed, params, client, gatewayOrigins), kept)

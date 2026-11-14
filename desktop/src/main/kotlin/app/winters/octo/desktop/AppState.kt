@@ -568,7 +568,7 @@ class AppState(
             signedIn(restored)
             refreshExtensions(restored)
         } else {
-            accounts.takeStartAsk()?.let { (id, note) -> accounts.find(id)?.let { fillSignIn(it, note) } }
+            accounts.takeStartAsk()?.let { ask -> accounts.find(ask.id)?.let { fillSignIn(it, ask.words, ask.certificate) } }
         }
     }
 
@@ -879,11 +879,13 @@ class AppState(
 
     // Fills the sign-in page with a kept server, asking for its password;
     // signing in then brings that server up to date rather than keeping
-    // another.
-    fun fillSignIn(server: SavedServer, note: String? = null) {
-        signInForm = SignInForm(server).also { form ->
+    // another. With `certificate`, its client certificate could not be
+    // read: its saved password stays, and the page opens on the certificate.
+    fun fillSignIn(server: SavedServer, note: String? = null, certificate: Boolean = false) {
+        signInForm = SignInForm(server, keepsSecret = certificate).also { form ->
             form.keptId = server.id
             note?.let { form.result = false to it }
+            if (certificate) form.askForCertificate()
         }
     }
 
@@ -908,6 +910,7 @@ class AppState(
                 is SwitchOutcome.Done -> arrive(outcome.connection, page)
                 is SwitchOutcome.Failed -> notice = outcome.message
                 is SwitchOutcome.NeedsPassword -> Unit
+                is SwitchOutcome.NeedsCertificate -> Unit
                 SwitchOutcome.Overtaken -> Unit
             }
             done(outcome)

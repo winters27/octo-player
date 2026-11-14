@@ -34,7 +34,12 @@ import app.winters.octo.connection.keyShown as keyShownRule
 import app.winters.octo.connection.pointTo as pointToRule
 import app.winters.octo.connection.sending as sendingRule
 import app.winters.octo.desktop.server.API_KEY_EXTENSION
+import app.winters.octo.desktop.server.CertificateChoice
+import app.winters.octo.desktop.server.CertificateDraft
+import app.winters.octo.desktop.server.CertificateLoad
 import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.CertificateTry
+import app.winters.octo.desktop.server.PickedCertificate
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.server.SignInRequest
 import app.winters.octo.desktop.settings.SavedServer
@@ -54,9 +59,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 // typed), the sign-in, and the advanced settings, the sign-in page in front
 // of the server among them. It starts from the server signed in to last, if
 // any. With `keepsSecret` (editing a kept server) the password or key may be
-// left empty to keep the saved one.
+// left empty to keep the saved one. The client certificate starts as that of
+// `certificateOf`: the server the form started from, unless another is named.
 @Stable
-class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
+class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, certificateOf: String? = last?.id) {
     // The name the listener gives the server; empty shows its host.
     var label by mutableStateOf(last?.label.orEmpty())
 
@@ -136,6 +142,59 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
 
     // A certificate the system does not trust, waiting for an answer.
     var question by mutableStateOf<CertificateQuestion?>(null)
+
+    // The client certificate: what the form started with, what a sign-in
+    // sends now (see CertificateDraft), and what reading the one the row
+    // shows found, and for which.
+    private val startCertificate: CertificateDraft = certificateOf?.let { CertificateDraft.Keep(it) } ?: CertificateDraft.None
+    var certificateDraft by mutableStateOf(startCertificate)
+        private set
+    var certificateLoad by mutableStateOf<CertificateTry?>(null)
+
+    // Brings the Special setups group into view once Advanced shows it.
+    var certificatePending by mutableStateOf(false)
+
+    // A file chosen on the row while it opens, and why one wasn't taken.
+    var certificateOpening by mutableStateOf(false)
+    var certificateProblem by mutableStateOf<String?>(null)
+
+    // The latest file opening, so an older one's answer is let go.
+    internal var certificateTurn: Any? = null
+
+    // Takes a file opened on the row.
+    fun useCertificate(picked: PickedCertificate) {
+        certificateDraft = CertificateDraft.Use(picked.path, picked.password)
+        certificateLoad = CertificateTry(CertificateChoice.Picked(picked.path, picked.password), CertificateLoad.Found(picked.loaded))
+        certificateProblem = null
+        result = null
+    }
+
+    // Takes off the certificate the row shows: a kept server's comes off
+    // that server when the sign-in keeps it, and a file just chosen goes
+    // back to the form's first certificate taken off, or to none.
+    fun removeCertificate() {
+        certificateDraft = when (val now = certificateDraft) {
+            is CertificateDraft.Keep -> CertificateDraft.Remove(now.serverId)
+            is CertificateDraft.Use -> (startCertificate as? CertificateDraft.Keep)?.let { CertificateDraft.Remove(it.serverId) } ?: CertificateDraft.None
+            else -> now
+        }
+        certificateLoad = null
+        certificateProblem = null
+        result = null
+    }
+
+    // Opens Advanced on the certificate: a try that found it unreadable, a
+    // server asking for one or turning it down, or a form opened for it.
+    fun askForCertificate() {
+        advancedOpen = true
+        certificatePending = true
+    }
+
+    // What a finished try found for the certificate it sent, which the row
+    // then shows.
+    fun tried(attempt: CertificateTry?) {
+        if (attempt?.load != null) certificateLoad = attempt
+    }
 
     // A sign-in from another device of one's own, while it comes, and what
     // is happening, in plain words.
@@ -255,7 +314,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             takesApiKeys = takesApiKeys,
             apiKeyOn = useApiKey,
             kind = gatewayKind,
-            certificateRow = false,
+            certificateRow = true,
         )
 
     // Picks how to sign in. API key with no key kept asks for the key row to
@@ -277,7 +336,8 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
             home.trim().removeSuffix("/") != server.home?.removeSuffix("/").orEmpty() || password.isNotEmpty() || apiKey.isNotEmpty() ||
             rememberPassword != server.rememberSignIn || headers.any { !it.saved || it.value.isNotBlank() } ||
             (headers.map { it.name } + gatewayRows).sortedBy { it.lowercase() } != server.headerNames.sortedBy { it.lowercase() } ||
-            gatewayKind != savedGateway || gatewayFirst.isNotEmpty() || gatewaySecond.isNotEmpty()
+            gatewayKind != savedGateway || gatewayFirst.isNotEmpty() || gatewaySecond.isNotEmpty() ||
+            certificateDraft is CertificateDraft.Use || certificateDraft is CertificateDraft.Remove
 
     // A blank header row at the end; its id, for the row to take focus.
     fun addHeader(): Long {
@@ -444,6 +504,9 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         gatewayKind = GatewayKind.None
         gatewayFirst = ""
         gatewaySecond = ""
+        // A file chosen for the old server is not taken to another one.
+        if (certificateDraft is CertificateDraft.Use) certificateDraft = startCertificate
+        certificateLoad = null
     }
 
     // Back to the plain sign-in.
@@ -474,6 +537,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         headers = headers.toList(),
         rememberPassword = rememberPassword,
         gateway = gatewayDraft(),
+        certificate = certificateDraft,
     )
 
     fun request(): SignInRequest = SignInRequest(
@@ -485,6 +549,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false) {
         headers = headers.toList(),
         rememberPassword = rememberPassword,
         gateway = gatewayDraft(),
+        certificate = certificateDraft,
     )
 
     // A way of signing in that worked other than the one asked for (the

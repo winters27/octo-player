@@ -3,6 +3,7 @@ package app.winters.octo.desktop
 import app.winters.octo.desktop.audio.FakeEngine
 import app.winters.octo.desktop.audio.openPlayer
 import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.settings.AppPlaces
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.currentOs
@@ -39,7 +40,7 @@ class StartupTest {
         val places = places()
         val settings = settings(places)
         val engine = FakeEngine()
-        val parts = Startup(settings, places, currentOs()) { engine }.parts()
+        val parts = Startup(settings, places, currentOs(), openSecrets = { SessionOnlySecrets() }) { engine }.parts()
         assertSame(engine, parts.engine.getOrNull())
         // Signed out: nothing to restore.
         assertNull(parts.restored)
@@ -51,7 +52,7 @@ class StartupTest {
     fun anEngineThatWouldNotOpenLeavesTheSilentPlayer() = runBlocking {
         val places = places()
         val settings = settings(places)
-        val parts = Startup(settings, places, currentOs()) { throw UnsatisfiedLinkError("no engine here") }.parts()
+        val parts = Startup(settings, places, currentOs(), openSecrets = { SessionOnlySecrets() }) { throw UnsatisfiedLinkError("no engine here") }.parts()
         assertTrue(parts.engine.isFailure)
         val opened = openPlayer(settings, scope, { null }, opened = parts.engine)
         assertTrue(opened.player is SilentPlayer)

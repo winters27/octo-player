@@ -290,7 +290,13 @@ fun switchServer(app: AppState, id: String) {
     if (server.signedOut) return signInTo(app, server)
     val page = if (app.navigator.current.page == Page.Settings) Page.Settings else Page.Home
     app.switchTo(id, page) { outcome ->
-        if (outcome is SwitchOutcome.NeedsPassword) serverSheet(app, sheetFor(outcome), outcome.server, outcome.note)
+        when (outcome) {
+            is SwitchOutcome.NeedsPassword -> serverSheet(app, sheetFor(outcome), outcome.server, outcome.note)
+            // Its certificate can't be read: the sign-in sheet opens on it,
+            // and an empty password keeps the saved one.
+            is SwitchOutcome.NeedsCertificate -> serverSheet(app, SheetKind.SignIn, outcome.server, outcome.words, keepsSecret = true, certificate = true)
+            else -> Unit
+        }
     }
 }
 
@@ -320,12 +326,24 @@ fun editServer(app: AppState, server: SavedServer, note: String? = null) = serve
 // Asks for the password of a kept server, then makes it the one in use.
 fun signInTo(app: AppState, server: SavedServer, note: String? = null) = serverSheet(app, SheetKind.SignIn, server, note)
 
-private fun serverSheet(app: AppState, kind: SheetKind, server: SavedServer?, note: String? = null) {
+private fun serverSheet(
+    app: AppState,
+    kind: SheetKind,
+    server: SavedServer?,
+    note: String? = null,
+    keepsSecret: Boolean = kind == SheetKind.Edit || kind == SheetKind.Secure,
+    certificate: Boolean = false,
+) {
     // Each opening starts afresh, even straight after another sheet.
     val opening = Any()
     app.popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
         key(opening) {
-            val form = remember { SignInForm(server, keepsSecret = kind == SheetKind.Edit || kind == SheetKind.Secure).also { f -> note?.let { f.result = false to it } } }
+            val form = remember {
+                SignInForm(server, keepsSecret = keepsSecret).also { f ->
+                    note?.let { f.result = false to it }
+                    if (certificate) f.askForCertificate()
+                }
+            }
             ServerSheet(app, kind, server, form, close)
         }
     }
@@ -355,17 +373,17 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         form.result = null
         val tried = form.attemptAddress
         scope.launch {
-            val request = if (form.keepsSecret && server != null && form.password.isEmpty() && form.apiKey.isEmpty()) null else form.request()
-            val tested = if (request == null) null else app.accounts.test(request)
-            when (tested) {
-                null -> form.result = false to "Enter the password to test the connection."
+            when (val tested = app.accounts.test(form.request(), keptId = server?.id?.takeIf { form.keepsSecret })) {
                 is TestOutcome.Reached -> {
+                    form.tried(tested.tried)
                     form.worked(tested.mode)
                     form.result = true to tested.facts.summary()
                 }
                 is TestOutcome.Failed -> {
                     form.result = false to tested.message
                     form.failed(tried, tested.gateway)
+                    form.tried(tested.tried)
+                    if (tested.certificate) form.askForCertificate()
                 }
                 is TestOutcome.Untrusted -> form.question = tested.question
             }
@@ -412,6 +430,8 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 is SignInOutcome.Failed -> {
                     form.result = false to outcome.message
                     form.failed(tried, outcome.gateway)
+                    form.tried(outcome.tried)
+                    if (outcome.certificate) form.askForCertificate()
                 }
                 is SignInOutcome.Untrusted -> form.question = outcome.question
             }
@@ -429,6 +449,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
     val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
+    CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
 
     val asked = form.question
     if (asked != null) {
@@ -507,7 +528,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                     form.rememberPassword,
                 ) { form.rememberPassword = it }
             }
-            Advanced(form, ::save, places)
+            Advanced(app, form, ::save, places, replacingId = server?.id?.takeIf { kind != SheetKind.Add }, url = form.url, home = form.homeUrl)
         }
     }
     PopupPadding {

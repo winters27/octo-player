@@ -38,7 +38,10 @@ import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.server.CertificateLoad
 import app.winters.octo.desktop.server.CertificateQuestion
+import app.winters.octo.desktop.server.CertificateTry
+import app.winters.octo.desktop.server.CheckClient
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SignInRequest
 import app.winters.octo.desktop.server.familyPlatform
@@ -55,6 +58,7 @@ import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.ui.family.passwordStrength
 import app.winters.octo.ui.family.receiveHandOver
 import kotlinx.coroutines.launch
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 // Signs up from the invite the form holds: the new member's name and the
@@ -77,13 +81,11 @@ suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.
         }
         is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
     }
-    val joined = accounts.checkClient(listOfNotNull(url, form.homeUrl), headers).use { join ->
+    val addresses = listOfNotNull(url, form.homeUrl)
+    val sent = accounts.joinCertificate(form, url)
+    val joined = accounts.checkClient(addresses, headers, sent.certificate).use { join ->
         val outcome = joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, join.http, home = form.homeUrl)
-        if (outcome is JoinOutcome.Untrusted) {
-            val leaf = join.security.takeRejected(outcome.host)
-            if (leaf != null) form.question = CertificateQuestion(outcome.host, leaf.fingerprint()) else form.result = false to "This server's certificate is not trusted."
-        }
-        outcome
+        joinAnswer(outcome, join, addresses, sent, form)
     }
     when (joined) {
         is JoinOutcome.Failed -> {
@@ -102,6 +104,8 @@ suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.
             is SignInOutcome.Failed -> {
                 form.result = false to done.message
                 form.failed(tried, done.gateway)
+                form.tried(done.tried)
+                if (done.certificate) form.askForCertificate()
             }
             is SignInOutcome.Untrusted -> form.question = done.question
         }
@@ -128,8 +132,12 @@ suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: 
         }
         is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
     }
-    val got = accounts.checkClient(listOfNotNull(link.base.toHttpUrlOrNull(), form.homeUrl), headers).use { join ->
-        receiveHandOver(link, join.http, accounts.security.deviceName(), platform, step = { form.handOverStep = it })
+    val base = link.base.toHttpUrlOrNull()
+    val addresses = listOfNotNull(base, form.homeUrl)
+    val sent = accounts.joinCertificate(form, base)
+    val got = accounts.checkClient(addresses, headers, sent.certificate).use { join ->
+        val received = receiveHandOver(link, join.http, accounts.security.deviceName(), platform, step = { form.handOverStep = it })
+        handOverAnswer(received, join, addresses, sent, form)
     }
     if (got !is HandOverResult.Received) {
         val refused = got as HandOverResult.Refused
@@ -148,6 +156,7 @@ suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: 
         headers = form.headers.toList(),
         rememberPassword = true,
         gateway = form.gatewayDraft(),
+        certificate = form.certificateDraft,
     )
     when (val done = accounts.signIn(request)) {
         is SignInOutcome.Done -> {
@@ -159,11 +168,52 @@ suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: 
         is SignInOutcome.Failed -> {
             form.result = false to done.message
             form.failed(tried, done.gateway)
+            form.tried(done.tried)
+            if (done.certificate) form.askForCertificate()
         }
         is SignInOutcome.Untrusted -> form.question = done.question
     }
     form.handOverStep = null
     return null
+}
+
+// The certificate a join or hand-over sends from the form, by its own
+// address, and how loading it went.
+private suspend fun Accounts.joinCertificate(form: SignInForm, at: HttpUrl?): CertificateTry {
+    val choice = certificateFor(form.certificateDraft, null, at, form.homeUrl)
+    return CertificateTry(choice, loadChoice(choice))
+}
+
+// What a join's first answer leaves to do, with anything to say already on
+// the form: a certificate the system does not trust is asked about first,
+// then what the server said about the client certificate, then today's
+// words for an untrusted one. Untrusted stops the join there.
+private fun joinAnswer(outcome: JoinOutcome, join: CheckClient, addresses: List<HttpUrl>, sent: CertificateTry, form: SignInForm): JoinOutcome {
+    form.tried(sent)
+    if (outcome is JoinOutcome.SignedUp) return outcome
+    addresses.firstNotNullOfOrNull { at -> join.security.peekRejected(at.host)?.let { at.host to it } }?.let { (host, leaf) ->
+        form.question = CertificateQuestion(host, leaf.fingerprint())
+        return JoinOutcome.Untrusted(host)
+    }
+    join.security.certificateWords(addresses)?.let { words ->
+        form.result = false to ((sent.load as? CertificateLoad.Unreadable)?.words ?: words)
+        form.askForCertificate()
+        return JoinOutcome.Untrusted(addresses.first().host)
+    }
+    if (outcome is JoinOutcome.Untrusted) form.result = false to "This server's certificate is not trusted."
+    return outcome
+}
+
+// What a hand-over's answer says: a certificate the system does not trust
+// keeps today's words; otherwise what the server said about the client
+// certificate, when it asked for one.
+private fun handOverAnswer(received: HandOverResult, join: CheckClient, addresses: List<HttpUrl>, sent: CertificateTry, form: SignInForm): HandOverResult {
+    form.tried(sent)
+    if (received is HandOverResult.Received) return received
+    if (addresses.any { join.security.peekRejected(it.host) != null }) return received
+    val words = join.security.certificateWords(addresses) ?: return received
+    form.askForCertificate()
+    return HandOverResult.Refused((sent.load as? CertificateLoad.Unreadable)?.words ?: words)
 }
 
 // Opens a link clicked under a QR code: an octo:// link in Octo itself,
@@ -183,7 +233,9 @@ fun AppState.openFamilyLink(link: FamilyLink) {
         return
     }
     popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
-        val form = remember { SignInForm().also { it.take(link) } }
+        // Nothing of the server in use is filled in but its certificate,
+        // which a join to that server's own origin sends.
+        val form = remember { SignInForm(certificateOf = connection?.server?.id).also { it.take(link) } }
         LinkSheet(this@openFamilyLink, form, close)
     }
 }
@@ -221,6 +273,8 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
                     is SignInOutcome.Failed -> null.also {
                         form.result = false to signedIn.message
                         form.failed(tried, signedIn.gateway)
+                        form.tried(signedIn.tried)
+                        if (signedIn.certificate) form.askForCertificate()
                     }
                     is SignInOutcome.Untrusted -> null.also { form.question = signedIn.question }
                     is SignInOutcome.Saved -> null
@@ -235,6 +289,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
     val host = content?.let { CalloutHost(scroll, PopupTopInset, it, settled = { true }, imeBottom = { 0 }, focus = calloutFocus) }
     CalloutEffect(form.calloutPending, host, { places.gateway }) { form.calloutShown() }
     CalloutEffect(form.keyPending, host, { places.key }) { form.keyShown() }
+    CalloutEffect(form.certificatePending, host, { places.special }) { form.certificatePending = false }
     val question = asking
     if (question != null) {
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
@@ -272,7 +327,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             LinkCard(form, ::go, places)
-            Advanced(form, ::go, places)
+            Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
         }
     }
     PopupPadding { LinkFooter(form, ::go, onLeave = close) }

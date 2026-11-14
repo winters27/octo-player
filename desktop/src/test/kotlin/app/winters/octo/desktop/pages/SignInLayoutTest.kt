@@ -226,6 +226,23 @@ class SignInLayoutTest {
         }
     }
 
+    // A page form opened for its certificate brings the Special setups group,
+    // with the certificate row, under the top. Red when the certificate
+    // callout is not placed (Advanced opens, the page does not move).
+    @Test(timeout = 120_000)
+    fun aFormOpenedForItsCertificateBringsSpecialSetupsUnderTheTop() {
+        page(height = 700).use { s ->
+            s.onUi {
+                s.app.signInForm.typeAddress("https://music.example.com")
+                s.app.signInForm.askForCertificate()
+            }
+            s.until { s.app.signInForm.advancedOpen && !s.app.signInForm.certificatePending }
+            s.render(4)
+            s.landed(SignInWords.GROUP_SPECIAL_SETUPS, PageTopInset.value)
+            assertTrue(s.withText(SignInWords.CERT_TITLE).isNotEmpty())
+        }
+    }
+
     // Picking API key with Advanced scrolled down to the Method brings the
     // key row, in the main card, under the top. Red when the key row is
     // left out of view.

@@ -232,6 +232,9 @@ dependencies {
     testImplementation(libs.mockwebserver)
 }
 
+// The client certificate tests open the files in fixtures/gateway/certs.
+tasks.withType<Test>().configureEach { inputs.dir(rootProject.file("fixtures/gateway/certs")) }
+
 // The performance harness (OCTO_PERF=1, perf/LibraryPerfTest.kt) runs each
 // time it is asked for, with room for a library of 100,000 songs.
 // OCTO_PERF_HEAP tries it under another heap limit, and OCTO_PERF_JVM
