@@ -55,7 +55,10 @@ import UIKit
 /// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
 /// - `signin:STATE` opens the sign-in page in a sign-in page state, with sample values only:
 ///   `signin:plain`, `signin:authentik`, `signin:cloudflare`, `signin:saved`, `signin:https`,
-///   `signin:join`, each also as `STATE@end`, scrolled to the page's end (see `GatewayDrive`)
+///   `signin:join`, `signin:tall` (a sign-in page group taller than the screen at the largest text
+///   sizes), each also as `STATE@end`, scrolled to the page's end, and `signin:key` (Add a server
+///   scrolled to its end, then API key picked, so the key row comes back into view); see
+///   `GatewayDrive`
 /// - `servers:rows` opens Server and sync with two sample rows after the kept servers: one a
 ///   sign-in page turned away, one that needs https
 @MainActor
@@ -248,6 +251,7 @@ enum GatewayDrive {
     static func signIn(_ step: String, router: Router) {
         let state = step.hasSuffix("@end") ? String(step.dropLast(4)) : step
         var form: SignInModel.Form = .signIn
+        var then: ((SignInModel) -> Void)?
         let sample: (SignInModel) -> Void
         switch state {
         case "plain":
@@ -293,11 +297,31 @@ enum GatewayDrive {
                 model.startJoin()
                 model.advancedOpen = true
             }
+        case "tall":
+            // As a sign-in left it after an unknown sign-in page answered: its words are the
+            // longest, so at the largest text sizes the group is taller than the screen.
+            sample = { model in
+                model.rest = address
+                model.username = "example"
+                model.driveSample(met: .signInPage, words: GatewayWords.failure(.signInPage, loginSent: false))
+            }
+        case "key":
+            // Add a server with Advanced open, scrolled to its end; then API key is picked with no
+            // key kept, so the key row in the main card comes back into view.
+            form = .add
+            sample = { model in
+                model.label = "Example"
+                model.rest = address
+                model.username = "example"
+                model.advancedOpen = true
+            }
+            then = { model in model.pickMethod(.apiKey) }
         default:
             return
         }
         SignInView.sampleOnOpen = sample
-        SignInView.endOnOpen = state != step
+        SignInView.endOnOpen = state != step || then != nil
+        SignInView.thenOnOpen = then
         router.signIn = form
     }
 
@@ -313,6 +337,27 @@ enum GatewayDrive {
              ServerCheck(.needsHttps)),
         ]
         await SettingsNavigator.shared.drive("settings", SettingsPage.server.rawValue, router: router)
+    }
+}
+
+/// The sign-in page's callout as a device step reads it, one log line each: a visible height it
+/// read beside UIKit's own for the key window, where it scrolled, and that it finished.
+@MainActor
+enum CalloutLog {
+    private static let log = Logger(subsystem: "app.winters.octo", category: "callout")
+
+    static func height(_ visible: Double) {
+        let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first
+        let uikit = window.map { Double($0.safeAreaLayoutGuide.layoutFrame.height) } ?? -1
+        log.info("callout height visible=\(visible, privacy: .public) uikit=\(uikit, privacy: .public)")
+    }
+
+    static func scroll(_ target: CalloutTarget) {
+        log.info("callout scroll \(String(describing: target), privacy: .public)")
+    }
+
+    static func shown(wasUp: Bool) {
+        log.info("callout shown wasUp=\(wasUp, privacy: .public)")
     }
 }
 

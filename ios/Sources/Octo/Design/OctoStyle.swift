@@ -352,6 +352,20 @@ extension Font {
     static var octoBodySmall: Font { octo(14, .regular, .subheadline) }
     static var octoCaption: Font { octo(12, .regular, .caption1) }
     static var octoLabel: Font { octo(13.5, .semibold, .footnote) }
+    /// The sign-in form's roles. A section's title (Advanced): 22 bold, as title 2.
+    static var octoFormSection: Font { octo(22, .bold, .title2) }
+    /// A group's title: 17 semibold, as the headline.
+    static var octoFormGroup: Font { octo(17, .semibold, .headline) }
+    /// A setting's name: 15 medium.
+    static var octoFormName: Font { octo(15, .medium, .subheadline) }
+    /// A value, and the words typed in a field: 15 regular.
+    static var octoFormValue: Font { octo(15, .regular, .subheadline) }
+    /// The line under a setting's name: 13 regular, as the footnote.
+    static var octoFormDescription: Font { octo(13, .regular, .footnote) }
+    /// A note or an error under a card: 14 regular.
+    static var octoFormNote: Font { octo(14, .regular, .subheadline) }
+    /// The Optional tag: 11 semibold, as caption 2.
+    static var octoFormTag: Font { octo(11, .semibold, .caption2) }
 
     /// A size from the scale, grown or shrunk with the phone's text size.
     static func octo(_ size: CGFloat, _ weight: UIFont.Weight, _ style: UIFont.TextStyle = .body) -> Font {

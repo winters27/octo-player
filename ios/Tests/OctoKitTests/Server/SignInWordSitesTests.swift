@@ -31,7 +31,7 @@ import Testing
         #expect(model.contains("self.error = SignInWords.legacyUnsafe"))
         let view = try source("Octo/SignIn/SignInView.swift")
         #expect(view.contains("GatewayWords.fieldLabels(model.gatewayKind, detected: model.gatewayMet)"))
-        #expect(view.contains("Text(SignInWords.unchanged)"))
+        #expect(view.contains("keptPage ? SignInWords.unchanged : SignInWords.required"))
         for path in ["Octo/SignIn/SignInModel.swift", "Octo/SignIn/SignInView.swift", "OctoKit/Shell/PageWords.swift",
                      "OctoKit/Server/PasswordChange.swift", "OctoKit/Catalog/UserMessages.swift", "OctoKit/Server/SignInWords.swift"] {
             let text = try source(path)

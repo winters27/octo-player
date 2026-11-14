@@ -195,7 +195,8 @@ import Testing
     @Test func nothingReadsTheRemovedHeaders() throws {
         for source in try Self.sources() {
             let code = Self.code(source)
-            #expect(Self.count(#"\.customHeaders\b"#, in: code) == 0, "\(source.path) reads customHeaders")
+            // The words "Custom headers" are not the removed field.
+            #expect(Self.count(#"(?<!SignInWords)\.customHeaders\b"#, in: code) == 0, "\(source.path) reads customHeaders")
             #expect(Self.count(#"\bclient\.headers\b(?!\s*\()"#, in: code) == 0, "\(source.path) reads client.headers")
         }
     }

@@ -33,6 +33,8 @@ final class FamilyHub {
     @ObservationIgnored private var watch: Watch<String?>?
     /// The clipboard text last offered, so the same link is offered once.
     @ObservationIgnored private var offered: String?
+    /// Counts each opening of a family link, so the same link opened again gets a cover of its own.
+    @ObservationIgnored private var joinOpens = 0
 
     init(session: Session, router: Router) {
         self.session = session
@@ -72,7 +74,8 @@ final class FamilyHub {
         case .family:
             router.openInSettings(.family)
         case .join(let link):
-            router.signIn = .join(familyAppLink(link))
+            joinOpens += 1
+            router.signIn = .join(familyAppLink(link), opened: joinOpens)
         }
     }
 

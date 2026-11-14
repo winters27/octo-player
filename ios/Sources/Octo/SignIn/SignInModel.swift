@@ -19,8 +19,9 @@ final class SignInModel {
         case again(StoredServer, note: String? = nil)
         /// From the Server and sync page: change how the server in use is reached.
         case editConnection(StoredServer)
-        /// A family link: an invite, a sign-in to fill in, or a sign-in handed over.
-        case join(String)
+        /// A family link: an invite, a sign-in to fill in, or a sign-in handed over. `opened` counts
+        /// each opening, so the same link opened again presents a cover of its own.
+        case join(String, opened: Int)
 
         var id: String {
             switch self {
@@ -29,18 +30,13 @@ final class SignInModel {
             case .edit(let server): "edit." + server.id
             case .again(let server, _): "again." + server.id
             case .editConnection(let server): "connection." + server.id
-            case .join(let link): "join." + link
+            case .join(let link, let opened): "join.\(opened)." + link
             }
         }
     }
 
-    struct Header: Identifiable, Equatable {
-        let id = UUID()
-        var name: String
-        var value: String
-        /// The value is kept in the keychain and is not shown.
-        var saved: Bool
-    }
+    /// A custom header row; a saved one keeps its value in the keychain and shows none.
+    typealias Header = HeaderDraftRow
 
     let form: Form
     var rest = "" {
@@ -63,14 +59,21 @@ final class SignInModel {
     /// key may still be tried.
     var takesApiKeys: Bool?
     var homeAddress = ""
-    var headers: [Header] = []
-    /// A certificate chosen on this form, checked but not in use until the server is saved.
-    var certificate: (name: String, data: Data, password: String)?
+    /// The custom header rows; every change goes through `HeaderList`, which keeps each row's id.
+    private var headerList = HeaderList.empty
+    var headers: [Header] { headerList.rows }
+    /// A certificate chosen on this form, checked but not in use until the server is saved, with its
+    /// last valid day when it names one.
+    var certificate: (name: String, data: Data, password: String, expires: Date?)?
     /// The kept server has a certificate the keychain can still read.
     var hadCertificate = false
     var removesCertificate = false
     /// The saved certificate's file name.
     private(set) var savedCertificateName: String?
+    /// The saved certificate's last valid day, read once off the main actor when the form opens; nil
+    /// until then, and when its file cannot be opened.
+    private(set) var savedCertificateExpiry: Date?
+    @ObservationIgnored private var expiryRead: Task<Void, Never>?
     /// The kept server says it has a certificate, but the keychain no longer holds it (a phone
     /// restored from a backup); saving clears that.
     private var staleCertificate = false
@@ -78,21 +81,38 @@ final class SignInModel {
     /// The kind of sign-in the sign-in page in front of the server takes from apps, and what is
     /// typed for it: a username and password, or a Client ID and Client Secret.
     private(set) var gatewayKind: GatewayKind = .none
-    var gatewayFirst = ""
-    var gatewaySecond = ""
+    /// An edit of either field is the person's answer to the failure: the error and the callout go.
+    var gatewayFirst = "" {
+        didSet { if gatewayFirst != oldValue { pageFieldEdited() } }
+    }
+    var gatewaySecond = "" {
+        didSet { if gatewaySecond != oldValue { pageFieldEdited() } }
+    }
     /// The kind the saved headers make up; its values stay while its fields are left empty.
     private(set) var gatewaySaved: GatewayKind = .none
     /// The sign-in page the last failed attempt met, and the address it met it at.
     private(set) var gatewayMet: Gateway?
     private var gatewayMetFor: String?
+    /// The last failure met a sign-in page at this address: its group shows that failure, outlined.
+    private(set) var callout = false
+    /// The sign-in page group still has to be brought into view.
+    private(set) var calloutPending = false
+    /// The API key row, just asked for, still has to be brought into view.
+    private(set) var keyPending = false
 
     var busy = false
-    var error: String?
+    /// Any write ends the callout and its scroll; a failure that met a sign-in page calls it out
+    /// again right after its words are written.
+    var error: String? {
+        didSet { useGatewayForm(OctoKit.calm(gatewayForm)) }
+    }
     var question: ServerTrust.Untrusted?
     private(set) var notice: String?
     private(set) var signedIn = false
     /// Moves the phone between servers and says how a sign-in's switch went.
     @ObservationIgnored var serverSwitch: ServerSwitch?
+    /// The link this page was opened with has been taken: a page shown again never takes it twice.
+    @ObservationIgnored var didOpenJoin = false
 
     // MARK: Joining a family
 
@@ -130,7 +150,7 @@ final class SignInModel {
         legacy = server.mode == .legacyPassword
         useApiKey = server.mode == .apiKey
         homeAddress = server.homeAddress.map(ServerAddress.shown) ?? ""
-        headers = savedHeaderNames.map { Header(name: $0, value: "", saved: true) }
+        headerList.replaced(savedHeaderNames.map { HeaderRules.Row(name: $0, value: "", saved: true) })
         // The saved sign-in page's kind; its values stay in the keychain and are kept while its
         // fields are left empty.
         gatewaySaved = session.gatewayKind(server.id)
@@ -140,6 +160,7 @@ final class SignInModel {
         staleCertificate = server.hasClientCertificate && !certificateKept
         savedCertificateName = certificateKept ? server.clientCertificateName : nil
         advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate || gatewaySaved != .none
+        if hadCertificate { readSavedExpiry(server.id) }
         takesApiKeys = server.takesApiKeys
         if case .again(_, let note) = form { error = note }
     }
@@ -205,13 +226,47 @@ final class SignInModel {
     }
 
     /// The way of signing in the form is set to.
-    private var mode: AuthMode { useApiKey ? .apiKey : (legacy ? .legacyPassword : .token) }
+    var mode: AuthMode { authModeOf(legacy: legacy, apiKey: useApiKey) }
+
+    /// Whether the password field may stay empty and keep the saved password.
+    var keepsPassword: Bool { OctoKit.keepsPassword(keepsSecret: editing, savedMode: saved?.mode, mode: mode) }
+
+    /// Whether the API key field may stay empty and keep the saved key.
+    var keepsKey: Bool { OctoKit.keepsKey(keepsSecret: editing, savedMode: saved?.mode, mode: mode) }
+
+    /// Picks the way of signing in. Picking API key with no key kept for it brings the key row,
+    /// which takes the password's place, into view.
+    func pickMethod(_ newMode: AuthMode) {
+        let oldMode = mode
+        let flags = flagsOf(newMode)
+        legacy = flags.legacy
+        useApiKey = flags.apiKey
+        useGatewayForm(methodPicked(gatewayForm, oldMode: oldMode, newMode: newMode, keepsKey: keepsKey))
+    }
 
     /// The client certificate's name to show, or nil for none.
     var certificateShown: String? {
         if let certificate { return certificate.name }
         guard hadCertificate, !removesCertificate else { return nil }
         return savedCertificateName ?? "Saved certificate"
+    }
+
+    /// The shown certificate's last valid day, when it is known.
+    var certificateExpiry: Date? {
+        if let certificate { return certificate.expires }
+        guard hadCertificate, !removesCertificate else { return nil }
+        return savedCertificateExpiry
+    }
+
+    /// Reads the saved certificate's last valid day: its file is opened with its password once, off the
+    /// main actor. An answer that comes after the form moved on (the page left, the certificate removed
+    /// or another picked) is dropped.
+    private func readSavedExpiry(_ id: String) {
+        expiryRead = Task { [weak self] in
+            let expires = await Task.detached(priority: .utility) { CertificateCheck.savedExpiry(forServer: id) }.value
+            guard !Task.isCancelled, let self, self.hadCertificate, !self.removesCertificate, self.certificate == nil else { return }
+            self.savedCertificateExpiry = expires
+        }
     }
 
     /// A scheme typed or pasted moves into the button; until one is picked the scheme follows
@@ -245,28 +300,38 @@ final class SignInModel {
 
     /// How safe the connection is, for the line under the card.
     enum Note: Equatable {
-        case encrypted, homeNetwork, legacyInTheOpen, tokenInTheOpen
+        case encrypted, homeNetwork, legacyInTheOpen, apiKeyInTheOpen, tokenInTheOpen
     }
 
+    /// While joining, the link decides how to sign in, so the note reads the Method as Normal.
     var note: Note? {
         guard let url else { return nil }
         if url.scheme == "https" { return .encrypted }
         if ServerAddress.isPrivate(url) { return .homeNetwork }
-        return legacy && !useApiKey ? .legacyInTheOpen : .tokenInTheOpen
-    }
-
-    func addHeader() {
-        headers.append(Header(name: "", value: "", saved: false))
-    }
-
-    func renameHeader(_ id: Header.ID, to name: String) {
-        guard let index = headers.firstIndex(where: { $0.id == id }) else { return }
-        // A renamed saved header no longer has a value to keep.
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        if headers[index].saved, trimmed.caseInsensitiveCompare(headers[index].name.trimmingCharacters(in: .whitespaces)) != .orderedSame {
-            headers[index].saved = false
+        switch joining ? .token : mode {
+        case .legacyPassword: return .legacyInTheOpen
+        case .apiKey: return .apiKeyInTheOpen
+        case .token: return .tokenInTheOpen
         }
-        headers[index].name = name
+    }
+
+    /// A blank header row at the end; its id lets the page put focus in it once it is drawn.
+    @discardableResult
+    func addHeader() -> Header.ID {
+        headerList.added()
+    }
+
+    /// A header row's new name; a saved row renamed no longer has a value to keep.
+    func renameHeader(_ id: Header.ID, to name: String) {
+        headerList.renamed(id, name)
+    }
+
+    func setHeaderValue(_ id: Header.ID, to value: String) {
+        headerList.valued(id, value)
+    }
+
+    func removeHeader(_ id: Header.ID) {
+        headerList.remove(id)
     }
 
     // MARK: The sign-in page in front of the server
@@ -278,7 +343,7 @@ final class SignInModel {
             gatewayFirst = ""
             gatewaySecond = ""
         }
-        gatewayKind = kind
+        useGatewayForm(kindPicked(gatewayForm, kind: kind))
         error = nil
     }
 
@@ -295,7 +360,8 @@ final class SignInModel {
     }
 
     private var gatewayForm: GatewayFormState {
-        GatewayFormState(advancedOpen: advancedOpen, kind: gatewayKind, detected: gatewayMet, detectedFor: gatewayMetFor)
+        GatewayFormState(advancedOpen: advancedOpen, kind: gatewayKind, detected: gatewayMet, detectedFor: gatewayMetFor,
+                         callout: callout, calloutPending: calloutPending, keyPending: keyPending)
     }
 
     private func useGatewayForm(_ state: GatewayFormState) {
@@ -303,6 +369,34 @@ final class SignInModel {
         gatewayKind = state.kind
         gatewayMet = state.detected
         gatewayMetFor = state.detectedFor
+        callout = state.callout
+        calloutPending = state.calloutPending
+        keyPending = state.keyPending
+    }
+
+    /// A sign-in page field edited: the failure is the person's to fix now.
+    private func pageFieldEdited() {
+        useGatewayForm(OctoKit.gatewayEdited(gatewayForm))
+        error = nil
+    }
+
+    /// The sign-in page group calls out the last failure: its error note, its outline and the
+    /// pointer under the button draw only while this holds.
+    var calloutShowing: Bool { callout && advancedOpen && error != nil }
+
+    /// The pointer under the button: the group is brought into view again.
+    func pointTo() {
+        useGatewayForm(OctoKit.pointTo(gatewayForm))
+    }
+
+    /// The group was brought into view, or a field took focus first.
+    func calloutShown() {
+        useGatewayForm(OctoKit.calloutShown(gatewayForm))
+    }
+
+    /// The API key row was brought into view, or a field took focus first.
+    func keyShown() {
+        useGatewayForm(OctoKit.keyShown(gatewayForm))
     }
 
     /// The address as a sign-in sends it, which what a sign-in met belongs to.
@@ -340,7 +434,8 @@ final class SignInModel {
     }
 
     func submit(_ session: Session, sync: ServerSync? = nil) async {
-        guard ready, let url else { return }
+        guard !busy, ready, let url else { return }
+        useGatewayForm(OctoKit.sending(gatewayForm))
         error = nil
         let attempt = sentAddress
         let home: URL?
@@ -412,14 +507,13 @@ final class SignInModel {
                 // Servers that check passwords against a directory cannot check a token. Over
                 // https or on the home network the password may go as it is, so try that at once.
                 legacy = true
-                advancedOpen = true
                 busy = false
                 await submit(session, sync: sync)
             case .unsafe:
                 self.error = SignInWords.legacyUnsafe
             case .none:
-                self.error = userMessage(plainError(error))
                 // A sign-in page in front of the server opens Advanced at its fields.
+                self.error = userMessage(plainError(error))
                 met(attempt, SubsonicError(error).gateway)
             }
         }
@@ -511,6 +605,7 @@ final class SignInModel {
     /// made, like a typed sign-in.
     func signUp(_ session: Session) async {
         guard !busy, joinMissing == nil, let url, let invite else { return }
+        useGatewayForm(OctoKit.sending(gatewayForm))
         busy = true
         error = nil
         defer { busy = false }
@@ -594,6 +689,7 @@ final class SignInModel {
     func receive(_ session: Session) {
         guard let link = handOver, !busy else { return }
         guard let base = ServerAddress.httpURL(link.base) else { return }
+        useGatewayForm(OctoKit.sending(gatewayForm))
         let home: URL?
         switch readHome() {
         case .success(let read): home = read
@@ -645,8 +741,8 @@ final class SignInModel {
                 question = rejected
                 return
             }
-            error = words
             // A sign-in page that turns the hand-over away opens Advanced at its fields.
+            error = words
             met(attempt, gateway)
         case .received(let signIn):
             guard let address = ServerAddress.parse(signIn.server) else {
@@ -697,25 +793,26 @@ final class SignInModel {
         }
     }
 
-    /// Leaving the screen stops a wait still running.
+    /// Leaving the screen stops a wait still running, and the saved certificate's read.
     func leave() {
         receiving?.cancel()
+        expiryRead?.cancel()
     }
 }
 
 #if DEBUG
 extension SignInModel {
     /// A launch step's sample state, in memory only: the kind saved for the server, and the
-    /// sign-in page an attempt at the typed address met with the words it showed, as a failed
-    /// sign-in leaves them.
+    /// sign-in page an attempt at the typed address met with the words it showed, written the way
+    /// a failed sign-in writes them: the words first, then the group's reaction.
     func driveSample(saved: GatewayKind? = nil, met gateway: Gateway? = nil, words: String? = nil) {
         if let saved {
             gatewaySaved = saved
             gatewayKind = saved
             advancedOpen = true
         }
-        if let gateway { met(sentAddress, gateway) }
         if let words { error = words }
+        if let gateway { met(sentAddress, gateway) }
     }
 }
 #endif

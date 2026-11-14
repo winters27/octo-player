@@ -53,7 +53,8 @@ enum AccountHooks {
 /// - `account:share` opens the share card for the first song playing or a sample
 /// - `account:signin`, `account:add`, `account:edit`, `account:again`, `account:connection`
 ///   open the sign-in screen in that mode (edit, again and connection for the server in use)
-/// - `account:join:LINK` opens the sign-in screen joining with a family link
+/// - `account:join:LINK` opens a family link the way an outside link does (text that is no family
+///   link opens the joining screen with it as it is)
 /// - `account:scan` opens the sign-in screen with the family QR scanner
 /// - `account:shortcut:NAME` runs a Home Screen quick action (`shuffle_all`, `liked`,
 ///   `recently_added`, `resume`)
@@ -107,7 +108,7 @@ enum AccountDrive {
         case "edit": if let server = session.active { router.signIn = .edit(server) }
         case "again": if let server = session.active { router.signIn = .again(server, note: serverSwitchPasswordRefusedWords(server.name)) }
         case "connection": if let server = session.active { router.signIn = .editConnection(server) }
-        case "join": router.signIn = .join(rest)
+        case "join": if let link = parseFamilyLink(rest) { accounts.family.open(.join(link)) } else { router.signIn = .join(rest, opened: 0) }
         case "scan":
             SignInView.scanOnOpen = true
             router.signIn = .signIn
