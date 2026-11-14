@@ -89,13 +89,19 @@ public struct FamilyAbilities: Decodable, Sendable, Equatable {
     public var approveRequests = false
     public var storageLimitGb = 0
     public var instantFromFamily = true
+    /// Where the songs they add land, as the server names it: "Own" (their own library) or
+    /// "Shared" (the shared library). Read as text, so an older server (none) or a newer name
+    /// reads as their own library.
+    public var musicGoesTo = musicGoesToOwn
+
+    public var musicGoesToShared: Bool { musicGoesTo == musicGoesToSharedName }
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
         case addToLibrary, requestQuality, autoApprove, weeklyRequestLimit, streamCap, awayCap, away, devicesAtOnce
         case downloadFiles, offlineCopies, share, importPlaylists, cleanOnly, familyPlaylistsEdit, manageFamily
-        case approveRequests, storageLimitGb, instantFromFamily
+        case approveRequests, storageLimitGb, instantFromFamily, musicGoesTo
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,8 +124,13 @@ public struct FamilyAbilities: Decodable, Sendable, Equatable {
         approveRequests = c.bool(.approveRequests) ?? false
         storageLimitGb = c.int(.storageLimitGb) ?? 0
         instantFromFamily = c.bool(.instantFromFamily) ?? true
+        musicGoesTo = c.string(.musicGoesTo) ?? musicGoesToOwn
     }
 }
+
+/// The server's names for where a member's songs land.
+public let musicGoesToOwn = "Own"
+public let musicGoesToSharedName = "Shared"
 
 /// The signed-in account as the family sees it.
 public struct FamilyMe: Decodable, Sendable, Equatable {
@@ -171,9 +182,12 @@ public struct FamilyMember: Decodable, Sendable, Equatable, Identifiable {
     public var pendingRequests = 0
     public var storageUsedBytes: Int64 = 0
     public var storageLimitGb = 0
+    /// Where the songs they add land (`FamilyAbilities.musicGoesTo`).
+    public var musicGoesTo = musicGoesToOwn
 
     public var id: String { username }
     public var role: FamilyRole? { familyRole(roleName) }
+    public var musicGoesToShared: Bool { musicGoesTo == musicGoesToSharedName }
 
     public init(username: String = "", displayName: String = "", roleName: String = FamilyRole.member.rawValue) {
         self.username = username
@@ -182,7 +196,7 @@ public struct FamilyMember: Decodable, Sendable, Equatable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case username, displayName, role, suspended, devices, playingNow, pendingRequests, storageUsedBytes, storageLimitGb
+        case username, displayName, role, suspended, devices, playingNow, pendingRequests, storageUsedBytes, storageLimitGb, musicGoesTo
     }
 
     public init(from decoder: Decoder) throws {
@@ -196,6 +210,7 @@ public struct FamilyMember: Decodable, Sendable, Equatable, Identifiable {
         pendingRequests = c.int(.pendingRequests) ?? 0
         storageUsedBytes = c.long(.storageUsedBytes) ?? 0
         storageLimitGb = c.int(.storageLimitGb) ?? 0
+        musicGoesTo = c.string(.musicGoesTo) ?? musicGoesToOwn
     }
 }
 

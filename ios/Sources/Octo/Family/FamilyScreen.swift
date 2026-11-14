@@ -72,12 +72,15 @@ struct FamilyScreen: View {
         title(FamilyText.myPlan)
         VStack(alignment: .leading, spacing: 6) {
             Text(planTitle(me)).font(.octoBody).foregroundStyle(OctoColor.textPrimary)
+            let library = libraryRow(me)
             HStack {
-                Text("Your library").font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary)
+                Text(library.title).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary)
                 Spacer()
-                Text(storageLine(usedBytes: me.storageUsedBytes, limitGb: can.storageLimitGb)).font(.octoCaption).foregroundStyle(OctoColor.textSecondary)
+                if let value = library.value {
+                    Text(value).font(.octoCaption).foregroundStyle(OctoColor.textSecondary)
+                }
             }
-            if let share = storageShare(usedBytes: me.storageUsedBytes, limitGb: can.storageLimitGb) {
+            if let share = library.share {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2).fill(OctoColor.textMuted.opacity(0.25))
@@ -197,7 +200,7 @@ struct FamilyScreen: View {
         ForEach(manager.members) { member in
             let name = member.displayName.isEmpty ? member.username : member.displayName
             FamilyItemLine(title: name,
-                           line: "\(memberLine(member)) · \(storageLine(usedBytes: member.storageUsedBytes, limitGb: member.storageLimitGb))") {
+                           line: "\(memberLine(member)) · \(memberStorageLine(member))") {
                 GlazeButton(FamilyText.resetPassword, size: .extraSmall, enabled: !model.working) { resetting = member }
                     .confirmationDialog("Reset \(name)'s password?",
                                         isPresented: Binding(get: { resetting?.id == member.id }, set: { if !$0 { resetting = nil } }),

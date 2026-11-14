@@ -193,11 +193,12 @@ private fun LazyListScope.plan(me: FamilyMe, onImport: () -> Unit) {
     item(key = "plan:who") {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(planTitle(me), style = OctoType.body, color = OctoColors.TextPrimary)
+            val library = libraryRow(me)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Your library", style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
-                Text(storageLine(me.storageUsedBytes, can.storageLimitGb), style = OctoType.caption, color = OctoColors.TextSecondary)
+                Text(library.title, style = OctoType.bodySmall, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
+                library.value?.let { Text(it, style = OctoType.caption, color = OctoColors.TextSecondary) }
             }
-            storageShare(me.storageUsedBytes, can.storageLimitGb)?.let { Meter(it) }
+            library.share?.let { Meter(it) }
             if (can.weeklyRequestLimit > 0 || me.requestsThisWeek > 0) {
                 Text(weeklyLine(me.requestsThisWeek, can.weeklyRequestLimit), style = OctoType.caption, color = OctoColors.TextMuted)
             }
@@ -302,7 +303,7 @@ private fun LazyListScope.members(model: FamilyModel, members: List<FamilyMember
     title("members", MEMBERS)
     if (live > 0) item(key = "members:live") { Line("$live playing now") }
     items(members, key = { "member:${it.username}" }) { member ->
-        ItemLine(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
+        ItemLine(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${memberStorageLine(member)}") {
             GlazeButton(RESET_PASSWORD, { onReset(member) }, size = ButtonSize.ExtraSmall, enabled = !model.working)
         }
     }

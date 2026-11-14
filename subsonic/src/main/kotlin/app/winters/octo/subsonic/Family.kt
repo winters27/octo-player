@@ -111,7 +111,17 @@ data class FamilyAbilities(
     val approveRequests: Boolean = false,
     val storageLimitGb: Int = 0,
     val instantFromFamily: Boolean = true,
-)
+    // Where the songs they add land, as the server names it: "Own" (their
+    // own library) or "Shared" (the shared library). Read as text, so an
+    // older server (none) or a newer name reads as their own library.
+    @SerialName("musicGoesTo") val musicGoesToName: String = MUSIC_GOES_TO_OWN,
+) {
+    val musicGoesToShared: Boolean get() = musicGoesToName == MUSIC_GOES_TO_SHARED
+}
+
+// The server's names for where a member's songs land.
+const val MUSIC_GOES_TO_OWN = "Own"
+const val MUSIC_GOES_TO_SHARED = "Shared"
 
 // The signed-in account as the family sees it.
 @Serializable
@@ -145,8 +155,11 @@ data class FamilyMember(
     val pendingRequests: Int = 0,
     val storageUsedBytes: Long = 0,
     val storageLimitGb: Int = 0,
+    // Where the songs they add land (FamilyAbilities.musicGoesToName).
+    @SerialName("musicGoesTo") val musicGoesToName: String = MUSIC_GOES_TO_OWN,
 ) {
     val role: FamilyRole? get() = familyRole(roleName)
+    val musicGoesToShared: Boolean get() = musicGoesToName == MUSIC_GOES_TO_SHARED
 }
 
 // A role by the name the server gives it, or null for one this app does

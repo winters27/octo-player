@@ -102,8 +102,8 @@ import app.winters.octo.ui.family.requestKindLine
 import app.winters.octo.ui.family.requestSheet
 import app.winters.octo.ui.family.requestStateLine
 import app.winters.octo.ui.family.requestTitle
-import app.winters.octo.ui.family.storageLine
-import app.winters.octo.ui.family.storageShare
+import app.winters.octo.ui.family.libraryRow
+import app.winters.octo.ui.family.memberStorageLine
 import app.winters.octo.ui.family.weeklyLine
 import kotlinx.coroutines.launch
 
@@ -186,11 +186,12 @@ private fun PlanSection(model: FamilyModel, me: FamilyMe) {
     val can = me.abilities
     Rows {
         Column(Modifier.fillMaxWidth().padding(horizontal = RowInset, vertical = Space.L), verticalArrangement = Arrangement.spacedBy(Space.S)) {
+            val library = libraryRow(me)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Txt("Your library", DesktopType.body, modifier = Modifier.weight(1f))
-                Txt(storageLine(me.storageUsedBytes, can.storageLimitGb), DesktopType.meta, OctoColors.TextSecondary)
+                Txt(library.title, DesktopType.body, modifier = Modifier.weight(1f))
+                library.value?.let { Txt(it, DesktopType.meta, OctoColors.TextSecondary) }
             }
-            storageShare(me.storageUsedBytes, can.storageLimitGb)?.let { MeterLine(it) }
+            library.share?.let { MeterLine(it) }
         }
         if (can.weeklyRequestLimit > 0 || me.requestsThisWeek > 0) {
             SettingRow("Requests this week", weeklyLine(me.requestsThisWeek, can.weeklyRequestLimit))
@@ -376,7 +377,7 @@ private fun MembersSection(model: FamilyModel, members: List<FamilyMember>) {
     Rows {
         if (members.isEmpty()) SettingRow("No members yet", "Add someone below. They get a QR code or a link to sign up.")
         members.forEach { member ->
-            ItemRow(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${storageLine(member.storageUsedBytes, member.storageLimitGb)}") {
+            ItemRow(member.displayName.ifBlank { member.username }, "${memberLine(member)} · ${memberStorageLine(member)}") {
                 RowAction(RESET_PASSWORD, { askToReset(popups, model, member) }, enabled = !model.working)
             }
         }

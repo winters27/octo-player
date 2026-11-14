@@ -78,7 +78,8 @@ fun requestSheet(me: FamilyMe): RequestSheet {
             else -> "$left of ${plural(limit, "request")} left this week"
         },
         quotaUsed = limit > 0 && left == 0,
-        storageLine = if (storageFull(me.storageUsedBytes, can.storageLimitGb)) storageFullLine(me.storageUsedBytes, can.storageLimitGb) else null,
+        // Songs that go to the shared library never fill their own.
+        storageLine = if (!can.musicGoesToShared && storageFull(me.storageUsedBytes, can.storageLimitGb)) storageFullLine(me.storageUsedBytes, can.storageLimitGb) else null,
         approvalLine = if (can.autoApprove) "Approved right away" else "Waits for approval",
     )
 }

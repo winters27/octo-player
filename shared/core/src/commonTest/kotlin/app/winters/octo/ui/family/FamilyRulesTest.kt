@@ -115,6 +115,38 @@ class FamilyRulesTest {
         assertNull(open.storageLine)
     }
 
+    // Music goes to the shared library: no "Your library, x of N GB", no
+    // meter and no full warning, even with a limit kept for later; the
+    // plan and a manager's list say where the songs go. Own (or an older
+    // server that never says) keeps the library row.
+    @Test
+    fun musicThatGoesToTheSharedLibraryShowsNoStorage() {
+        val shared = member(add = AddToLibrary.Direct, storageUsed = 60_000_000_000, storageLimit = 50).let {
+            it.copy(abilities = it.abilities.copy(musicGoesToName = "Shared"))
+        }
+        assertEquals(LibraryRow("Your songs go to the shared library", null, null), libraryRow(shared))
+        assertNull(requestSheet(shared).storageLine)
+        val lines = abilityLines(shared.abilities).map { it.text }
+        assertEquals("Songs you add go straight into the shared library", lines[0])
+        assertTrue(lines.none { "your library" in it })
+        val own = member(storageUsed = 5_400_000_000, storageLimit = 10)
+        assertEquals(LibraryRow("Your library", "5.4 of 10 GB used", 0.54f), libraryRow(own))
+        val listed = app.winters.octo.subsonic.FamilyMember(username = "ria", storageUsedBytes = 5_400_000_000, storageLimitGb = 10)
+        assertEquals("5.4 of 10 GB used", memberStorageLine(listed))
+        assertEquals("Adds to the shared library", memberStorageLine(listed.copy(musicGoesToName = "Shared")))
+    }
+
+    // Older servers send no musicGoesTo, and a name this app doesn't know
+    // reads as the member's own library.
+    @Test
+    fun musicGoesToReadsLeniently() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        assertFalse(json.decodeFromString(FamilyAbilities.serializer(), "{}").musicGoesToShared)
+        assertTrue(json.decodeFromString(FamilyAbilities.serializer(), """{"musicGoesTo":"Shared"}""").musicGoesToShared)
+        assertFalse(json.decodeFromString(FamilyAbilities.serializer(), """{"musicGoesTo":"Elsewhere"}""").musicGoesToShared)
+        assertTrue(json.decodeFromString(app.winters.octo.subsonic.FamilyMember.serializer(), """{"username":"ria","musicGoesTo":"Shared"}""").musicGoesToShared)
+    }
+
     @Test
     fun sizesAndCountsReadPlainly() {
         assertEquals("5.4 of 10 GB used", storageLine(5_400_000_000, 10))

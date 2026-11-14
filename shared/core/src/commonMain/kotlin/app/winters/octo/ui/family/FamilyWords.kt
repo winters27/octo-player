@@ -74,10 +74,11 @@ data class AbilityLine(val text: String, val on: Boolean = true)
 // Everything this account may do, in the order a person cares
 // about: adding music, listening, devices, then the rest.
 fun abilityLines(can: FamilyAbilities): List<AbilityLine> = buildList {
+    val library = if (can.musicGoesToShared) "the shared library" else "your library"
     add(
         when (can.addToLibrary) {
-            AddToLibrary.Direct -> AbilityLine("Songs you add go straight into your library")
-            AddToLibrary.Request -> AbilityLine("Songs you add are saved. Request a copy to keep one in your library")
+            AddToLibrary.Direct -> AbilityLine("Songs you add go straight into $library")
+            AddToLibrary.Request -> AbilityLine("Songs you add are saved. Request a copy to keep one in $library")
             AddToLibrary.SaveOnly -> AbilityLine("Songs you add are saved and play from the internet")
         },
     )
@@ -95,7 +96,11 @@ fun abilityLines(can: FamilyAbilities): List<AbilityLine> = buildList {
         add(AbilityLine(if (can.weeklyRequestLimit > 0) "${plural(can.weeklyRequestLimit, "request")} a week" else "No limit on requests"))
     }
     if (can.instantFromFamily) add(AbilityLine("Songs the family already has are added right away"))
-    add(AbilityLine(if (can.storageLimitGb > 0) "Room for ${can.storageLimitGb} GB in your library" else "No limit on your library's size"))
+    // Their own library's size says nothing when their songs go to the
+    // shared one.
+    if (!can.musicGoesToShared) {
+        add(AbilityLine(if (can.storageLimitGb > 0) "Room for ${can.storageLimitGb} GB in your library" else "No limit on your library's size"))
+    }
     // Quality is each person's own choice (Audio quality); only a limit the
     // family set is a line here. An away limit of 0 is the same as at home,
     // and so is one no lower.
@@ -139,6 +144,27 @@ fun usedOf(usedBytes: Long, limitGb: Int): String {
     val used = gigabytes(usedBytes)
     return if (used.endsWith(" GB")) "${used.removeSuffix(" GB")} of $limitGb GB" else "$used of $limitGb GB"
 }
+
+// A member whose songs go to the shared library: what My plan says in
+// place of their library's size and meter, and what a manager's member
+// list says in place of their storage.
+const val MUSIC_TO_SHARED = "Your songs go to the shared library"
+const val MEMBER_MUSIC_TO_SHARED = "Adds to the shared library"
+
+// My plan's library row: where the member's songs go and, for their own
+// library, how much of it is used and how full it is (null with no limit).
+data class LibraryRow(val title: String, val value: String?, val share: Float?)
+
+fun libraryRow(me: FamilyMe): LibraryRow =
+    if (me.abilities.musicGoesToShared) {
+        LibraryRow(MUSIC_TO_SHARED, null, null)
+    } else {
+        LibraryRow("Your library", storageLine(me.storageUsedBytes, me.abilities.storageLimitGb), storageShare(me.storageUsedBytes, me.abilities.storageLimitGb))
+    }
+
+// A member's storage as a manager's list shows it.
+fun memberStorageLine(member: FamilyMember): String =
+    if (member.musicGoesToShared) MEMBER_MUSIC_TO_SHARED else storageLine(member.storageUsedBytes, member.storageLimitGb)
 
 // What the request sheet says when the library is full: requests still
 // go, and an approver can still let them in.

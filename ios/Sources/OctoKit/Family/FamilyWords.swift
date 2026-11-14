@@ -83,9 +83,10 @@ public struct AbilityLine: Sendable, Equatable, Hashable {
 /// devices, then the rest.
 public func abilityLines(_ can: FamilyAbilities) -> [AbilityLine] {
     var lines: [AbilityLine] = []
+    let library = can.musicGoesToShared ? "the shared library" : "your library"
     switch can.addToLibrary {
-    case .direct: lines.append(AbilityLine("Songs you add go straight into your library"))
-    case .request: lines.append(AbilityLine("Songs you add are saved. Request a copy to keep one in your library"))
+    case .direct: lines.append(AbilityLine("Songs you add go straight into \(library)"))
+    case .request: lines.append(AbilityLine("Songs you add are saved. Request a copy to keep one in \(library)"))
     case .saveOnly: lines.append(AbilityLine("Songs you add are saved and play from the internet"))
     }
     if can.addToLibrary == .request {
@@ -98,7 +99,10 @@ public func abilityLines(_ can: FamilyAbilities) -> [AbilityLine] {
         lines.append(AbilityLine(can.weeklyRequestLimit > 0 ? "\(plural(can.weeklyRequestLimit, "request")) a week" : "No limit on requests"))
     }
     if can.instantFromFamily { lines.append(AbilityLine("Songs the family already has are added right away")) }
-    lines.append(AbilityLine(can.storageLimitGb > 0 ? "Room for \(can.storageLimitGb) GB in your library" : "No limit on your library's size"))
+    // Their own library's size says nothing when their songs go to the shared one.
+    if !can.musicGoesToShared {
+        lines.append(AbilityLine(can.storageLimitGb > 0 ? "Room for \(can.storageLimitGb) GB in your library" : "No limit on your library's size"))
+    }
     if can.streamCap > 0 { lines.append(AbilityLine("Your family plan limits listening to \(can.streamCap) kbps", on: false)) }
     let awayLower = can.awayCap > 0 && (can.streamCap == 0 || can.awayCap < can.streamCap)
     if !can.away {
@@ -146,6 +150,30 @@ public func storageLine(usedBytes: Int64, limitGb: Int) -> String {
 public func usedOf(usedBytes: Int64, limitGb: Int) -> String {
     let used = gigabytes(usedBytes)
     return used.hasSuffix(" GB") ? "\(used.dropLast(3)) of \(limitGb) GB" : "\(used) of \(limitGb) GB"
+}
+
+/// A member whose songs go to the shared library: what My plan says in place of their library's
+/// size and meter, and what a manager's member list says in place of their storage.
+public let musicToShared = "Your songs go to the shared library"
+public let memberMusicToShared = "Adds to the shared library"
+
+/// My plan's library row: where the member's songs go and, for their own library, how much of it
+/// is used and how full it is (nil with no limit).
+public struct LibraryRow: Sendable, Equatable {
+    public var title: String
+    public var value: String?
+    public var share: Double?
+}
+
+public func libraryRow(_ me: FamilyMe) -> LibraryRow {
+    if me.abilities.musicGoesToShared { return LibraryRow(title: musicToShared, value: nil, share: nil) }
+    return LibraryRow(title: "Your library", value: storageLine(usedBytes: me.storageUsedBytes, limitGb: me.abilities.storageLimitGb),
+                      share: storageShare(usedBytes: me.storageUsedBytes, limitGb: me.abilities.storageLimitGb))
+}
+
+/// A member's storage as a manager's list shows it.
+public func memberStorageLine(_ member: FamilyMember) -> String {
+    member.musicGoesToShared ? memberMusicToShared : storageLine(usedBytes: member.storageUsedBytes, limitGb: member.storageLimitGb)
 }
 
 /// What the request sheet says when the library is full.
@@ -326,7 +354,8 @@ public func requestSheet(_ me: FamilyMe) -> RequestSheet {
         initial: choices.first { $0.enabled }?.quality ?? .mp3,
         quotaLine: quota,
         quotaUsed: limit > 0 && left == 0,
-        storageLine: storageFull(usedBytes: me.storageUsedBytes, limitGb: can.storageLimitGb)
+        // Songs that go to the shared library never fill their own.
+        storageLine: !can.musicGoesToShared && storageFull(usedBytes: me.storageUsedBytes, limitGb: can.storageLimitGb)
             ? storageFullLine(usedBytes: me.storageUsedBytes, limitGb: can.storageLimitGb) : nil,
         approvalLine: can.autoApprove ? "Approved right away" : "Waits for approval")
 }

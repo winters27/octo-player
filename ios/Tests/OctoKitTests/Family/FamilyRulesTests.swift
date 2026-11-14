@@ -73,6 +73,37 @@ import Testing
         #expect(open.storageLine == nil)
     }
 
+    /// Music goes to the shared library: no "Your library, x of N GB", no meter and no full
+    /// warning, even with a limit kept for later; the plan and a manager's list say where the
+    /// songs go. Own keeps the library row. The same as the phone and desktop (FamilyRulesTest).
+    @Test func musicThatGoesToTheSharedLibraryShowsNoStorage() {
+        var shared = member(add: .direct, storageUsed: 60_000_000_000, storageLimit: 50)
+        shared.abilities.musicGoesTo = "Shared"
+        #expect(libraryRow(shared) == LibraryRow(title: "Your songs go to the shared library", value: nil, share: nil))
+        #expect(requestSheet(shared).storageLine == nil)
+        let lines = abilityLines(shared.abilities).map(\.text)
+        #expect(lines.first == "Songs you add go straight into the shared library")
+        #expect(!lines.contains { $0.contains("your library") })
+        let own = libraryRow(member(storageUsed: 5_400_000_000, storageLimit: 10))
+        #expect(own.title == "Your library" && own.value == "5.4 of 10 GB used")
+        var listed = FamilyMember(username: "ria")
+        listed.storageUsedBytes = 5_400_000_000
+        listed.storageLimitGb = 10
+        #expect(memberStorageLine(listed) == "5.4 of 10 GB used")
+        listed.musicGoesTo = "Shared"
+        #expect(memberStorageLine(listed) == "Adds to the shared library")
+    }
+
+    /// Older servers send no musicGoesTo, and a name this app doesn't know reads as the member's
+    /// own library.
+    @Test func musicGoesToReadsLeniently() throws {
+        let decoder = JSONDecoder()
+        #expect(!(try decoder.decode(FamilyAbilities.self, from: Data("{}".utf8))).musicGoesToShared)
+        #expect(try decoder.decode(FamilyAbilities.self, from: Data(#"{"musicGoesTo":"Shared"}"#.utf8)).musicGoesToShared)
+        #expect(!(try decoder.decode(FamilyAbilities.self, from: Data(#"{"musicGoesTo":"Elsewhere"}"#.utf8))).musicGoesToShared)
+        #expect(try decoder.decode(FamilyMember.self, from: Data(#"{"username":"ria","musicGoesTo":"Shared"}"#.utf8)).musicGoesToShared)
+    }
+
     @Test func sizesAndCountsReadPlainly() {
         #expect(storageLine(usedBytes: 5_400_000_000, limitGb: 10) == "5.4 of 10 GB used")
         #expect(storageLine(usedBytes: 5_400_000_000, limitGb: 0) == "5.4 GB used")
