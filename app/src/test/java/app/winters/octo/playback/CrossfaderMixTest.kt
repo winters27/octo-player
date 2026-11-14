@@ -458,9 +458,14 @@ class CrossfaderMixTest {
     fun aReplayGainChangePlansTheBlendAgainWithTheNewGain() {
         var mode = ReplayGainMode.Off
         val songs = listOf(PcmSong("a", 5_000, trackGainDb = -8f), PcmSong("b", 2_500, sign = -1))
-        val gains = gainsPlanned(songs, listOf(songs[1].item()), { SoundSettings(replayGain = mode) }) { mode = ReplayGainMode.Track }
+        val gains = gainsPlanned(songs, listOf(songs[1].item()), { SoundSettings(replayGain = mode) }) { rig ->
+            // Registered, the next song's tags read: only the setting changes.
+            assertTrue(rig.runUntil(1_000) { rig.decks[1].playWhenReady })
+            rig.runFor(300)
+            mode = ReplayGainMode.Track
+        }
         assertEquals("$gains", 0.0, gains.first(), 1e-3)
-        assertEquals("$gains", 8.0, gains.last(), 1e-3)
+        assertEquals("planned again at the new gain: $gains", 8.0, gains.last(), 1e-3)
     }
 
     @Test

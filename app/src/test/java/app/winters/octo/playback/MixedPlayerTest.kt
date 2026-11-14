@@ -519,6 +519,8 @@ class MixedPlayerTest {
         val rig = PlayerRig(twoSongs())
         rig.play("a", "b", settings = crossfade)
         assertTrue(rig.runUntil(6_000) { rig.decks[1].playWhenReady })
+        // Gapless from the moment main hears it: nothing is armed again.
+        gaplessAt(rig, BlendEventKind.CANCELLED, BlendCause.PAUSED)
         rig.context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
         until(rig, BlendEventKind.CANCELLED, BlendCause.PAUSED, maxMs = 300)
         rig.player.play()
