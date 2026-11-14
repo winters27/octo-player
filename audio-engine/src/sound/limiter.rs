@@ -22,6 +22,16 @@ const TRUE_PEAK_TAPS: usize = TRUE_PEAK_HALF_TAPS * 2;
 ///
 /// Here the limiter sits on one continuous stream after the mix, so songs
 /// flow through it without anything held back between them.
+///
+/// Its switches can change at any frame. Each frame keeps the ones it came
+/// in with: a frame that came in with the limiter off is never held at the
+/// ceiling, and its sound between samples is never read, however the
+/// switches stand when it comes out. Its level still follows the frames
+/// after it, so the level is down in time for a need that comes in later.
+///
+/// Coming back up, the level lands exactly on unity once the remaining step
+/// is lost in float rounding, so sound that needs no limiting after a peak
+/// passes through bit for bit.
 #[derive(Debug)]
 pub struct Limiter {
     channels: usize,
@@ -36,6 +46,14 @@ pub struct Limiter {
     /// least `2 * TRUE_PEAK_HALF_TAPS` frames (0.7 ms at 48 kHz) and is left
     /// out with a shorter one.
     pub true_peak: bool,
+    /// Turns the level down in a straight line from unity across the
+    /// look-ahead, reaching each frame's need just as that frame comes out,
+    /// instead of dropping it at once when the need comes into view, so the
+    /// level never steps. A need read between samples comes into view as
+    /// late as the frame that completed the reading, so its line reaches it
+    /// as the first sample the reading used comes out, and holds it from
+    /// there. Off, the level drops at once, as it always has.
+    pub ramped_attack: bool,
     // The last `TRUE_PEAK_TAPS` frames in, each channel's kept twice over so
     // its newest frames are one slice from `recent_at`.
     recent: Vec<f32>,
@@ -54,6 +72,17 @@ pub struct Limiter {
     need_at: Vec<u64>,
     need_front: usize,
     need_size: usize,
+    // By frame number, for every frame in view (from `out_count` up to
+    // `in_count`): what its samples need, what the sound between samples
+    // read as it came in needs, and whether it came in with the limiter on
+    // and with the ramped attack.
+    need_of: Vec<f32>,
+    between_of: Vec<f32>,
+    limited_of: Vec<bool>,
+    ramped_of: Vec<bool>,
+    // One past the newest frame that came in with the ramped attack: while
+    // that frame is in view, the level follows the ramp.
+    ramped_until: u64,
     // Counts frames in and out, to know which needs are still in view.
     in_count: u64,
     out_count: u64,
@@ -79,6 +108,7 @@ impl Limiter {
             latency,
             enabled: true,
             true_peak: false,
+            ramped_attack: false,
             recent: vec![0.0; channels * TRUE_PEAK_TAPS * 2],
             recent_at: 0,
             between: between_taps(),
@@ -91,6 +121,11 @@ impl Limiter {
             need_at: vec![0; latency + 2],
             need_front: 0,
             need_size: 0,
+            need_of: vec![1.0; latency + 1],
+            between_of: vec![1.0; latency + 1],
+            limited_of: vec![false; latency + 1],
+            ramped_of: vec![false; latency + 1],
+            ramped_until: 0,
             in_count: 0,
             out_count: 0,
             gain: 1.0,
@@ -115,19 +150,32 @@ impl Limiter {
         let mut out_index = 0;
         let mut written = 0;
         for frame in input[..frames * ch].chunks_exact(ch) {
-            let mut peak = frame.iter().fold(0f32, |p, s| p.max(s.abs()));
+            let peak = frame.iter().fold(0f32, |p, s| p.max(s.abs()));
             // Kept whether or not the true peak is read, so it can start
             // reading at any frame.
             self.remember(frame);
-            if self.enabled && self.true_peak && self.latency >= TRUE_PEAK_TAPS {
+            let slot = self.slot_of(self.in_count);
+            self.limited_of[slot] = self.enabled;
+            self.ramped_of[slot] = self.ramped_attack;
+            let wanted = if self.enabled && peak > self.ceiling { self.ceiling / peak } else { 1.0 };
+            let mut between = 1.0;
+            if self.enabled && self.true_peak && self.latency >= TRUE_PEAK_TAPS && self.reads_limited_frames()
+            {
                 // The reading is about the frames `TRUE_PEAK_HALF_TAPS` back,
                 // but its need counts from this frame, so it holds the level
                 // down from `latency` frames before this one: over every
                 // sample the reading used.
-                peak = peak.max(self.peak_between());
+                let read = self.peak_between();
+                if read > self.ceiling {
+                    between = self.ceiling / read;
+                }
             }
-            let level = if self.enabled && peak > self.ceiling { self.ceiling / peak } else { 1.0 };
-            self.push_need(level);
+            self.need_of[slot] = wanted;
+            self.between_of[slot] = between;
+            self.push_need(wanted.min(between));
+            if self.ramped_attack {
+                self.ramped_until = self.in_count + 1;
+            }
             self.in_count += 1;
 
             if self.held_frames < self.latency {
@@ -168,11 +216,26 @@ impl Limiter {
         self.held_frames = 0;
         self.need_front = 0;
         self.need_size = 0;
+        self.ramped_until = 0;
         self.in_count = 0;
         self.out_count = 0;
         self.gain = 1.0;
         self.recent.fill(0.0);
         self.recent_at = 0;
+    }
+
+    // Where the frame numbered `frame` keeps what it came in with.
+    fn slot_of(&self, frame: u64) -> usize {
+        (frame % self.need_of.len() as u64) as usize
+    }
+
+    // Whether the reading taken as the frame numbered `in_count` comes in
+    // is about frames the limiter was on for: it reads the points between
+    // the frames `TRUE_PEAK_HALF_TAPS` and `TRUE_PEAK_HALF_TAPS - 1` back,
+    // and counts once the newer of the two came in with the limiter on.
+    fn reads_limited_frames(&self) -> bool {
+        let back = (TRUE_PEAK_HALF_TAPS - 1) as u64;
+        self.in_count < back || self.limited_of[self.slot_of(self.in_count - back)]
     }
 
     fn remember(&mut self, frame: &[f32]) {
@@ -200,23 +263,67 @@ impl Limiter {
     }
 
     // Writes the oldest held frame, turned down as far as any frame in view
-    // needs. Down is instant; back up is slow.
+    // needs. Down is instant, or a straight line across the look-ahead for
+    // the needs that came in with the ramped attack; back up is slow. Held
+    // at the ceiling only when it came in with the limiter on.
     fn emit(&mut self, output: &mut [f32], at: usize) {
         while self.need_size > 0 && self.need_at[self.need_front] < self.out_count {
             self.need_front = (self.need_front + 1) % self.need.len();
             self.need_size -= 1;
         }
-        let target = if self.need_size > 0 { self.need[self.need_front] } else { 1.0 };
-        self.gain = if target < self.gain { target } else { self.gain + (target - self.gain) * self.release };
+        let target = if self.ramped_until > self.out_count {
+            self.ramp_target()
+        } else if self.need_size > 0 {
+            self.need[self.need_front]
+        } else {
+            1.0
+        };
+        self.gain = if target < self.gain {
+            target
+        } else {
+            let next = self.gain + (target - self.gain) * self.release;
+            // The step lost in rounding would leave the level just short of
+            // its target for good (0.99986 for unity at 48 kHz).
+            if next == self.gain { target } else { next }
+        };
+        let limited = self.limited_of[self.slot_of(self.out_count)];
         let from = self.head * self.channels;
         for ch in 0..self.channels {
             let mut y = self.held[from + ch] * self.gain;
-            if self.enabled {
+            if limited {
                 y = y.clamp(-self.ceiling, self.ceiling);
             }
             output[at + ch] = y;
         }
         self.out_count += 1;
+    }
+
+    // The lowest of what the frames in view ask for: a frame that came in
+    // with the ramped attack asks for the straight line from unity, as it
+    // came into view, down to its need as it comes out (for its reading
+    // between samples, down by the first sample the reading used); any
+    // other frame asks for its need at once.
+    fn ramp_target(&self) -> f32 {
+        let mut target = 1f32;
+        for frame in self.out_count..self.in_count {
+            let slot = self.slot_of(frame);
+            let (wanted, between) = (self.need_of[slot], self.between_of[slot]);
+            if !self.ramped_of[slot] {
+                target = target.min(wanted).min(between);
+                continue;
+            }
+            if wanted < 1.0 {
+                let ahead = (frame - self.out_count) as f32;
+                target = target.min(wanted + (1.0 - wanted) * ahead / self.latency as f32);
+            }
+            if between < 1.0 {
+                // A reading needs a look-ahead of at least `TRUE_PEAK_TAPS`.
+                let span = (self.latency - (TRUE_PEAK_TAPS - 1)) as f32;
+                let ahead = frame.saturating_sub(self.out_count + (TRUE_PEAK_TAPS - 1) as u64) as f32;
+                target = target.min(between + (1.0 - between) * ahead / span);
+            }
+        }
+        target
     }
 
     fn push_need(&mut self, level: f32) {

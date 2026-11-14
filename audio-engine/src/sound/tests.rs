@@ -201,18 +201,212 @@ fn the_mix_limiter_holds_the_sound_between_samples_under_the_ceiling() {
     let sum = quarter_rate_sum(9_600);
     assert!(sum.iter().all(|s| s.abs() < ceiling * 0.9), "every sample a dB under the ceiling");
     assert!(db(crate::testing::fixtures::true_peak(&sum, 0, 9_600)) > 0.9);
+    for ramped in [false, true] {
+        let mut limiter = Limiter::new(2, 48_000);
+        limiter.true_peak = true;
+        limiter.ramped_attack = ramped;
+        let out = limited(&mut limiter, &sum);
+        let peak = db(crate::testing::fixtures::true_peak(&out, 2_400, 7_200));
+        assert!(peak <= LIMITER_CEILING_DB as f64 + 0.02, "ramped {ramped}: true peak {peak} dBTP");
+        // Turned down by what the sound between samples needs, no further.
+        assert!(peak > LIMITER_CEILING_DB as f64 - 0.05, "ramped {ramped}: true peak {peak} dBTP");
+    }
+}
+
+// A limiter set the way the shaper sets it while two songs blend.
+fn blend_limiter() -> Limiter {
     let mut limiter = Limiter::new(2, 48_000);
     limiter.true_peak = true;
-    let out = limited(&mut limiter, &sum);
-    let peak = db(crate::testing::fixtures::true_peak(&out, 2_400, 7_200));
-    assert!(peak <= LIMITER_CEILING_DB as f64 + 0.02, "true peak {peak} dBTP");
-    // Turned down by what the sound between samples needs, no further.
-    assert!(peak > LIMITER_CEILING_DB as f64 - 0.05, "true peak {peak} dBTP");
+    limiter.ramped_attack = true;
+    limiter
+}
+
+// Every frame through `limiter` one at a time, keeping the level after
+// each, then the delay drained, so output frame `i` is input frame `i`.
+// From frame `off_at`, the limiter is off.
+fn levels_of(limiter: &mut Limiter, input: &[f32], off_at: Option<usize>) -> (Vec<f32>, Vec<f32>) {
+    let mut levels = Vec::with_capacity(input.len() / 2);
+    let mut out = vec![0.0; input.len()];
+    let mut written = 0;
+    for (i, frame) in input.chunks_exact(2).enumerate() {
+        if off_at == Some(i) {
+            limiter.enabled = false;
+        }
+        written += limiter.process(frame, 1, &mut out[written * 2..written * 2 + 2]);
+        levels.push(limiter.gain());
+    }
+    limiter.drain(&mut out[written * 2..]);
+    (levels, out)
+}
+
+// The most the level falls from one frame to the next.
+fn largest_drop(levels: &[f32]) -> f32 {
+    levels.windows(2).fold(0f32, |d, w| d.max(w[0] - w[1]))
+}
+
+// `java.util.Random`, so a test reads the same noise as its Kotlin twin.
+struct JavaRandom(u64);
+
+impl JavaRandom {
+    const MASK: u64 = (1 << 48) - 1;
+
+    fn new(seed: u64) -> Self {
+        Self((seed ^ 0x5_DEEC_E66D) & Self::MASK)
+    }
+
+    fn next_float(&mut self) -> f32 {
+        self.0 = self.0.wrapping_mul(0x5_DEEC_E66D).wrapping_add(0xB) & Self::MASK;
+        (self.0 >> (48 - 24)) as f32 / (1u32 << 24) as f32
+    }
+}
+
+// `LimiterMixTest.loud`: a quiet tone, then stereo noise at twice full
+// scale.
+fn loud_mix() -> Vec<f32> {
+    let mut noise = JavaRandom::new(7);
+    (0..9_600 * 2)
+        .map(|i| {
+            let frame = i / 2;
+            if frame < 4_800 {
+                (0.3 * (2.0 * PI * 440.0 * frame as f64 / 48_000.0).sin()) as f32
+            } else {
+                2.0 * (noise.next_float() * 2.0 - 1.0)
+            }
+        })
+        .collect()
+}
+
+// Kotlin twin: `LimiterMixTest.theRampedAttackNeverStepsTheLevelAndHoldsTheCeiling`.
+#[test]
+fn the_ramped_attack_never_steps_the_level_and_holds_the_ceiling() {
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    let loud = loud_mix();
+    let mut ramped = Limiter::new(2, 48_000);
+    ramped.ramped_attack = true;
+    let (ramped_levels, ramped_out) = levels_of(&mut ramped, &loud, None);
+    let (instant_levels, _) = levels_of(&mut Limiter::new(2, 48_000), &loud, None);
+    // The deepest need is the ceiling over twice full scale; its straight
+    // line down across the look-ahead falls by this much a frame at most.
+    let slope = (1.0 - ceiling / 2.0) / ramped.latency() as f32;
+    let drop = largest_drop(&ramped_levels);
+    assert!(drop <= slope + 1e-6, "ramped drop {drop}, line {slope}");
+    assert!(largest_drop(&instant_levels) > 0.3, "the instant attack does step");
+    assert!(ramped_out.iter().all(|s| s.abs() <= ceiling));
+    let loudest = ramped_out.iter().fold(0f32, |m, s| m.max(s.abs()));
+    assert!(loudest > ceiling * 0.95, "held near the ceiling: {loudest}");
+}
+
+// Kotlin twin: `LimiterMixTest.turningOffMidReductionNeverStepsTheLevel`.
+#[test]
+fn turning_the_ramped_limiter_off_mid_reduction_never_steps_the_level() {
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    let mut limiter = Limiter::new(2, 48_000);
+    limiter.ramped_attack = true;
+    let (levels, _) = levels_of(&mut limiter, &loud_mix(), Some(7_000));
+    assert!(levels[6_999] < 0.9, "{}", levels[6_999]);
+    let rise = levels[7_000..].windows(2).fold(0f32, |r, w| r.max(w[1] - w[0]));
+    assert!(rise < 1e-3, "rise {rise}");
+    assert!(largest_drop(&levels) <= (1.0 - ceiling / 2.0) / limiter.latency() as f32 + 1e-6);
+}
+
+// Kotlin twin: `LimiterTruePeakTest.theRampedAttackStillNeverStepsTheLevel`.
+#[test]
+fn the_ramped_attack_still_never_steps_the_level_with_the_true_peak() {
+    // Quiet, then the quarter-rate sum: only the sound between samples
+    // needs limiting, and it is seen 31 frames late.
+    let mut input = vec![0.0; 4_800 * 2];
+    input.extend(quarter_rate_sum(4_800));
+    let mut limiter = blend_limiter();
+    let (levels, _) = levels_of(&mut limiter, &input, None);
+    // Each need's line runs from unity across the look-ahead less the
+    // reading's span, so none falls faster than the line to the deepest
+    // need, which the level reaches (where the tone starts, the sound
+    // between samples overshoots the steady sum a little).
+    let deepest = levels.iter().fold(1f32, |m, &l| m.min(l));
+    let slope = (1.0 - deepest) / (limiter.latency() - 31) as f32;
+    let drop = largest_drop(&levels);
+    assert!(drop <= slope + 1e-6, "largest drop {drop}, line {slope}");
+    assert!(deepest < 0.8, "deepest {deepest}");
+    assert!(levels[levels.len() - 1] < 0.81);
+}
+
+#[test]
+fn a_blend_turns_a_full_scale_step_down_along_a_line_with_the_limiter_off() {
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    let mut shaper = SoundShaper::new(48_000, 2);
+    let mut settings = SoundSettings::default();
+    settings.dsp.limiter = false;
+    shaper.apply(&settings, 1.0, true);
+    assert!(!shaper.limiter_enabled());
+    // A quarter of full scale alone, then two songs blending whose sum
+    // steps to full scale.
+    let level = |n: usize| if n < 9_600 { 0.25f32 } else { 1.0 };
+    let input: Vec<f32> = (0..14_400).flat_map(|n| [level(n), -level(n)]).collect();
+    let mut out = input.clone();
+    shaper.process(&mut out[..4_800 * 2], 4_800);
+    shaper.set_blending(true);
+    shaper.process(&mut out[4_800 * 2..], 9_600);
+    let lat = shaper.latency();
+    // The level each frame came out at.
+    let levels: Vec<f32> = (lat..14_400).map(|i| out[i * 2] / input[(i - lat) * 2]).collect();
+    let deepest = levels.iter().fold(1f32, |m, &l| m.min(l));
+    // The step's samples need the ceiling, and the sound between its
+    // samples a little more: no line falls faster than the one to the
+    // deepest level over the reading's shorter span.
+    assert!(deepest < ceiling, "deepest {deepest}");
+    let drop = largest_drop(&levels);
+    let slope = (1.0 - deepest) / (lat - 31) as f32;
+    assert!(drop <= slope + 1e-6, "largest drop {drop}, line {slope}");
+    assert!(out.iter().all(|s| s.abs() <= ceiling), "held at the ceiling");
+}
+
+#[test]
+fn a_frame_that_came_in_with_the_limiter_off_comes_out_as_it_went_in() {
+    let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
+    // A hot song alone with the Limiter off, its samples and the sound
+    // between them over the ceiling; then a blend whose sum needs nothing,
+    // with the limiter switched on the way the shaper does for a blend.
+    let blend_at = 4_800;
+    let level = |n: usize| if n < blend_at { 0.99f32 } else { 0.2 };
+    let input: Vec<f32> = (0..9_600).flat_map(|n| [level(n), -level(n)]).collect();
+    let mut limiter = Limiter::new(2, 48_000);
+    limiter.enabled = false;
+    let mut out = vec![0.0; input.len()];
+    let first = limiter.process(&input[..blend_at * 2], blend_at, &mut out);
+    (limiter.enabled, limiter.true_peak, limiter.ramped_attack) = (true, true, true);
+    let rest = limiter.process(&input[blend_at * 2..], 9_600 - blend_at, &mut out[first * 2..]);
+    limiter.drain(&mut out[(first + rest) * 2..]);
+    // Up to the frame just before the blend, the song alone comes out as it
+    // went in: never held at the ceiling, and its sound between samples
+    // never read.
+    assert!(out[(blend_at - 1) * 2] > ceiling);
+    assert_eq!(&out[..blend_at * 2], &input[..blend_at * 2]);
+    assert_eq!(&out[blend_at * 2..], &input[blend_at * 2..]);
+}
+
+#[test]
+fn after_a_peak_the_level_comes_back_to_exactly_unity() {
+    // A burst at twice full scale, then a quiet tone for 1.9 s: once the
+    // level is back, the tone passes bit for bit.
+    let input: Vec<f32> = (0..96_000)
+        .flat_map(|n| {
+            let s = if n < 4_800 { 2.0 } else { 0.5 * (n as f64 * 0.05).sin() as f32 };
+            [s, -s]
+        })
+        .collect();
+    for ramped in [false, true] {
+        let mut limiter = Limiter::new(2, 48_000);
+        limiter.ramped_attack = ramped;
+        let out = limited(&mut limiter, &input);
+        assert_eq!(limiter.gain(), 1.0, "ramped {ramped}");
+        assert_eq!(&out[72_000 * 2..], &input[72_000 * 2..], "ramped {ramped}");
+    }
 }
 
 // The sample limiter written out plainly: each frame turned down as far as
-// any frame from it to `latency` ahead needs, down at once and back up
-// slowly, then held at the ceiling.
+// any frame from it to `latency` ahead needs, down at once, back up slowly
+// and onto unity once the step is lost in rounding, then held at the
+// ceiling.
 fn sample_limited(input: &[f32], rate: u32) -> Vec<f32> {
     let latency = (rate as f32 * super::limiter::LIMITER_LOOKAHEAD_MS / 1_000.0).round() as usize;
     let ceiling = 10f32.powf(LIMITER_CEILING_DB / 20.0);
@@ -228,7 +422,12 @@ fn sample_limited(input: &[f32], rate: u32) -> Vec<f32> {
     let mut out = Vec::with_capacity(input.len());
     for i in 0..frames {
         let target = need[i..(i + latency + 1).min(frames)].iter().fold(1.0f32, |m, &n| m.min(n));
-        gain = if target < gain { target } else { gain + (target - gain) * release };
+        gain = if target < gain {
+            target
+        } else {
+            let next = gain + (target - gain) * release;
+            if next == gain { target } else { next }
+        };
         for ch in 0..2 {
             out.push((input[i * 2 + ch] * gain).clamp(-ceiling, ceiling));
         }
@@ -253,9 +452,14 @@ fn without_the_true_peak_the_limiter_holds_samples_as_it_always_has() {
         let out = limited(&mut Limiter::new(2, rate), &input);
         assert_eq!(out, sample_limited(&input, rate), "at {rate} Hz");
     }
-    // Its sound between samples passes over the ceiling untouched.
-    let alone = limited(&mut Limiter::new(2, 48_000), &quarter_rate_sum(9_600));
-    assert_eq!(alone, quarter_rate_sum(9_600));
+    // Plain and ramped alike, its sound between samples passes over the
+    // ceiling untouched.
+    for ramped in [false, true] {
+        let mut limiter = Limiter::new(2, 48_000);
+        limiter.ramped_attack = ramped;
+        let alone = limited(&mut limiter, &quarter_rate_sum(9_600));
+        assert_eq!(alone, quarter_rate_sum(9_600), "ramped {ramped}");
+    }
 }
 
 #[test]
