@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.pages
 
 import app.winters.octo.subsonic.normalizeServerUrl
+import app.winters.octo.ui.family.HandOverSignIn
 import app.winters.octo.ui.family.inviteProblem
 import app.winters.octo.subsonic.parseFamilyLink
 import app.winters.octo.subsonic.FamilyInviteLink
@@ -16,7 +17,16 @@ import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.HeaderList
+import app.winters.octo.connection.LinkAction
+import app.winters.octo.connection.LinkAnchor
+import app.winters.octo.connection.LinkForm
+import app.winters.octo.connection.LinkFormState
+import app.winters.octo.connection.LinkRefusal
+import app.winters.octo.connection.LinkTake
+import app.winters.octo.connection.ReceivedAction
 import app.winters.octo.connection.addressChanged
+import app.winters.octo.connection.linkFacts
+import app.winters.octo.connection.receivedFacts
 import app.winters.octo.connection.advancedLayout
 import app.winters.octo.connection.authModeOf
 import app.winters.octo.connection.flagsOf
@@ -51,6 +61,7 @@ import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.isPrivateHost
 import app.winters.octo.subsonic.serverUrl
 import app.winters.octo.subsonic.splitScheme
+import kotlinx.coroutines.Job
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -63,6 +74,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 // `certificateOf`: the server the form started from, unless another is named.
 @Stable
 class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, certificateOf: String? = last?.id) {
+    // Where family links may take this form (see LinkFormState): the saved
+    // server it was filled from, what was typed and taken since, and the
+    // words of the last link refused here.
+    private var link by mutableStateOf(LinkFormState(LinkForm.Fresh))
+
+    // The server this form was built from (or whose certificate it starts
+    // with), until a link to another server starts it over; a late fill for
+    // any other server changes nothing.
+    var filledFrom: String? = certificateOf
+        private set
+
+    // How that server signs in, for which saved secret may stand in.
+    private var lastMode: AuthMode? = last?.authMode
+
     // The name the listener gives the server; empty shows its host.
     var label by mutableStateOf(last?.label.orEmpty())
 
@@ -86,7 +111,14 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     var legacyPassword by mutableStateOf(last?.authMode == AuthMode.LegacyPassword)
     var useApiKey by mutableStateOf(last?.authMode == AuthMode.ApiKey)
     var apiKey by mutableStateOf("")
-    var home by mutableStateOf(last?.home?.removeSuffix("/").orEmpty())
+    private var homeText by mutableStateOf(last?.home?.removeSuffix("/").orEmpty())
+    var home: String
+        get() = homeText
+        set(value) {
+            if (value == homeText) return
+            homeText = value
+            edited()
+        }
 
     // The custom header rows, each with an id kept beside it, so they draw
     // keyed; every write goes through one of HeaderList's ops.
@@ -146,7 +178,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     // The client certificate: what the form started with, what a sign-in
     // sends now (see CertificateDraft), and what reading the one the row
     // shows found, and for which.
-    private val startCertificate: CertificateDraft = certificateOf?.let { CertificateDraft.Keep(it) } ?: CertificateDraft.None
+    private var startCertificate: CertificateDraft = certificateOf?.let { CertificateDraft.Keep(it) } ?: CertificateDraft.None
     var certificateDraft by mutableStateOf(startCertificate)
         private set
     var certificateLoad by mutableStateOf<CertificateTry?>(null)
@@ -196,6 +228,37 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
         if (attempt?.load != null) certificateLoad = attempt
     }
 
+    // What reading the certificate the row shows found, landing after the
+    // read. A read of a kept server's certificate begun before a link to
+    // another server started the form over changes nothing.
+    fun knowCertificate(choice: CertificateChoice, load: CertificateLoad?) {
+        if (choice is CertificateChoice.Saved && filledFrom != choice.serverId) return
+        if (certificateLoad?.choice != choice) certificateLoad = CertificateTry(choice, load)
+    }
+
+    // A hand-over's sealed sign-in, once redeemed, and a finished sign-up
+    // with the main address it was made at: each works only once, so Try
+    // again and Trust reuse them. A new link, leaving the link, or signing in
+    // ends them.
+    var received by mutableStateOf<HandOverSignIn?>(null)
+    var signedUp by mutableStateOf<HeldSignUp?>(null)
+
+    // While a sign-up is held, its address stays the one it was made at.
+    val addressLocked: Boolean get() = signedUp != null
+
+    // A hand-over's redeem and its polls, before the other device allows it:
+    // leaving then is harmless and cancels it. Every other request commits,
+    // and nothing leaves it until it ends.
+    var waiting by mutableStateOf(false)
+    val committing: Boolean get() = busy && !waiting
+
+    // The request running now: a way out while it waits cancels it, and a
+    // cancelled request's late end never touches a newer one's flags.
+    var running: Job? = null
+
+    // The words of the last link refused here, under the result line.
+    val linkNote: String? get() = link.note
+
     // A sign-in from another device of one's own, while it comes, and what
     // is happening, in plain words.
     var handOver by mutableStateOf<FamilyHandOverLink?>(null)
@@ -238,6 +301,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
         if (last != null) {
             typeAddress(last.address.removeSuffix("/"))
             headerList = headerList.replaced(last.headerNames.map { HeaderDraft(it, "", saved = true) })
+            link = link.filled(LinkAnchor(last.address, last.home, last.username))
         }
     }
 
@@ -249,7 +313,9 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     // sets the scheme and leaves the rest; otherwise the scheme follows the
     // address until one is picked: http at home, https anywhere else.
     fun typeAddress(text: String) {
+        if (addressLocked) return
         val before = attemptAddress
+        val was = scheme to address
         val (typed, rest) = splitScheme(text)
         if (typed != null) {
             scheme = typed
@@ -261,15 +327,24 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
         }
         result = null
         movedFrom(before)
+        if (scheme to address != was) edited()
     }
 
     // Switches between https and http by hand.
     fun toggleScheme() {
+        if (addressLocked) return
         val before = attemptAddress
         scheme = if (scheme == Scheme.Https) Scheme.Http else Scheme.Https
         schemePicked = true
         result = null
         movedFrom(before)
+        edited()
+    }
+
+    // The address, its scheme or the home changed: the form is no longer the
+    // saved server's, and a link is compared with what was typed.
+    private fun edited() {
+        link = link.edited(url?.toString(), homeUrl?.toString(), address.isNotBlank())
     }
 
     val url: HttpUrl? get() = serverUrl(scheme, address)
@@ -292,7 +367,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     val mode: AuthMode get() = authModeOf(legacyPassword, useApiKey)
 
     // How the kept server signs in, for which saved secret may stand in.
-    private val savedMode: AuthMode? get() = lastServer?.authMode
+    private val savedMode: AuthMode? get() = lastMode
 
     // Whether the password, or the key, may stay empty and keep the saved
     // one: only a saved password for a password Method, and a saved key for
@@ -408,7 +483,7 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     // rows (typed in it, removed it, or added a row of that name), since
     // the answer may land while they type; every other row keeps its id.
     fun knowSavedGateway(server: SavedServer, saved: SavedGateway) {
-        if (saved.kind == GatewayKind.None || url?.toString() != server.address) return
+        if (filledFrom != server.id || saved.kind == GatewayKind.None || url?.toString() != server.address) return
         fun named(row: HeaderDraft) = saved.names.any { it.equals(row.name.trim(), ignoreCase = true) }
         val untouched = saved.names.all { name -> headers.any { it.saved && it.value.isEmpty() && it.name.trim().equals(name, ignoreCase = true) } } &&
             headers.none { !it.saved && named(it) }
@@ -465,56 +540,146 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
 
     // Takes a family link, pasted or opened: an invite to sign up with, a
     // sign-in from another device of one's own, or a server and username
-    // to fill in. False for any other text, which a field takes as typed.
-    fun takeJoinLink(text: String): Boolean {
+    // to fill in. False for any other text, which a field takes as typed; a
+    // link refused (see take) is still not typed in.
+    fun takeJoinLink(text: String, switching: Boolean = false): Boolean {
         val link = parseFamilyLink(text) ?: return false
-        take(link)
+        take(link, switching)
         return true
     }
 
-    // A link's home address becomes this account's home address, so the
-    // app uses the home network at home and the outside address away. A
-    // link to another server than the one filled in leaves that one's
-    // headers and sign-in page behind.
-    fun take(link: FamilyLink) {
-        val before = url?.toString()
-        typeAddress(link.server)
-        if (url?.toString() != before) forgetServerDetails()
-        link.home?.let { home = it }
-        invite = null
-        handOver = null
-        handOverStep = null
-        when (link) {
-            is FamilyInviteLink -> invite = link
-            is FamilyHandOverLink -> handOver = link
-            is FamilySignInPrefill -> {
-                if (link.username.isNotBlank()) username = link.username
-                password = ""
-                useApiKey = false
+    // Takes a family link. One that comes while a sign-in runs here, a
+    // certificate question waits or a switch is on its way is refused, its
+    // words in the link note and nothing else changed. One for the server
+    // this form holds keeps what it holds; one for another server starts the
+    // form over first (forgetServerDetails), then writes its server and home.
+    // The same invite or hand-over again keeps the sign-up or sign-in it
+    // already made, so its token is never spent twice; a link to another
+    // server is never the same one, whatever its token.
+    fun take(link: FamilyLink, switching: Boolean = false) {
+        val action = this.link.take(linkFacts(link), busy = busy || question != null || switching, home = home)
+        if (action is LinkAction.Take) {
+            if (action.kind == LinkTake.Forget || !sameToken(link)) {
+                received = null
+                signedUp = null
             }
+            if (action.kind == LinkTake.Forget) forgetServerDetails(namedUsername(link))
+            action.address?.let(::typeAddress)
+            action.home?.let { home = it }
+            invite = null
+            handOver = null
+            handOverStep = null
+            when (link) {
+                is FamilyInviteLink -> invite = link
+                is FamilyHandOverLink -> handOver = link
+                is FamilySignInPrefill -> {
+                    if (link.username.isNotBlank()) username = link.username
+                    password = ""
+                    useApiKey = false
+                }
+            }
+            result = null
         }
-        result = null
+        this.link = this.link.took(action)
     }
 
-    private fun forgetServerDetails() {
+    // Whether a link carries the invite or hand-over this form holds now.
+    private fun sameToken(link: FamilyLink): Boolean = when (link) {
+        is FamilyInviteLink -> invite?.token == link.token
+        is FamilyHandOverLink -> handOver?.token == link.token
+        is FamilySignInPrefill -> false
+    }
+
+    // The username a link names, if any.
+    private fun namedUsername(link: FamilyLink): String? = when (link) {
+        is FamilySignInPrefill -> link.username
+        is FamilyHandOverLink -> link.username
+        is FamilyInviteLink -> null
+    }
+
+    // Starts the form over for another server: nothing of the server it held
+    // goes with it (its header rows, sign-in page, saved kind, saved secret,
+    // Method, client certificate), nor anything typed for it, nor its
+    // username unless the link names one (a sign-in link then writes it); the
+    // caller then writes the new server and home. The name given to the
+    // server stays: it is never sent anywhere.
+    private fun forgetServerDetails(linkUsername: String?) {
         keptId = null
+        filledFrom = null
+        lastMode = null
         headerList = headerList.replaced(emptyList())
         gatewayRows = emptyList()
         savedGateway = GatewayKind.None
         gatewayKind = GatewayKind.None
         gatewayFirst = ""
         gatewaySecond = ""
-        // A file chosen for the old server is not taken to another one.
-        if (certificateDraft is CertificateDraft.Use) certificateDraft = startCertificate
+        legacyPassword = false
+        useApiKey = false
+        apiKey = ""
+        password = ""
+        inviteName = ""
+        invitePassword = ""
+        inviteAgain = ""
+        if (linkUsername.isNullOrBlank()) username = ""
+        rememberPassword = true
+        keyShown()
+        startCertificate = CertificateDraft.None
+        certificateDraft = CertificateDraft.None
         certificateLoad = null
     }
 
-    // Back to the plain sign-in.
+    // Back to the plain sign-in. Never while a request commits; a hand-over
+    // still waiting for the other device is cancelled. A finished sign-up's
+    // username goes into the username field, since the server chose it.
     fun leaveLink() {
+        if (committing) return
+        if (busy) stopRunning()
+        signedUp?.let { username = it.username }
         invite = null
         handOver = null
         handOverStep = null
+        received = null
+        signedUp = null
         result = null
+        link = link.left()
+    }
+
+    // Cancels the request running now, and leaves the form as if it had ended.
+    private fun stopRunning() {
+        running?.cancel()
+        running = null
+        busy = false
+        waiting = false
+        handOverStep = null
+    }
+
+    // What to do with a hand-over's sealed sign-in (see LinkFormState).
+    fun receivedAction(signIn: HandOverSignIn): ReceivedAction = link.received(receivedFacts(signIn))
+
+    // A sealed sign-in for another server than the one this form held: the
+    // form starts over and takes that server and home, so a retry keeps them.
+    fun adopt(action: ReceivedAction.ForgetAndAdopt, linkUsername: String?) {
+        forgetServerDetails(linkUsername)
+        typeAddress(action.address)
+        home = action.home
+        link = link.adopted(action)
+    }
+
+    // A sealed sign-in refused here: the hand-over is left (its token is
+    // spent) and the words go in the link note.
+    fun refuseReceived(why: LinkRefusal) {
+        invite = null
+        handOver = null
+        handOverStep = null
+        received = null
+        signedUp = null
+        link = link.left().noted(why.words)
+    }
+
+    // Words for the link note from outside the form: a link that came while
+    // a sign-in was open, or the note of the form this one replaced.
+    fun noteLink(words: String) {
+        link = link.noted(words)
     }
 
     // What is missing before signing up from an invite, or null when it can go.
@@ -527,9 +692,10 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     val homeUrl: HttpUrl? get() = home.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)
 
     // Signing in after signing up, with the username the server gave and
-    // the password just chosen, remembered like any typed one.
-    fun signUpRequest(username: String, password: String): SignInRequest = SignInRequest(
-        address = url?.toString() ?: (scheme.prefix + address.trim()),
+    // the password just chosen, remembered like any typed one, at the main
+    // address the sign-up was made at.
+    fun signUpRequest(username: String, password: String, main: String = url?.toString() ?: (scheme.prefix + address.trim())): SignInRequest = SignInRequest(
+        address = main,
         username = username,
         secret = password,
         mode = AuthMode.Token,
@@ -563,4 +729,10 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
         question = null
         result = false to "Not connected. The server's certificate wasn't trusted."
     }
+}
+
+// A finished sign-up's login, and the main address it was made at (never
+// the home address it may have been made through).
+class HeldSignUp(val username: String, val password: String, val main: String) {
+    override fun toString() = "HeldSignUp(username=$username, main=$main)"
 }

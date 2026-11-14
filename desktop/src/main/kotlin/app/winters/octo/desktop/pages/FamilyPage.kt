@@ -283,7 +283,7 @@ private fun DevicesSection(app: AppState, model: FamilyModel) {
                 RowAction("Show QR code", { showHandOver(popups, app, model) }, icon = OctoIcons.QrCode)
             }
             SettingRow(SIGN_OUT_EVERYWHERE, SIGN_OUT_EVERYWHERE_LINE) {
-                RowAction(CHANGE_PASSWORD, { changePassword(app) })
+                RowAction(CHANGE_PASSWORD, { changePassword(app) }, enabled = !app.changingPassword)
             }
         }
     }
@@ -321,7 +321,7 @@ private fun LoginSection(app: AppState, model: FamilyModel) {
             CopyButton(login.username, "Copy username", ::copyText)
         }
         SettingRow("Password", PASSWORD_LINE) {
-            RowAction(CHANGE_PASSWORD, { changePassword(app) })
+            RowAction(CHANGE_PASSWORD, { changePassword(app) }, enabled = !app.changingPassword)
         }
         SettingRow(HANDOVER_TITLE, "A QR code your phone or another computer scans to sign in with this login.") {
             RowAction("Show QR code", { showHandOver(popups, app, model) }, icon = OctoIcons.QrCode)

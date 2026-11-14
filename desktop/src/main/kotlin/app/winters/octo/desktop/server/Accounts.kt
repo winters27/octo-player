@@ -78,6 +78,10 @@ private const val HOME_PING_SECONDS = 2L
 // How long a server not in use gets to answer a quick look.
 private const val GLANCE_SECONDS = 6L
 
+// How long one call of a sign-in, a sign-up or a hand-over may take, so a
+// step nothing can leave while it commits always ends.
+internal const val COMMIT_SECONDS = 30L
+
 // The signed-in server: the client that talks to it, and what it said
 // about itself when signing in.
 class Connection(
@@ -1265,7 +1269,7 @@ class Accounts(
         }
         val tried = loaded ?: certificateFor(request.certificate, editing?.id, main, home).let { choice -> CertificateTry(choice, loadChoice(choice)) }
         var creds = Credentials(request.username.trim(), secret, mode)
-        return checkClient(listOfNotNull(main, home), headers, tried.certificate).use { own ->
+        return checkClient(listOfNotNull(main, home), headers, tried.certificate, COMMIT_SECONDS).use { own ->
             val (reachedUrl, info) = try {
                 reach(own.http, main, home, creds)
             } catch (e: SubsonicException) {

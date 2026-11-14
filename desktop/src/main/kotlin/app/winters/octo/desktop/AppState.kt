@@ -225,7 +225,7 @@ class AppState(
     // Opens Settings on `page` (or the page it last showed), bringing `row`
     // into view when given. Already in Settings, it only moves there.
     fun openSettings(page: String? = null, row: String? = null) {
-        if (popups.open) popups.close()
+        if (!popups.dismiss()) return
         fullPlayer = false
         if (page != null) settingsUi.page = page
         settingsUi.aim(row)
@@ -242,7 +242,7 @@ class AppState(
     // Settings' shortcut: leaves Settings when in it, else opens it on the
     // page it last showed. An open menu closes first.
     fun toggleSettings() {
-        if (popups.open) popups.close()
+        if (!popups.dismiss()) return
         if (inSettings) leaveSettings() else openSettings()
     }
 
@@ -257,6 +257,11 @@ class AppState(
     // The kept server being switched to, while it is asked whether it
     // answers; none otherwise.
     var switching by mutableStateOf<SavedServer?>(null)
+        private set
+
+    // A change of the signed-in user's password is on its way; only one at
+    // a time goes.
+    var changingPassword by mutableStateOf(false)
         private set
 
     // The sign-in page's fields, started from the server signed in to last.
@@ -882,10 +887,12 @@ class AppState(
     // another. With `certificate`, its client certificate could not be
     // read: its saved password stays, and the page opens on the certificate.
     fun fillSignIn(server: SavedServer, note: String? = null, certificate: Boolean = false) {
+        val carried = signInForm.linkNote
         signInForm = SignInForm(server, keepsSecret = certificate).also { form ->
             form.keptId = server.id
             note?.let { form.result = false to it }
             if (certificate) form.askForCertificate()
+            carried?.let(form::noteLink)
         }
     }
 
@@ -908,7 +915,7 @@ class AppState(
             }
             when (outcome) {
                 is SwitchOutcome.Done -> arrive(outcome.connection, page)
-                is SwitchOutcome.Failed -> notice = outcome.message
+                is SwitchOutcome.Failed -> if (connection == null) signInForm.result = false to outcome.message else notice = outcome.message
                 is SwitchOutcome.NeedsPassword -> Unit
                 is SwitchOutcome.NeedsCertificate -> Unit
                 SwitchOutcome.Overtaken -> Unit
@@ -952,9 +959,14 @@ class AppState(
     // Changes the signed-in user's password on the server in use. Songs
     // queued with the old one are asked for again with the new.
     suspend fun changePassword(connection: Connection, current: String, new: String, family: Boolean = false): PasswordOutcome {
-        val outcome = accounts.changePassword(connection, current, new, family)
-        if (outcome.result == PasswordChange.Changed) player.reconnect()
-        return outcome
+        changingPassword = true
+        try {
+            val outcome = accounts.changePassword(connection, current, new, family)
+            if (outcome.result == PasswordChange.Changed) player.reconnect()
+            return outcome
+        } finally {
+            changingPassword = false
+        }
     }
 
     // Signs out of a kept server that is not the one in use; the one in use
@@ -1247,7 +1259,8 @@ class AppState(
     private fun closeLayer(typing: Boolean): Boolean {
         val ui = settingsUi
         when {
-            popups.open -> popups.close()
+            // A sheet whose sign-in commits stays, and Escape goes no further.
+            popups.open -> popups.dismiss()
             fullPlayer -> fullPlayer = false
             omnibox.open -> return false
             shownPanel != null && panelHasKeyboard -> showSidePanel(null)

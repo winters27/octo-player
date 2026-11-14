@@ -24,7 +24,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.ResolvedHeaders
+import app.winters.octo.connection.ReceivedAction
 import app.winters.octo.connection.SignInWords
+import app.winters.octo.connection.signInOpen
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
@@ -36,11 +38,13 @@ import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.NoticeAction
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.CertificateLoad
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.CertificateTry
+import app.winters.octo.desktop.server.COMMIT_SECONDS
 import app.winters.octo.desktop.server.CheckClient
 import app.winters.octo.desktop.server.SignInOutcome
 import app.winters.octo.desktop.server.SignInRequest
@@ -57,6 +61,8 @@ import app.winters.octo.ui.family.MIN_PASSWORD
 import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.ui.family.passwordStrength
 import app.winters.octo.ui.family.receiveHandOver
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -74,41 +80,48 @@ suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.
     val invite = form.invite ?: return null
     form.sending()
     val tried = form.attemptAddress
-    val headers = when (val resolved = accounts.joinHeaders(form.request())) {
-        is ResolvedHeaders.Problem -> {
-            form.result = false to resolved.text
-            return null
-        }
-        is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
-    }
-    val addresses = listOfNotNull(url, form.homeUrl)
-    val sent = accounts.joinCertificate(form, url)
-    val joined = accounts.checkClient(addresses, headers, sent.certificate).use { join ->
-        val outcome = joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, join.http, home = form.homeUrl)
-        joinAnswer(outcome, join, addresses, sent, form)
-    }
-    when (joined) {
-        is JoinOutcome.Failed -> {
-            form.result = false to (joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message)
-            form.failed(tried, joined.gateway)
-        }
-        is JoinOutcome.Untrusted -> Unit
-        is JoinOutcome.SignedUp -> when (val done = accounts.signIn(form.signUpRequest(joined.username, joined.password))) {
-            is SignInOutcome.Done -> {
-                form.invitePassword = ""
-                form.inviteAgain = ""
-                form.invite = null
-                return done
+    // A sign-up this invite already made is used again (the invite is spent),
+    // at the main address it was made at.
+    val held = form.signedUp ?: run {
+        val headers = when (val resolved = accounts.joinHeaders(form.request())) {
+            is ResolvedHeaders.Problem -> {
+                form.result = false to resolved.text
+                return null
             }
-            is SignInOutcome.Saved -> Unit
-            is SignInOutcome.Failed -> {
-                form.result = false to done.message
-                form.failed(tried, done.gateway)
-                form.tried(done.tried)
-                if (done.certificate) form.askForCertificate()
-            }
-            is SignInOutcome.Untrusted -> form.question = done.question
+            is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
         }
+        val addresses = listOfNotNull(url, form.homeUrl)
+        val sent = accounts.joinCertificate(form, url)
+        val joined = accounts.checkClient(addresses, headers, sent.certificate, COMMIT_SECONDS).use { join ->
+            val outcome = joinWithInvite(url, invite.token, form.inviteName, form.invitePassword, join.http, home = form.homeUrl)
+            joinAnswer(outcome, join, addresses, sent, form)
+        }
+        when (joined) {
+            is JoinOutcome.Failed -> {
+                form.result = false to (joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message)
+                form.failed(tried, joined.gateway)
+                return null
+            }
+            is JoinOutcome.Untrusted -> return null
+            is JoinOutcome.SignedUp -> HeldSignUp(joined.username, joined.password, url.toString()).also { form.signedUp = it }
+        }
+    }
+    when (val done = accounts.signIn(form.signUpRequest(held.username, held.password, held.main))) {
+        is SignInOutcome.Done -> {
+            form.invitePassword = ""
+            form.inviteAgain = ""
+            form.invite = null
+            form.signedUp = null
+            return done
+        }
+        is SignInOutcome.Saved -> Unit
+        is SignInOutcome.Failed -> {
+            form.result = false to done.message
+            form.failed(tried, done.gateway)
+            form.tried(done.tried)
+            if (done.certificate) form.askForCertificate()
+        }
+        is SignInOutcome.Untrusted -> form.question = done.question
     }
     return null
 }
@@ -123,36 +136,58 @@ suspend fun signUpFromForm(accounts: Accounts, form: SignInForm): SignInOutcome.
 suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: SignInForm): SignInOutcome.Done? {
     val link = form.handOver ?: return null
     form.sending()
-    val tried = form.attemptAddress
-    val headers = when (val resolved = accounts.joinHeaders(form.request())) {
-        is ResolvedHeaders.Problem -> {
+    var tried = form.attemptAddress
+    // A sealed sign-in this code already brought is used again (the code is
+    // spent).
+    val signIn = form.received ?: run {
+        val headers = when (val resolved = accounts.joinHeaders(form.request())) {
+            is ResolvedHeaders.Problem -> {
+                form.waiting = false
+                form.handOverStep = null
+                form.result = false to resolved.text
+                return null
+            }
+            is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
+        }
+        val base = link.base.toHttpUrlOrNull()
+        val addresses = listOfNotNull(base, form.homeUrl)
+        val sent = accounts.joinCertificate(form, base)
+        val got = accounts.checkClient(addresses, headers, sent.certificate, COMMIT_SECONDS).use { join ->
+            val received = receiveHandOver(link, join.http, accounts.security.deviceName(), platform, step = { form.handOverStep = it })
+            handOverAnswer(received, join, addresses, sent, form)
+        }
+        // The wait for the other device is over, however it ended: what
+        // follows commits.
+        form.waiting = false
+        if (got !is HandOverResult.Received) {
+            val refused = got as HandOverResult.Refused
             form.handOverStep = null
-            form.result = false to resolved.text
+            form.result = false to (refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message)
+            form.failed(tried, refused.gateway)
             return null
         }
-        is ResolvedHeaders.Ready -> resolved.headers.associate { it.name to it.value }
+        got.signIn.also { form.received = it }
     }
-    val base = link.base.toHttpUrlOrNull()
-    val addresses = listOfNotNull(base, form.homeUrl)
-    val sent = accounts.joinCertificate(form, base)
-    val got = accounts.checkClient(addresses, headers, sent.certificate).use { join ->
-        val received = receiveHandOver(link, join.http, accounts.security.deviceName(), platform, step = { form.handOverStep = it })
-        handOverAnswer(received, join, addresses, sent, form)
-    }
-    if (got !is HandOverResult.Received) {
-        val refused = got as HandOverResult.Refused
-        form.handOverStep = null
-        form.result = false to (refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message)
-        form.failed(tried, refused.gateway)
+    // The sealed sign-in is checked against what the form holds before
+    // anything is sent to it.
+    val action = form.receivedAction(signIn)
+    if (action is ReceivedAction.Refuse) {
+        form.refuseReceived(action.why)
         return null
     }
-    val signIn = got.signIn
+    if (action is ReceivedAction.ForgetAndAdopt) {
+        form.adopt(action, link.username)
+        // What this try meets is told against the address now in the box.
+        tried = form.attemptAddress
+    }
+    // The form's own server: its addresses as the form holds them.
+    val useForm = (action as? ReceivedAction.Keep)?.useForm == true
     val request = SignInRequest(
-        address = signIn.server,
+        address = if (useForm) form.url?.toString() ?: signIn.server else signIn.server,
         username = signIn.username,
         secret = signIn.secret,
         mode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
-        home = signIn.home.orEmpty(),
+        home = if (useForm) form.home else signIn.home.orEmpty(),
         headers = form.headers.toList(),
         rememberPassword = true,
         gateway = form.gatewayDraft(),
@@ -162,6 +197,7 @@ suspend fun receiveFromForm(accounts: Accounts, platform: FamilyPlatform, form: 
         is SignInOutcome.Done -> {
             form.handOverStep = HANDOVER_SIGNED_IN
             form.handOver = null
+            form.received = null
             return done
         }
         is SignInOutcome.Saved -> Unit
@@ -225,19 +261,43 @@ fun AppState.openJoinLink(url: String) {
 }
 
 // Opens a family link, from a launch, the clipboard or a pasted link:
-// signed out, the sign-in page fills in; signed in, a popup does the same,
-// and the link's server becomes the one in use once signed in.
+// signed out, the sign-in page fills in; signed in, a sheet does the same,
+// and the link's server becomes the one in use once signed in. A link never
+// replaces a sign-in that is open (running, a question waiting, or a
+// sign-up or sealed sign-in held): signed out, or while a switch from the
+// page is on its way, the page's link note says so; signed in, the open
+// sheet's link note and the notice say so, the notice with Use it, which
+// opens the link again from here.
 fun AppState.openFamilyLink(link: FamilyLink) {
     if (connection == null) {
-        signInForm.take(link)
+        val form = signInForm
+        if (switching != null || signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null)) {
+            form.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            return
+        }
+        form.take(link)
         return
     }
-    popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
-        // Nothing of the server in use is filled in but its certificate,
-        // which a join to that server's own origin sends.
-        val form = remember { SignInForm(certificateOf = connection?.server?.id).also { it.take(link) } }
-        LinkSheet(this@openFamilyLink, form, close)
+    val open = popups.request
+    if (open != null && open.open()) {
+        open.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+        notice = SignInWords.LINK_WHILE_SIGN_IN_OPEN
+        noticeDetail = null
+        noticeAction = NoticeAction(SignInWords.LINK_WHILE_SIGN_IN_OPEN, "Use it") { openFamilyLink(link) }
+        return
     }
+    // Nothing of the server in use is filled in but its certificate, which a
+    // join to that server's own origin sends.
+    val form = SignInForm(certificateOf = connection?.server?.id).also { it.take(link) }
+    popups.showCentred(
+        width = SettingsSize.Sheet,
+        maxHeight = SettingsSize.SheetMax,
+        scrollsItself = true,
+        busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },
+        open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },
+        noteLink = form::noteLink,
+        link = true,
+    ) { close -> LinkSheet(this@openFamilyLink, form, close) }
 }
 
 // The sheet a link opens while signed in: the link's card and Advanced
@@ -262,27 +322,37 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
         if (form.busy) return
         form.sending()
         form.busy = true
+        form.waiting = form.handOver != null && form.received == null
         form.result = null
         val tried = form.attemptAddress
-        scope.launch {
-            val done = when {
-                form.invite != null -> signUpFromForm(app.accounts, form)
-                form.handOver != null -> receiveFromForm(app.accounts, familyPlatform(app.os), form)
-                else -> when (val signedIn = app.accounts.signIn(form.request())) {
-                    is SignInOutcome.Done -> signedIn
-                    is SignInOutcome.Failed -> null.also {
-                        form.result = false to signedIn.message
-                        form.failed(tried, signedIn.gateway)
-                        form.tried(signedIn.tried)
-                        if (signedIn.certificate) form.askForCertificate()
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val done = try {
+                when {
+                    form.invite != null -> signUpFromForm(app.accounts, form)
+                    form.handOver != null -> receiveFromForm(app.accounts, familyPlatform(app.os), form)
+                    else -> when (val signedIn = app.accounts.signIn(form.request())) {
+                        is SignInOutcome.Done -> signedIn
+                        is SignInOutcome.Failed -> null.also {
+                            form.result = false to signedIn.message
+                            form.failed(tried, signedIn.gateway)
+                            form.tried(signedIn.tried)
+                            if (signedIn.certificate) form.askForCertificate()
+                        }
+                        is SignInOutcome.Untrusted -> null.also { form.question = signedIn.question }
+                        is SignInOutcome.Saved -> null
                     }
-                    is SignInOutcome.Untrusted -> null.also { form.question = signedIn.question }
-                    is SignInOutcome.Saved -> null
+                }
+            } finally {
+                if (form.running === coroutineContext.job) {
+                    form.busy = false
+                    form.waiting = false
+                    form.running = null
                 }
             }
-            form.busy = false
             finish(done)
         }
+        form.running = job
+        job.start()
     }
     // A hand-over starts at once: there is nothing to type.
     LaunchedEffect(form.handOver) { if (form.handOver != null && form.handOverStep == null) go() }
@@ -306,6 +376,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
                     asking = null
                 },
             )
+            LinkNote(form)
         }
         return
     }
@@ -330,7 +401,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
         }
     }
-    PopupPadding { LinkFooter(form, ::go, onLeave = close) }
+    PopupPadding { LinkFooter(form, ::go, onLeave = { if (form.invite != null) form.leaveLink() else if (!form.committing) close() }) }
 }
 
 // The part of the sign-in a family link fills, as the page's main card:
@@ -418,20 +489,24 @@ internal fun LinkCard(
     }
 }
 
-// The foot of a link's card: the result line, then the way out of the link
-// and the button that goes on. The page draws it in its card; the sheet
-// keeps it under its scrolling part.
+// The foot of a link's card: the result line and a refused link's words,
+// then the way out of the link and the button that goes on. With an invite
+// held the way out is a password sign-in instead; with anything else it is
+// Cancel. Nothing leaves while the request commits, and nothing goes while
+// `held` (a switch from the page on its way). The page draws it in its card;
+// the sheet keeps it under its scrolling part.
 @Composable
-internal fun LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit) {
+internal fun LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit, held: Boolean = false) {
     val invite = form.invite
     val handOver = form.handOver
     ResultLine(form)
+    LinkNote(form)
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        TextAction(if (handOver != null) "Cancel" else "Sign in with a password instead", onLeave)
+        TextAction(if (invite != null) "Sign in with a password instead" else "Cancel", onLeave, enabled = !form.committing)
         when {
-            invite != null -> AccentButton("Sign up", go, Modifier.widthIn(min = 150.dp), enabled = form.inviteReady, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
-            handOver != null -> if (!form.busy) AccentButton("Try again", go, Modifier.widthIn(min = 150.dp), size = ButtonSize.Medium, fill = OctoColors.Accent)
-            else -> AccentButton("Sign in", go, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
+            invite != null -> AccentButton("Sign up", go, Modifier.widthIn(min = 150.dp), enabled = form.inviteReady && !held, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
+            handOver != null -> if (!form.busy) AccentButton("Try again", go, Modifier.widthIn(min = 150.dp), enabled = !held, size = ButtonSize.Medium, fill = OctoColors.Accent)
+            else -> AccentButton("Sign in", go, Modifier.widthIn(min = 150.dp), enabled = form.ready && !held, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
         }
     }
 }

@@ -153,7 +153,8 @@ class CertificateFormTest {
         val form = SignInForm(k)
         form.useCertificate(PickedCertificate(a.path, PASSWORD, (accounts.openPicked(a.path, PASSWORD) as CertificateOpened.Found).certificate))
         assertTrue(form.takeJoinLink(inviteLink("https://elsewhere.test")))
-        assertEquals(CertificateDraft.Keep("k"), form.certificateDraft)
+        // A link to another server starts the form over: no certificate.
+        assertEquals(CertificateDraft.None, form.certificateDraft)
         assertNull(form.certificateLoad)
     }
 
@@ -204,8 +205,32 @@ class CertificateFormTest {
         assertEquals(rsa, server.lastLeaf)
     }
 
+    // An invite always makes a new account, so on the page after a sign-out
+    // it starts the form over: the last server's certificate goes nowhere.
     @Test
-    fun aPageInviteToTheLastHostSendsTheCertificateAndTheNewServerKeepsIt() = runTest {
+    fun aPageInviteToTheLastHostCarriesNothingOfIt() = runTest {
+        val server = serve(Auth.Wanted)
+        answerJoin(server)
+        val accounts = accounts()
+        val k = signIn(accounts, server.address)
+        accounts.signOut()
+        val form = SignInForm(accounts.last)
+        assertTrue(form.takeJoinLink(inviteLink(server.address)))
+        assertEquals(CertificateDraft.None, form.certificateDraft)
+        fillInvite(form)
+        server.leaves.clear()
+        val made = signUpFromForm(accounts, form)!!.connection.server
+        assertEquals("alex", made.username)
+        assertNull(made.certificate)
+        assertTrue(server.leaves.isNotEmpty() && server.leaves.all { it == null })
+        assertNotEquals(k.id, made.id)
+    }
+
+    // After the invite started the form over, a certificate chosen on the
+    // page goes with the join to a server that requires one, and the new
+    // server keeps it across a restart.
+    @Test
+    fun aCertificateChosenOnThePageAfterAnInviteGoesWithTheJoinAndStays() = runTest {
         val server = serve()
         answerJoin(server)
         val accounts = accounts()
@@ -213,13 +238,20 @@ class CertificateFormTest {
         accounts.signOut()
         val form = SignInForm(accounts.last)
         assertTrue(form.takeJoinLink(inviteLink(server.address)))
+        assertEquals(CertificateDraft.None, form.certificateDraft)
+        form.useCertificate(PickedCertificate(a.path, PASSWORD, (accounts.openPicked(a.path, PASSWORD) as CertificateOpened.Found).certificate))
+        assertEquals(CertificateDraft.Use(a.path, PASSWORD), form.certificateDraft)
         fillInvite(form)
+        server.leaves.clear()
         val made = signUpFromForm(accounts, form)!!.connection.server
         assertEquals("alex", made.username)
-        assertEquals(fileA, made.certificate)
-        assertTrue(server.leaves.all { it == rsa })
-        assertTrue(loads(accounts(), made) is CertificateLoad.Found)
         assertNotEquals(k.id, made.id)
+        assertEquals(fileA, made.certificate)
+        assertTrue(server.leaves.isNotEmpty() && server.leaves.all { it == rsa })
+        val later = accounts()
+        assertEquals(fileA, later.find(made.id)?.certificate)
+        assertTrue(loads(later, made) is CertificateLoad.Found)
+        assertEquals(CertSecret(a.path, PASSWORD), secrets.item(made.id))
     }
 
     // The usual http LAN home never stops k's certificate at its https main.
@@ -237,8 +269,8 @@ class CertificateFormTest {
     }
 
     @Test
-    fun anInviteLinkWithAnHttpHomeToTheSameOriginSendsIt() = runTest {
-        val server = serve()
+    fun anInviteLinkWithAnHttpHomeToTheSameOriginSendsNone() = runTest {
+        val server = serve(Auth.Wanted)
         answerJoin(server)
         val accounts = accounts()
         signIn(accounts, server.address)
@@ -246,16 +278,17 @@ class CertificateFormTest {
         val form = SignInForm(accounts.last)
         assertTrue(form.takeJoinLink(inviteLink(server.address, home = "http://127.0.0.1:1")))
         fillInvite(form)
+        server.leaves.clear()
         assertTrue(signUpFromForm(accounts, form) != null)
-        assertTrue(server.leaves.isNotEmpty() && server.leaves.all { it == rsa })
+        assertTrue(server.leaves.isNotEmpty() && server.leaves.all { it == null })
     }
 
-    // A link's https home on another host becomes part of the saved server,
-    // and the certificate goes there too.
+    // A link's https home on another host becomes part of the saved server;
+    // the last server's certificate goes to neither address.
     @Test
-    fun anInviteLinkWithAnHttpsHomeOnAnotherHostKeepsTheCertificateAndThatHome() = runTest {
-        val main = serve()
-        val home = serve()
+    fun anInviteLinkWithAnHttpsHomeOnAnotherHostKeepsThatHomeAndNoCertificate() = runTest {
+        val main = serve(Auth.Wanted)
+        val home = serve(Auth.Wanted)
         answerJoin(main)
         val accounts = accounts()
         signIn(accounts, main.address)
@@ -264,10 +297,12 @@ class CertificateFormTest {
         val homeAddress = home.url("localhost").toString()
         assertTrue(form.takeJoinLink(inviteLink(main.address, home = homeAddress)))
         fillInvite(form)
+        main.leaves.clear()
         val made = signUpFromForm(accounts, form)!!.connection.server
-        assertEquals(fileA, made.certificate)
+        assertNull(made.certificate)
         assertEquals(homeAddress.removeSuffix("/"), made.home?.removeSuffix("/"))
-        assertTrue(home.leaves.contains(rsa))
+        assertTrue(main.leaves.all { it == null })
+        assertTrue(home.leaves.all { it == null })
     }
 
     @Test
@@ -451,17 +486,24 @@ class CertificateFormTest {
         assertTrue(otherPort.leaves.isNotEmpty() && otherPort.leaves.all { it == null })
     }
 
+    // A sealed sign-in for another account at the last server: the page
+    // starts over and adopts it, so the last server's certificate stays home.
+    // The redeem, at k's own origin, still goes with k's certificate; the
+    // sign-in after it goes with none.
     @Test
-    fun aHandOverFromThePageToANewAccountAtTheLastOriginCarriesTheCertificate() = runTest {
-        val server = serve()
+    fun aHandOverFromThePageToANewAccountAtTheLastOriginCarriesNothingOfIt() = runTest {
+        val server = serve(Auth.Wanted)
         val accounts = accounts()
         val k = signIn(accounts, server.address)
         accounts.signOut()
         val form = SignInForm(accounts.last).also { it.take(handOver(server, HandOverSignIn("ana", "pw3", server = server.address))) }
         val made = receiveFromForm(accounts, FamilyPlatform.Windows, form)!!.connection.server
         assertNotEquals(k.id, made.id)
-        assertEquals(fileA, made.certificate)
-        assertEquals(CertSecret(a.path, PASSWORD), secrets.item(made.id))
+        assertEquals(CertificateDraft.None, form.certificateDraft)
+        assertNull(made.certificate)
+        assertNull(secrets.item(made.id))
+        assertNull(server.lastLeaf)
+        assertEquals("k keeps its own", fileA, accounts.find(k.id)?.certificate)
     }
 
     // The page row with keptId set and http typed on k's host shows what

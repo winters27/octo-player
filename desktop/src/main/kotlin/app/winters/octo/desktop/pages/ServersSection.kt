@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.SignInWords
+import app.winters.octo.connection.signInOpen
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.CardFit
 import app.winters.octo.design.Corner
@@ -71,6 +72,7 @@ import app.winters.octo.design.Txt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.design.scrollbar
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.NoticeAction
 import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.Accounts
@@ -196,7 +198,7 @@ private fun ServerMenuButton(app: AppState, server: SavedServer, inUse: Boolean)
             app.popups.showUnder(anchor, width = FrameSize.Menu) { close ->
                 MenuTitle(server.name)
                 MenuRow("Edit", { close(); editServer(app, server) }, OctoIcons.Rename)
-                if (inUse && server.authMode != AuthMode.ApiKey) MenuRow("Change password", { close(); changePassword(app) }, OctoIcons.Settings)
+                if (inUse && server.authMode != AuthMode.ApiKey) MenuRow("Change password", { close(); changePassword(app) }, OctoIcons.Settings, enabled = !app.changingPassword)
                 if (server.signedOut) {
                     MenuRow("Sign in", { close(); signInTo(app, server) }, OctoIcons.Forward)
                 } else {
@@ -247,7 +249,7 @@ private fun OverviewCards(app: AppState, connection: Connection) {
         SettingRow("In your library", overview.counts ?: if (state is LibraryState.Failed) "Couldn't read the library just now." else "Reading the library.")
         val kept = if (app.accounts.remembersSignIn) "Octo keeps you signed in on this computer." else "You'll sign in again the next time Octo opens."
         SettingRow("Signed in as ${connection.client.username.ifEmpty { "API key" }}", overview.passwordNote ?: kept, stable = "Signed in as ...") {
-            if (overview.canChangePassword) RowAction("Change password", { changePassword(app) })
+            if (overview.canChangePassword) RowAction("Change password", { changePassword(app) }, enabled = !app.changingPassword)
         }
         // Any account on a family server: a QR code another device scans to
         // sign in with the same login.
@@ -291,7 +293,7 @@ fun switchServer(app: AppState, id: String) {
     val page = if (app.navigator.current.page == Page.Settings) Page.Settings else Page.Home
     app.switchTo(id, page) { outcome ->
         when (outcome) {
-            is SwitchOutcome.NeedsPassword -> serverSheet(app, sheetFor(outcome), outcome.server, outcome.note)
+            is SwitchOutcome.NeedsPassword -> askSignIn(app, sheetFor(outcome), outcome.server, outcome.note)
             // Its certificate can't be read: the sign-in sheet opens on it,
             // and an empty password keeps the saved one.
             is SwitchOutcome.NeedsCertificate -> serverSheet(app, SheetKind.SignIn, outcome.server, outcome.words, keepsSecret = true, certificate = true)
@@ -334,19 +336,48 @@ private fun serverSheet(
     keepsSecret: Boolean = kind == SheetKind.Edit || kind == SheetKind.Secure,
     certificate: Boolean = false,
 ) {
-    // Each opening starts afresh, even straight after another sheet.
+    // Each opening starts afresh, even straight after another sheet. The form
+    // is made here, so the pop-up can tell when its sign-in is committing
+    // (closing waits) or open (a link does not replace it).
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet, maxHeight = SettingsSize.SheetMax, scrollsItself = true) { close ->
-        key(opening) {
-            val form = remember {
-                SignInForm(server, keepsSecret = keepsSecret).also { f ->
-                    note?.let { f.result = false to it }
-                    if (certificate) f.askForCertificate()
-                }
-            }
-            ServerSheet(app, kind, server, form, close)
-        }
+    val form = SignInForm(server, keepsSecret = keepsSecret).also { f ->
+        note?.let { f.result = false to it }
+        if (certificate) f.askForCertificate()
     }
+    app.popups.showCentred(
+        width = SettingsSize.Sheet,
+        maxHeight = SettingsSize.SheetMax,
+        scrollsItself = true,
+        busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },
+        open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },
+        noteLink = form::noteLink,
+    ) { close ->
+        key(opening) { ServerSheet(app, kind, server, form, close) }
+    }
+}
+
+// A switch that needs a password opens its sheet, unless a sign-in is open
+// in a sheet or a family link's sheet is showing: then nothing opens over
+// it, and the notice offers Sign in, which looks the server up again and
+// asks again from here (never switching again): the sheet then, the gone
+// words when it left the list, nothing once it is the one in use.
+internal fun askSignIn(app: AppState, kind: SheetKind, server: SavedServer, note: String?) {
+    val open = app.popups.request
+    if (open != null && (open.open() || open.link)) {
+        val words = SignInWords.askWhileSignInOpen(server.name)
+        app.notice = words
+        app.noticeDetail = null
+        app.noticeAction = NoticeAction(words, "Sign in") {
+            val now = app.accounts.find(server.id)
+            when {
+                now == null -> app.notice = SignInWords.GONE
+                now.id == app.connection?.server?.id -> Unit
+                else -> askSignIn(app, kind, now, note)
+            }
+        }
+        return
+    }
+    serverSheet(app, kind, server, note)
 }
 
 // The form of a server sheet: the sign-in page's groups, in the middle of
@@ -370,6 +401,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         again = ::test
         form.sending()
         form.busy = true
+        form.waiting = false
         form.result = null
         val tried = form.attemptAddress
         scope.launch {
@@ -403,6 +435,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         }
         form.sending()
         form.busy = true
+        form.waiting = false
         form.result = null
         // Taken now, so a switch, sign-out or removal asked for while this
         // is checked comes after it.
@@ -463,6 +496,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 },
                 onCancel = form::distrust,
             )
+            LinkNote(form)
         }
         return
     }
@@ -533,6 +567,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
     }
     PopupPadding {
         ResultLine(form)
+        LinkNote(form)
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically) {
             if (kind != SheetKind.SignIn) TextAction("Test connection", ::test, enabled = form.ready)
             Spacer(Modifier.weight(1f))
@@ -557,6 +592,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
 // Changes the signed-in user's password on the server in use: the current
 // one, then the new one twice.
 fun changePassword(app: AppState) {
+    if (app.changingPassword) return
     val connection = app.connection ?: return
     val opening = Any()
     app.popups.showCentred(width = SettingsSize.Sheet, scrim = true) { close -> key(opening) { PasswordSheet(app, connection, close) } }
@@ -592,7 +628,8 @@ internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder:
 
 @Composable
 private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, close: () -> Unit) {
-    val scope = rememberCoroutineScope()
+    // The pop-up this sheet opened in, to know whether it is still the one open.
+    val mine = remember { app.popups.request }
     val first = remember { FocusRequester() }
     var draft by remember { mutableStateOf(PasswordDraft()) }
     var busy by remember { mutableStateOf(false) }
@@ -607,17 +644,22 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
     fun change() {
         tried = true
         passwordDraftProblem(draft)?.let { problem = it; return }
-        if (busy) return
+        if (busy || app.changingPassword) return
         busy = true
         problem = null
-        scope.launch {
-            val outcome = app.changePassword(connection, draft.current, draft.new, family)
+        val sent = draft
+        app.scope.launch {
+            val outcome = app.changePassword(connection, sent.current, sent.new, family)
             busy = false
-            if (outcome.result == PasswordChange.Changed) {
-                close()
-                app.notice = listOfNotNull(passwordChangeWords(outcome.result, family), outcome.note).joinToString(" ")
-            } else {
-                problem = passwordChangeWords(outcome.result)
+            val changed = outcome.result == PasswordChange.Changed
+            val words = if (changed) listOfNotNull(passwordChangeWords(outcome.result, family), outcome.note).joinToString(" ") else passwordChangeWords(outcome.result)
+            when {
+                app.popups.request !== mine -> app.notice = words
+                changed -> {
+                    close()
+                    app.notice = words
+                }
+                else -> problem = words
             }
         }
     }

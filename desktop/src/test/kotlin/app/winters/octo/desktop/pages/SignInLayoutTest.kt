@@ -18,12 +18,15 @@ import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.a11y.name
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.subsonic.FamilyHandOverLink
+import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.subsonic.FamilySignInPrefill
 import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.GatewayKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -506,6 +509,70 @@ class SignInLayoutTest {
             s.type(s.named(SignInWords.API_KEY).single(), "key-1")
             assertEquals(SignInWords.API_KEY, s.entry("key-1").config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" "))
             assertNotEquals("the key is typed into its own field", s.named(SignInWords.USERNAME).firstOrNull(), s.entry("key-1"))
+        }
+    }
+
+    // `below` sits under `above`, close: the link note under the result line.
+    private fun A11yScene.under(above: String, below: String) {
+        val top = text(above).boundsInRoot
+        val note = text(below).boundsInRoot
+        assertTrue("'$below' at ${note.top}, '$above' ends at ${top.bottom}", note.top >= top.bottom - 1f && note.top - top.bottom < 24f)
+    }
+
+    // A refused link's words sit under the result line in the plain form and
+    // in a link's card, an invite or a hand-over showing; a held sign-up
+    // keeps the address it was made at. Shots of each, for the polish pass.
+    @Test(timeout = 120_000)
+    fun aRefusedLinksWordsSitUnderTheResultLine() {
+        page(height = 1_200).use { s ->
+            s.onUi {
+                val form = s.app.signInForm
+                form.typeAddress("https://music.example.com")
+                form.result = false to SignInWords.WRONG_PASSWORD
+                form.noteLink(SignInWords.LINK_WHILE_BUSY)
+            }
+            s.settle(600).close()
+            s.under(SignInWords.WRONG_PASSWORD, SignInWords.LINK_WHILE_BUSY)
+            s.shot("signin-link-note")
+            s.onUi {
+                val form = s.app.signInForm
+                form.take(FamilyInviteLink("https://music.example.com", "t1"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+                form.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            }
+            s.settle(600).close()
+            s.under(SignInWords.WRONG_PASSWORD, SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            s.shot("signin-invite-link-note")
+            s.onUi { s.app.signInForm.signedUp = HeldSignUp("alex", "long enough", s.app.signInForm.url.toString()) }
+            s.render(3)
+            assertTrue("the address is read-only", s.named(SignInWords.SERVER_ADDRESS).single().config.getOrNull(SemanticsProperties.Disabled) != null)
+            s.onUi {
+                val form = s.app.signInForm
+                form.leaveLink()
+                // The result is written before the page draws, so the hand-over does not start.
+                form.take(FamilyHandOverLink(base = "https://music.example.com", token = "t2", key = "k", server = "https://music.example.com"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+                form.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            }
+            s.settle(600).close()
+            assertNotNull(s.app.signInForm.handOver)
+            s.under(SignInWords.WRONG_PASSWORD, SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            s.shot("signin-hand-over-link-note")
+        }
+    }
+
+    // The link sheet with a refused link's words in its foot, over its
+    // buttons.
+    @Test(timeout = 120_000)
+    fun theLinkSheetShowsALinkNoteOverItsButtons() {
+        signedIn(height = 1_000).use { s ->
+            s.onUi { s.app.openFamilyLink(FamilySignInPrefill("https://music.example.com", "ana")) }
+            s.settle(600).close()
+            s.onUi { s.app.popups.request!!.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN) }
+            s.render(4)
+            val note = s.inPopup(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            assertTrue(note.boundsInRoot.top < s.inPopup("Sign in").boundsInRoot.top)
+            s.shot("link-sheet-link-note")
         }
     }
 }

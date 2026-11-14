@@ -151,6 +151,14 @@ class PopupRequest(
     val over: IntRect? = null,
     // What takes the keyboard first as it opens, rather than its first row.
     val first: FocusRequester? = null,
+    // A sign-in in it that is committing, so closing waits for it to end.
+    val busy: () -> Boolean = { false },
+    // A sign-in open in it, so a link does not replace it.
+    val open: () -> Boolean = { false },
+    // Where the words of a link refused while it is open go.
+    val noteLink: (String) -> Unit = {},
+    // A family link opened it.
+    val link: Boolean = false,
 )
 
 // How dark the shade over the part of the window a question is about.
@@ -186,19 +194,26 @@ class PopupHost {
 
     // Opens at a point in the window, like where a right click landed.
     // Content that `scrollsItself` keeps a part in place (a search field)
-    // while the rest scrolls.
+    // while the rest scrolls. Nothing opens over a sign-in that is
+    // committing (see busy).
     fun showAt(point: IntOffset, width: Dp? = 260.dp, scrollsItself: Boolean = false, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
+        if (busy) return
         request = PopupRequest(point, null, width, content, scrollsItself = scrollsItself)
     }
 
     // Opens under (or over) a control, given its bounds in the window.
     fun showUnder(anchor: IntRect, width: Dp? = 260.dp, scrollsItself: Boolean = false, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
+        if (busy) return
         request = PopupRequest(null, anchor, width, content, scrollsItself = scrollsItself)
     }
 
     // Opens in the middle of the window, for a small form, or of `over`
     // with that part shaded, for a question about it. A taller form may ask
-    // for more room before it scrolls; `first` takes the keyboard first.
+    // for more room before it scrolls; `first` takes the keyboard first. A
+    // sign-in form says when it is committing (`busy`, then nothing closes
+    // it but its own buttons) and when a sign-in is open in it (`open`,
+    // then a link must not replace it), where a refused link's words go
+    // (`noteLink`), and whether a family link opened it (`link`).
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
@@ -206,13 +221,30 @@ class PopupHost {
         scrollsItself: Boolean = false,
         over: IntRect? = null,
         first: FocusRequester? = null,
+        busy: () -> Boolean = { false },
+        open: () -> Boolean = { false },
+        noteLink: (String) -> Unit = {},
+        link: Boolean = false,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
-        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first)
+        if (this.busy) return
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link)
     }
 
     fun close() {
         request = null
+    }
+
+    // Whether the open pop-up holds a sign-in that is committing.
+    val busy: Boolean get() = request?.busy?.invoke() == true
+
+    // Closes the open pop-up the way Escape, a press outside it, Settings
+    // and the Mac menu do: not while its sign-in is committing. False when it
+    // stays.
+    fun dismiss(): Boolean {
+        if (busy) return false
+        request = null
+        return true
     }
 
     val open: Boolean get() = request != null
@@ -377,7 +409,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             .onKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
                 when (event.key) {
-                    Key.Escape -> host.close()
+                    Key.Escape -> host.dismiss()
                     Key.DirectionDown -> focusManager.moveFocus(FocusDirection.Next)
                     Key.DirectionUp -> focusManager.moveFocus(FocusDirection.Previous)
                     else -> return@onKeyEvent false
@@ -387,7 +419,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             .pointerInput(request) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = true)
-                    host.close()
+                    host.dismiss()
                 }
             },
     ) { measurables, constraints ->

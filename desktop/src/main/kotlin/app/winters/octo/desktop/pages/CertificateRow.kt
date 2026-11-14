@@ -38,7 +38,6 @@ import app.winters.octo.desktop.server.CertificateDraft
 import app.winters.octo.desktop.server.CertificateLoad
 import app.winters.octo.desktop.server.CertificateOpened
 import app.winters.octo.desktop.server.CertificateShown
-import app.winters.octo.desktop.server.CertificateTry
 import app.winters.octo.desktop.server.CertificateWords
 import app.winters.octo.desktop.server.PickedCertificate
 import app.winters.octo.desktop.server.certificateName
@@ -68,8 +67,7 @@ internal fun CertificateRow(app: AppState, form: SignInForm, replacingId: String
     // one no longer shown is let go.
     LaunchedEffect(sends) {
         if (sends == null || form.certificateLoad?.choice == sends) return@LaunchedEffect
-        val load = app.accounts.loadChoice(sends)
-        if (form.certificateLoad?.choice != sends) form.certificateLoad = CertificateTry(sends, load)
+        form.knowCertificate(sends, app.accounts.loadChoice(sends))
     }
     val load = form.certificateLoad?.takeIf { it.choice == sends }?.load
     val name = when (shown) {

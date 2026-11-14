@@ -60,6 +60,7 @@ import app.winters.octo.connection.AdvancedRow
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.formatFingerprint
+import app.winters.octo.connection.signInOpen
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.ControlHeight
@@ -92,6 +93,8 @@ import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.shownAddress
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -117,14 +120,33 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
     // Each try is tagged with the address it went to, so a sign-in page it
     // met counts only while that address is still the one typed.
+    // Runs a request as the form's own: a later one, or a way out that
+    // cancels it, is never undone by its end.
+    fun runRequest(work: suspend () -> Unit) {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                work()
+            } finally {
+                if (form.running === coroutineContext.job) {
+                    form.busy = false
+                    form.waiting = false
+                    form.running = null
+                }
+            }
+        }
+        form.running = job
+        job.start()
+    }
+
     fun test() {
-        if (!form.ready) return
+        if (!form.ready || app.switching != null) return
         again = ::test
         form.sending()
         form.busy = true
+        form.waiting = false
         form.result = null
         val tried = form.attemptAddress
-        scope.launch {
+        runRequest {
             when (val tested = app.accounts.test(form.request(), keptId = form.signsInAgainTo)) {
                 is TestOutcome.Reached -> {
                     form.tried(tested.tried)
@@ -139,18 +161,18 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 }
                 is TestOutcome.Untrusted -> form.question = tested.question
             }
-            form.busy = false
         }
     }
 
     fun signIn() {
-        if (!form.ready) return
+        if (!form.ready || app.switching != null) return
         again = ::signIn
         form.sending()
         form.busy = true
+        form.waiting = false
         form.result = null
         val tried = form.attemptAddress
-        scope.launch {
+        runRequest {
             val kept = form.signsInAgainTo
             when (val done = if (kept != null) app.accounts.signInAgain(kept, form.request(), sameAccount = true) else app.accounts.signIn(form.request())) {
                 is SignInOutcome.Done -> {
@@ -167,23 +189,22 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 }
                 is SignInOutcome.Untrusted -> form.question = done.question
             }
-            form.busy = false
         }
     }
 
     // Signs up from an invite, or takes a sign-in from another device of
-    // one's own, then signs in.
+    // one's own, then signs in. Only a hand-over's redeem waits.
     fun go() {
-        if (form.busy) return
+        if (form.busy || app.switching != null) return
         if (form.invite != null && !form.inviteReady) return
         again = ::go
         form.sending()
         form.busy = true
+        form.waiting = form.handOver != null && form.received == null
         form.result = null
-        scope.launch {
+        runRequest {
             val done = if (form.invite != null) signUpFromForm(app.accounts, form) else receiveFromForm(app.accounts, familyPlatform(app.os), form)
             done?.let { app.signedIn(it.connection, it.note) }
-            form.busy = false
         }
     }
 
@@ -219,6 +240,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                 },
                 onCancel = close,
             )
+            LinkNote(form)
         }
     }
 
@@ -276,17 +298,18 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                             FormFieldRow(
                                 SignInWords.SERVER_ADDRESS,
                                 value = form.address,
-                                onChange = { if (!form.takeJoinLink(it)) form.typeAddress(it) },
+                                onChange = { if (!form.takeJoinLink(it, app.switching != null)) form.typeAddress(it) },
                                 placeholder = SignInWords.REQUIRED,
-                                leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme) },
+                                leading = { SchemeToggle(form.scheme.prefix, form::toggleScheme, enabled = !form.addressLocked) },
                                 onSubmit = { if (form.invite != null || form.handOver != null) go() else signIn() },
                                 focus = if (form.startsAtPassword) null else first,
+                                readOnly = form.addressLocked,
                             )
                         }
 
                         if (form.invite != null || form.handOver != null) {
                             LinkCard(form, ::go, places, address = address, addressNotes = { ConnectionNotes(form) })
-                            LinkFooter(form, ::go, onLeave = form::leaveLink)
+                            LinkFooter(form, ::go, onLeave = form::leaveLink, held = app.switching != null)
                             Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
                             return@SignInCard
                         }
@@ -313,15 +336,17 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                         }
 
                         ResultLine(form)
+                        LinkNote(form)
+                        val held = app.switching != null
                         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                            GlazeCapsule(null, "Test connection", ::test, enabled = form.ready)
-                            AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready, loading = form.busy, size = ButtonSize.Medium)
+                            GlazeCapsule(null, "Test connection", ::test, enabled = form.ready && !held)
+                            AccentButton("Sign in", ::signIn, Modifier.widthIn(min = 150.dp), enabled = form.ready && !held, loading = form.busy, size = ButtonSize.Medium)
                         }
                         // An invite, or a sign-in link from another device, copied anywhere.
                         TextAction("Paste a family link", {
                             val text = clipboardText()
-                            if (text == null || !form.takeJoinLink(text)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
-                        }, Modifier.align(Alignment.CenterHorizontally), icon = OctoIcons.Family)
+                            if (text == null || !form.takeJoinLink(text, app.switching != null)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
+                        }, Modifier.align(Alignment.CenterHorizontally), enabled = !held, icon = OctoIcons.Family)
 
                         Advanced(app, form, ::signIn, places, replacingId = form.signsInAgainTo, url = form.url, home = form.homeUrl)
                     }
@@ -343,6 +368,10 @@ private fun OtherServers(app: AppState) {
     val shown = app.signInForm.url?.toString()
     val others = settings.servers.filter { it.address != shown || it.username != app.signInForm.username.trim() }
     if (others.isEmpty()) return
+    // A sign-in open on the page (running, a question waiting, or a sign-up
+    // or sealed sign-in held) is never replaced by another server's.
+    val form = app.signInForm
+    val open = signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null)
     Column(Modifier.padding(top = 16.dp).width(480.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Txt(if (app.switching != null) "Opening ${app.switching?.name}" else "Or open another of your servers", OctoType.caption, OctoColors.TextMuted)
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally), modifier = Modifier.padding(top = 4.dp)) {
@@ -359,7 +388,7 @@ private fun OtherServers(app: AppState) {
                             }
                         }
                     }
-                }, enabled = app.switching == null)
+                }, enabled = app.switching == null && !open)
             }
         }
     }
@@ -641,11 +670,18 @@ private fun SpecialSetups(
     }
 }
 
+// The words of the last link refused here, under the result line.
+@Composable
+internal fun LinkNote(form: SignInForm) {
+    form.linkNote?.let { FormNote(it) }
+}
+
 // The scheme at the start of the address: a small darker pill set into
 // the field that switches between https:// and http:// when clicked. On a
-// light theme a faint shade of the words' own ink.
+// light theme a faint shade of the words' own ink. Not `enabled`, it only
+// shows the scheme.
 @Composable
-internal fun SchemeToggle(prefix: String, onClick: () -> Unit) {
+internal fun SchemeToggle(prefix: String, onClick: () -> Unit, enabled: Boolean = true) {
     val shape = RoundedCornerShape(8.dp)
     val other = if (prefix == "https://") "http://" else "https://"
     val fill = if (LocalOctoSurfaces.current.light) OctoColors.TextPrimary.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.35f)
@@ -654,8 +690,8 @@ internal fun SchemeToggle(prefix: String, onClick: () -> Unit) {
             Modifier
                 .focusProperties { canFocus = false }
                 .background(fill, shape)
-                .hoverLift(shape)
-                .clickable(role = Role.Button, onClick = onClick)
+                .hoverLift(shape, clickable = enabled)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = "Switch to $other" }
                 .padding(horizontal = 8.dp, vertical = 5.dp),
         ) {

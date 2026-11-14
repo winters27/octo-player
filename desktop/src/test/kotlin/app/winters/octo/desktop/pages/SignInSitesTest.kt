@@ -189,4 +189,93 @@ class SignInSitesTest {
             literal.findAll(text).forEach { assertFalse("$name: ${it.value}", it.value.contains("optional", ignoreCase = true)) }
         }
     }
+
+    private val accounts get() = main("server/Accounts.kt")
+    private val app get() = main("AppState.kt")
+    private val family get() = main("pages/FamilyPage.kt")
+    private val menus get() = read("../desktop-design/src/main/kotlin/app/winters/octo/design/GlassMenu.kt")
+
+    // Every call a sign-in, a sign-up or a hand-over commits through has a
+    // total time limit, so nothing that waits for it waits for ever.
+    @Test
+    fun theCommittingClientsHaveATimeLimit() {
+        assertTrue(accounts.contains("internal const val COMMIT_SECONDS = 30L"))
+        assertTrue(accounts.contains("checkClient(listOfNotNull(main, home), headers, tried.certificate, COMMIT_SECONDS).use { own ->"))
+        assertEquals(2, count(join, "checkClient(addresses, headers, sent.certificate, COMMIT_SECONDS)"))
+    }
+
+    // The server sheets never take a family link: their address only types.
+    @Test
+    fun theServerSheetsAddressOnlyTypes() {
+        assertTrue(sheet.contains("onChange = form::typeAddress"))
+        assertFalse(sheet.contains("takeJoinLink"))
+    }
+
+    // Every way a pop-up closes but its own buttons asks the host, and none
+    // moves the page when it refuses.
+    @Test
+    fun everyCloseButTheSheetsOwnGoesThroughDismiss() {
+        assertTrue(menus.contains("Key.Escape -> host.dismiss()"))
+        assertTrue(menus.contains("awaitFirstDown(requireUnconsumed = true)\n                    host.dismiss()"))
+        assertEquals(2, count(app, "if (!popups.dismiss()) return"))
+        assertTrue(app.contains("popups.open -> popups.dismiss()"))
+        assertFalse(app.contains("popups.close()"))
+    }
+
+    // Every request that sets busy says whether it waits; only a hand-over's
+    // redeem does, and each job is kept as the form's own.
+    @Test
+    fun everyBusyRequestSaysWhetherItWaits() {
+        for ((name, text) in listOf("SignInPage.kt" to page, "LinkSheet" to slice(join, "private fun ColumnScope.LinkSheet(", "\n}\n"), "ServerSheet" to sheet)) {
+            val lines = text.lines()
+            val busy = lines.indices.filter { lines[it].trim() == "form.busy = true" }
+            assertTrue(name, busy.isNotEmpty())
+            busy.forEach { i -> assertTrue("$name: ${lines[i + 1]}", lines[i + 1].trim().startsWith("form.waiting = ")) }
+        }
+        val waits = "form.waiting = form.handOver != null && form.received == null"
+        assertEquals(1, count(page, waits))
+        assertEquals(1, count(join, waits))
+        assertTrue(page.contains("form.running = job"))
+        assertTrue(join.contains("form.running = job"))
+        assertEquals(2, count(page + join, "if (form.running === coroutineContext.job) {"))
+        // The redeem's end, whatever it brought, and the header problem end the wait.
+        val receive = slice(join, "suspend fun receiveFromForm(", "\n}\n")
+        assertTrue(receive.contains("}\n        // The wait for the other device is over, however it ended: what\n        // follows commits.\n        form.waiting = false"))
+        assertTrue(receive.contains("is ResolvedHeaders.Problem -> {\n                form.waiting = false"))
+        assertTrue(form.contains("fun leaveLink() {\n        if (committing) return"))
+    }
+
+    @Test
+    fun aPasswordChangeRunsInTheAppsScopeAndOneAtATime() {
+        assertEquals(2, count(servers, "enabled = !app.changingPassword"))
+        assertEquals(2, count(family, "enabled = !app.changingPassword"))
+        assertTrue(servers.contains("fun changePassword(app: AppState) {\n    if (app.changingPassword) return"))
+        assertTrue(servers.contains("app.scope.launch {\n            val outcome = app.changePassword("))
+        assertTrue(servers.contains("app.popups.request !== mine -> app.notice = words"))
+    }
+
+    // The link note sits under the result line wherever one is drawn, and
+    // under the certificate question; a form that replaces the page's
+    // carries it.
+    @Test
+    fun theLinkNoteSitsUnderEveryResultLine() {
+        assertTrue(page.contains("ResultLine(form)\n                        LinkNote(form)"))
+        assertTrue(join.contains("ResultLine(form)\n    LinkNote(form)"))
+        assertTrue(sheet.contains("ResultLine(form)\n        LinkNote(form)"))
+        assertTrue(page.contains("onCancel = close,\n            )\n            LinkNote(form)"))
+        assertTrue(join.contains("asking = null\n                },\n            )\n            LinkNote(form)"))
+        assertTrue(sheet.contains("onCancel = form::distrust,\n            )\n            LinkNote(form)"))
+        assertTrue(app.contains("carried?.let(form::noteLink)"))
+    }
+
+    // A link from outside checks for an open sign-in where it is routed.
+    @Test
+    fun theLinkRouteChecksForAnOpenSignIn() {
+        val route = slice(join, "fun AppState.openFamilyLink(", "\n}\n")
+        assertTrue(route.contains("if (switching != null || signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null)) {"))
+        assertTrue(route.contains("if (open != null && open.open()) {"))
+        assertTrue(route.contains("busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },"))
+        assertTrue(route.contains("open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },"))
+        assertTrue(route.contains("link = true,"))
+    }
 }
