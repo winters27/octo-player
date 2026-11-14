@@ -2,15 +2,46 @@
 //! checked-in ones (see `tests/fixtures/README.md`).
 
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime};
 
-/// A fresh folder for one test's files.
+/// How long a test's folder is kept. Tests run in seconds, so a folder this
+/// old belongs to no test still running.
+const KEPT_FOR: Duration = Duration::from_secs(60 * 60);
+
+/// A fresh folder for one test's files. The first call in a process clears
+/// away the folders earlier runs left, once they are `KEPT_FOR` old.
 pub fn temp_dir() -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
+    static PRUNED: Once = Once::new();
+    let root = std::env::temp_dir().join("octo-audio-tests");
+    PRUNED.call_once(|| {
+        if let Some(cutoff) = SystemTime::now().checked_sub(KEPT_FOR) {
+            prune(&root, cutoff);
+        }
+    });
     let n = NEXT.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join("octo-audio-tests").join(format!("{}-{n}", std::process::id()));
+    let dir = root.join(format!("{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// Removes the folders in `root` last changed before `cutoff`, with all
+/// they hold, and returns how many went. A folder that cannot be read or
+/// removed (one a test elsewhere still has open) is left, and a missing
+/// `root` is nothing to do.
+pub fn prune(root: &Path, cutoff: SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else { return 0 };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        let old = meta.is_dir() && meta.modified().is_ok_and(|changed| changed < cutoff);
+        if old && std::fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// A checked-in fixture.
@@ -192,4 +223,26 @@ pub fn with_id3v2(audio: &[u8], text: &[(&str, &str)], user: &[(&str, &str)]) ->
     out.extend_from_slice(&frames);
     out.extend_from_slice(audio);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_test_folder_is_pruned_only_once_older_than_the_cutoff() {
+        // A root of its own, so no other test's folder is touched.
+        let root = temp_dir().join("pruned");
+        let folder = root.join("left");
+        std::fs::create_dir_all(folder.join("inner")).unwrap();
+        std::fs::write(folder.join("inner").join("a.wav"), b"RIFF").unwrap();
+        // Changed just now, after a cutoff an hour back: kept.
+        assert_eq!(prune(&root, SystemTime::now() - Duration::from_secs(60 * 60)), 0);
+        assert!(folder.exists());
+        // Before a cutoff in the future: removed, with all it holds.
+        assert_eq!(prune(&root, SystemTime::now() + Duration::from_secs(60)), 1);
+        assert!(!folder.exists());
+        // A root that is not there is no error.
+        assert_eq!(prune(&root.join("missing"), SystemTime::now()), 0);
+    }
 }
