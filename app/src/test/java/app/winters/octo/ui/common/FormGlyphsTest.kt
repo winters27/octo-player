@@ -1,6 +1,7 @@
 package app.winters.octo.ui.common
 
 import app.winters.octo.design.OctoIcons
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -15,6 +16,9 @@ class FormGlyphsTest {
     @Test
     fun anErrorDrawsTheErrorGlyph() {
         assertNotEquals(OctoIcons.Info, OctoIcons.Error)
+        // Filled, a shape of its own beside the info ring. Red with the
+        // outlined warning circle.
+        assertEquals(app.winters.octo.design.R.drawable.sym_error_fill, OctoIcons.Error)
         val groups = File("src/main/java/app/winters/octo/ui/common/FormGroups.kt").readText().replace("\r\n", "\n")
         val error = groups.substringAfter("fun FormError(").substringBefore(") {")
         assertTrue(error, error.contains("@DrawableRes icon: Int = OctoIcons.Error,"))

@@ -184,6 +184,20 @@ class CalloutEffectTest {
         assertFalse(page.pending)
     }
 
+    // A tall group's last note ends 8 above where the scroll's soft bottom
+    // edge starts, not inside it. Red when the fade is left out of the
+    // scroll (the note ends 8 above the bottom).
+    @Test
+    fun aTallGroupsLastNoteEndsAboveTheBottomFade() {
+        page.groupHeight = 600.dp
+        page.fadeDp = 24.dp
+        show()
+        page.pending = true
+        idle()
+        assertEquals(page.viewport.toFloat(), ui.compose.runOnIdle { page.groupBottom } + page.gap + page.fade, 1f)
+        assertFalse(page.pending)
+    }
+
     // Red when focus already held counts as a field taking it.
     @Test
     fun aFieldFocusedBeforeTheCalloutStillScrolls() {

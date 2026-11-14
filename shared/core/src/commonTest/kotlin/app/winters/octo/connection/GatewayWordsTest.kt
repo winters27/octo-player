@@ -67,6 +67,13 @@ class GatewayWordsTest {
         kotlinWords().values.forEach { words -> assertFalse(words, words.any { it in "—–‘’“”" }) }
     }
 
+    // Red when a word calls Octo "the app" where every other line names it.
+    @Test
+    fun noWordCallsOctoTheApp() {
+        val theApp = Regex("\\bthe app\\b")
+        kotlinWords().values.forEach { words -> assertFalse(words, theApp.containsMatchIn(words)) }
+    }
+
     // Red when a sign-in page field row reads like the server's own username
     // or password again.
     @Test

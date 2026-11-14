@@ -56,6 +56,10 @@ internal class CalloutPage {
     var gap = 0
     var viewport = 0
 
+    // How tall the scroll's soft bottom edge is, and that in pixels.
+    var fadeDp by mutableStateOf(0.dp)
+    var fade = 0
+
     // Where the group's top and bottom, and the key row's top, are in the
     // window, in pixels. Read on the UI thread.
     val groupTop: Float get() = group!!.positionInRoot().y
@@ -70,10 +74,11 @@ internal fun CalloutPage.Draw() {
     topInset = with(density) { 68.dp.roundToPx() }
     gap = with(density) { 8.dp.roundToPx() }
     viewport = with(density) { 400.dp.roundToPx() }
+    fade = with(density) { fadeDp.roundToPx() }
     if (!shown) return
     val focus = remember { CalloutFocus() }
     var content by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val host = content?.let { CalloutHost(scroll, topInset, it, settled = { settled }, imeBottom = { ime }, focus = focus) }
+    val host = content?.let { CalloutHost(scroll, topInset, it, settled = { settled }, imeBottom = { ime }, focus = focus, fade = fade) }
     CalloutEffect(pending, host, { group }) {
         pending = false
         shownCount++

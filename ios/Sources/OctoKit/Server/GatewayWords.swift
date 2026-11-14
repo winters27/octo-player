@@ -50,13 +50,13 @@ public enum GatewayWords {
         }
         switch gateway {
         case .authentik:
-            return "Authentik is in front of this server, so the app needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
+            return "Authentik is in front of this server, so Octo needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
         case .authelia:
-            return "Authelia is in front of this server, so the app needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
+            return "Authelia is in front of this server, so Octo needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
         case .cloudflareAccess:
-            return "Cloudflare Access is in front of this server, so the app needs a service token to get through. Fill in the sign-in page fields under Advanced."
+            return "Cloudflare Access is in front of this server, so Octo needs a service token to get through. Fill in the sign-in page fields under Advanced."
         case .passwordPrompt:
-            return "This server asks for a username and password before the app can reach it. Fill in the sign-in page fields under Advanced."
+            return "This server asks for a username and password before Octo can reach it. Fill in the sign-in page fields under Advanced."
         case .signInPage:
             return "A sign-in page answered instead of the server. On public Wi-Fi, sign in to the Wi-Fi first. Otherwise fill in the sign-in page fields under Advanced."
         }
@@ -81,7 +81,7 @@ public enum GatewayWords {
         case .passwordPrompt:
             "Use the username and password the server's proxy asks for."
         case .signInPage:
-            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let the app in: ask whoever runs it to let /rest/ through."
+            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /rest/ through."
         }
     }
 

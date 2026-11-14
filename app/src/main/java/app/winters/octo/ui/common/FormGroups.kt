@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -105,6 +106,10 @@ private val NoteGap = 8.dp
 private val ChoiceChevron = 20.dp
 private val ChoiceGap = 12.dp
 
+// How far a choice row's chevron rises above the top of its name's line, so
+// its middle meets the middle of the name's capitals.
+private val ChevronLift = 1.dp
+
 // Descriptions and values keep to two lines at the phone's normal text
 // size; larger text wraps freely.
 @Composable
@@ -119,10 +124,11 @@ val LocalIconVectors = staticCompositionLocalOf<@Composable (Int) -> ImageVector
 @Composable
 fun octoIcon(@DrawableRes id: Int): Painter = rememberVectorPainter(LocalIconVectors.current(id))
 
-// A section's head that opens and closes it, such as Advanced: its title
-// and a line naming what is inside, one size whether open or closed, with
-// only the chevron turning. Screen readers hear a heading that expands and
-// collapses.
+// A section's head that opens and closes it, such as Advanced: its title,
+// set as a group's title and one size whether open or closed, and a line
+// naming what is inside, with only the chevron turning. The chevron sits on
+// the title's line and ends where the rows' chevrons end. Screen readers
+// hear a heading that expands and collapses.
 @Composable
 fun FormSectionHead(title: String, line: String, open: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     val turn by animateFloatAsState(if (open) 90f else 0f, label = "section chevron")
@@ -145,11 +151,11 @@ fun FormSectionHead(title: String, line: String, open: Boolean, onToggle: () -> 
                     }
                 }
             }
-            .padding(horizontal = 4.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 4.dp, end = RowSides, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.Top,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = OctoType.formSection, color = OctoColors.TextPrimary)
+            Text(title, style = OctoType.formGroup, color = OctoColors.TextPrimary)
             Text(line, style = OctoType.formDescription, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
         }
         Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp).rotate(turn))
@@ -167,16 +173,16 @@ fun FormGroupTitle(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-// The raised card a group's rows sit on. `outlined` rings it in the accent,
-// while the group calls out a failure.
+// The raised card a group's rows sit on. `outlined` rings it in the red of
+// the error note under it, while the group calls out a failure.
 @Composable
 fun FormGroupCard(modifier: Modifier = Modifier, outlined: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    val accent = OctoColors.Accent
+    val ring = OctoColors.ErrorWords
     Column(
         modifier
             .fillMaxWidth()
             .raisedPanel(CardShape)
-            .then(if (outlined) Modifier.border(1.5.dp, accent, CardShape) else Modifier),
+            .then(if (outlined) Modifier.border(1.5.dp, ring, CardShape) else Modifier),
         content = content,
     )
 }
@@ -350,7 +356,8 @@ private fun RevealToggle(revealed: Boolean, onClick: () -> Unit) {
 }
 
 // A setting with a few answers: its name, the answer chosen at the row's end
-// (at most two lines), the line under the name, and a chevron. A tap asks
+// (at most two lines), the line under the name, and a chevron on the name's
+// line, however many lines follow it. A tap asks
 // through the choice sheet, beside the row. Where the name and the widest
 // answer do not fit on one line, the answer goes under the name.
 @Composable
@@ -378,7 +385,7 @@ fun FormChoiceRow(
                 .choiceAnchor(sheet)
                 .clickable(role = Role.Button, onClick = onClick)
                 .padding(horizontal = RowSides, vertical = RowEnds),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(ChoiceGap),
         ) {
             Column(Modifier.weight(1f)) {
@@ -416,7 +423,7 @@ fun FormChoiceRow(
                     )
                 }
             }
-            Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(ChoiceChevron))
+            Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.offset(y = -ChevronLift).size(ChoiceChevron))
         }
     }
 }
@@ -598,7 +605,8 @@ class CalloutFocus {
 // how far below the scroll's top a group's title should land, the
 // coordinates of the scroll's own child (taken before its padding), whether
 // the part that holds the group has settled, how far up the on-screen
-// keyboard reaches, and the focus record its entries keep.
+// keyboard reaches, the focus record its entries keep, and how tall the
+// scroll's soft bottom edge is, in pixels.
 data class CalloutHost(
     val scroll: ScrollState,
     val topInset: Int,
@@ -606,6 +614,7 @@ data class CalloutHost(
     val settled: () -> Boolean,
     val imeBottom: () -> Int,
     val focus: CalloutFocus,
+    val fade: Int = 0,
 )
 
 // The host of the page drawn, null until its content is placed.
@@ -622,8 +631,9 @@ private sealed interface CalloutWait {
 // alone, since clearing focus there hands it to the first field and scrolls
 // to it), then, once the keyboard is down and the host has settled with the
 // group placed, the group's title goes `topInset` below the scroll's top (a
-// group taller than that room puts its last note's bottom 8 above the
-// scroll's bottom instead). A field taking focus during either wait ends it
+// group taller than that room puts its last note's bottom 8 above where the
+// scroll's soft bottom edge starts instead). A field taking focus during
+// either wait ends it
 // with no scroll. `onShown` runs when the scroll ends, or when a drag cuts it
 // short, but never when the effect itself leaves (the flag then stays set and
 // the callout runs again when the host is back).
@@ -679,7 +689,7 @@ private fun calloutTarget(host: CalloutHost, group: LayoutCoordinates, gap: Int)
     val top = host.content.localPositionOf(group, Offset.Zero).y.roundToInt()
     val height = group.size.height
     val view = host.scroll.viewportSize
-    return if (height > view - host.topInset) top + height + gap - view else top - host.topInset
+    return if (height > view - host.topInset) top + height + gap + host.fade - view else top - host.topInset
 }
 
 // Scrolls to `target` as a place, not a distance: each frame goes to where

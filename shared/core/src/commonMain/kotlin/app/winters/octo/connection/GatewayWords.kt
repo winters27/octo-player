@@ -48,13 +48,13 @@ object GatewayWords {
     } else {
         when (gateway) {
             Gateway.Authentik ->
-                "Authentik is in front of this server, so the app needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
+                "Authentik is in front of this server, so Octo needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
             Gateway.Authelia ->
-                "Authelia is in front of this server, so the app needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
+                "Authelia is in front of this server, so Octo needs its own sign-in to get through. Fill in the sign-in page fields under Advanced."
             Gateway.CloudflareAccess ->
-                "Cloudflare Access is in front of this server, so the app needs a service token to get through. Fill in the sign-in page fields under Advanced."
+                "Cloudflare Access is in front of this server, so Octo needs a service token to get through. Fill in the sign-in page fields under Advanced."
             Gateway.PasswordPrompt ->
-                "This server asks for a username and password before the app can reach it. Fill in the sign-in page fields under Advanced."
+                "This server asks for a username and password before Octo can reach it. Fill in the sign-in page fields under Advanced."
             Gateway.SignInPage ->
                 "A sign-in page answered instead of the server. On public Wi-Fi, sign in to the Wi-Fi first. Otherwise fill in the sign-in page fields under Advanced."
         }
@@ -80,7 +80,7 @@ object GatewayWords {
             "Use a service token from Cloudflare Zero Trust, and add a Service Auth rule for it to this app's Access policy."
         Gateway.PasswordPrompt -> "Use the username and password the server's proxy asks for."
         Gateway.SignInPage ->
-            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let the app in: ask whoever runs it to let /rest/ through."
+            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /rest/ through."
     }
 
     // The note under the sign-in page group when a kind is picked and no

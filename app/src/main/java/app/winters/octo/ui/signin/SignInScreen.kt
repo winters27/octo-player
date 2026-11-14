@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -143,21 +144,49 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Date
 
-// Once the page has scrolled, what runs up under the back button melts away
-// over the top gap instead of showing through behind it.
-private fun Modifier.topFade(scroll: ScrollState): Modifier = this
+// Soft edges on the page's scroll. What runs up under the back button melts
+// away over the top gap instead of showing through behind it; what runs on
+// past the bottom fades out over BottomFade, gently at both ends. Each shows
+// only while there is more of the page that way, coming in over the first
+// stretch scrolled so it never pops.
+private fun Modifier.pageFades(scroll: ScrollState): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
-        if (scroll.value > 0) {
-            val edge = DetailTopGap.toPx()
+        val top = DetailTopGap.toPx()
+        val above = (scroll.value / top).coerceIn(0f, 1f)
+        if (above > 0f) {
+            val hidden = Shown.copy(alpha = 1f - above)
             drawRect(
-                Brush.verticalGradient(0f to Color.Transparent, 0.4f to Color.Transparent, 1f to Color.Black, endY = edge),
-                size = Size(size.width, edge),
+                Brush.verticalGradient(0f to hidden, 0.4f to hidden, 1f to Shown, endY = top),
+                size = Size(size.width, top),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        val bottom = BottomFade.toPx()
+        val below = ((scroll.maxValue - scroll.value) / bottom).coerceIn(0f, 1f)
+        if (below > 0f) {
+            drawRect(
+                Brush.verticalGradient(*easedStops(1f, 1f - below), startY = size.height - bottom, endY = size.height),
+                topLeft = Offset(0f, size.height - bottom),
+                size = Size(size.width, bottom),
                 blendMode = BlendMode.DstIn,
             )
         }
     }
+
+// How tall the soft edge at the bottom of the page's scroll is.
+private val BottomFade = 24.dp
+
+// What a fade's mask draws where the page shows: only its alpha counts.
+private val Shown = Color.Black
+
+// The stops of a fade's mask from showing `from` to showing `to`, along a
+// smooth step, so it starts and ends gently.
+private fun easedStops(from: Float, to: Float): Array<Pair<Float, Color>> = Array(9) { i ->
+    val t = i / 8f
+    t to Shown.copy(alpha = from + (to - from) * t * t * (3 - 2 * t))
+}
 
 // Opened from Settings. Signing in goes back there, and the server's
 // music starts copying on its own. When editing, it starts from the saved
@@ -288,6 +317,7 @@ private fun SignInForm(vm: SignInViewModel, scanAgain: FocusRequester, addressFo
             settled = { advanced.isIdle && advanced.currentState },
             imeBottom = { ime.getBottom(density) },
             focus = calloutFocus,
+            fade = with(density) { BottomFade.roundToPx() },
         )
     }
     CalloutEffect(vm.calloutPending, host, { gatewayGroup }, vm::calloutShown)
@@ -299,7 +329,7 @@ private fun SignInForm(vm: SignInViewModel, scanAgain: FocusRequester, addressFo
                 .fillMaxSize()
                 .systemBarsPadding()
                 .imePadding()
-                .topFade(scroll)
+                .pageFades(scroll)
                 .verticalScroll(scroll),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -538,17 +568,19 @@ private fun SignInButtons(vm: SignInViewModel) {
     )
     ResultLine(vm)
     if (vm.form == null && !vm.editing) {
-        // An invite, or a sign-in shown on another device of one's own.
-        GlazeButton(
-            "Scan a family QR code",
-            {
-                vm.startJoin()
-                vm.scanning = true
-            },
-            size = ButtonSize.Small,
-            icon = octoIcon(OctoIcons.Camera),
-            modifier = Modifier.padding(top = 12.dp),
-        )
+        // An invite, or a sign-in shown on another device of one's own, under
+        // the button on its right edge.
+        Box(Modifier.fillMaxWidth().padding(top = 12.dp), contentAlignment = Alignment.CenterEnd) {
+            GlazeButton(
+                "Scan a family QR code",
+                {
+                    vm.startJoin()
+                    vm.scanning = true
+                },
+                size = ButtonSize.Small,
+                icon = octoIcon(OctoIcons.Camera),
+            )
+        }
     }
 }
 
