@@ -155,10 +155,12 @@ final class SignInModel {
         // fields are left empty.
         gatewaySaved = session.gatewayKind(server.id)
         gatewayKind = gatewaySaved
-        let certificateKept = server.hasClientCertificate && CertificateCheck.isSaved(forServer: server.id)
-        hadCertificate = certificateKept
-        staleCertificate = server.hasClientCertificate && !certificateKept
-        savedCertificateName = certificateKept ? server.clientCertificateName : nil
+        // A server with none reads as one whose certificate is gone; one the keychain can't read now
+        // still shows, with its name and Remove, and is never taken off by itself.
+        let certificateState: CertificateState = server.hasClientCertificate ? CertificateCheck.state(forServer: server.id) : .stale
+        hadCertificate = certificateState.shown
+        staleCertificate = server.hasClientCertificate && certificateState == .stale
+        savedCertificateName = certificateState.shown ? server.clientCertificateName : nil
         advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate || gatewaySaved != .none
         if hadCertificate { readSavedExpiry(server.id) }
         takesApiKeys = server.takesApiKeys

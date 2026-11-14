@@ -1,4 +1,5 @@
 import Foundation
+import OctoKit
 import Security
 
 /// Looks at client certificates for the sign-in form without putting them to use: the server in
@@ -27,9 +28,11 @@ enum CertificateCheck {
         return try? validate(data, password: password)
     }
 
-    /// Whether a kept server's certificate can still be read from the keychain. It is kept on
-    /// this device only, so a phone restored from a backup has the server but not its certificate.
-    static func isSaved(forServer id: String) -> Bool {
-        Keychain.readData(for: "server.\(id).certificate") != nil
+    /// Whether a kept server's certificate can be used: kept; gone (it is kept on this device only,
+    /// so a phone restored from a backup has the server but not its certificate); or unreadable
+    /// just now, which is never taken for gone.
+    static func state(forServer id: String) -> CertificateState {
+        CertificateState(data: Keychain.lookup(for: "server.\(id).certificate"),
+                         password: Keychain.lookup(for: "server.\(id).certificate.password"))
     }
 }

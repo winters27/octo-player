@@ -53,6 +53,8 @@ import UIKit
 /// - `settings:PAGE`, `settings:PAGE@ROW`, `settings-search:TEXT`, `popup:ROW`, `whatsnew`,
 ///   `settings-state:NAME`: see `SettingsNavigator.drive`
 /// - `account:WHAT`: the account pages, sheets, sign-in modes and ways in; see `AccountDrive`
+/// - `keychainProbe` checks the keychain's in-place update on a scratch item and leaves none behind
+///   (see `KeychainProbe`)
 /// - `signin:STATE` opens the sign-in page in a sign-in page state, with sample values only:
 ///   `signin:plain`, `signin:authentik`, `signin:cloudflare`, `signin:saved`, `signin:https`,
 ///   `signin:join`, `signin:tall` (a sign-in page group taller than the screen at the largest text
@@ -122,6 +124,7 @@ enum Drive {
             case "settings", "settings-search", "popup", "whatsnew", "settings-state": await SettingsNavigator.shared.drive(name, value, router: router)
             case "signin": GatewayDrive.signIn(value, router: router)
             case "servers": await GatewayDrive.servers(value, router: router)
+            case "keychainProbe": KeychainProbe.run()
             case "list":
                 guard let client = session.client,
                       let list = try? await client.playlists().first(where: { $0.name.caseInsensitiveCompare(value) == .orderedSame }),
@@ -193,6 +196,33 @@ enum Drive {
     private static func split(_ step: String) -> (String, String) {
         guard let colon = step.firstIndex(of: ":") else { return (step, "") }
         return (String(step[..<colon]), String(step[step.index(after: colon)...]))
+    }
+}
+
+/// The keychain's in-place update, checked on the phone with a scratch item alone: no server,
+/// certificate or trust is touched, and nothing is left behind. One log line per step, with its
+/// result only.
+@MainActor
+enum KeychainProbe {
+    private static let account = "octo-walk-probe"
+    private static let log = Logger(subsystem: "app.winters.octo", category: "keychain-probe")
+
+    static func run() {
+        // A probe stopped earlier may have left the item, and keychain items outlive a reinstall.
+        Keychain.delete(for: account)
+        line("cleared", Keychain.lookup(for: account) == .missing)
+        line("added", Keychain.saveData(Data("first".utf8), for: account))
+        line("marked", Keychain.probeMark(for: account))
+        line("updated", Keychain.saveData(Data("second".utf8), for: account))
+        line("label kept", Keychain.probeLabel(for: account))
+        line("second value", Keychain.readData(for: account) == Data("second".utf8))
+        if case .found = Keychain.lookup(for: account) { line("found", true) } else { line("found", false) }
+        Keychain.delete(for: account)
+        line("gone", Keychain.lookup(for: account) == .missing)
+    }
+
+    private static func line(_ step: String, _ ok: Bool) {
+        log.info("keychain probe \(step, privacy: .public): \(ok, privacy: .public)")
     }
 }
 

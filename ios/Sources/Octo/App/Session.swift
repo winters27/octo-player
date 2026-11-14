@@ -225,19 +225,25 @@ final class Session {
             hasClientCertificate: keepsCertificate, clientCertificateName: certificateName,
             serverType: profile.info.type, serverVersion: profile.info.serverVersion,
             isOcto: probed, extensions: profile.extensions)
-        Keychain.save(secret, for: Self.secretAccount(id))
-        Keychain.saveData(try JSONEncoder().encode(headers), for: Self.headersAccount(id))
-        if let certificate = form.certificate {
-            Keychain.saveData(certificate.data, for: Self.certificateAccount(id))
-            Keychain.save(certificate.password, for: Self.certificatePasswordAccount(id))
+        // The secrets go under the server's id first: every old value read before anything is
+        // written, and put back when a write fails. The old id's are let go only once the list
+        // naming the new id is saved.
+        let change: CertificateKeep = if let certificate = form.certificate {
+            .picked(data: certificate.data, password: certificate.password)
         } else if form.removesCertificate {
-            Keychain.delete(for: Self.certificateAccount(id))
-            Keychain.delete(for: Self.certificatePasswordAccount(id))
-        } else if let before, before.id != id, before.hasClientCertificate {
-            Keychain.saveData(Keychain.readData(for: Self.certificateAccount(before.id)) ?? Data(), for: Self.certificateAccount(id))
-            Keychain.save(Keychain.read(for: Self.certificatePasswordAccount(before.id)) ?? "", for: Self.certificatePasswordAccount(id))
+            .removed
+        } else {
+            .unchanged
         }
-        if let before, before.id != id { forgetSecrets(before.id) }
+        let encodedHeaders = try JSONEncoder().encode(headers)
+        let forgetOld: String?
+        do {
+            forgetOld = try keepSecrets(KeychainItems(), from: before?.id, to: id, carriesCertificate: before?.hasClientCertificate == true,
+                                        secret: secret, headers: encodedHeaders, certificate: change, names: Self.secretNames)
+        } catch let failure as KeepSecretsError {
+            restoreSecurity()
+            throw SignInFailure.words(failure.words)
+        }
         let addressChanged = before.map { $0.address != main } ?? false
         if addressChanged { prefs.removeObject(forKey: Self.folderKey(id)) }
 
@@ -245,12 +251,14 @@ final class Session {
             restoreSecurity()
             servers = serversAfterKeep(servers, before: before, now: server)
             save()
+            if let forgetOld { forgetSecrets(forgetOld) }
             return Kept(server: server, addressChanged: addressChanged)
         }
         let from = self.client == nil ? nil : active.flatMap { $0.id == id || $0.id == before?.id || $0.signedOut ? nil : $0 }
         if let from { await leaving?(from, id) }
         servers = serversAfterKeep(servers, before: before, now: server)
         activate(server, credentials: client.credentials, headers: headers, profile: profile)
+        if let forgetOld { forgetSecrets(forgetOld) }
         return Kept(server: server, addressChanged: addressChanged)
     }
 
@@ -441,7 +449,9 @@ final class Session {
         guard let client, let id = activeId else { return .failed("Connect a server first.") }
         let result = await changeOwnPassword(client, current: current, new: new, family: family)
         guard result == .changed else { return result }
-        Keychain.save(new, for: Self.secretAccount(id))
+        // An update in place that fails would leave the old password, which the server no longer
+        // takes; with none kept, Octo asks for it next time.
+        if !Keychain.save(new, for: Self.secretAccount(id)) { Keychain.delete(for: Self.secretAccount(id)) }
         if self.activeId == id, let now = self.client {
             self.client = now.with(Credentials(username: now.credentials.username, password: new, mode: now.credentials.mode))
         }
@@ -767,9 +777,9 @@ final class Session {
         let server = StoredServer(id: freshServerId(username: username, address: ServerAddress.written(address), taken: []),
                                   address: address, username: username,
                                   mode: prefs.bool(forKey: "server.legacyPassword") ? .legacyPassword : .token)
+        // The old item goes only once the new one is kept.
         if let secret = Keychain.read(for: oldAccount) {
-            Keychain.save(secret, for: Self.secretAccount(server.id))
-            Keychain.delete(for: oldAccount)
+            if Keychain.save(secret, for: Self.secretAccount(server.id)) { Keychain.delete(for: oldAccount) }
         }
         servers = [server]
         activeId = server.id
@@ -803,6 +813,10 @@ final class Session {
     private static func headersAccount(_ id: String) -> String { "server.\(id).headers" }
     private static func certificateAccount(_ id: String) -> String { "server.\(id).certificate" }
     private static func certificatePasswordAccount(_ id: String) -> String { "server.\(id).certificate.password" }
+    private static func secretNames(_ id: String) -> ServerSecretNames {
+        ServerSecretNames(secret: secretAccount(id), headers: headersAccount(id), certificate: certificateAccount(id),
+                          certificatePassword: certificatePasswordAccount(id))
+    }
     private static func folderKey(_ id: String) -> String { "server.folder@\(id)" }
 
     private static func headers(for id: String) -> [String: String] {
