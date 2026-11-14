@@ -1184,6 +1184,29 @@
       ]
     },
     {
+      "name": "iphone-a-mapping-change-in-the-run-up-re-places-the-start",
+      "about": "A's time-pitch latency turns on (50 ms) after the start is decided at 480000 and before it is proposed: A tells the new frame as restarted, and the start is re-placed there, uncommitted. It is proposed 7680 frames before 482400 (474720) and, acked, committed 2880 before it (479520). A's song runs 50 ms later from the restart on, so the blend ends with it at 182000, frame 578400.",
+      "profile": "iphone50",
+      "steps": [
+        {"op": "prelude", "name": "clockPhone"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250},
+        {"op": "post", "deck": "B", "input": "ready", "frame": 380000},
+        {"op": "advance", "to": 403200, "head": 403200, "aSongMs": 178400},
+        {"op": "post", "deck": "A", "input": "startAt", "frame": 465600, "value": 480000},
+        {"op": "advance", "to": 466080, "head": 466080, "aSongMs": 179710, "actions": [{"kind": "startB", "frame": 480000}, {"kind": "limiterOn", "frame": 480000}]},
+        {"op": "post", "deck": "A", "input": "restarted", "frame": 466560, "value": 482400},
+        {"op": "advance", "to": 467040, "head": 467040, "aSongMs": 179680, "actions": [{"kind": "startB", "frame": 482400}, {"kind": "limiterOn", "frame": 482400}]},
+        {"op": "word", "gen": 1, "state": "initial"},
+        {"op": "advance", "to": 474720, "head": 474720, "aSongMs": 179840, "events": [{"kind": "proposed", "gen": 1, "frame": 482400}]},
+        {"op": "word", "gen": 1, "state": "proposed"},
+        {"op": "ack", "gen": 1, "ok": true},
+        {"op": "advance", "to": 479520, "head": 479520, "aSongMs": 179940, "actions": [{"kind": "commitB", "frame": 482400}]},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 573600, "value": 578400},
+        {"op": "advance", "to": 578400, "head": 578400, "aSongMs": 182000, "actions": [{"kind": "aEnd", "frame": 578400}, {"kind": "limiterOff", "frame": 578400}], "events": [{"kind": "blendEnd", "gen": 1, "frame": 578400, "ms": 2000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
       "name": "iphone-restart-inside-the-deadline-without-a-grid",
       "about": "The same restart for a Crossfade: the start moves to the placement horizon, 480960, and A's start time with it (180030).",
       "profile": "iphone50",
