@@ -10,10 +10,18 @@ import app.winters.octo.connection.ConnectionSettings
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
 import app.winters.octo.connection.GatewayWords
+import app.winters.octo.connection.HeaderList
 import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.addressChanged
+import app.winters.octo.connection.authModeOf
+import app.winters.octo.connection.calm
+import app.winters.octo.connection.flagsOf
+import app.winters.octo.connection.gatewayEdited
+import app.winters.octo.connection.kindPicked
+import app.winters.octo.connection.methodPicked
 import app.winters.octo.connection.reactToFailure
 import app.winters.octo.connection.resolveConnectionHeaders
+import app.winters.octo.connection.sending
 import app.winters.octo.connection.ServerClients
 import app.winters.octo.connection.letGo
 import app.winters.octo.subsonic.SubsonicException
@@ -33,7 +41,6 @@ import app.winters.octo.subsonic.FamilyPlatform
 import app.winters.octo.connection.DeviceIds
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -104,6 +111,10 @@ class SignInViewModel @Inject constructor(
     // The camera scanner, over the join form.
     var scanning by mutableStateOf(false)
 
+    // The family link this page opened, and which opening of it: a page
+    // drawn again (a rotation) is the same opening and starts nothing.
+    private var joinedFrom: Pair<FamilyLink, Long>? = null
+
     // The address in two parts, as the desktop keeps it: the scheme, shown
     // as a button at the start of the field, and the rest as typed.
     var address by mutableStateOf("")
@@ -117,8 +128,17 @@ class SignInViewModel @Inject constructor(
     var password by mutableStateOf("")
     var busy by mutableStateOf(false)
         private set
-    var error by mutableStateOf<String?>(null)
-        private set
+
+    // What the last attempt came to. Every write, a new failure included,
+    // ends the sign-in page group's callout of the one before; a failure
+    // that met a sign-in page calls it out again after its words are set.
+    private var errorWords by mutableStateOf<String?>(null)
+    var error: String?
+        get() = errorWords
+        private set(value) {
+            errorWords = value
+            useGatewayForm(calm(gatewayForm))
+        }
 
     // True once signed in, so the screen can close. The library copy
     // starts on its own.
@@ -159,15 +179,37 @@ class SignInViewModel @Inject constructor(
     var useApiKey by mutableStateOf(false)
     var apiKey by mutableStateOf("")
     var home by mutableStateOf("")
-    val headers = mutableStateListOf<HeaderDraft>()
+
+    // The custom header rows, each with an id that stays with it, so the
+    // rows draw keyed and an edit always lands on its own row. Every write
+    // goes through HeaderList.
+    private var list by mutableStateOf(HeaderList.empty)
+    val headers: List<HeaderDraft> get() = list.rows
+    val headerIds: List<Long> get() = list.ids
 
     // The sign-in page in front of the server: the kind of sign-in it takes
     // from apps, what is typed for it, and the kind saved for this server,
-    // whose values are kept while its fields are left empty.
+    // whose values are kept while its fields are left empty. Typing in its
+    // fields makes the last failure the person's to fix: its words go, and
+    // the group stops calling it out.
     var gatewayKind by mutableStateOf(GatewayKind.None)
         private set
-    var gatewayFirst by mutableStateOf("")
-    var gatewaySecond by mutableStateOf("")
+    private var firstWords by mutableStateOf("")
+    var gatewayFirst: String
+        get() = firstWords
+        set(value) {
+            firstWords = value
+            error = null
+            useGatewayForm(gatewayEdited(gatewayForm))
+        }
+    private var secondWords by mutableStateOf("")
+    var gatewaySecond: String
+        get() = secondWords
+        set(value) {
+            secondWords = value
+            error = null
+            useGatewayForm(gatewayEdited(gatewayForm))
+        }
     var gatewaySaved by mutableStateOf(GatewayKind.None)
         private set
 
@@ -176,6 +218,16 @@ class SignInViewModel @Inject constructor(
     var gateway by mutableStateOf<Gateway?>(null)
         private set
     private var gatewayFor: String? = null
+
+    // The last failure met a sign-in page here: its group shows it, outlined,
+    // with a pointer under Sign in. The group, or the API key's row, still
+    // has to be brought into view.
+    var callout by mutableStateOf(false)
+        private set
+    var calloutPending by mutableStateOf(false)
+        private set
+    var keyPending by mutableStateOf(false)
+        private set
 
     // The client certificate's name in the phone's store, once picked.
     var clientCert by mutableStateOf<String?>(null)
@@ -192,11 +244,11 @@ class SignInViewModel @Inject constructor(
     // Certificates the user trusted, by host.
     private val pins = HashMap<String, String>()
 
-    // Whether a saved secret stands in for each way of signing in when its
-    // field is left empty: when editing, or signing in again to a kept
-    // server not signed out of.
-    private var savedPassword = false
-    private var savedKey = false
+    // Whether a saved secret stands in for an empty field: a form that keeps
+    // it (an edit, or a sign-in again to a kept server not signed out of),
+    // and the way it was saved.
+    private var keepsSecret = false
+    private var savedMode: AuthMode? = null
 
     // The server's address, or null while what is typed isn't one.
     val url: HttpUrl? by derivedStateOf { serverUrl(scheme, address) }
@@ -231,6 +283,18 @@ class SignInViewModel @Inject constructor(
         val link = parseFamilyLink(text) ?: return false
         startJoin(link)
         return true
+    }
+
+    // Opens a family link the page was opened for, once per opening: a page
+    // drawn again (a rotation, a redraw) is the same opening and starts
+    // nothing, while the same link opened again is a new page. `before` runs
+    // first, only when the link is taken (the page puts focus on the
+    // address).
+    fun open(link: FamilyLink, opened: Long, before: () -> Unit = {}) {
+        if (joinedFrom == link to opened) return
+        joinedFrom = link to opened
+        before()
+        startJoin(link)
     }
 
     fun startJoin(link: FamilyLink? = null) {
@@ -295,7 +359,8 @@ class SignInViewModel @Inject constructor(
         val link = handOver ?: return
         if (busy) return
         val base = link.base.toHttpUrlOrNull() ?: return
-        val connection = when (val form = formConnection(base, home, headers.toList(), gatewayDraft, pins.toMap(), clientCert)) {
+        useGatewayForm(sending(gatewayForm))
+        val connection = when (val form = formConnection(base, home, headers, gatewayDraft, pins.toMap(), clientCert)) {
             is FormConnection.Ready -> form.settings
             is FormConnection.Problem -> {
                 error = form.text
@@ -337,7 +402,7 @@ class SignInViewModel @Inject constructor(
                 secret = signIn.secret,
                 authMode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
                 home = signIn.home.orEmpty(),
-                headers = headers.toList(),
+                headers = headers,
                 pins = pins.toMap(),
                 clientCertAlias = clientCert,
                 gateway = gatewayDraft,
@@ -368,10 +433,11 @@ class SignInViewModel @Inject constructor(
     fun join() {
         val url = url
         if (busy || joinProblem != null || url == null) return
+        useGatewayForm(sending(gatewayForm))
         // Set up as signing in to the server would be: the certificates
         // trusted for it, its headers, its sign-in page fields and its client
         // certificate.
-        val connection = when (val form = formConnection(url, home, headers.toList(), gatewayDraft, pins.toMap(), clientCert)) {
+        val connection = when (val form = formConnection(url, home, headers, gatewayDraft, pins.toMap(), clientCert)) {
             is FormConnection.Ready -> form.settings
             is FormConnection.Problem -> {
                 error = form.text
@@ -418,7 +484,7 @@ class SignInViewModel @Inject constructor(
                 secret = account.password,
                 authMode = AuthMode.Token,
                 home = home,
-                headers = headers.toList(),
+                headers = headers,
                 pins = pins.toMap(),
                 clientCertAlias = clientCert,
                 gateway = gatewayDraft,
@@ -482,15 +548,26 @@ class SignInViewModel @Inject constructor(
         val draft = sessions.connectionDraft(id) ?: return
         editing = form == ServerForm.Edit
         fill(draft)
-        if (!keepsSavedSecret(form, kept?.signedOut != false)) {
-            savedPassword = false
-            savedKey = false
-        }
+        if (!keepsSavedSecret(form, kept?.signedOut != false)) keepsSecret = false
     }
 
+    // How the form signs in: an API key, the legacy password, or the normal
+    // way.
+    val mode: AuthMode get() = authModeOf(legacyPassword, useApiKey)
+
     // Whether the password or key may be left empty to keep the saved one.
-    val keepsPassword: Boolean get() = savedPassword
-    val keepsKey: Boolean get() = savedKey
+    val keepsPassword: Boolean get() = app.winters.octo.connection.keepsPassword(keepsSecret, savedMode, mode)
+    val keepsKey: Boolean get() = app.winters.octo.connection.keepsKey(keepsSecret, savedMode, mode)
+
+    // Picks how to sign in. Picking API key with no key kept for it asks for
+    // the key's row to be brought into view.
+    fun pickMethod(next: AuthMode) {
+        val was = mode
+        val (legacy, key) = flagsOf(next)
+        legacyPassword = legacy
+        useApiKey = key
+        useGatewayForm(methodPicked(gatewayForm, was, next, app.winters.octo.connection.keepsKey(keepsSecret, savedMode, next)))
+    }
 
     private fun fill(draft: ConnectionDraft) {
         started = draft
@@ -506,64 +583,82 @@ class SignInViewModel @Inject constructor(
         legacyPassword = draft.authMode == AuthMode.LegacyPassword
         useApiKey = draft.authMode == AuthMode.ApiKey
         home = draft.home
-        headers.clear()
-        headers.addAll(draft.headers)
+        list = list.replaced(draft.headers)
         clientCert = draft.clientCertAlias
         pins.putAll(draft.pins)
         takesApiKeys = draft.takesApiKeys
-        savedKey = useApiKey
-        savedPassword = !useApiKey
+        keepsSecret = true
+        savedMode = draft.authMode
         // The saved sign-in page's kind; its values stay sealed and are kept
         // while its fields are left empty.
         gatewaySaved = draft.gateway
         gatewayKind = draft.gateway
-        gatewayFirst = ""
-        gatewaySecond = ""
+        firstWords = ""
+        secondWords = ""
         advancedOpen = draft.authMode != AuthMode.Token || draft.home.isNotEmpty() ||
             draft.headers.isNotEmpty() || draft.clientCertAlias != null || draft.gateway != GatewayKind.None
     }
 
-    fun addHeader() {
-        headers.add(HeaderDraft("", ""))
+    // A blank header row at the end, and its id.
+    fun addHeader(): Long {
+        val (next, id) = list.added()
+        list = next
+        return id
     }
 
-    fun removeHeader(index: Int) {
-        if (index in headers.indices) headers.removeAt(index)
+    fun removeHeader(id: Long) {
+        list = list.remove(id)
     }
 
     // A renamed saved header no longer keeps its saved value.
-    fun setHeaderName(index: Int, name: String) {
-        val old = headers.getOrNull(index) ?: return
-        headers[index] = old.copy(name = name, saved = old.saved && name.trim().equals(old.name.trim(), ignoreCase = true))
+    fun setHeaderName(id: Long, name: String) {
+        list = list.renamed(id, name)
     }
 
-    fun setHeaderValue(index: Int, value: String) {
-        val old = headers.getOrNull(index) ?: return
-        headers[index] = old.copy(value = value)
+    fun setHeaderValue(id: Long, value: String) {
+        list = list.valued(id, value)
     }
 
     // Picks the kind of sign-in the sign-in page takes. Another kind starts
     // with empty fields, since they mean other things.
     fun pickGateway(kind: GatewayKind) {
         if (kind != gatewayKind) {
-            gatewayFirst = ""
-            gatewaySecond = ""
+            firstWords = ""
+            secondWords = ""
         }
-        gatewayKind = kind
         error = null
+        useGatewayForm(kindPicked(gatewayForm, kind))
+    }
+
+    // The sign-in page group was brought into view, or the API key's row.
+    fun calloutShown() {
+        useGatewayForm(app.winters.octo.connection.calloutShown(gatewayForm))
+    }
+
+    fun keyShown() {
+        useGatewayForm(app.winters.octo.connection.keyShown(gatewayForm))
+    }
+
+    // The pointer under Sign in: the group calling out the failure comes
+    // into view again.
+    fun pointTo() {
+        useGatewayForm(app.winters.octo.connection.pointTo(gatewayForm))
     }
 
     private val gatewayDraft: GatewayDraft
         get() = GatewayDraft(gatewayKind, gatewayFirst, gatewaySecond, gatewaySaved)
 
     private val gatewayForm: GatewayFormState
-        get() = GatewayFormState(advancedOpen, gatewayKind, gateway, gatewayFor)
+        get() = GatewayFormState(advancedOpen, gatewayKind, gateway, gatewayFor, callout, calloutPending, keyPending)
 
     private fun useGatewayForm(state: GatewayFormState) {
         advancedOpen = state.advancedOpen
         gatewayKind = state.kind
         gateway = state.detected
         gatewayFor = state.detectedFor
+        callout = state.callout
+        calloutPending = state.calloutPending
+        keyPending = state.keyPending
     }
 
     // The address as a sign-in sends it, which what it met belongs to.
@@ -571,25 +666,20 @@ class SignInViewModel @Inject constructor(
         get() = url?.toString() ?: (scheme.prefix + address.trim())
 
     // An attempt at `attempt` that met a sign-in page opens Advanced at its
-    // fields, unless the address has changed since.
+    // fields and calls the failure out there, unless the address has changed
+    // since. It runs after the failure's words are set.
     private fun met(attempt: String, found: Gateway?) = useGatewayForm(reactToFailure(gatewayForm, attempt, sentAddress, found))
-
-    private val mode: AuthMode
-        get() = when {
-            useApiKey -> AuthMode.ApiKey
-            legacyPassword -> AuthMode.LegacyPassword
-            else -> AuthMode.Token
-        }
 
     // Whether the form has what the chosen way of signing in needs.
     val ready: Boolean
         get() = url != null && when (mode) {
-            AuthMode.ApiKey -> apiKey.isNotBlank() || savedKey
-            else -> username.isNotBlank() && (password.isNotEmpty() || savedPassword)
+            AuthMode.ApiKey -> apiKey.isNotBlank() || keepsKey
+            else -> username.isNotBlank() && (password.isNotEmpty() || keepsPassword)
         }
 
     fun submit() {
         if (busy || !ready) return
+        useGatewayForm(sending(gatewayForm))
         // A header row left completely empty is ignored; a half-filled or
         // malformed one is pointed out rather than dropped.
         val unusable = headers.any { row ->
@@ -610,7 +700,7 @@ class SignInViewModel @Inject constructor(
             secret = if (mode == AuthMode.ApiKey) apiKey.trim() else password,
             authMode = mode,
             home = home,
-            headers = headers.toList(),
+            headers = headers,
             pins = pins.toMap(),
             clientCertAlias = clientCert,
             label = label.takeIf { form == ServerForm.Add || form == ServerForm.Edit },
@@ -639,15 +729,12 @@ class SignInViewModel @Inject constructor(
                     // Once in, the secrets are kept only in the sealed vault.
                     password = ""
                     apiKey = ""
-                    gatewayFirst = ""
-                    gatewaySecond = ""
+                    firstWords = ""
+                    secondWords = ""
                     signedIn = true
                 }
                 is SignInError.Untrusted -> question = failed
                 else -> {
-                    // A sign-in page in front of the server opens Advanced
-                    // at its fields.
-                    met(request.address, gatewayOf(failed))
                     // A server that cannot check tokens gets the password
                     // itself where that is safe, and the switch shows it.
                     val retry = (failed as? SignInError.Failed)?.cause
@@ -662,6 +749,9 @@ class SignInViewModel @Inject constructor(
                         LegacyRetry.Unsafe -> error = SignInWords.LEGACY_UNSAFE
                         LegacyRetry.None -> error = failed.userMessage()
                     }
+                    // A sign-in page in front of the server opens Advanced
+                    // at its fields.
+                    met(request.address, gatewayOf(failed))
                 }
             }
             busy = false
@@ -680,6 +770,7 @@ class SignInViewModel @Inject constructor(
     // Trusts the certificate asked about, for its host only, and tries again.
     fun trust() {
         val asked = question ?: return
+        useGatewayForm(sending(gatewayForm))
         pins[pinKey(asked.host)] = asked.fingerprint
         question = null
         when {
@@ -725,6 +816,7 @@ internal fun formConnection(
 // Whether the form changes more than the server's name: the address, the
 // sign-in, a secret typed in, or anything under Advanced, the sign-in page
 // in front of the server included. With nothing to compare with, it does.
+// A saved header whose value holds only spaces is left as it was.
 internal fun connectionChanged(request: SignInRequest, was: ConnectionDraft?): Boolean {
     was ?: return true
     return request.address.trim().removeSuffix("/") != was.address ||
@@ -732,7 +824,7 @@ internal fun connectionChanged(request: SignInRequest, was: ConnectionDraft?): B
         request.secret.isNotEmpty() ||
         request.authMode != was.authMode ||
         request.home.trim().removeSuffix("/") != was.home ||
-        request.headers.any { !it.saved || it.value.isNotEmpty() } ||
+        request.headers.any { !it.saved || it.value.isNotBlank() } ||
         request.headers.map { it.name.trim().lowercase() }.filter(String::isNotEmpty) != was.headers.map { it.name.trim().lowercase() } ||
         request.pins != was.pins ||
         request.clientCertAlias != was.clientCertAlias ||

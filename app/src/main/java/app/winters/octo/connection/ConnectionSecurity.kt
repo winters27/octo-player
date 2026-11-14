@@ -13,15 +13,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import okhttp3.ConnectionPool
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.io.IOException
+import java.net.InetAddress
+import java.net.Socket
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
 
 // Whether a server's gateway sign-in can't be used where it is: gateway
 // headers with a plain http main address outside the home network, where
@@ -37,7 +41,7 @@ fun needsHttps(main: HttpUrl, headers: List<ServerHeader>): Boolean =
 // everywhere at once.
 @Singleton
 class ConnectionSecurity @Inject constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val context: Context,
     private val devices: DeviceIds,
 ) {
     // What decides who is signed in where: the addresses, the ones gateway
@@ -76,8 +80,27 @@ class ConnectionSecurity @Inject constructor(
     // Distrusted authorities are turned down before a pin is looked at.
     private val platform = platformTrustManager()
     private val trustManager = DistrustingTrustManager(PinningTrustManager(platform, pins, remember), phoneBuiltChain(platform))
-    private val keyManager = ClientCertKeyManager(context) {
-        current?.let { now -> now.identity.clientCert?.let { ClientCertChoice(it, now.hosts) } }
+    // The client certificate the factory's context was made for. Kept apart
+    // from `current`, which clear() lets go of, so the next configuration
+    // compares with what is installed rather than with nothing.
+    @Volatile private var installedIdentity: String? = null
+
+    // One factory for every client installed here, over a context made for
+    // the client certificate in use: another certificate swaps the context
+    // behind it, so a session made with the old one is never resumed.
+    private val factory = SwappingFactory(contextFor().socketFactory)
+
+    // The connections every client installed here keeps, closed when the
+    // client certificate changes.
+    private val pool = ConnectionPool()
+
+    // A TLS context with a key manager of its own (nothing read from the
+    // phone's certificate store carries over) and the shared trust manager.
+    private fun contextFor(): SSLContext {
+        val keys = ClientCertKeyManager(context) {
+            current?.let { now -> now.identity.clientCert?.let { ClientCertChoice(it, now.hosts) } }
+        }
+        return SSLContext.getInstance("TLS").apply { init(arrayOf(keys), arrayOf(trustManager), null) }
     }
 
     // Uses the settings for the server at these addresses from now on. The
@@ -95,12 +118,17 @@ class ConnectionSecurity @Inject constructor(
         val before = current
         val cookies = before?.takeIf { it.identity == identity }?.cookies ?: GatewayCookies()
         current = Current(identity, addresses.mapTo(HashSet()) { pinKey(it.host) }, cookies)
-        if (before?.identity?.clientCert != settings.clientCertAlias) keyManager.forget()
+        if (settings.clientCertAlias != installedIdentity) {
+            factory.delegate = contextFor().socketFactory
+            installedIdentity = settings.clientCertAlias
+            pool.evictAll()
+        }
     }
 
+    // Lets go of the configuration. The context installed stays until a
+    // configuration with another client certificate replaces it.
     fun clear() {
         current = null
-        keyManager.forget()
         rejected.clear()
     }
 
@@ -117,14 +145,12 @@ class ConnectionSecurity @Inject constructor(
     // force as a request starts goes with it (serverHeaders), so every hop of
     // it, and the cookies its answers set, belong to that one even when
     // another comes in meanwhile.
-    fun install(builder: OkHttpClient.Builder): OkHttpClient.Builder {
-        val tls = SSLContext.getInstance("TLS").apply { init(arrayOf(keyManager), arrayOf(trustManager), null) }
-        return builder
-            .addInterceptor(watch)
-            .serverHeaders { current?.let(::scopeOf) }
-            .sslSocketFactory(tls.socketFactory, trustManager)
-            .hostnameVerifier(PinningHostnameVerifier(pins, remember))
-    }
+    fun install(builder: OkHttpClient.Builder): OkHttpClient.Builder = builder
+        .addInterceptor(watch)
+        .serverHeaders { current?.let(::scopeOf) }
+        .connectionPool(pool)
+        .sslSocketFactory(factory, trustManager)
+        .hostnameVerifier(PinningHostnameVerifier(pins, remember))
 
     // The same client for songs, covers, loops and kept files: an HTML page
     // from one of the server's addresses in place of one is refused, never
@@ -152,4 +178,28 @@ class ConnectionSecurity @Inject constructor(
         cookies = now.cookies,
         device = devices.current(),
     )
+}
+
+// One socket factory for a client's whole life, handing each new socket to
+// the context of the moment: swapping `delegate` means the next connection
+// never resumes a session made under the old client certificate. Sockets
+// come back as the context made them.
+internal class SwappingFactory(@Volatile var delegate: SSLSocketFactory) : SSLSocketFactory() {
+    override fun getDefaultCipherSuites(): Array<String> = delegate.defaultCipherSuites
+
+    override fun getSupportedCipherSuites(): Array<String> = delegate.supportedCipherSuites
+
+    override fun createSocket(s: Socket?, host: String?, port: Int, autoClose: Boolean): Socket = delegate.createSocket(s, host, port, autoClose)
+
+    override fun createSocket(host: String?, port: Int): Socket = delegate.createSocket(host, port)
+
+    override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket =
+        delegate.createSocket(host, port, localHost, localPort)
+
+    override fun createSocket(host: InetAddress?, port: Int): Socket = delegate.createSocket(host, port)
+
+    override fun createSocket(address: InetAddress?, port: Int, localAddress: InetAddress?, localPort: Int): Socket =
+        delegate.createSocket(address, port, localAddress, localPort)
+
+    override fun createSocket(): Socket = delegate.createSocket()
 }

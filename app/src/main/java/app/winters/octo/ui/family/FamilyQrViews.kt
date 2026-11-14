@@ -54,6 +54,16 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.OverArt
 import app.winters.octo.subsonic.FamilyLink
+import androidx.compose.foundation.focusGroup
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.lifecycle.LifecycleOwner
+import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.Executors
 
 // The text of a QR code in a camera frame: its brightness plane, read
@@ -67,14 +77,22 @@ internal fun readFrame(image: ImageProxy): String? {
 
 // The camera, full screen, reading family QR codes. A code that holds a
 // family link closes it with the link; any other code says so and scanning
-// goes on. Asks for the camera first, and says plainly when it cannot.
+// goes on. Asks for the camera first, and says plainly when it cannot. It is
+// a modal over the page: presses and focus stay in it, and its Cancel takes
+// `cancelFocus`.
 @Composable
-fun QrScanner(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
-    OverArt { ScannerView(onFound, onClose) }
+fun QrScanner(onFound: (FamilyLink) -> Unit, onClose: () -> Unit, cancelFocus: FocusRequester) {
+    OverArt { ScannerView(onFound, onClose, cancelFocus) }
+}
+
+// How a page draws the scanner. The app never provides another; a test
+// provides one that reads a link without a camera.
+val LocalQrScanner = staticCompositionLocalOf<@Composable (onFound: (FamilyLink) -> Unit, onClose: () -> Unit, cancelFocus: FocusRequester) -> Unit> {
+    { found, close, focus -> QrScanner(found, close, focus) }
 }
 
 @Composable
-private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
+private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit, cancelFocus: FocusRequester) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     var allowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
@@ -86,18 +104,31 @@ private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
         asked = true
     }
     LaunchedEffect(Unit) { if (!allowed) ask.launch(Manifest.permission.CAMERA) }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    // Presses on it never reach the page under it (only fresh downs are
+    // taken, so a finger's small movement still clicks Cancel), and Tab and
+    // the arrows stay on its own controls, while a request for focus
+    // elsewhere and a clear still leave it.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { if (it.changedToDown()) it.consume() } } }
+            .focusProperties { onExit = { if (requestedFocusDirection != FocusDirection.Enter && requestedFocusDirection != FocusDirection.Exit) cancelFocusChange() } }
+            .focusGroup(),
+    ) {
         if (allowed) {
             val analysis = remember { Executors.newSingleThreadExecutor() }
+            val future = remember { ProcessCameraProvider.getInstance(context) }
+            val camera = remember { ScannerCamera(ProviderBinder(future, owner)) }
             var found by remember { mutableStateOf(false) }
-            DisposableEffect(Unit) { onDispose { analysis.shutdown() } }
+            // Closing lets the camera go at once (its light goes out), and a
+            // camera that arrives only after closing is never started.
+            DisposableEffect(Unit) { onDispose { camera.close(); analysis.shutdown() } }
             AndroidView(
                 factory = { ctx ->
                     val view = PreviewView(ctx)
-                    val future = ProcessCameraProvider.getInstance(ctx)
                     future.addListener({
                         runCatching {
-                            val provider = future.get()
                             val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
                             val reader = ImageAnalysis.Builder()
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -115,8 +146,7 @@ private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
                                     }
                                 }
                             }
-                            provider.unbindAll()
-                            provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, reader)
+                            camera.bind(preview, reader)
                         }.onFailure { problem = "The camera did not start. Type the code instead." }
                     }, ContextCompat.getMainExecutor(ctx))
                     view
@@ -139,7 +169,64 @@ private fun ScannerView(onFound: (FamilyLink) -> Unit, onClose: () -> Unit) {
                 else -> "Hold the family QR code inside the square."
             }
             Text(line, style = OctoType.body, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-            GlazeButton("Cancel", onClose, size = ButtonSize.Medium)
+            GlazeButton("Cancel", onClose, Modifier.focusRequester(cancelFocus), size = ButtonSize.Medium)
         }
+    }
+}
+
+// What the scanner asks of the camera: let go of every use, take the
+// preview and the reader, let go of those two, and stop reading frames.
+internal interface CameraBinder<P, R> {
+    fun unbindAll()
+
+    fun bind(preview: P, reader: R)
+
+    fun unbind(preview: P, reader: R)
+
+    fun clearAnalyzer(reader: R)
+}
+
+// The scanner's hold on the camera. A bind after closing does nothing (the
+// camera arrived too late); a bind that fails throws to the caller and
+// leaves nothing to let go of; closing lets go of the last pair bound and
+// stops its reader, once.
+internal class ScannerCamera<P : Any, R : Any>(private val binder: CameraBinder<P, R>) {
+    private var closed = false
+    private var bound: Pair<P, R>? = null
+
+    fun bind(preview: P, reader: R) {
+        if (closed) return
+        binder.unbindAll()
+        binder.bind(preview, reader)
+        bound = preview to reader
+    }
+
+    fun close() {
+        if (closed) return
+        closed = true
+        val (preview, reader) = bound ?: return
+        binder.unbind(preview, reader)
+        binder.clearAnalyzer(reader)
+    }
+}
+
+// The phone's camera, through CameraX, for the page's lifecycle. Reached
+// only once the provider is in (from its listener, or after a bind).
+internal class ProviderBinder(
+    private val future: ListenableFuture<ProcessCameraProvider>,
+    private val owner: LifecycleOwner,
+) : CameraBinder<Preview, ImageAnalysis> {
+    override fun unbindAll() {
+        future.get().unbindAll()
+    }
+
+    override fun bind(preview: Preview, reader: ImageAnalysis) {
+        future.get().bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, reader)
+    }
+
+    override fun unbind(preview: Preview, reader: ImageAnalysis) { future.get().unbind(preview, reader) }
+
+    override fun clearAnalyzer(reader: ImageAnalysis) {
+        reader.clearAnalyzer()
     }
 }

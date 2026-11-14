@@ -79,12 +79,19 @@ class GatewayWordSitesTest {
         listOf(
             "GatewayWords.LABEL_SECTION",
             "GatewayWords.LABEL_CAPTION",
-            "GatewayWords::kindLabel",
+            "GatewayWords.kindLabel(",
+            "GatewayWords.kindHelper(",
             "GatewayWords.fieldLabels(vm.gatewayKind, vm.gateway)",
             "SignInWords.UNCHANGED",
             "GatewayWords.hint(",
+            "GatewayWords.tip(",
+            "GatewayWords.POINTER",
+            "GatewayWords.inGroup(",
             "GatewayWords.JOIN_HINT",
             "GatewayWords.NEEDS_HTTPS",
+            "SignInWords.API_KEY_IN_THE_OPEN",
+            "SignInWords.HOME_NOTE",
+            "SignInWords.HEADERS_DESCRIPTION",
         ).forEach { assertTrue(it, form.contains(it)) }
     }
 

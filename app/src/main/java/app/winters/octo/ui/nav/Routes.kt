@@ -85,8 +85,17 @@ enum class ServerForm {
 // manager, the members and the requests waiting.
 @Serializable data object FamilyRoute : NavKey
 
-// Signing up or signing in, filled in from a family link.
-@Serializable data class FamilyJoinRoute(val link: String) : NavKey
+// Signing up or signing in, filled in from a family link: which opening of
+// it, so each opening is a page (and a view model) of its own. A back stack
+// saved before openings were counted reads as 0.
+@Serializable data class FamilyJoinRoute(val link: String, val opened: Long = 0) : NavKey
+
+// Opens a family link's page: one already on top is replaced, so going back
+// never lands on a spent invite's form; on any other top it is added. One
+// write either way.
+fun MutableList<NavKey>.openJoin(route: FamilyJoinRoute) {
+    if (lastOrNull() is FamilyJoinRoute) this[lastIndex] = route else add(route)
+}
 
 // The charts and new songs, on an Octo server that has them.
 @Serializable data object ChartsRoute : NavKey

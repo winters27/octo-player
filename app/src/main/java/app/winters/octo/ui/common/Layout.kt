@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlazedIconButton
@@ -53,7 +51,7 @@ fun BackButton(onBack: () -> Unit) {
     Box(Modifier.statusBarsPadding().padding(start = 16.dp, top = 8.dp)) {
         GlazedIconButton(
             backdrop = LocalHaze.current,
-            icon = ImageVector.vectorResource(OctoIcons.Back),
+            icon = LocalIconVectors.current(OctoIcons.Back),
             contentDescription = "Back",
             onClick = onBack,
             size = 40.dp,

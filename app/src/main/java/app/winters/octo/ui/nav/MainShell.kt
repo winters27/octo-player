@@ -36,6 +36,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -178,16 +179,18 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // join form filled in, on the Settings tab.
     val familyHub = hiltViewModel<FamilyShellViewModel>().hub
     val familyOpen by familyHub.opens.collectAsStateWithLifecycle()
+    // Each opening of a family link counts, so it is a page of its own: the
+    // same link opened again starts again, and a page drawn again does not.
+    // Saved, so a page restored with opening N is never reused for the next.
+    var joinOpens by rememberSaveable { mutableLongStateOf(0L) }
     LaunchedEffect(familyOpen) {
         val what = familyOpen ?: return@LaunchedEffect
         familyHub.opened()
         selected = stacks.lastIndex
-        stacks.last().add(
-            when (what) {
-                FamilyOpen.Family -> FamilyRoute
-                is FamilyOpen.Join -> FamilyJoinRoute(familyAppLink(what.link))
-            },
-        )
+        when (what) {
+            FamilyOpen.Family -> stacks.last().add(FamilyRoute)
+            is FamilyOpen.Join -> stacks.last().openJoin(FamilyJoinRoute(familyAppLink(what.link), opened = ++joinOpens))
+        }
     }
     // A list shared to Octo: Import, on the Settings tab, which sends it.
     val importInbox = hiltViewModel<ImportShellViewModel>().inbox
@@ -212,6 +215,11 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // The bar's small player, and the full one over everything.
     var barPlayer by rememberSaveable { mutableStateOf(false) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    // A sign-in page opened while the full player is up (a family link, a
+    // server's sign-in asked for) closes the player, so the page is not left
+    // under it.
+    val top = stack.lastOrNull()
+    LaunchedEffect(top) { if (isSignInRoute(top)) playerOpen = false }
     // The full player hides everything under it, so the pages need not draw.
     var playerCovers by remember { mutableStateOf(false) }
     // A search asked for elsewhere (the live player's "Find this song in
@@ -335,7 +343,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 // The bar steps aside while the full player is open; the artwork
                 // flies between the two.
                 AnimatedVisibility(
-                    visible = !playerOpen,
+                    visible = barShown(playerOpen, stack.lastOrNull()),
                     enter = fadeIn(tween(300)),
                     exit = fadeOut(tween(300)),
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -361,7 +369,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 // Songs on their way: a small pill above the bar, on the
                 // right, that opens the server downloads sheet when tapped.
                 AnimatedVisibility(
-                    visible = !playerOpen,
+                    visible = barShown(playerOpen, stack.lastOrNull()),
                     enter = fadeIn(tween(300)),
                     exit = fadeOut(tween(300)),
                     modifier = Modifier.align(Alignment.BottomEnd),
@@ -460,7 +468,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<OctoAdminRoute> { OctoAdminScreen(back) }
         entry<ImportRoute> { ImportScreen(back) }
         entry<FamilyRoute> { FamilyScreen(back, onImport = { open(ImportRoute) }) }
-        entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link)) }
+        entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link), joinOpened = route.opened) }
         entry<ChartsRoute> { app.winters.octo.ui.charts.ChartsScreen(back) }
         entry<SoundRoute> { SoundScreen(back) }
         entry<HomeSectionsRoute> { app.winters.octo.ui.settings.HomeSectionsPage(back) }
