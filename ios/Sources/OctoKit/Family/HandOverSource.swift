@@ -168,7 +168,7 @@ public final class HandOverSource {
             now.asking = nil
             if sent {
                 let name = asking.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "your other device" : asking.deviceName
-                now.done = "Sent to \(name). It's signing in now."
+                now.done = "Sent to \(name)."
             } else {
                 now.failed = HandOverText.sendFailed
             }

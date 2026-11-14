@@ -126,6 +126,17 @@ public enum SignInWords {
     public static let certNotYetValid = "This certificate isn't valid yet. Check this computer's date, or choose another."
     public static let certTooBig = "This file is too big to be a certificate."
 
+    /// A family link refused by the form it came to, and the words for an outside link or one of
+    /// Octo's own sign-in asks while a sign-in is open.
+    public static let linkWhileBusy = "That link came in while Octo was signing in. Open it again to use it."
+    public static let linkForAnotherAccount = "This link is for another account. Add it from Add a server."
+    public static let linkForAnotherServer = "This link is for another server. Add it from Add a server."
+    public static let codeElsewhere = "This code can't sign in here. Use it from Add a server instead."
+    public static let linkAfterAddressChange = "The address here was changed. Add this link from Add a server instead."
+    public static let linkWhileSignInOpen = "Finish or close the sign-in that's open, then try this link again."
+
+    public static func askWhileSignInOpen(_ name: String) -> String { "Sign in to \(name) when you're done here." }
+
     /// The words for any error a sign-in can end with.
     public static func describe(_ error: Error) -> String {
         if let octo = error as? OctoError {

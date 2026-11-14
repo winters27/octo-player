@@ -119,4 +119,15 @@ object SignInWords {
     const val CERT_EXPIRED = "This certificate has expired. Choose a current one."
     const val CERT_NOT_YET_VALID = "This certificate isn't valid yet. Check this computer's date, or choose another."
     const val CERT_TOO_BIG = "This file is too big to be a certificate."
+
+    // A family link refused by the form it came to, and the words for an
+    // outside link or one of Octo's own sign-in asks while a sign-in is open.
+    const val LINK_WHILE_BUSY = "That link came in while Octo was signing in. Open it again to use it."
+    const val LINK_FOR_ANOTHER_ACCOUNT = "This link is for another account. Add it from Add a server."
+    const val LINK_FOR_ANOTHER_SERVER = "This link is for another server. Add it from Add a server."
+    const val CODE_ELSEWHERE = "This code can't sign in here. Use it from Add a server instead."
+    const val LINK_AFTER_ADDRESS_CHANGE = "The address here was changed. Add this link from Add a server instead."
+    const val LINK_WHILE_SIGN_IN_OPEN = "Finish or close the sign-in that's open, then try this link again."
+
+    fun askWhileSignInOpen(name: String): String = "Sign in to $name when you're done here."
 }

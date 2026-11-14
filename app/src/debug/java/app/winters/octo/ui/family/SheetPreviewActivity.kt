@@ -53,7 +53,7 @@ class SheetPreviewActivity : ComponentActivity() {
             servers = FamilyLinkChoices("https://music.example.com", "http://192.168.1.20:4533"),
         )
         val sheet = when (state) {
-            "sent" -> HandOverSheet(id = 1, start = start, key = key, done = "Sent to Studio PC. It's signing in now.")
+            "sent" -> HandOverSheet(id = 1, start = start, key = key, done = "Sent to Studio PC.")
             "stale" -> HandOverSheet(id = 1, start = start.copy(expires = Instant.now().minusSeconds(5).toString()), key = key, stale = true)
             "unavailable" -> HandOverSheet(id = 1, start = start.copy(links = FamilyLinkChoices(null, "http://192.168.1.20:4533/family/signin"), servers = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key)
             "loading" -> HandOverSheet(id = 1, key = key, loading = true)

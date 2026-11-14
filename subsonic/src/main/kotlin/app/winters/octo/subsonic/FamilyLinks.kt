@@ -67,7 +67,7 @@ fun parseFamilyLink(text: String): FamilyLink? {
 
 private fun parseAppInvite(text: String): FamilyLink? {
     val params = readParams(text.substringAfter('?', "").substringBefore('#'))
-    val server = params["server"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val server = params["server"]?.trim()?.takeIf(String::isNotEmpty)?.let(::addressIn) ?: return null
     val token = params["invite"]?.trim()?.takeIf(String::isNotEmpty) ?: return null
     return FamilyInviteLink(server, token, homeIn(params, "home"))
 }
@@ -102,8 +102,14 @@ private fun handOverIn(params: Map<String, String>, base: String?): FamilyHandOv
     return FamilyHandOverLink(base ?: server, token, key, server, homeIn(params, "h"), params["u"]?.trim()?.takeIf(String::isNotEmpty))
 }
 
-// An address a link names, when it is an address at all.
-private fun addressIn(text: String): String? = normalizeServerUrl(text)?.toString()?.removeSuffix("/")
+// An address a link names, when it is an address at all. One without a
+// scheme gets the one the app picks for a typed address: http on the home
+// network, https anywhere else.
+private fun addressIn(text: String): String? {
+    val trimmed = text.trim()
+    val withScheme = if ("://" in trimmed) trimmed else automaticScheme(trimmed).prefix + trimmed
+    return normalizeServerUrl(withScheme)?.toString()?.removeSuffix("/")
+}
 
 private fun homeIn(params: Map<String, String>, name: String): String? =
     params[name]?.trim()?.takeIf(String::isNotEmpty)?.let(::addressIn)

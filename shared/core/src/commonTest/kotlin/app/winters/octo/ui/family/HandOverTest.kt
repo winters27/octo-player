@@ -129,7 +129,7 @@ class HandOverTest {
 
         source.allow()
         until("sent") { source.sheet?.done != null }
-        assertEquals("Sent to Pixel 9. It's signing in now.", source.sheet!!.done)
+        assertEquals("Sent to Pixel 9.", source.sheet!!.done)
         val decide = server.called("decideFamilySignIn").single()
         assertEquals("true", decide.url.queryParameter("allow"))
         val boxCall = server.called("putFamilySignInBox").single()

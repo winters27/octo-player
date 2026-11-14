@@ -217,9 +217,9 @@ class FamilyDialogsTest {
         draw()
         assertTrue(has("Still there?"))
         assertTrue(has("Make a new code"))
-        handOver = handOver.copy(stale = false, done = "Sent to Pixel 9. It's signing in now.")
+        handOver = handOver.copy(stale = false, done = "Sent to Pixel 9.")
         render()
-        assertTrue(has("Sent to Pixel 9. It's signing in now."))
+        assertTrue(has("Sent to Pixel 9."))
     }
 
     @Test

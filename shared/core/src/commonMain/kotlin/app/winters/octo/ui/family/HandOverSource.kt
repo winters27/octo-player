@@ -156,7 +156,7 @@ class HandOverSource(
             }
             val now = sheet?.takeIf { it.id == open.id } ?: return@launch
             sheet = if (sent.isSuccess) {
-                now.copy(sending = false, asking = null, done = "Sent to ${asking.deviceName.ifBlank { "your other device" }}. It's signing in now.")
+                now.copy(sending = false, asking = null, done = "Sent to ${asking.deviceName.ifBlank { "your other device" }}.")
             } else {
                 now.copy(sending = false, asking = null, failed = HANDOVER_SEND_FAILED)
             }

@@ -474,6 +474,34 @@ class FamilyParsingTest {
         assertNull(parseFamilyLink("https://example.com/family/join#invite=t&home=%3A%2F%2F")!!.home)
     }
 
+    // Every address field of every kind of link: one without a scheme gets
+    // the app's own, https outside the home network and http inside it.
+    @Test
+    fun anAddressWithoutASchemeGetsTheAppsOwn() {
+        val bare = mapOf(
+            "music.example.com" to "https://music.example.com",
+            "192.168.1.20:4533" to "http://192.168.1.20:4533",
+            "music.lan" to "http://music.lan",
+        )
+        val main = "https%3A%2F%2Fmusic.example.com"
+        for ((typed, read) in bare) {
+            val e = encodeComponent(typed)
+            assertEquals(typed, read, (parseFamilyLink("octo://join?server=$e&invite=t") as FamilyInviteLink).server)
+            assertEquals(typed, read, parseFamilyLink("octo://join?server=$main&invite=t&home=$e")!!.home)
+            assertEquals(typed, read, parseFamilyLink("https://music.example.com/family/join#invite=t&home=$e")!!.home)
+            assertEquals(typed, read, (parseFamilyLink("octo://signin?server=$e&username=alex") as FamilySignInPrefill).server)
+            assertEquals(typed, read, parseFamilyLink("octo://signin?server=$main&home=$e")!!.home)
+            val own = parseFamilyLink("octo://handover?t=t1&k=k1&s=$e") as FamilyHandOverLink
+            assertEquals(typed, read, own.server)
+            assertEquals(typed, read, own.base)
+            assertEquals(typed, read, parseFamilyLink("octo://handover?t=t1&k=k1&s=$main&h=$e")!!.home)
+            assertEquals(typed, read, (parseFamilyLink("https://music.example.com/family/signin#t=t1&k=k1&s=$e") as FamilyHandOverLink).server)
+            assertEquals(typed, read, parseFamilyLink("https://music.example.com/family/signin#t=t1&k=k1&s=$main&h=$e")!!.home)
+        }
+        // An app-form invite whose server is not an address is no link.
+        assertNull(parseFamilyLink("octo://join?server=%3A%2F%2F&invite=t"))
+    }
+
     @Test
     fun qualityLimitsCompareLowestFirst() {
         assertTrue(RequestQuality.Mp3.allowedUnder(RequestQuality.Flac))

@@ -73,6 +73,13 @@ import Testing
             "cert.expired": SignInWords.certExpired,
             "cert.notYetValid": SignInWords.certNotYetValid,
             "cert.tooBig": SignInWords.certTooBig,
+            "link.whileBusy": SignInWords.linkWhileBusy,
+            "link.forAnotherAccount": SignInWords.linkForAnotherAccount,
+            "link.forAnotherServer": SignInWords.linkForAnotherServer,
+            "link.codeElsewhere": SignInWords.codeElsewhere,
+            "link.afterAddressChange": SignInWords.linkAfterAddressChange,
+            "link.whileSignInOpen": SignInWords.linkWhileSignInOpen,
+            "link.askWhileSignInOpen": SignInWords.askWhileSignInOpen("{name}"),
         ]
         for (mode, name) in modes {
             words["method.\(name)"] = SignInWords.methodLabel(mode)

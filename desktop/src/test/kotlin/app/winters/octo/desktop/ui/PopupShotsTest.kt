@@ -162,7 +162,7 @@ class PopupShotsTest {
                     val actions = SheetActions(owner = false)
                     val fixed = linkedMapOf(
                         "08-device-asking" to null,
-                        "09-handed-over" to HandOverSheet(id = 2, start = start, key = key, done = "Sent to Pixel 9. It's signing in now."),
+                        "09-handed-over" to HandOverSheet(id = 2, start = start, key = key, done = "Sent to Pixel 9."),
                         "10-still-there" to HandOverSheet(id = 3, start = start.copy(expires = Instant.now().minusSeconds(5).toString()), key = key, stale = true),
                         "11-no-outside-address" to HandOverSheet(id = 4, start = start.copy(expires = Instant.now().plusSeconds(80).toString(), links = FamilyLinkChoices(null, "http://192.168.1.20:4533/family/signin"), servers = FamilyLinkChoices(null, "http://192.168.1.20:4533"), anywhereAvailable = false), key = key),
                     )

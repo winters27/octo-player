@@ -476,6 +476,32 @@ enum FamilyFixtures {
         #expect(parseFamilyLink("https://example.com/family/join#invite=t&home=%3A%2F%2F")?.home == nil)
     }
 
+    /// Every address field of every kind of link: one without a scheme gets the app's own, https
+    /// outside the home network and http inside it.
+    @Test func anAddressWithoutASchemeGetsTheAppsOwn() {
+        let bare = [("music.example.com", "https://music.example.com"), ("192.168.1.20:4533", "http://192.168.1.20:4533"),
+                    ("music.lan", "http://music.lan")]
+        let main = "https%3A%2F%2Fmusic.example.com"
+        for (typed, read) in bare {
+            let e = encodeComponent(typed)
+            #expect(parseFamilyLink("octo://join?server=\(e)&invite=t")?.server == read, "\(typed)")
+            #expect(parseFamilyLink("octo://join?server=\(main)&invite=t&home=\(e)")?.home == read, "\(typed)")
+            #expect(parseFamilyLink("https://music.example.com/family/join#invite=t&home=\(e)")?.home == read, "\(typed)")
+            #expect(parseFamilyLink("octo://signin?server=\(e)&username=alex")?.server == read, "\(typed)")
+            #expect(parseFamilyLink("octo://signin?server=\(main)&home=\(e)")?.home == read, "\(typed)")
+            if case .handOver(let own)? = parseFamilyLink("octo://handover?t=t1&k=k1&s=\(e)") {
+                #expect(own.server == read && own.base == read, "\(typed)")
+            } else {
+                Issue.record("not a hand-over: \(typed)")
+            }
+            #expect(parseFamilyLink("octo://handover?t=t1&k=k1&s=\(main)&h=\(e)")?.home == read, "\(typed)")
+            #expect(parseFamilyLink("https://music.example.com/family/signin#t=t1&k=k1&s=\(e)")?.server == read, "\(typed)")
+            #expect(parseFamilyLink("https://music.example.com/family/signin#t=t1&k=k1&s=\(main)&h=\(e)")?.home == read, "\(typed)")
+        }
+        // An app-form invite whose server is not an address is no link.
+        #expect(parseFamilyLink("octo://join?server=%3A%2F%2F&invite=t") == nil)
+    }
+
     @Test func encodingIsRFC3986() {
         #expect(encodeComponent("a b/c~d_e.f-g") == "a%20b%2Fc~d_e.f-g")
         #expect(encodeComponent("ö") == "%C3%B6")

@@ -124,7 +124,7 @@ final class HandOverClock: @unchecked Sendable {
 
         source.allow()
         #expect(await until("sent") { source.sheet?.done != nil })
-        #expect(source.sheet?.done == "Sent to Pixel 9. It's signing in now.")
+        #expect(source.sheet?.done == "Sent to Pixel 9.")
         let decide = try #require(fake.called("decideFamilySignIn").first)
         #expect(decide.query["allow"] == "true")
         let boxCall = try #require(fake.called("putFamilySignInBox").first)

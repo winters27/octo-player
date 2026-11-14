@@ -134,7 +134,7 @@ private func nonEmpty(_ text: String?) -> String? {
 
 private func parseAppInvite(_ query: String) -> FamilyLink? {
     let params = readParams(query)
-    guard let server = nonEmpty(params["server"]), let token = nonEmpty(params["invite"]) else { return nil }
+    guard let server = nonEmpty(params["server"]).flatMap(addressIn), let token = nonEmpty(params["invite"]) else { return nil }
     return .invite(FamilyInviteLink(server: server, token: token, home: homeIn(params, "home")))
 }
 
@@ -179,9 +179,10 @@ private func handOverIn(_ params: [String: String], base: String?) -> FamilyHand
                               username: nonEmpty(params["u"]))
 }
 
-/// An address a link names, when it is an address at all.
+/// An address a link names, when it is an address at all. One without a scheme gets the one the
+/// app picks for a typed address: http on the home network, https anywhere else.
 private func addressIn(_ text: String) -> String? {
-    ServerAddress.normalized(text).map { ServerAddress.trimmedSlash(ServerAddress.written($0)) }
+    ServerAddress.parse(text).map { ServerAddress.trimmedSlash(ServerAddress.written(ServerAddress.lowercasingHost($0))) }
 }
 
 private func homeIn(_ params: [String: String], _ name: String) -> String? {

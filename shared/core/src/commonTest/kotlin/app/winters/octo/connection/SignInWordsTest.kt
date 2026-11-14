@@ -86,6 +86,13 @@ class SignInWordsTest {
         put("cert.expired", SignInWords.CERT_EXPIRED)
         put("cert.notYetValid", SignInWords.CERT_NOT_YET_VALID)
         put("cert.tooBig", SignInWords.CERT_TOO_BIG)
+        put("link.whileBusy", SignInWords.LINK_WHILE_BUSY)
+        put("link.forAnotherAccount", SignInWords.LINK_FOR_ANOTHER_ACCOUNT)
+        put("link.forAnotherServer", SignInWords.LINK_FOR_ANOTHER_SERVER)
+        put("link.codeElsewhere", SignInWords.CODE_ELSEWHERE)
+        put("link.afterAddressChange", SignInWords.LINK_AFTER_ADDRESS_CHANGE)
+        put("link.whileSignInOpen", SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+        put("link.askWhileSignInOpen", SignInWords.askWhileSignInOpen("{name}"))
         Gateway.entries.forEach { gateway ->
             for (sent in listOf(false, true)) {
                 put("inGroup.${gateway.name}.$sent", GatewayWords.inGroup(GatewayWords.failure(gateway, sent)))
