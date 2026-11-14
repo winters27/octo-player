@@ -788,11 +788,12 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
 
     // iPhone: an engine restart re-placed a start that has not played. Not
     // yet committed, it simply moves (the commit point decides). Committed
-    // and now inside the commit deadline, it moves to A's next bar line, to
-    // the placement horizon with no bar grid, or, with no bar line before
-    // A's end or within the plan's bar budget (or a budget of 0 with no bar
-    // grid), B starts at the horizon by the clean cut (a committed start
-    // cannot be cancelled).
+    // and now inside the commit deadline, it moves to A's bar line the
+    // fewest whole bars on that reaches the deadline, or to the placement
+    // horizon with no bar grid; with no such bar line before A's end or
+    // within the plan's bar budget (with no bar grid, a budget of 0 or a
+    // blend that would end past the latest end), B starts at the horizon by
+    // the clean cut (a committed start cannot be cancelled).
     private fun restarted(frame: Long, s: Long) {
         if (head >= startFrame) return
         if (!committed && !handedOver()) {
@@ -806,22 +807,23 @@ class BlendSession(private val word: CommitWord, val timing: BlendTiming) {
         }
         if (!locked && lateMoveBars != 0) {
             val at = max(soonest + timing.placementHorizonFrames, s)
-            startMs += (at - s) * msPerFrame
-            action(BlendActionKind.MOVE_START, frame, ms = startMs)
-            replace(at, commitNow = true)
-            moved(frame)
-            return
+            val movedMs = startMs + (at - s) * msPerFrame
+            if (movedMs + overlapMs + extensionMs <= latestEndMs) {
+                startMs = movedMs
+                action(BlendActionKind.MOVE_START, frame, ms = startMs)
+                replace(at, commitNow = true)
+                moved(frame)
+                return
+            }
         }
         if (locked) {
             val bar = barMs / msPerFrame
-            var bars = max(1.0, ceil((earliest - s) / bar))
-            var at = s + frames(bars * bar)
-            if (at < earliest) {
-                bars += 1.0
-                at = s + frames(bars * bar)
-            }
+            var bars = max(1L, ceil((earliest - s) / bar).toLong())
+            while (bars > 1 && s + frames((bars - 1) * bar) >= earliest) bars--
+            while (s + frames(bars * bar) < earliest) bars++
+            val at = s + frames(bars * bar)
             val movedMs = startMs + bars * barMs
-            if (bars <= allowedBars().toDouble() && movedMs < outgoingEndMs) {
+            if (bars <= allowedBars() && movedMs < outgoingEndMs) {
                 movedBars += bars.toInt()
                 startMs = movedMs
                 action(BlendActionKind.MOVE_START, frame, ms = movedMs)

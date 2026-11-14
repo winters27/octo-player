@@ -1152,6 +1152,69 @@ class AutomixTest {
     }
 
     @Test
+    fun anUnlockedIntroMovesOnlyWhenEveryStepToTheLatestEndKeepsItsTrim() {
+        // The next song has no beat, so no bar grid: a late start may move
+        // the intro any amount up to the latest end. The outgoing song drops
+        // 14 dB more at 197 s, partway along the room past the intro's end.
+        val drop = plan("intro-unlocked-drop")
+        val quiet = plan("intro-unlocked-quiet")
+        for (p in listOf(drop, quiet)) {
+            assertEquals(p.reason, TransitionKind.INTRO, p.kind)
+            assertTrue(p.reason, !p.barLocked)
+            val end = p.startMs + p.overlapMs
+            assertTrue(p.reason, end < 197_000 && 197_000 < p.latestEndMs)
+        }
+        // Its body 20 dB under the outgoing song is louder than the drop, so
+        // once moved far enough the two cross there: no move at all.
+        assertEquals(0, drop.lateMoveBars)
+        // 36 dB under, it stays apart from the outgoing song wherever it
+        // moves.
+        assertEquals(1, quiet.lateMoveBars)
+    }
+
+    @Test
+    fun aCutOrALateBlendTooShortToFadeTheOutgoingSongOutIsNotPlanned() {
+        // Bounded with no rate, 15% apart: the only cut whose beats stay
+        // within the bound would leave a few ms after the 560 ms hold.
+        val cut = plan("drift-lead-cut")
+        assertTrue(cut.reason, cut.kind == TransitionKind.GAPLESS || (1 - cut.holdShare) * cut.overlapMs >= SHORTEST_FADE_MS - 1)
+        // Matched and late: the blend left before the latest end is shorter
+        // than the 1.9 s lead-in it would hold A through.
+        val late = plan("late-lead-fills")
+        assertEquals(late.reason, TransitionKind.GAPLESS, late.kind)
+        assertTrue(late.reason, late.reason.startsWith("gapless: too late to blend"))
+    }
+
+    @Test
+    fun aLateBlendCappedTooShortToFadeTheOutgoingSongOutIsNotPlanned() {
+        // A's grid at 132 BPM (1818 ms bars, a downbeat at 201.45 s), the next
+        // song's at 35 BPM (a tagged slow song), 5.7% apart with no rate. The
+        // next song is silent until 1.6 s and its first beat is at 1.65 s, so
+        // it enters at 0 and a blend holds A through those 1.6 s. Started at
+        // 199 s, the late blend runs from A's downbeat at 201.45 s less that
+        // lead to the latest end, 1.95 s: within the drift bound, but only
+        // 350 ms after the hold to fade A out, and every cut is shorter
+        // still. Neither the capped blend nor a cut is planned.
+        val tail = AutomixCases.tail("steady-100")
+        val head = AutomixCases.head("steady-100-late-sound")
+        val a = tail.features.tempo!!
+        val b = head.features.tempo!!
+        val fast = SectionAnalysis.fromFeatures(
+            tail.envelope,
+            tail.features.copy(tempo = a.copy(bpm = 132.0, beatMs = 60_000.0 / 132, firstBeatMs = 1_470.0, downbeatMs = 1_470.0)),
+        )
+        val slow = SectionAnalysis.fromFeatures(
+            head.envelope,
+            head.features.copy(tempo = b.copy(bpm = 35.0, beatMs = 60_000.0 / 35, firstBeatMs = 1_650.0, downbeatMs = 1_650.0)),
+        )
+        val p = planTransition(
+            FadeSong("a", 1, 202_000), FadeSong("b", 1, 40_000), fast, slow, AutomixSettings(8_000), TransitionContext(nowMs = 199_000),
+        )
+        assertEquals(p.reason, TransitionKind.GAPLESS, p.kind)
+        assertTrue(p.reason, p.reason.startsWith("gapless: too late to blend"))
+    }
+
+    @Test
     fun aSilentLeadInFillingEveryBlendGivesTheGaplessJoin() {
         // Matched, the next song enters at 0 for its first bar line at 2.1 s,
         // silent until 1.9 s (1881 ms at the 1.01 rate): a 1.8 s cut would

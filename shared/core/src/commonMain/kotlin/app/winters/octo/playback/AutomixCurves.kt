@@ -92,7 +92,7 @@ fun introOutGain(t: Double, holdShare: Double): Double {
 fun introInGain(t: Double, riseShare: Double, holdShare: Double, level: Double): Double {
     val p = t.coerceIn(0.0, 1.0)
     val hold = holdShare.coerceIn(0.0, 1.0)
-    val rise = riseShare.coerceIn(0.0, hold)
+    val rise = riseShare.coerceIn(0.0, 1.0).coerceAtMost(hold)
     val g = level.coerceIn(0.0, 1.0)
     if (p < rise) return (sin(PI / 2 * p / rise) * g).coerceIn(0.0, 1.0)
     if (p <= hold) return g

@@ -1169,6 +1169,21 @@
       ]
     },
     {
+      "name": "iphone-restart-moves-the-fewest-whole-bars",
+      "about": "A 2000.01 ms bar is 96000.48 frames. The restart re-places S at 289439, more than a bar before the head (478080), with room for 3 bars before the latest end 190000. The commit deadline 481440 is 192001 frames on, a hair over two bars' 192000.96, and two bars land at 289439 + round(192000.96) = 481440, the deadline itself: the committed start moves two bars, to 184000.02 at 481440, never a third bar on (186000.03 at 577440).",
+      "profile": "iphone50",
+      "steps": [
+        {"op": "prelude", "name": "clockPhone"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000.01, "latestEndMs": 190000, "outgoingEndMs": 190250, "lateMoveBars": "unbounded"},
+        {"op": "prelude", "name": "committedPhone50"},
+        {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 289439},
+        {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "moveStart", "frame": 477600, "ms": 184000.02}, {"kind": "startB", "frame": 481440}, {"kind": "limiterOn", "frame": 481440}, {"kind": "commitB", "frame": 481440}], "events": [{"kind": "moved", "gen": 1, "frame": 477600, "ms": 184000.02, "ms2": 0}]},
+        {"op": "post", "deck": "A", "input": "endReached", "frame": 572640, "value": 577440},
+        {"op": "advance", "to": 577440, "head": 577440, "aSongMs": 186000.02, "actions": [{"kind": "aEnd", "frame": 577440}, {"kind": "limiterOff", "frame": 577440}], "events": [{"kind": "blendEnd", "gen": 1, "frame": 577440, "ms": 2000}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
       "name": "iphone-restart-inside-the-deadline-without-a-grid",
       "about": "The same restart for a Crossfade: the start moves to the placement horizon, 480960, and A's start time with it (180030).",
       "profile": "iphone50",
@@ -1204,6 +1219,20 @@
       "steps": [
         {"op": "prelude", "name": "clockPhone"},
         {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "barMs": 2000, "latestEndMs": 185000, "outgoingEndMs": 185250, "lateMoveBars": 0},
+        {"op": "prelude", "name": "committedPhone50"},
+        {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
+        {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "startB", "frame": 480960}, {"kind": "limiterOn", "frame": 480960}, {"kind": "commitB", "frame": 480960}, {"kind": "cut", "frame": 480960, "value": 960}, {"kind": "limiterOff", "frame": 481920}]},
+        {"op": "advance", "to": 484800, "head": 484800, "aSongMs": 180100, "events": [{"kind": "blendEnd", "gen": 1, "frame": 480960, "ms": 0}]},
+        {"op": "stopped", "gen": 1}
+      ]
+    },
+    {
+      "name": "iphone-restart-without-a-grid-past-the-latest-end-cuts",
+      "about": "The restart of iphone-restart-inside-the-deadline-without-a-grid with latestEndMs 182010: moving A's start to the horizon (180030) would end the blend at 182030, past it, so B starts at the horizon by the clean cut instead.",
+      "profile": "iphone50",
+      "steps": [
+        {"op": "prelude", "name": "clockPhone"},
+        {"op": "arm", "gen": 1, "startMs": 180000, "overlapMs": 2000, "latestEndMs": 182010, "outgoingEndMs": 182300, "lateMoveBars": "unbounded"},
         {"op": "prelude", "name": "committedPhone50"},
         {"op": "post", "deck": "A", "input": "restarted", "frame": 477600, "value": 479520},
         {"op": "advance", "to": 478080, "head": 478080, "aSongMs": 179960, "actions": [{"kind": "startB", "frame": 480960}, {"kind": "limiterOn", "frame": 480960}, {"kind": "commitB", "frame": 480960}, {"kind": "cut", "frame": 480960, "value": 960}, {"kind": "limiterOff", "frame": 481920}]},

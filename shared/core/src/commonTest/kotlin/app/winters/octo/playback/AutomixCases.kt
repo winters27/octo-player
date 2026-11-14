@@ -195,6 +195,26 @@ object AutomixCases {
             steady(0.0, 192_000.0, 100.0, 0.0) + steady(192_000.0, 193_500.0, 100.0, 0.0, padDb = -24.0) +
                 steady(193_500.0, 202_000.0, 100.0, 0.0),
         ),
+        // steady-100 until 186 s, then a pad fading 10 dB to 192 s (its
+        // outro, no step sharp enough to count as a boundary), held there,
+        // and 24 dB down from 197 s to its end.
+        "steady-100-outro-steps" to SyntheticSong(
+            44_100, 1, 202_000,
+            steady(0.0, 186_000.0, 100.0, 0.0) + pad(186_000.0, 192_000.0, -14.0, -24.0) + pad(192_000.0, 197_000.0, -24.0) +
+                pad(197_000.0, 202_000.0, -38.0),
+        ),
+        // No beat (no tempo): a quiet start of 11 s, then a body 20 dB (or
+        // 36 dB) under steady-100: the first sits above steady-100-outro-steps
+        // once it drops to -38 dB, the second stays 12 dB under even that.
+        "under-pad" to SyntheticSong(22_050, 1, 45_000, pad(0.0, 11_000.0, -45.0) + pad(11_000.0, 45_000.0, -34.0)),
+        "quiet-pad" to SyntheticSong(22_050, 1, 45_000, pad(0.0, 11_000.0, -57.0) + pad(11_000.0, 45_000.0, -50.0)),
+        // 82 BPM at full level throughout; 71.4 BPM sounding from 0.56 s,
+        // its beats from 0.6 s: without a rate it enters at 0 and holds the
+        // outgoing song through those 0.56 s.
+        "steady-82" to SyntheticSong(44_100, 1, 202_000, steady(0.0, 202_000.0, 82.0, 0.0)),
+        "steady-71-late" to SyntheticSong(22_050, 1, 40_000, steady(560.0, 40_000.0, 100.0 / 1.4, 600.0)),
+        // 100 BPM sounding from 1.6 s, its beats from 1.65 s.
+        "steady-100-late-sound" to SyntheticSong(22_050, 1, 40_000, steady(1_600.0, 40_000.0, 100.0, 1_650.0)),
     )
 
     data class Pair(
@@ -342,6 +362,18 @@ object AutomixCases {
         // it may move as far as the room allows.
         Pair("intro-trimmed-at-outro", "steady-100-outro", "level-100", eight),
         Pair("intro-quiet-at-outro", "steady-100-outro", "quiet-100", eight),
+        // No bar grid (the next song has no beat) and room past the end,
+        // where the outgoing song drops 26 dB partway along it: a start that
+        // would sit over the drop is not moved to at all; one far under
+        // stays under, and may move.
+        Pair("intro-unlocked-drop", "steady-100-outro-steps", "under-pad", eight),
+        Pair("intro-unlocked-quiet", "steady-100-outro-steps", "quiet-pad", eight),
+        // Bounded, no rate, the next song sounding just before its first
+        // beat: only a cut too short to fade the outgoing song out meets the
+        // bound. Matched, late, with a lead-in longer than the blend left:
+        // the late blend could not fade it out either.
+        Pair("drift-lead-cut", "steady-82", "steady-71-late", eight),
+        Pair("late-lead-fills", "steady-101", "steady-100-long-lead", matched, context = TransitionContext(nowMs = 199_000)),
     )
 
     private val tails = HashMap<String, SectionAnalysis>()
