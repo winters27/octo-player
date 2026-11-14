@@ -365,7 +365,9 @@ class ContrastTest {
                     Triple("Songs", "open place (main)", 7.0),
                 ), { it.right < 240f })
                 s.onUi { s.app.popups.showAt(androidx.compose.ui.unit.IntOffset(400, 120)) { close -> SongMenu(s.app, listOf(s.app.library!!.index!!.songs[2]), close) } }
-                val menu = s.settle(700)
+                // The popups are measured once their fade has ended, however
+                // late a loaded run draws their first frame.
+                val menu = s.settleStill(700, quiet = 150)
                 keep(menu, "contrast-theme-menu-${theme.name.lowercase()}")
                 val menuBox = s.popup()
                 val inMenu = s.spots(menu, "${theme.label} menu", listOf(
@@ -376,7 +378,7 @@ class ContrastTest {
                     s.app.popups.close()
                     addServer(s.app)
                 }
-                val sheet = s.settle(700)
+                val sheet = s.settleStill(700, quiet = 150)
                 keep(sheet, "contrast-theme-sheet-${theme.name.lowercase()}")
                 val sheetBox = s.popup()
                 list + inMenu + s.spots(sheet, "${theme.label} sheet", listOf(
