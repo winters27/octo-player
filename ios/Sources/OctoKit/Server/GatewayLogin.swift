@@ -121,7 +121,7 @@ func rowHeaders(_ rows: [HeaderRules.Row], saved: [String: String]) -> [String: 
     for row in rows {
         let name = row.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedValue = saved.first { named($0.key, name) }?.value
-        let typed = row.saved && row.value.isEmpty ? savedValue : row.value
+        let typed = row.saved && row.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? savedValue : row.value
         let value = (typed ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard HeaderRules.isValidName(name), !value.isEmpty, HeaderRules.isValidValue(value) else { continue }
         if let earlier = order[name.lowercased()] { out[earlier] = nil }
@@ -160,25 +160,35 @@ private func fieldHeaders(_ draft: GatewayDraft, saved: [String: String]) -> Res
 }
 
 /// The form's sign-in page state across attempts: whether Advanced is open, the kind picked, and
-/// the gateway seen at the address typed (`detectedFor`).
+/// the gateway seen at the address typed (`detectedFor`). `callout`: the last failure met a
+/// sign-in page at this address, so its group shows that failure as its error note, outlined, with
+/// a pointer under Sign in. `calloutPending`: the group still has to be brought into view.
+/// `keyPending`: the API key row, just asked for, still has to be brought into view.
 public struct GatewayFormState: Sendable, Equatable {
     public var advancedOpen: Bool
     public var kind: GatewayKind
     public var detected: Gateway?
     public var detectedFor: String?
+    public var callout: Bool
+    public var calloutPending: Bool
+    public var keyPending: Bool
 
-    public init(advancedOpen: Bool = false, kind: GatewayKind = .none, detected: Gateway? = nil, detectedFor: String? = nil) {
+    public init(advancedOpen: Bool = false, kind: GatewayKind = .none, detected: Gateway? = nil, detectedFor: String? = nil,
+                callout: Bool = false, calloutPending: Bool = false, keyPending: Bool = false) {
         self.advancedOpen = advancedOpen
         self.kind = kind
         self.detected = detected
         self.detectedFor = detectedFor
+        self.callout = callout
+        self.calloutPending = calloutPending
+        self.keyPending = keyPending
     }
 }
 
 /// A failed attempt at `attemptAddress`, while the address field reads `currentAddress`. A
 /// gateway opens Advanced and, when no kind is picked yet, picks the one that gets through it.
-/// The most specific gateway seen at this address is kept. A result for an address no longer
-/// typed is dropped.
+/// The most specific gateway seen at this address is kept, and the group calls the failure out,
+/// again for a repeat. A result for an address no longer typed is dropped.
 public func reactToFailure(_ state: GatewayFormState, attemptAddress: String, currentAddress: String,
                            gateway: Gateway?) -> GatewayFormState {
     let address = currentAddress.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -189,15 +199,19 @@ public func reactToFailure(_ state: GatewayFormState, attemptAddress: String, cu
     if state.kind == .none { next.kind = kept == .cloudflareAccess ? .cloudflareToken : .password }
     next.detected = kept
     next.detectedFor = address
+    next.callout = true
+    next.calloutPending = true
     return next
 }
 
-/// Another address forgets the gateway seen at the last one.
+/// Another address forgets the gateway seen at the last one, and its callout.
 public func addressChanged(_ state: GatewayFormState, address: String) -> GatewayFormState {
     guard state.detectedFor != address.trimmingCharacters(in: .whitespacesAndNewlines) else { return state }
     var next = state
     next.detected = nil
     next.detectedFor = nil
+    next.callout = false
+    next.calloutPending = false
     return next
 }
 

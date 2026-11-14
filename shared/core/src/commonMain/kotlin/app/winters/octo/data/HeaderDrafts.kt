@@ -10,11 +10,11 @@ data class HeaderDraft(val name: String, val value: String, val saved: Boolean =
 }
 
 // The headers to use: what was typed, with saved values filled in where a
-// saved header was left empty.
+// saved header was left empty or holds only spaces.
 fun resolveHeaders(drafts: List<HeaderDraft>, saved: List<ServerHeader>): List<ServerHeader> {
     val savedByName = saved.associateBy { it.name.lowercase() }
     return drafts.map { draft ->
-        val keep = draft.saved && draft.value.isEmpty()
+        val keep = draft.saved && draft.value.isBlank()
         ServerHeader(draft.name, if (keep) savedByName[draft.name.trim().lowercase()]?.value.orEmpty() else draft.value)
     }
 }

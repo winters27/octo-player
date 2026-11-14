@@ -1,0 +1,142 @@
+{
+  "gatewayForm": [
+    {"name": "a sign-in page met at the address typed calls its group out", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "reactToFailure", "attempt": "https://music.example.com/", "current": "https://music.example.com/", "gateway": "Authentik", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}},
+      {"op": "calloutShown", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": false, "keyPending": false}},
+      {"op": "reactToFailure", "attempt": "https://music.example.com/", "current": "https://music.example.com/", "gateway": "PasswordPrompt", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}}
+    ]},
+    {"name": "a result for another address, or with no sign-in page, changes nothing", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "reactToFailure", "attempt": "https://old.example.com/", "current": "https://music.example.com/", "gateway": "Authentik", "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}},
+      {"op": "reactToFailure", "attempt": "https://music.example.com/", "current": "https://music.example.com/", "gateway": null, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}}
+    ]},
+    {"name": "pointing brings the group back only while it is called out", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "pointTo", "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}},
+      {"op": "reactToFailure", "attempt": "https://music.example.com/", "current": " https://music.example.com/ ", "gateway": "CloudflareAccess", "expect": {"advancedOpen": true, "kind": "CloudflareToken", "detected": "CloudflareAccess", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}},
+      {"op": "calloutShown", "expect": {"advancedOpen": true, "kind": "CloudflareToken", "detected": "CloudflareAccess", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": false, "keyPending": false}},
+      {"op": "pointTo", "expect": {"advancedOpen": true, "kind": "CloudflareToken", "detected": "CloudflareAccess", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}}
+    ]},
+    {"name": "an edit of a sign-in page field ends the callout", "start": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}, "steps": [
+      {"op": "gatewayEdited", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": true, "keyPending": false}},
+      {"op": "pointTo", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": true, "keyPending": false}}
+    ]},
+    {"name": "picking a kind sets it and ends the callout", "start": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": false}, "steps": [
+      {"op": "kindPicked", "kind": "CloudflareToken", "expect": {"advancedOpen": true, "kind": "CloudflareToken", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": true, "keyPending": false}},
+      {"op": "kindPicked", "kind": "Password", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": true, "keyPending": false}}
+    ]},
+    {"name": "calm ends the callout and its scroll but leaves the key row alone", "start": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": true}, "steps": [
+      {"op": "calm", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": false, "keyPending": true}}
+    ]},
+    {"name": "sending ends all three", "start": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": true}, "steps": [
+      {"op": "sending", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": false, "calloutPending": false, "keyPending": false}}
+    ]},
+    {"name": "another address forgets the sign-in page and its callout", "start": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": true}, "steps": [
+      {"op": "addressChanged", "address": " https://music.example.com/ ", "expect": {"advancedOpen": true, "kind": "Password", "detected": "Authentik", "detectedFor": "https://music.example.com/", "callout": true, "calloutPending": true, "keyPending": true}},
+      {"op": "addressChanged", "address": "https://other.example.com/", "expect": {"advancedOpen": true, "kind": "Password", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}}
+    ]},
+    {"name": "picking API key with no kept key brings the key row up, and calm keeps it", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "methodPicked", "from": "Token", "to": "ApiKey", "keepsKey": false, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}},
+      {"op": "calm", "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}},
+      {"op": "keyShown", "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}}
+    ]},
+    {"name": "API key then Token clears it", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "methodPicked", "from": "Token", "to": "ApiKey", "keepsKey": false, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}},
+      {"op": "methodPicked", "from": "ApiKey", "to": "Token", "keepsKey": false, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}}
+    ]},
+    {"name": "a kept key, or API key picked again, asks for nothing", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}, "steps": [
+      {"op": "methodPicked", "from": "ApiKey", "to": "ApiKey", "keepsKey": false, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}},
+      {"op": "methodPicked", "from": "Token", "to": "ApiKey", "keepsKey": true, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}}
+    ]},
+    {"name": "Legacy password to API key brings it up too, and sending clears it", "start": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}, "steps": [
+      {"op": "methodPicked", "from": "LegacyPassword", "to": "ApiKey", "keepsKey": false, "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": true}},
+      {"op": "sending", "expect": {"advancedOpen": false, "kind": "None", "detected": null, "detectedFor": null, "callout": false, "calloutPending": false, "keyPending": false}}
+    ]}
+  ],
+  "authModeOf": [
+    {"legacy": false, "apiKey": false, "expect": "Token"},
+    {"legacy": false, "apiKey": true, "expect": "ApiKey"},
+    {"legacy": true, "apiKey": false, "expect": "LegacyPassword"},
+    {"legacy": true, "apiKey": true, "expect": "ApiKey"}
+  ],
+  "flagsOf": [
+    {"mode": "Token", "legacy": false, "apiKey": false},
+    {"mode": "LegacyPassword", "legacy": true, "apiKey": false},
+    {"mode": "ApiKey", "legacy": false, "apiKey": true}
+  ],
+  "methodsShown": [
+    {"takesApiKeys": null, "apiKeyOn": false, "expect": ["Token", "LegacyPassword", "ApiKey"]},
+    {"takesApiKeys": null, "apiKeyOn": true, "expect": ["Token", "LegacyPassword", "ApiKey"]},
+    {"takesApiKeys": true, "apiKeyOn": false, "expect": ["Token", "LegacyPassword", "ApiKey"]},
+    {"takesApiKeys": true, "apiKeyOn": true, "expect": ["Token", "LegacyPassword", "ApiKey"]},
+    {"takesApiKeys": false, "apiKeyOn": false, "expect": ["Token", "LegacyPassword"]},
+    {"takesApiKeys": false, "apiKeyOn": true, "expect": ["Token", "LegacyPassword", "ApiKey"]}
+  ],
+  "keeps": [
+    {"keepsSecret": false, "savedMode": "Token", "mode": "Token", "password": false, "key": false},
+    {"keepsSecret": true, "savedMode": null, "mode": "Token", "password": false, "key": false},
+    {"keepsSecret": true, "savedMode": "Token", "mode": "Token", "password": true, "key": false},
+    {"keepsSecret": true, "savedMode": "LegacyPassword", "mode": "Token", "password": true, "key": false},
+    {"keepsSecret": true, "savedMode": "Token", "mode": "LegacyPassword", "password": true, "key": false},
+    {"keepsSecret": true, "savedMode": "Token", "mode": "ApiKey", "password": false, "key": false},
+    {"keepsSecret": true, "savedMode": "ApiKey", "mode": "ApiKey", "password": false, "key": true},
+    {"keepsSecret": true, "savedMode": "ApiKey", "mode": "Token", "password": false, "key": false},
+    {"keepsSecret": true, "savedMode": "ApiKey", "mode": "LegacyPassword", "password": false, "key": false},
+    {"keepsSecret": false, "savedMode": "ApiKey", "mode": "ApiKey", "password": false, "key": false},
+    {"keepsSecret": true, "savedMode": null, "mode": "ApiKey", "password": false, "key": false}
+  ],
+  "advancedLayout": [
+    {"name": "a form with no sign-in page picked", "joining": false, "takesApiKeys": null, "apiKeyOn": false, "kind": "None", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": ["Token", "LegacyPassword", "ApiKey"]}},
+    {"name": "a sign-in page kind adds its two field rows", "joining": false, "takesApiKeys": null, "apiKeyOn": false, "kind": "Password", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "PageFirst", "PageSecond", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": ["Token", "LegacyPassword", "ApiKey"]}},
+    {"name": "a service token too, on a server that takes keys", "joining": false, "takesApiKeys": true, "apiKeyOn": false, "kind": "CloudflareToken", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "PageFirst", "PageSecond", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": ["Token", "LegacyPassword", "ApiKey"]}},
+    {"name": "joining leaves Signing in out", "joining": true, "takesApiKeys": null, "apiKeyOn": false, "kind": "Password", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "PageFirst", "PageSecond", "Home"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": []}},
+    {"name": "a server known not to take keys offers no API key", "joining": false, "takesApiKeys": false, "apiKeyOn": false, "kind": "None", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": ["Token", "LegacyPassword"]}},
+    {"name": "unless API key is already on", "joining": false, "takesApiKeys": false, "apiKeyOn": true, "kind": "None", "certificateRow": true, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers", "Certificate"]}], "methods": ["Token", "LegacyPassword", "ApiKey"]}},
+    {"name": "no certificate row on a host that has none", "joining": false, "takesApiKeys": null, "apiKeyOn": false, "kind": "None", "certificateRow": false, "expect": {"groups": [{"group": "GettingThere", "rows": ["PageKind", "Home"]}, {"group": "SigningIn", "rows": ["Method"]}, {"group": "SpecialSetups", "rows": ["Headers"]}], "methods": ["Token", "LegacyPassword", "ApiKey"]}}
+  ],
+  "headerList": [
+    {"name": "rows from a fill keep their saved mark", "steps": [
+      {"op": "replaced", "rows": [{"name": "X-Token", "value": "", "saved": true}, {"name": "Authorization", "value": "", "saved": true}], "expect": [{"name": "X-Token", "value": "", "saved": true}, {"name": "Authorization", "value": "", "saved": true}]}
+    ]},
+    {"name": "renaming a saved row to another name clears its mark for good", "steps": [
+      {"op": "replaced", "rows": [{"name": "X-Token", "value": "", "saved": true}], "expect": [{"name": "X-Token", "value": "", "saved": true}]},
+      {"op": "renamed", "row": 0, "to": "X-Other", "expect": [{"name": "X-Other", "value": "", "saved": false}]},
+      {"op": "renamed", "row": 0, "to": "X-Token", "expect": [{"name": "X-Token", "value": "", "saved": false}]}
+    ]},
+    {"name": "the same name in another case and with spaces keeps it", "steps": [
+      {"op": "replaced", "rows": [{"name": "X-Token", "value": "", "saved": true}], "expect": [{"name": "X-Token", "value": "", "saved": true}]},
+      {"op": "renamed", "row": 0, "to": " x-TOKEN ", "expect": [{"name": " x-TOKEN ", "value": "", "saved": true}]}
+    ]},
+    {"name": "a value typed into a saved row keeps it", "steps": [
+      {"op": "replaced", "rows": [{"name": "X-Token", "value": "", "saved": true}], "expect": [{"name": "X-Token", "value": "", "saved": true}]},
+      {"op": "valued", "row": 0, "to": "abc", "expect": [{"name": "X-Token", "value": "abc", "saved": true}]}
+    ]},
+    {"name": "added makes a blank row at the end that is not saved", "steps": [
+      {"op": "replaced", "rows": [{"name": "X-Token", "value": "", "saved": true}], "expect": [{"name": "X-Token", "value": "", "saved": true}]},
+      {"op": "added", "expect": [{"name": "X-Token", "value": "", "saved": true}, {"name": "", "value": "", "saved": false}]},
+      {"op": "renamed", "row": 1, "to": "X-New", "expect": [{"name": "X-Token", "value": "", "saved": true}, {"name": "X-New", "value": "", "saved": false}]},
+      {"op": "valued", "row": 1, "to": "v", "expect": [{"name": "X-Token", "value": "", "saved": true}, {"name": "X-New", "value": "v", "saved": false}]}
+    ]},
+    {"name": "remove takes out only that row", "steps": [
+      {"op": "replaced", "rows": [{"name": "A", "value": "1", "saved": false}, {"name": "B", "value": "2", "saved": false}, {"name": "C", "value": "3", "saved": false}], "expect": [{"name": "A", "value": "1", "saved": false}, {"name": "B", "value": "2", "saved": false}, {"name": "C", "value": "3", "saved": false}]},
+      {"op": "remove", "row": 1, "expect": [{"name": "A", "value": "1", "saved": false}, {"name": "C", "value": "3", "saved": false}]}
+    ]},
+    {"name": "an edit for a row already removed changes nothing", "steps": [
+      {"op": "replaced", "rows": [{"name": "A", "value": "1", "saved": false}, {"name": "B", "value": "2", "saved": true}], "expect": [{"name": "A", "value": "1", "saved": false}, {"name": "B", "value": "2", "saved": true}]},
+      {"op": "remove", "row": 1, "expect": [{"name": "A", "value": "1", "saved": false}]},
+      {"op": "renamed", "removedIn": 2, "to": "Z", "expect": [{"name": "A", "value": "1", "saved": false}]},
+      {"op": "valued", "removedIn": 2, "to": "v", "expect": [{"name": "A", "value": "1", "saved": false}]},
+      {"op": "remove", "removedIn": 2, "expect": [{"name": "A", "value": "1", "saved": false}]}
+    ]},
+    {"name": "replaced with nothing leaves no rows", "steps": [
+      {"op": "replaced", "rows": [{"name": "A", "value": "1", "saved": false}], "expect": [{"name": "A", "value": "1", "saved": false}]},
+      {"op": "added", "expect": [{"name": "A", "value": "1", "saved": false}, {"name": "", "value": "", "saved": false}]},
+      {"op": "replaced", "rows": [], "expect": []}
+    ]}
+  ],
+  "savedHeaderValues": [
+    {"name": "a saved row left as a space keeps its saved value", "rows": [{"name": "X-Token", "value": " ", "saved": true}], "saved": {"X-Token": "secret"}, "expect": {"X-Token": "secret"}},
+    {"name": "a newline counts as blank too", "rows": [{"name": "X-Token", "value": "\n", "saved": true}], "saved": {"X-Token": "secret"}, "expect": {"X-Token": "secret"}},
+    {"name": "a typed value replaces the saved one", "rows": [{"name": "X-Token", "value": "abc", "saved": true}], "saved": {"X-Token": "secret"}, "expect": {"X-Token": "abc"}},
+    {"name": "a blank row that is not saved sends nothing", "rows": [{"name": "X-Other", "value": " ", "saved": false}], "saved": {"X-Token": "secret"}, "expect": {}},
+    {"name": "a saved row finds its value whatever the name's case", "rows": [{"name": "x-token", "value": " ", "saved": true}], "saved": {"X-Token": "secret"}, "expect": {"x-token": "secret"}}
+  ]
+}

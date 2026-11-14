@@ -92,19 +92,26 @@ private fun fieldHeaders(draft: GatewayDraft, saved: List<ServerHeader>): Resolv
 
 // The form's sign-in page state across attempts: whether Advanced is
 // open, the kind picked, and the gateway seen at the address typed
-// (`detectedFor`).
+// (`detectedFor`). `callout`: the last failure met a sign-in page at this
+// address, so its group shows that failure as its error note, outlined,
+// with a pointer under Sign in. `calloutPending`: the group still has to be
+// brought into view. `keyPending`: the API key row, just asked for, still
+// has to be brought into view.
 data class GatewayFormState(
     val advancedOpen: Boolean,
     val kind: GatewayKind,
     val detected: Gateway?,
     val detectedFor: String?,
+    val callout: Boolean = false,
+    val calloutPending: Boolean = false,
+    val keyPending: Boolean = false,
 )
 
 // A failed attempt at `attemptAddress`, while the address field reads
 // `currentAddress`. A gateway opens Advanced and, when no kind is picked
 // yet, picks the one that gets through it. The most specific gateway seen
-// at this address is kept. A result for an address no longer typed is
-// dropped.
+// at this address is kept, and the group calls the failure out, again for
+// a repeat. A result for an address no longer typed is dropped.
 fun reactToFailure(state: GatewayFormState, attemptAddress: String, currentAddress: String, gateway: Gateway?): GatewayFormState {
     val address = currentAddress.trim()
     if (gateway == null || attemptAddress.trim() != address) return state
@@ -114,12 +121,16 @@ fun reactToFailure(state: GatewayFormState, attemptAddress: String, currentAddre
         kind = if (state.kind == GatewayKind.None) kindFor(kept) else state.kind,
         detected = kept,
         detectedFor = address,
+        callout = true,
+        calloutPending = true,
     )
 }
 
-// Another address forgets the gateway seen at the last one.
+// Another address forgets the gateway seen at the last one, and its
+// callout.
 fun addressChanged(state: GatewayFormState, address: String): GatewayFormState =
-    if (state.detectedFor == address.trim()) state else state.copy(detected = null, detectedFor = null)
+    if (state.detectedFor == address.trim()) state
+    else state.copy(detected = null, detectedFor = null, callout = false, calloutPending = false)
 
 // Authentik, Authelia and Cloudflare Access outrank a password prompt and
 // an unknown sign-in page; otherwise the later one counts.

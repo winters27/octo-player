@@ -111,7 +111,7 @@ import Testing
 
     @Test func aGatewayOpensAdvancedAndPicksTheKindOnlyFromNone() {
         #expect(reactToFailure(none, attemptAddress: here, currentAddress: here, gateway: .authentik)
-            == GatewayFormState(advancedOpen: true, kind: .password, detected: .authentik, detectedFor: here))
+            == GatewayFormState(advancedOpen: true, kind: .password, detected: .authentik, detectedFor: here, callout: true, calloutPending: true))
         #expect(reactToFailure(none, attemptAddress: here, currentAddress: here, gateway: .cloudflareAccess).kind == .cloudflareToken)
         let picked = GatewayFormState(kind: .cloudflareToken)
         #expect(reactToFailure(picked, attemptAddress: here, currentAddress: here, gateway: .authelia).kind == .cloudflareToken)

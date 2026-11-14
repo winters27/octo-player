@@ -37,8 +37,10 @@ import Testing
             .init(name: " X-Token ", value: " abc ", saved: false),
             .init(name: "  ", value: " ", saved: false),
             .init(name: "X-Saved", value: "", saved: true),
+            .init(name: "X-Kept", value: " \n", saved: true),
         ])
-        #expect(rows == [.init(name: "X-Token", value: "abc", saved: false), .init(name: "X-Saved", value: "", saved: true)])
+        #expect(rows == [.init(name: "X-Token", value: "abc", saved: false), .init(name: "X-Saved", value: "", saved: true),
+                         .init(name: "X-Kept", value: "", saved: true)])
     }
 
     @Test func aBadHeaderRowStopsTheSave() {
