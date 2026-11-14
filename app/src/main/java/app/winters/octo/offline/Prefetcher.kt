@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -49,8 +50,8 @@ class Prefetcher @Inject constructor(
     // The songs being fetched, so the same list is not started twice.
     private var ahead: List<String> = emptyList()
 
-    // The fetch running now, so it can be stopped mid-song.
-    @Volatile private var writer: CacheWriter? = null
+    // The fetch running now, so a stop can end it mid-song.
+    private val gate = FetchGate<CacheWriter> { it.cancel() }
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -99,15 +100,16 @@ class Prefetcher @Inject constructor(
             delay(START_AFTER_MS)
             for (uri in next) {
                 ensureActive()
-                if (!fetch(uri)) break
+                if (!fetch(uri) { isActive }) break
             }
         }
     }
 
     private fun stop() {
-        job?.cancel()
-        job = null
-        writer?.cancel()
+        gate.stop {
+            job?.cancel()
+            job = null
+        }
         ahead = emptyList()
     }
 
@@ -139,14 +141,15 @@ class Prefetcher @Inject constructor(
     }
 
     // Saves one song whole unless it already is. False when fetching should
-    // stop, such as when the connection is gone.
-    private fun fetch(uri: String): Boolean {
+    // stop, such as when the connection is gone or the fetching was stopped
+    // (`active` false) before this song began.
+    private fun fetch(uri: String, active: () -> Boolean): Boolean {
         val ref = parseStreamUri(uri)?.let(streams::pinned) ?: return true
         val key = streams.cacheKey(ref) ?: return true
         if (saved.isFullySaved(key)) return true
         val source = streams.savingSource() ?: return false
         val cacheWriter = CacheWriter(source, DataSpec(streamUri(ref).toUri()), null, null)
-        writer = cacheWriter
+        if (!gate.start(cacheWriter, active)) return false
         return try {
             cacheWriter.cache()
             true
@@ -154,8 +157,37 @@ class Prefetcher @Inject constructor(
             Log.i("Octo", "fetch ahead stopped: ${e.javaClass.simpleName}")
             false
         } finally {
-            writer = null
+            gate.done(cacheWriter)
             saved.refreshUsed()
         }
+    }
+}
+
+// The one fetch running now, made safe to stop: a stop and the start of a
+// fetch never cross, so a fetch either starts first and the stop cancels it
+// (`cancel`), or it sees the stop and never starts. Safe across threads.
+internal class FetchGate<W : Any>(private val cancel: (W) -> Unit) {
+    private val lock = Any()
+    private var running: W? = null
+
+    // Stops the fetching (`stopJob`, which cancels its job) and the fetch
+    // running now, as one step.
+    fun stop(stopJob: () -> Unit) = synchronized(lock) {
+        stopJob()
+        running?.let(cancel)
+        running = null
+    }
+
+    // Takes `writer` as the fetch running now, unless the fetching was
+    // stopped first (`active` false). Answers whether it may run.
+    fun start(writer: W, active: () -> Boolean): Boolean = synchronized(lock) {
+        if (!active()) return false
+        running = writer
+        true
+    }
+
+    // A fetch ended; a later one that started since stays the running one.
+    fun done(writer: W) = synchronized(lock) {
+        if (running === writer) running = null
     }
 }
