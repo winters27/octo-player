@@ -10,8 +10,9 @@ import androidx.compose.ui.platform.LocalWindowInfo
 // in front (behind another, the glass loses its specular and lit rim), and
 // whether motion is reduced, by the app's setting or the system's. It also
 // gives every click the keyboard's focus ring, shown while `focus` says the
-// keyboard is in use, and says which control holds the arrow keys. Wrap
-// the window's content in it once.
+// keyboard is in use, has the buttons' own accent ring follow the same, and
+// says which control holds the arrow keys. Wrap the window's content in it
+// once.
 @Composable
 fun ProvideWindowLook(
     reduceMotion: Boolean,
@@ -26,6 +27,7 @@ fun ProvideWindowLook(
         LocalMotionScale provides if (reduceMotion) MotionScale.Reduced else MotionScale.Full,
         LocalIndication provides DefaultFocusRing,
         LocalFocusVisibility provides focus,
+        LocalRingsShown provides focus.keyboard,
         LocalArrowKeys provides arrows,
         content = content,
     )

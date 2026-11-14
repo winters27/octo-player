@@ -56,6 +56,8 @@ object OctoIcons {
     val Ascending by sym("sym_arrow_upward")
     val Descending by sym("sym_arrow_downward")
     val Info by sym("sym_info")
+    // What an error note leads with.
+    val Error by sym("sym_error")
     val Select by sym("sym_check_circle")
     val Close by sym("sym_close")
     val History by sym("sym_history")
@@ -94,6 +96,7 @@ object OctoIcons {
     // address is set.
     val Globe by sym("sym_globe")
     val Lock by sym("sym_lock")
+    val LockOpen by sym("sym_lock_open")
     // Signing out of a server: an arrow leaving a box.
     val SignOut by sym("sym_sign_out")
 
@@ -154,6 +157,7 @@ val allIcons: List<Pair<String, () -> ImageVector>> = listOf(
     "Sound" to { OctoIcons.Sound }, "Star" to { OctoIcons.Star }, "StarFilled" to { OctoIcons.StarFilled },
     "Lyrics" to { OctoIcons.Lyrics }, "Folder" to { OctoIcons.Folder }, "Sort" to { OctoIcons.Sort },
     "Ascending" to { OctoIcons.Ascending }, "Descending" to { OctoIcons.Descending }, "Info" to { OctoIcons.Info },
+    "Error" to { OctoIcons.Error }, "LockOpen" to { OctoIcons.LockOpen },
     "Select" to { OctoIcons.Select }, "Close" to { OctoIcons.Close }, "History" to { OctoIcons.History },
     "Pin" to { OctoIcons.Pin }, "Pinned" to { OctoIcons.Pinned },
     "RemoveFromPlaylist" to { OctoIcons.RemoveFromPlaylist }, "Playback" to { OctoIcons.Playback },

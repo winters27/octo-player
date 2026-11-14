@@ -2,6 +2,7 @@ package app.winters.octo.desktop.a11y
 
 import app.winters.octo.design.ArrowKeys
 import app.winters.octo.design.FocusVisibility
+import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.LineSlider
 import app.winters.octo.design.OctoIcons
@@ -94,6 +95,43 @@ class FocusRingTest {
             val tabbed = scene.render()
             val ring = tabbed.pixel(21, 38).color()
             assertTrue("the ring stands out from the glass: ${contrast(ring, dark)}", contrast(ring, dark) >= 3f)
+        } finally {
+            scene.close()
+        }
+    }
+
+    // A click on a glass capsule (Test connection, Add header) focuses it on
+    // the desktop, and must leave no ring; Tab still draws one. Samples 1 px
+    // outside the capsule's left edge, where only the button's own accent
+    // ring draws (the click indication strokes inside the edge), after 25
+    // frames on a moving clock, past the ring's 300 ms fade. Red on a
+    // Buttons.kt whose ring follows focus alone.
+    @Test
+    fun aClickedCapsuleShowsNoRingAndTabShowsIt() {
+        val visibility = FocusVisibility(keyboard = false)
+        val scene = scene(visibility) { GlazeCapsule(null, "Go", {}, height = 32.dp) }
+        var t = 0L
+        fun frame() = scene.render(t).also { t += 16_000_000 }
+        fun capsule() = scene.semanticsOwners.firstNotNullOf { find(it.unmergedRootSemanticsNode, "Go") }
+        try {
+            repeat(25) { frame() }
+            val box = capsule().boundsInRoot
+            val left = box.left.toInt()
+            val middle = box.center.y.toInt()
+            scene.sendPointerEvent(PointerEventType.Press, box.center, buttons = PointerButtons(isPrimaryPressed = true))
+            scene.sendPointerEvent(PointerEventType.Release, box.center)
+            // The pointer moves off, so the capsule's hover lift is gone too.
+            scene.sendPointerEvent(PointerEventType.Move, Offset(190f, 75f))
+            repeat(25) { frame() }
+            assertEquals("the click focused the capsule", true, capsule().config.getOrNull(SemanticsProperties.Focused))
+            val clicked = frame().pixel(left - 1, middle).color()
+            assertTrue("no ring after a click: ${contrast(clicked, dark)}", contrast(clicked, dark) < 1.5f)
+            visibility.keyboard = true
+            tab(scene)
+            repeat(25) { frame() }
+            assertEquals("Tab left the capsule focused", true, capsule().config.getOrNull(SemanticsProperties.Focused))
+            val ring = frame().pixel(left - 1, middle).color()
+            assertTrue("the ring after Tab stands out from the glass: ${contrast(ring, dark)}", contrast(ring, dark) >= 3f)
         } finally {
             scene.close()
         }

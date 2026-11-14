@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +66,11 @@ class ButtonLook internal constructor(
     val ring: Float get() = ringState.value
 }
 
+// Whether a focused button shows its accent ring. The desktop shows it only
+// while the keyboard is in use, since a click focuses a button there too;
+// the phone always does.
+val LocalRingsShown = compositionLocalOf { true }
+
 // How a button answers the pointer, the finger and the keyboard, from its
 // interactions: pressed, it shrinks to `pressScale` and darkens; under the
 // pointer, it rises by `lift` and lightens; focused by the keyboard, it
@@ -91,7 +97,7 @@ fun rememberButtonLook(
     )
     val hover = animateFloatAsState(if (hovered) 0.10f else 0f, octoTween(motion, OctoDuration.Fill), label = "button hover")
     val press = animateFloatAsState(if (pressed) 0.10f else 0f, octoTween(motion, OctoDuration.Press), label = "button shade")
-    val ring = animateFloatAsState(if (focused) 1f else 0f, octoTween(motion, OctoDuration.Neutral), label = "button ring")
+    val ring = animateFloatAsState(if (focused && LocalRingsShown.current) 1f else 0f, octoTween(motion, OctoDuration.Neutral), label = "button ring")
     return ButtonLook(scale, rise, hover, press, ring, pressed, hovered)
 }
 

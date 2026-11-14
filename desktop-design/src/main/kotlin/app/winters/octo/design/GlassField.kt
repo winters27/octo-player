@@ -1,5 +1,6 @@
 package app.winters.octo.design
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -64,6 +65,9 @@ private val FieldShape = RoundedCornerShape(12.dp)
 // text (a choice of scheme, a button that shows a password). Enter calls
 // `onSubmit`; Escape calls `onEscape`. With `lines` over 1 it is a box of
 // that many lines that scrolls its own text, and Enter starts a new line.
+// `fill` and `edge` give the well a fill and a hairline of its own (a form's
+// entry: the page's color, edged); `name` is what a screen reader calls the
+// field when it is not its hint.
 @Composable
 fun GlassField(
     value: String,
@@ -79,6 +83,9 @@ fun GlassField(
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     lines: Int = 1,
+    fill: Color? = null,
+    edge: Color? = null,
+    name: String? = null,
 ) {
     val single = lines <= 1
     val typing = LocalTyping.current
@@ -91,10 +98,11 @@ fun GlassField(
     // The whole field is the target: a click on its edge puts the caret in too.
     val inner = focusRequester ?: remember { FocusRequester() }
     GlazeInset(
-        fill = glassFilm(0.30f),
+        fill = fill ?: glassFilm(0.30f),
         shape = FieldShape,
         modifier = modifier
             .height(if (single) 40.dp else (lines * 20 + 20).dp)
+            .then(if (edge != null) Modifier.border(FrameSize.Hairline, edge, FieldShape) else Modifier)
             .focusRing(FieldShape, { ring }, width = 1.5.dp, color = OctoColors.Accent.copy(alpha = 0.60f))
             .pointerInput(inner) { detectTapGestures { runCatching { inner.requestFocus() } } },
     ) {
@@ -127,8 +135,9 @@ fun GlassField(
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(if (single) Modifier else Modifier.fillMaxHeight())
-                        // Named by its hint, which a screen reader cannot see.
-                        .then(if (placeholder.isNotBlank()) Modifier.semantics { contentDescription = placeholder } else Modifier)
+                        // Named by `name`, or else by its hint, which a screen
+                        // reader cannot see.
+                        .then((name ?: placeholder).takeIf(String::isNotBlank)?.let { words -> Modifier.semantics { contentDescription = words } } ?: Modifier)
                         .focusRequester(inner)
                         .onFocusChanged { state ->
                             if (state.isFocused != focused) {

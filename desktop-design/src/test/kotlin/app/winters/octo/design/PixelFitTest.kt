@@ -163,9 +163,14 @@ class PixelFitTest {
         assertNull("a fit with a gap closed is refused", judged(outlines.plain, merged, keyboard.viewportWidth, px, keyboard.stroke, true))
     }
 
+    // Fits the old guard kept that this one refuses because the fit would
+    // close a gap between lines: each was looked at and is drawn as written
+    // at that size.
+    private val closesAGap = setOf("sym_error" to 13)
+
     // Nothing is lost: every fit the guard kept when it measured ink only
     // against the drawing as written is still kept, at every size it
-    // fits icons to.
+    // fits icons to, apart from the gaps listed above.
     @Test
     fun noFitKeptBeforeIsRefusedNow() {
         val lost = mutableListOf<String>()
@@ -180,7 +185,13 @@ class PixelFitTest {
                 val after = inkStats(rasterize(fitted, icon.viewportWidth, px), px)
                 val keptBefore = fitKept(before, after)
                 val keptNow = judged(plain, fitted, icon.viewportWidth, px, stroke, IconList.lined(icon.name)) != null
-                if (keptBefore && !keptNow) lost += "${icon.name} at $px px"
+                if (keptBefore && !keptNow) {
+                    if ((icon.name to px) in closesAGap) {
+                        assertTrue("${icon.name} at $px px is listed as closing a gap", !linesKept(plain, fitted, icon.viewportWidth.toDouble() / px))
+                    } else {
+                        lost += "${icon.name} at $px px"
+                    }
+                }
             }
         }
         assertTrue("fits the old guard kept, refused now (${lost.size}):\n" + lost.joinToString("\n"), lost.isEmpty())
