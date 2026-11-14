@@ -150,6 +150,69 @@ class FormGroupsTest {
         }
     }
 
+    // The same scroll with motion on: 500 dp, a group 100 dp tall, then
+    // `below` dp, drawn at times the test picks.
+    private class GlideRig {
+        val scroll = ScrollState(0)
+        var pending by mutableStateOf(false)
+        var below by mutableIntStateOf(500)
+        var shown = 0
+        private var now = 0L
+        val scene = ImageComposeScene(300, 200, Density(1f)) {
+            ProvideWindowLook(reduceMotion = false) {
+                var content by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                var group by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                val focus = remember { CalloutFocus() }
+                val host = content?.let { CalloutHost(scroll, 16.dp, it, settled = { true }, imeBottom = { 0 }, focus = focus) }
+                Column(Modifier.fillMaxSize().verticalScroll(scroll).onGloballyPositioned { content = it }) {
+                    Spacer(Modifier.height(500.dp))
+                    Box(Modifier.fillMaxWidth().height(100.dp).onGloballyPositioned { group = it })
+                    Spacer(Modifier.height(below.dp))
+                }
+                CalloutEffect(pending, host, { group }) {
+                    pending = false
+                    shown++
+                }
+            }
+        }
+
+        // One frame, 16 ms after the last.
+        fun frame() {
+            now += 16_000_000L
+            scene.render(now)
+        }
+    }
+
+    // A part closing under the scroll while it glides (the 500 dp below the
+    // group going to 300, which clamps the scroll from the bottom) still
+    // leaves the group's title at the inset. Red when the scroll goes a
+    // distance fixed at its start: it then ends short of the title by as much
+    // as the clamp moved it.
+    @Test
+    fun aPartClosingMidScrollStillLandsTheTitleAtTheInset() {
+        val rig = GlideRig()
+        try {
+            repeat(4) { rig.frame() }
+            rig.scroll.dispatchRawDelta(10_000f)
+            rig.frame()
+            assertEquals(900, rig.scroll.value)
+            rig.pending = true
+            var frames = 0
+            while (rig.scroll.value == 900 && frames < 60) {
+                rig.frame()
+                frames++
+            }
+            assertTrue("the glide started above the new bottom: ${rig.scroll.value}", rig.scroll.value in 701 until 900)
+            rig.below = 300
+            repeat(150) { rig.frame() }
+            assertEquals(484, rig.scroll.value)
+            assertEquals(1, rig.shown)
+            assertFalse(rig.pending)
+        } finally {
+            rig.scene.close()
+        }
+    }
+
     private fun nodes(scene: ImageComposeScene): List<SemanticsNode> {
         val all = mutableListOf<SemanticsNode>()
         fun walk(node: SemanticsNode) {

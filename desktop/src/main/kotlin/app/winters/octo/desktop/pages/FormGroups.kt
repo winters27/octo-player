@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -643,12 +644,22 @@ internal fun CalloutEffect(pending: Boolean, host: CalloutHost?, group: () -> La
         when (step) {
             CalloutStep.Taken -> shown()
             is CalloutStep.Go -> try {
-                if (still) step.host.scroll.scrollTo(step.target) else step.host.scroll.animateScrollTo(step.target)
+                if (still) step.host.scroll.scrollTo(step.target) else step.host.scroll.glideTo(step.target)
                 shown()
             } catch (e: CancellationException) {
                 if (currentCoroutineContext().isActive) shown()
                 throw e
             }
         }
+    }
+}
+
+// Scrolls to `target` as a place, not a distance: each frame goes to where
+// the animation is now, so content that shrinks under the scroll mid-way (a
+// part closing, which clamps the scroll) does not carry it past the target.
+// A drag still cancels it, as it cancels any scroll.
+private suspend fun ScrollState.glideTo(target: Int) {
+    scroll {
+        animate(value.toFloat(), target.toFloat(), animationSpec = spring()) { now, _ -> scrollBy(now - value) }
     }
 }
