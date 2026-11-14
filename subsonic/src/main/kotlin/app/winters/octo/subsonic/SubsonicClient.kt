@@ -15,6 +15,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -1026,22 +1028,31 @@ class SubsonicClient(
         }
     }
 
+    // An answer of any other shape throws only SubsonicException: no
+    // "subsonic-response" object is NotSubsonic, and a payload that does not
+    // read as asked is Server, so callers that catch SubsonicException see
+    // every way an answer can be wrong.
     internal fun <T> decode(body: String, key: String?, serializer: KSerializer<T>, default: T?): T =
-        decodeRoot(runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()?.get("subsonic-response")?.jsonObject, key, serializer, default)
+        decodeRoot(runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()?.get("subsonic-response") as? JsonObject, key, serializer, default)
 
     // The same, for an answer's own object already read (null when the body
     // held none).
-    internal fun <T> decodeRoot(answer: kotlinx.serialization.json.JsonObject?, key: String?, serializer: KSerializer<T>, default: T?): T {
+    internal fun <T> decodeRoot(answer: JsonObject?, key: String?, serializer: KSerializer<T>, default: T?): T {
         val root = answer ?: throw SubsonicException.NotSubsonic(NOT_LIKE_SUBSONIC)
-        if (root["status"]?.jsonPrimitive?.contentOrNull != "ok") {
-            val error = root["error"]?.jsonObject
-            val code = error?.get("code")?.jsonPrimitive?.intOrNull ?: 0
-            val message = error?.get("message")?.jsonPrimitive?.contentOrNull ?: "Request failed"
+        if ((root["status"] as? JsonPrimitive)?.contentOrNull != "ok") {
+            val error = root["error"] as? JsonObject
+            val code = (error?.get("code") as? JsonPrimitive)?.intOrNull ?: 0
+            val message = (error?.get("message") as? JsonPrimitive)?.contentOrNull ?: "Request failed"
             throw subsonicError(code, message)
         }
         val payload = if (key == null) root else root[key]
         return when {
-            payload != null -> json.decodeFromJsonElement(serializer, payload)
+            payload != null -> try {
+                json.decodeFromJsonElement(serializer, payload)
+            } catch (e: IllegalArgumentException) {
+                // SerializationException is one too.
+                throw SubsonicException.Server(0, if (key == null) "The answer could not be read" else "The answer's \"$key\" could not be read")
+            }
             default != null -> default
             else -> throw SubsonicException.Server(0, "Missing \"$key\" in the answer")
         }

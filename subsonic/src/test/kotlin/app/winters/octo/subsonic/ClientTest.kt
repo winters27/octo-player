@@ -133,6 +133,29 @@ class ClientTest {
         assertThrowsAsync<SubsonicException.NotSubsonic> { client().ping() }
     }
 
+    // An answer of the wrong shape throws only SubsonicException, so callers
+    // that catch it see every way an answer can be wrong.
+    @Test
+    fun anAnswerOfTheWrongShapeIsASubsonicException() = runTest {
+        val shapes = listOf(
+            // Not an object at all, or its "subsonic-response" is not one.
+            "[1, 2]" to SubsonicException.NotSubsonic::class,
+            """{"subsonic-response": "ok"}""" to SubsonicException.NotSubsonic::class,
+            // A status or error that is not a value.
+            """{"subsonic-response": {"status": {"ok": true}}}""" to SubsonicException.Server::class,
+            """{"subsonic-response": {"status": "failed", "error": [40]}}""" to SubsonicException.Server::class,
+            """{"subsonic-response": {"status": "failed", "error": {"code": {}, "message": []}}}""" to SubsonicException.Server::class,
+            // An "ok" answer whose album does not read as one.
+            """{"subsonic-response": {"status": "ok", "album": "Nightcall"}}""" to SubsonicException.Server::class,
+            """{"subsonic-response": {"status": "ok", "album": {"id": "a", "song": {"id": 1}}}}""" to SubsonicException.Server::class,
+        )
+        for ((body, expected) in shapes) {
+            server.enqueue(MockResponse.Builder().body(body).build())
+            val thrown = runCatching { client().album("a") }.exceptionOrNull()
+            assertTrue("$body threw $thrown", expected.isInstance(thrown))
+        }
+    }
+
     @Test
     fun http404IsNotSubsonic() = runTest {
         server.enqueue(MockResponse.Builder().code(404).body("Not found").build())
