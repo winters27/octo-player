@@ -67,3 +67,10 @@ only runs on macOS. The `iOS store assets` workflow does that on a GitHub
 macOS runner, and also writes the App Intents metadata for Shortcuts, App
 Shortcuts and the widget buttons. Its output lives in `Resources/StoreAssets`;
 run it again whenever the icon or the App Intents change.
+
+## Releases
+
+TestFlight builds and the IPA for sideloading are built, signed and uploaded
+on Linux with the tools in `scripts/release` (`testflight.sh`,
+`octo_asc.py`). Nothing there holds a secret: the App Store Connect key and
+the signing identity stay on the build machine.

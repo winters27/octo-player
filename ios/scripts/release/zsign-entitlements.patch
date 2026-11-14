@@ -1,0 +1,189 @@
+diff --git a/src/bundle.cpp b/src/bundle.cpp
+index 177388a..0e79334 100644
+--- a/src/bundle.cpp
++++ b/src/bundle.cpp
+@@ -408,6 +408,7 @@ bool ZBundle::SignNode(jvalue& jvNode)
+ 		auto endsWith = [](const string& str, const string& suffix) {
+ 			return str.size() >= suffix.size() && 0 == str.compare(str.size()-suffix.size(), suffix.size(), suffix);
+ 		};
++		bool bMatched = false;
+ 		for (auto it = m_pSignAssets->rbegin(); it != m_pSignAssets->rend(); ++it) {
+ 			m_pSignAsset = &(*it);
+ 			if (endsWith(m_pSignAsset->m_strApplicationId, strBundleId)) {
+@@ -416,9 +417,14 @@ bool ZBundle::SignNode(jvalue& jvNode)
+ 					return false;
+ 				}
+ 				bForceSign = true;
++				bMatched = true;
+ 				break;
+ 			}
+ 		}
++		if (!bMatched) {
++			ZLog::ErrorV(">>> No provisioning profile is for %s\n", strBundleId.c_str());
++			return false;
++		}
+ 	}
+ 
+ 	ZFile::CreateFolderV("%s/_CodeSignature", strBaseFolder.c_str());
+@@ -466,11 +472,24 @@ bool ZBundle::SignNode(jvalue& jvNode)
+ 		return false;
+ 	}
+ 
+-	if (!macho.Sign(m_pSignAsset, bForceSign, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResData)) {
+-		return false;
++	// With --bundle-entitlements every bundle is signed with its own entitlements, never another's.
++	string strAssetEntitlements;
++	bool bOwnEntitlements = !m_mapBundleEntitlements.empty();
++	if (bOwnEntitlements) {
++		auto found = m_mapBundleEntitlements.find(strBundleId);
++		if (found == m_mapBundleEntitlements.end()) {
++			ZLog::ErrorV(">>> No --bundle-entitlements for %s\n", strBundleId.c_str());
++			return false;
++		}
++		strAssetEntitlements = m_pSignAsset->m_strEntitleData;
++		m_pSignAsset->m_strEntitleData = found->second;
++		m_setBundleEntitlementsUsed.insert(strBundleId);
+ 	}
+-
+-	return true;
++	bool bSigned = macho.Sign(m_pSignAsset, bForceSign, strBundleId, strInfoSHA1, strInfoSHA256, strCodeResData);
++	if (bOwnEntitlements) {
++		m_pSignAsset->m_strEntitleData = strAssetEntitlements;
++	}
++	return bSigned;
+ }
+ 
+ bool ZBundle::ModifyPluginsBundleId(const string& strOldBundleId, const string& strNewBundleId)
+diff --git a/src/bundle.h b/src/bundle.h
+index ce16c79..b70ebc5 100644
+--- a/src/bundle.h
++++ b/src/bundle.h
+@@ -4,6 +4,7 @@
+ #include "openssl.h"
+ #include <vector>
+ #include <list>
++#include <map>
+ #include <set>
+ 
+ class ZBundle
+@@ -74,4 +75,7 @@ public:
+ 	bool		m_bRemoveUISupportedDevices;
+ 	bool		m_bInjectExtensions;
+ 	string			m_strAppFolder;
++	// --bundle-entitlements: each bundle's own entitlements by bundle id, and the ids signed so far.
++	map<string, string>	m_mapBundleEntitlements;
++	set<string>		m_setBundleEntitlementsUsed;
+ };
+diff --git a/src/openssl.cpp b/src/openssl.cpp
+index aca1b6b..cc16802 100644
+--- a/src/openssl.cpp
++++ b/src/openssl.cpp
+@@ -850,7 +850,10 @@ bool ZSignAsset::Init(
+ 	}
+ 
+ 	ZFile::ReadFile(strProvFile.c_str(), m_strProvData);
+-	ZFile::ReadFile(strEntitleFile.c_str(), m_strEntitleData);
++	if (!strEntitleFile.empty() && (!ZFile::ReadFile(strEntitleFile.c_str(), m_strEntitleData) || m_strEntitleData.empty())) {
++		ZLog::Error(">>> Can't read entitlements file!\n");
++		return false;
++	}
+ 	if (m_strProvData.empty()) {
+ 		ZLog::Error(">>> Can't find provision file!\n");
+ 		return false;
+diff --git a/src/zsign.cpp b/src/zsign.cpp
+index a5ce7e6..f0129cf 100644
+--- a/src/zsign.cpp
++++ b/src/zsign.cpp
+@@ -55,6 +55,7 @@ const struct option options[] = {
+ 	{"rm_watch", no_argument, NULL, 'W'},
+ 	{"rm_uisd", no_argument, NULL, 'U'},
+ 	{"inject_extensions", no_argument, NULL, 'P'},
++	{"bundle-entitlements", required_argument, NULL, 1000},
+ 	{"help", no_argument, NULL, 'h'},
+ 	{}
+ };
+@@ -134,6 +135,7 @@ int usage()
+ 	ZLog::Print("-n, --bundle_name\tNew bundle name to change.\n");
+ 	ZLog::Print("-r, --bundle_version\tNew bundle version to change.\n");
+ 	ZLog::Print("-e, --entitlements\tNew entitlements to change.\n");
++	ZLog::Print("--bundle-entitlements\tID=PATH: sign the bundle whose identifier is ID with the entitlements in PATH.\n\t\t\tGive one for every bundle; any bundle left out, any ID that is not a bundle, or a file\n\t\t\tthat cannot be read stops the signing.\n");
+ 	ZLog::Print("-I, --icon\t\tPath to new app icon to replace the primary icon. (PNG format)\n");
+ 	ZLog::Print("-z, --zip_level\t\tCompressed level when output the ipa file. (0-9)\n");
+ 	ZLog::Print("-l, --dylib\t\tPath to inject dylib file. Use -l multiple time to inject multiple dylib files at once.\n");
+@@ -189,6 +191,7 @@ int main(int argc, char* argv[])
+ 	string strOutputFile;
+ 	string strDisplayName;
+ 	string strEntitleFile;
++	map<string, string> mapBundleEntitlements;
+ 	string strIconFile;
+ 	vector<string> arrDylibFiles;
+ 	vector<string> arrRemoveDylibNames;
+@@ -234,6 +237,26 @@ int main(int argc, char* argv[])
+ 		case 'e':
+ 			strEntitleFile = ZFile::GetFullPath(optarg);
+ 			break;
++		case 1000: {
++			string strPair = optarg;
++			size_t pos = strPair.find('=');
++			if (string::npos == pos || 0 == pos || pos + 1 == strPair.size()) {
++				ZLog::ErrorV(">>> --bundle-entitlements wants ID=PATH, got: %s\n", optarg);
++				return -1;
++			}
++			string strId = strPair.substr(0, pos);
++			string strData;
++			if (!ZFile::ReadFile(ZFile::GetFullPath(strPair.substr(pos + 1).c_str()).c_str(), strData) || strData.empty()) {
++				ZLog::ErrorV(">>> Can't read the entitlements for %s: %s\n", strId.c_str(), strPair.substr(pos + 1).c_str());
++				return -1;
++			}
++			if (mapBundleEntitlements.count(strId)) {
++				ZLog::ErrorV(">>> --bundle-entitlements names %s twice\n", strId.c_str());
++				return -1;
++			}
++			mapBundleEntitlements[strId] = strData;
++			break;
++		}
+ 		case 'I':
+ 			strIconFile = ZFile::GetFullPath(optarg);
+ 			break;
+@@ -362,6 +385,10 @@ int main(int argc, char* argv[])
+ 	}
+ 
+ 	bool bZipFile = ZFile::IsZipFile(strPath.c_str());
++	if (!mapBundleEntitlements.empty() && !bZipFile && !ZFile::IsFolder(strPath.c_str())) {
++		ZLog::Error(">>> --bundle-entitlements needs an app or an .ipa, not a single Mach-O file\n");
++		return -1;
++	}
+ 	if (!bZipFile && !ZFile::IsFolder(strPath.c_str())) { // macho file
+ 		ZMachO* macho = new ZMachO();
+ 		if (!macho->Init(strPath.c_str())) {
+@@ -453,6 +480,7 @@ int main(int argc, char* argv[])
+ 	bundle.m_bRemoveWatchApp = bRemoveWatchApp;
+ 	bundle.m_bRemoveUISupportedDevices = bRemoveUISupportedDevices;
+ 	bundle.m_bInjectExtensions = bInjectExtensions;
++	bundle.m_mapBundleEntitlements = mapBundleEntitlements;
+ 
+ 	bool bRet;
+ 	if (arrProvFiles.size() > 1) {
+@@ -461,13 +489,21 @@ int main(int argc, char* argv[])
+ 			zsaList.push_back(ZSignAsset());
+ 			if (!zsaList.back().Init(strCertFile, strPKeyFile, provFile, strEntitleFile, strPassword, bAdhoc, bSHA256Only, false)) {
+ 				ZLog::ErrorV(">>> Failed to init provision: %s\n", provFile.c_str());
+-				zsaList.pop_back();
++				return -1;
+ 			}
+ 		}
+ 		bRet = bundle.SignFolder(&zsaList, strFolder, strBundleId, strBundleVersion, strDisplayName, arrDylibFiles, arrRemoveDylibNames, bForce, bWeakInject, bEnableCache, bRemoveProvision);
+ 	} else {
+ 		bRet = bundle.SignFolder(&zsa, strFolder, strBundleId, strBundleVersion, strDisplayName, arrDylibFiles, arrRemoveDylibNames, bForce, bWeakInject, bEnableCache, bRemoveProvision);
+ 	}
++	if (bRet) {
++		for (const auto& entry : mapBundleEntitlements) {
++			if (!bundle.m_setBundleEntitlementsUsed.count(entry.first)) {
++				ZLog::ErrorV(">>> --bundle-entitlements names %s, which is not a bundle in this app\n", entry.first.c_str());
++				bRet = false;
++			}
++		}
++	}
+ 	atimer.PrintResult(bRet, ">>> Signed %s!", bRet ? "OK" : "Failed");
+ 
+ 	// Post-sign certificate check
