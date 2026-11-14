@@ -45,9 +45,10 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 // Detail pages start low enough to clear the floating back button.
 val DetailTopGap = 56.dp
 
-// The round back button that floats over a detail page.
+// The round back button that floats over a detail page. While `enabled` is
+// false it shows dimmed and takes no press.
 @Composable
-fun BackButton(onBack: () -> Unit) {
+fun BackButton(onBack: () -> Unit, enabled: Boolean = true) {
     Box(Modifier.statusBarsPadding().padding(start = 16.dp, top = 8.dp)) {
         GlazedIconButton(
             backdrop = LocalHaze.current,
@@ -55,6 +56,7 @@ fun BackButton(onBack: () -> Unit) {
             contentDescription = "Back",
             onClick = onBack,
             size = 40.dp,
+            enabled = enabled,
         )
     }
 }

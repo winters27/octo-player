@@ -43,6 +43,7 @@ import app.winters.octo.testing.CountingKeyboard
 import app.winters.octo.testing.PageLocals
 import app.winters.octo.testing.RobolectricComposeRule
 import app.winters.octo.ui.family.LocalQrScanner
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -63,6 +64,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ScannerKeyboardTest {
+    // The switch's sign-in, recorded: no row here signs in, and a call made
+    // inside the view model's work would never reach JUnit by itself.
+    private val signIns = GatedSignIns()
+
+    @After
+    fun noSignInWasMade() = assertEquals(emptyList<RecordedSignIn>(), signIns.calls.value)
+
     @get:Rule
     val ui = RobolectricComposeRule()
 
@@ -84,7 +92,7 @@ class ScannerKeyboardTest {
         assertEquals(InputMode.Keyboard, modes!!.inputMode)
     }
 
-    private fun page(vm: SignInViewModel) = open { SignInScreen(onBack = { backs++ }, vm = vm) }
+    private fun page(vm: SignInViewModel) = open { SignInScreen(onDone = {}, onBack ={ backs++ }, vm = vm) }
 
     private fun address() = ui.compose.onNode(hasContentDescription(SignInWords.SERVER_ADDRESS) and hasSetTextAction(), useUnmergedTree = true)
 
@@ -116,7 +124,7 @@ class ScannerKeyboardTest {
     // on-screen keyboard left up.
     @Test
     fun theCameraTakesFocusAndClosesTheKeyboard() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         page(vm)
         address().requestFocus()
         ui.compose.waitForIdle()
@@ -134,7 +142,7 @@ class ScannerKeyboardTest {
     // layout changes, leaves focus behind the camera.
     @Test
     fun enterOnScanAFamilyQrCodeFocusesCancel() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         page(vm)
         address().requestFocus()
         ui.compose.waitForIdle()
@@ -148,7 +156,7 @@ class ScannerKeyboardTest {
     // Red when Cancel leaves focus to the platform (it lands on the address).
     @Test
     fun cancelReturnsFocusToTheButtonThatOpenedIt() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         vm.startJoin()
         page(vm)
         scanAgain()
@@ -162,7 +170,7 @@ class ScannerKeyboardTest {
     // Red when Tab, Shift+Tab or the arrows move focus to the page behind.
     @Test
     fun focusStaysOnTheCamerasCancel() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         vm.startJoin()
         page(vm)
         scanAgain()
@@ -185,7 +193,7 @@ class ScannerKeyboardTest {
     // or does not come back once it closes.
     @Test
     fun thePageBehindTheCameraIsHiddenFromScreenReaders() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         vm.startJoin()
         page(vm)
         ui.compose.onNodeWithText("Sign in with a password").assertExists()
@@ -200,7 +208,7 @@ class ScannerKeyboardTest {
     // it without a home for focus.
     @Test
     fun backClosesTheCameraAndReturnsFocus() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         vm.startJoin()
         page(vm)
         scanAgain()
@@ -217,14 +225,14 @@ class ScannerKeyboardTest {
     // when the guard's `before` is dropped.
     @Test
     fun aDeepLinksNewPageFocusesItsAddress() {
-        val first = signInForm()
+        val first = signInForm(signIns)
         first.startJoin()
-        val second = signInForm()
+        val second = signInForm(signIns)
         var opened by mutableStateOf(false)
         open {
             Column {
                 Box(Modifier.size(1.dp).testTag("first").focusable())
-                if (opened) SignInScreen(onBack = {}, vm = second, join = invite, joinOpened = 1) else SignInScreen(onBack = {}, vm = first)
+                if (opened) SignInScreen(onDone = {}, onBack ={}, vm = second, join = invite, joinOpened = 1) else SignInScreen(onDone = {}, onBack ={}, vm = first)
             }
         }
         ui.compose.runOnIdle { first.scanning = true }
@@ -241,7 +249,7 @@ class ScannerKeyboardTest {
     // has gone, and its focus with it) or not at all.
     @Test
     fun aLinkTheCameraReadsFocusesTheAddress() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         vm.startJoin()
         open {
             Column {
@@ -251,7 +259,7 @@ class ScannerKeyboardTest {
                         Box(Modifier.size(80.dp).focusRequester(focus).clickable { found(invite) }) { BasicText("Found") }
                     },
                 ) {
-                    SignInScreen(onBack = {}, vm = vm)
+                    SignInScreen(onDone = {}, onBack ={}, vm = vm)
                 }
             }
         }
@@ -272,9 +280,9 @@ class ScannerKeyboardTest {
     // camera) or the camera's focus is not given back.
     @Test
     fun aPageDrawnAgainKeepsTheCameraAndItsFocus() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         var shown by mutableStateOf(true)
-        open { if (shown) SignInScreen(onBack = {}, vm = vm, join = invite, joinOpened = 1) }
+        open { if (shown) SignInScreen(onDone = {}, onBack ={}, vm = vm, join = invite, joinOpened = 1) }
         assertEquals(invite, vm.invite)
         scanAgain()
         cancel().assertIsFocused()

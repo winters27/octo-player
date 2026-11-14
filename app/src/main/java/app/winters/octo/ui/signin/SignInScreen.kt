@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -172,6 +174,9 @@ private fun Modifier.topFade(scroll: ScrollState): Modifier = this
 @Composable
 fun SignInScreen(
     onBack: () -> Unit,
+    // Called once it has signed in: the page closes itself (its own entry,
+    // never whatever was pushed over it while it ran).
+    onDone: () -> Unit,
     editing: Boolean = false,
     form: ServerForm? = null,
     serverId: String? = null,
@@ -199,22 +204,39 @@ fun SignInScreen(
     LaunchedEffect(vm.signedIn) {
         if (vm.signedIn) {
             vm.notice?.let(feedback::done)
-            onBack()
+            onDone()
         }
     }
     // The camera opening: in touch mode nothing stays focused; otherwise its
     // Cancel takes focus and the on-screen keyboard closes.
     LaunchedEffect(vm.scanning) { if (vm.scanning) { if (inputModes.inputMode == InputMode.Touch) focusManager.clearFocus() else { scanCancel.requestFocus(); keyboard?.hide() } } }
 
+    // Back while a step commits (a sign-up, a sign-in) does nothing until it
+    // ends. With a finished sign-up held it leaves the link and stays, the
+    // new username in its field, so the next Back leaves. Otherwise it leaves
+    // the link (cancelling a hand-over that waits for the other device) and
+    // the page.
+    val back = {
+        when {
+            vm.committing -> Unit
+            vm.holdsSignUp -> vm.stopJoin()
+            else -> {
+                vm.stopJoin()
+                onBack()
+            }
+        }
+    }
     Box(Modifier.fillMaxSize().background(OctoColors.Background)) {
         Box(Modifier.fillMaxSize().then(if (vm.scanning) Modifier.clearAndSetSemantics {} else Modifier)) {
             SignInForm(vm, scanAgain, addressFocus)
-            BackButton(onBack)
+            BackButton(back, enabled = !vm.committing)
         }
         // The camera, over everything, until it reads a family link.
         if (vm.scanning) LocalQrScanner.current(onFound, closeScanner, scanCancel)
     }
-    // While the camera is open, Back and Escape close it.
+    BackHandler(enabled = vm.busy || vm.holdsSignUp) { back() }
+    // While the camera is open, Back and Escape close it (the handler
+    // composed last wins).
     BackHandler(enabled = vm.scanning) { closeScanner() }
     TrustSheet(vm.question, onTrust = vm::trust, onCancel = vm::distrust)
 }
@@ -364,9 +386,11 @@ private fun MainCard(vm: SignInViewModel, addressFocus: FocusRequester, onKeyRow
             placeholder = "music.example.com",
             keyboardType = KeyboardType.Uri,
             imeAction = if (vm.joining && vm.invite == null && !showsName) ImeAction.Done else ImeAction.Next,
-            leading = { SchemeButton(vm.scheme, onClick = vm::toggleScheme) },
+            leading = { SchemeButton(vm.scheme, enabled = !vm.holdsSignUp, onClick = vm::toggleScheme) },
             focus = addressFocus,
+            readOnly = vm.holdsSignUp,
         )
+        LinkNote(vm)
         if (showsName) {
             FormDivider()
             FormFieldRow(
@@ -466,6 +490,17 @@ private fun MainCard(vm: SignInViewModel, addressFocus: FocusRequester, onKeyRow
     }
 }
 
+// A family link refused here, said under the address it was pasted into,
+// which stays above the keyboard while it has focus; it is brought into
+// view as it appears.
+@Composable
+private fun LinkNote(vm: SignInViewModel) {
+    val words = vm.linkNote ?: return
+    val seen = remember { BringIntoViewRequester() }
+    LaunchedEffect(words) { seen.bringIntoView() }
+    FormNote(words, Modifier.bringIntoViewRequester(seen).padding(bottom = 12.dp))
+}
+
 // The notes under the main card: how the connection travels, then what a
 // family link asks of the person.
 @Composable
@@ -546,7 +581,7 @@ private fun JoinButtons(vm: SignInViewModel, scanAgain: FocusRequester) {
             modifier = Modifier.padding(top = 12.dp).focusRequester(scanAgain),
         )
     }
-    GlazeButton("Sign in with a password", vm::stopJoin, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
+    GlazeButton("Sign in with a password", vm::stopJoin, enabled = !vm.committing, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
 }
 
 // What the last attempt came to, under its button: while the sign-in page
@@ -623,14 +658,15 @@ private const val GROW_FROM = 0.88f
 // The start of the address: a lock and "https://", or an open lock and
 // "http://", in the field's quieter words, so the address reads whole. A
 // tap switches between them; it is picked by itself as the address is
-// typed (http at home, https anywhere else).
+// typed (http at home, https anywhere else). While the address is held (a
+// finished sign-up signs in there) it takes no tap.
 @Composable
-private fun SchemeButton(scheme: Scheme, onClick: () -> Unit) {
+private fun SchemeButton(scheme: Scheme, enabled: Boolean, onClick: () -> Unit) {
     val secure = scheme == Scheme.Https
     Row(
         Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(role = Role.Button, onClickLabel = if (secure) "Use http" else "Use https", onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = if (secure) "Use http" else "Use https", onClick = onClick)
             .semantics { contentDescription = if (secure) "Encrypted, https" else "Not encrypted, http" }
             .padding(start = 2.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -934,16 +970,21 @@ private fun dateWords(date: Date): String =
 // Asks before trusting a certificate the phone does not. It shows the
 // host and the certificate's fingerprint, so the user can compare it with
 // the server's own. Nothing is trusted unless they say so. It floats in
-// the middle of the screen, above the bar.
+// the middle of the screen, above the bar. A tap outside its card leaves
+// the question waiting; Back and its own buttons answer it.
 @Composable
 private fun TrustSheet(question: SignInError.Untrusted?, onTrust: () -> Unit, onCancel: () -> Unit) {
     GlassPopup(
         visible = question != null,
         anchor = null,
-        onDismiss = onCancel,
+        onDismiss = {},
         backdrop = LocalHaze.current,
         title = "Trust this certificate",
         maxWidth = 380.dp,
+        onBack = {
+            onCancel()
+            true
+        },
     ) {
         val shown = rememberLast(question) ?: return@GlassPopup
         PopupQuestion(

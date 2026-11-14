@@ -80,5 +80,7 @@ class GatewaySwitchTest {
         assertFalse(after.find(kept.id)!!.signedOut)
         assertEquals("pw", vault.open(after.find(kept.id)!!.passwordSealed))
         assertNull(after.active)
+        // A switch that failed asks for no sign-in form.
+        assertNull(sessions.signInAsk.value)
     }
 }

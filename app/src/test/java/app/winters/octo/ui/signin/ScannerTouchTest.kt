@@ -20,6 +20,7 @@ import app.winters.octo.connection.SignInWords
 import app.winters.octo.testing.DeviceFocusRule
 import app.winters.octo.testing.PageLocals
 import app.winters.octo.testing.RobolectricComposeRule
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -41,6 +42,13 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w360dp-h640dp-mdpi")
 class ScannerTouchTest {
+    // The switch's sign-in, recorded: no row here signs in, and a call made
+    // inside the view model's work would never reach JUnit by itself.
+    private val signIns = GatedSignIns()
+
+    @After
+    fun noSignInWasMade() = assertEquals(emptyList<RecordedSignIn>(), signIns.calls.value)
+
     @get:Rule
     val ui = RobolectricComposeRule()
 
@@ -55,7 +63,7 @@ class ScannerTouchTest {
         ui.compose.setContent {
             PageLocals {
                 modes = LocalInputModeManager.current
-                SignInScreen(onBack = { backs++ }, vm = vm)
+                SignInScreen(onDone = {}, onBack ={ backs++ }, vm = vm)
             }
         }
         ui.compose.waitForIdle()
@@ -75,7 +83,7 @@ class ScannerTouchTest {
     // Red when the camera opens with the address still focused behind it.
     @Test
     fun openingTheCameraLeavesNothingFocused() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         open(vm)
         address().performClick()
         ui.compose.waitForIdle()
@@ -89,7 +97,7 @@ class ScannerTouchTest {
     // cannot pass for one the page never got.
     @Test
     fun pressesNeverReachThePageUnderTheCamera() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         open(vm)
         val field = address().fetchSemanticsNode().boundsInRoot.center
         val back = ui.compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot.center
@@ -109,7 +117,7 @@ class ScannerTouchTest {
     // small movement would not click Cancel).
     @Test
     fun aFingersTapWithASmallMoveClosesTheCamera() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         open(vm)
         scan(vm)
         ui.compose.onNodeWithText("Cancel").performTouchInput {
@@ -124,7 +132,7 @@ class ScannerTouchTest {
     // Red when Cancel hands focus to the opening button in touch mode.
     @Test
     fun aTapOnCancelLeavesNothingFocused() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         open(vm)
         scan(vm)
         ui.compose.onNodeWithText("Cancel").performClick()

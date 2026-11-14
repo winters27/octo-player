@@ -25,6 +25,7 @@ import androidx.compose.ui.test.requestFocus
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.testing.PageLocals
 import app.winters.octo.testing.RobolectricComposeRule
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -42,6 +43,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class AdvancedKeyboardTest {
+    // The switch's sign-in, recorded: no row here signs in, and a call made
+    // inside the view model's work would never reach JUnit by itself.
+    private val signIns = GatedSignIns()
+
+    @After
+    fun noSignInWasMade() = assertEquals(emptyList<RecordedSignIn>(), signIns.calls.value)
+
     @get:Rule
     val ui = RobolectricComposeRule()
 
@@ -49,7 +57,7 @@ class AdvancedKeyboardTest {
     private var modes: InputModeManager? = null
 
     private fun open(vararg names: String) {
-        vm = signInForm()
+        vm = signInForm(signIns)
         for (name in names) {
             val id = vm.addHeader()
             vm.setHeaderName(id, name)

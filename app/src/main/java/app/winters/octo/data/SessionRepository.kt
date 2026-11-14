@@ -236,9 +236,10 @@ internal fun keepBase(formFor: String?, address: String, username: String, serve
 }
 
 // A kept server's sign-in form for the app to open by itself, with the
-// words to show first: the server in use at the last start that could not
-// be signed in to as kept.
-class SignInAsk(val serverId: String, val note: String)
+// words to show first, if any: the server in use at the last start that
+// could not be signed in to as kept, or one a switch needs the password
+// for. Each ask is its own object.
+class SignInAsk(val serverId: String, val note: String?)
 
 // The servers kept on the phone, and the one in use: signing in, adding
 // another, switching between them, editing, signing out and removing. Each
@@ -270,6 +271,19 @@ class SessionRepository @Inject constructor(
     // The form asked for is open.
     fun signInAsked(ask: SignInAsk) {
         _signInAsk.compareAndSet(ask, null)
+    }
+
+    // Asks for a kept server's sign-in form again ("Sign in" on its notice):
+    // the shell routes it as it routes every ask.
+    fun ask(ask: SignInAsk) {
+        _signInAsk.value = ask
+    }
+
+    // A switch that needs the password asks for the server's sign-in form
+    // itself, here, where nothing on screen can cut it short.
+    private fun asked(result: SwitchResult.NeedsPassword): SwitchResult.NeedsPassword {
+        _signInAsk.value = SignInAsk(result.server.id, result.note)
+        return result
     }
 
     // A quick client for asking whether the home address answers.
@@ -454,22 +468,22 @@ class SessionRepository @Inject constructor(
         val server = _servers.value.find(id) ?: return@withLock SwitchResult.Failed(SignInWords.GONE)
         val from = current
         if (from?.id == id) return@withLock SwitchResult.Done(from, null)
-        if (server.signedOut || server.passwordSealed.isEmpty()) return@withLock SwitchResult.NeedsPassword(server)
-        val secret = vault.open(server.passwordSealed) ?: return@withLock SwitchResult.NeedsPassword(server)
-        val settings = openedConnection(server) ?: return@withLock SwitchResult.NeedsPassword(server)
+        if (server.signedOut || server.passwordSealed.isEmpty()) return@withLock asked(SwitchResult.NeedsPassword(server))
+        val secret = vault.open(server.passwordSealed) ?: return@withLock asked(SwitchResult.NeedsPassword(server))
+        val settings = openedConnection(server) ?: return@withLock asked(SwitchResult.NeedsPassword(server))
         val main = server.serverUrl.toHttpUrlOrNull()
             ?: return@withLock SwitchResult.Failed("That server's address can't be read. Edit it and try again.")
         val creds = Credentials(server.username, secret, settings.authMode)
         // A sign-in page's password that would cross the internet readable
         // is never sent: its sign-in form opens saying why.
-        if (needsHttps(main, settings.headers)) return@withLock SwitchResult.NeedsPassword(server, GatewayWords.NEEDS_HTTPS)
+        if (needsHttps(main, settings.headers)) return@withLock asked(SwitchResult.NeedsPassword(server, GatewayWords.NEEDS_HTTPS))
         // Asked through a client of its own, let go once it has answered.
         val own = clients.forServer(main, settings, GLANCE_SECONDS)
         val (info, extensions) = try {
             val info = try {
                 reachWith(own, main, settings.home, creds).info
             } catch (e: SubsonicException) {
-                if (e is SubsonicException.WrongCredentials) return@withLock SwitchResult.NeedsPassword(server, passwordRefusedWords(server.name))
+                if (e is SubsonicException.WrongCredentials) return@withLock asked(SwitchResult.NeedsPassword(server, passwordRefusedWords(server.name)))
                 return@withLock SwitchResult.Failed(switchFailedWords(server.name, e.userMessage()))
             }
             info to runCatching { SubsonicClient(main, creds, own).extensions() }.getOrNull()

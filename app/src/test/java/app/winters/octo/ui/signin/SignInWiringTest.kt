@@ -6,6 +6,7 @@ import app.winters.octo.data.SignInRequest
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.subsonic.gateway.GatewayKind
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +21,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SignInWiringTest {
+    // The switch's sign-in, recorded: no row here signs in, and a call made
+    // inside the view model's work would never reach JUnit by itself.
+    private val signIns = GatedSignIns()
+
+    @After
+    fun noSignInWasMade() = assertEquals(emptyList<RecordedSignIn>(), signIns.calls.value)
+
     private val saved = ConnectionDraft(
         address = "https://music.example.com",
         username = "alice",
@@ -51,7 +59,7 @@ class SignInWiringTest {
     // or kept nowhere.
     @Test
     fun anOpeningStartsItsLinkOnce() {
-        val vm = signInForm()
+        val vm = signInForm(signIns)
         val link = FamilyInviteLink(server = "https://music.example.com", token = "invite-token")
         var befores = 0
         vm.open(link, 1) { befores++ }

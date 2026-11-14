@@ -3,6 +3,11 @@ package app.winters.octo.ui.nav
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.winters.octo.ui.family.FamilyShellViewModel
 import app.winters.octo.ui.signin.SignInShellViewModel
+import app.winters.octo.ui.signin.SignInRunning
+import app.winters.octo.connection.SignInWords
+import app.winters.octo.data.KeptServers
+import app.winters.octo.data.SessionState
+import app.winters.octo.data.SignInAsk
 import app.winters.octo.ui.family.FamilyRequestSheetHost
 import app.winters.octo.ui.family.FamilyScreen
 import app.winters.octo.subsonic.familyAppLink
@@ -183,14 +188,24 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // same link opened again starts again, and a page drawn again does not.
     // Saved, so a page restored with opening N is never reused for the next.
     var joinOpens by rememberSaveable { mutableLongStateOf(0L) }
+    // The sign-in forms open anywhere in the app, and the sessions, which
+    // ask for a kept server's sign-in form by themselves.
+    val running = hiltViewModel<SignInShellViewModel>().running
+    val sessions = hiltViewModel<SignInShellViewModel>().sessions
     LaunchedEffect(familyOpen) {
         val what = familyOpen ?: return@LaunchedEffect
         familyHub.opened()
-        selected = stacks.lastIndex
-        when (what) {
-            FamilyOpen.Family -> stacks.last().add(FamilyRoute)
-            is FamilyOpen.Join -> stacks.last().openJoin(FamilyJoinRoute(familyAppLink(what.link), opened = ++joinOpens))
-        }
+        routeFamilyOpen(
+            what,
+            running,
+            feedback,
+            reopen = { familyHub.open(it) },
+            select = { selected = stacks.lastIndex },
+            nextOpening = { ++joinOpens },
+            stack = stacks.last(),
+            askAgain = { sessions.ask(it) },
+            nameOf = { askName(it, sessions.servers.value, sessions.state.value) },
+        )
     }
     // A list shared to Octo: Import, on the Settings tab, which sends it.
     val importInbox = hiltViewModel<ImportShellViewModel>().inbox
@@ -200,15 +215,15 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         selected = stacks.lastIndex
         if (stacks.last().lastOrNull() != ImportRoute) stacks.last().add(ImportRoute)
     }
-    // A kept server that could not be signed in to at start as kept: its
-    // sign-in form, on the Settings tab, saying why.
-    val sessions = hiltViewModel<SignInShellViewModel>().sessions
+    // A kept server's sign-in form the sessions ask for (one that could not
+    // be signed in to at start as kept, or one a switch needs the password
+    // for): on the Settings tab, saying why, unless a sign-in is open or a
+    // link's page is there, when a notice offers it instead.
     val signInAsk by sessions.signInAsk.collectAsStateWithLifecycle()
     LaunchedEffect(signInAsk) {
         val ask = signInAsk ?: return@LaunchedEffect
         sessions.signInAsked(ask)
-        selected = stacks.lastIndex
-        stacks.last().add(ServerFormRoute(ServerForm.SignIn, ask.serverId, ask.note))
+        routeSignInAsk(ask, sessions.servers.value, sessions.state.value, running, stacks.last(), feedback, askAgain = { sessions.ask(it) }, select = { selected = stacks.lastIndex }, push = { stacks.last().add(it) })
     }
     val back: () -> Unit = { stack.backOne() }
     val hasTrack = now.trackId != null
@@ -252,8 +267,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         onSelect = { index ->
             barPlayer = false
             if (index == selected) {
-                // Tapping the current tab goes back to its top.
-                while (stack.size > 1) stack.removeAt(stack.lastIndex)
+                // Tapping the current tab goes back to its top, or, while a
+                // sign-in is open, to the sign-in page nearest the top.
+                stack.reselect(running.open.value.isNotEmpty())
             } else {
                 selected = index
             }
@@ -462,13 +478,13 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
                 if (route.id == null) open(LiveListRoute(saved))
             })
         }
-        entry<SignInRoute> { SignInScreen(back) }
-        entry<EditConnectionRoute> { SignInScreen(back, editing = true) }
-        entry<ServerFormRoute> { route -> SignInScreen(back, form = route.form, serverId = route.id, note = route.note) }
+        entry<SignInRoute> { route -> SignInScreen(back, onDone = { stack.removeOwn(route) }) }
+        entry<EditConnectionRoute> { route -> SignInScreen(back, onDone = { stack.removeOwn(route) }, editing = true) }
+        entry<ServerFormRoute> { route -> SignInScreen(back, onDone = { stack.removeOwn(route) }, form = route.form, serverId = route.id, note = route.note) }
         entry<OctoAdminRoute> { OctoAdminScreen(back) }
         entry<ImportRoute> { ImportScreen(back) }
         entry<FamilyRoute> { FamilyScreen(back, onImport = { open(ImportRoute) }) }
-        entry<FamilyJoinRoute> { route -> SignInScreen(back, join = parseFamilyLink(route.link), joinOpened = route.opened) }
+        entry<FamilyJoinRoute> { route -> SignInScreen(back, onDone = { stack.removeOwn(route) }, join = parseFamilyLink(route.link), joinOpened = route.opened) }
         entry<ChartsRoute> { app.winters.octo.ui.charts.ChartsScreen(back) }
         entry<SoundRoute> { SoundScreen(back) }
         entry<HomeSectionsRoute> { app.winters.octo.ui.settings.HomeSectionsPage(back) }
@@ -480,4 +496,75 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }
         entry<HealthTrashRoute> { RecentlyRemovedScreen(back) }
     }
+}
+
+// Where a family link or a family notice opens. While a sign-in is open a
+// link is refused: the open form says why under its address, a notice offers
+// the link again ("Use it", which routes it again from the start), and
+// nothing moves. Otherwise the Settings tab, with Family, or with the link's
+// page on top (replacing a link's page already there). Before a link's page
+// goes on, every page of Octo's own sign-in asks leaves the tab, so none is
+// left under it, and the topmost one still to ask is offered again.
+internal fun routeFamilyOpen(
+    what: FamilyOpen,
+    running: SignInRunning,
+    feedback: Feedback,
+    reopen: (FamilyOpen) -> Unit,
+    select: () -> Unit,
+    nextOpening: () -> Long,
+    stack: MutableList<NavKey>,
+    askAgain: (SignInAsk) -> Unit,
+    nameOf: (String) -> String?,
+) {
+    if (what is FamilyOpen.Join && running.open.value.isNotEmpty()) {
+        running.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+        feedback.show(SignInWords.LINK_WHILE_SIGN_IN_OPEN, "Use it", { reopen(what) })
+        return
+    }
+    select()
+    when (what) {
+        FamilyOpen.Family -> stack.add(FamilyRoute)
+        is FamilyOpen.Join -> {
+            val asked = stack.removeAsked()
+            stack.openJoin(FamilyJoinRoute(familyAppLink(what.link), opened = nextOpening()))
+            val offered = asked.asReversed().firstNotNullOfOrNull { ask -> nameOf(ask.serverId)?.let { ask to it } }
+            if (offered != null) {
+                val (ask, name) = offered
+                feedback.show(SignInWords.askWhileSignInOpen(name), "Sign in", { askAgain(ask) })
+            }
+        }
+    }
+}
+
+// Where a kept server's sign-in form that the sessions ask for goes, read
+// when it is routed: nowhere when the server is gone or is the one in use
+// and signed in; to a notice offering it ("Sign in", which asks again and
+// never switches) while a sign-in is open or a link's page is on the
+// Settings tab; otherwise onto the Settings tab, marked as asked.
+internal fun routeSignInAsk(
+    ask: SignInAsk,
+    kept: KeptServers,
+    state: SessionState,
+    running: SignInRunning,
+    stack: List<NavKey>,
+    feedback: Feedback,
+    askAgain: (SignInAsk) -> Unit,
+    select: () -> Unit,
+    push: (NavKey) -> Unit,
+) {
+    val name = askName(ask.serverId, kept, state) ?: return
+    if (running.open.value.isNotEmpty() || stack.any { it is FamilyJoinRoute }) {
+        feedback.show(SignInWords.askWhileSignInOpen(name), "Sign in", { askAgain(ask) })
+        return
+    }
+    select()
+    push(ServerFormRoute(ServerForm.SignIn, ask.serverId, note = ask.note, asked = true))
+}
+
+// The name of a kept server to ask to sign in to, or null when there is
+// none to ask: it is gone, or it is the one in use and signed in.
+internal fun askName(id: String, kept: KeptServers, state: SessionState): String? {
+    val server = kept.find(id) ?: return null
+    if ((state as? SessionState.SignedIn)?.session?.id == id) return null
+    return server.name
 }

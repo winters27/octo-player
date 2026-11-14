@@ -89,7 +89,8 @@ internal fun ServerList(vm: ServerViewModel, onOpen: (NavKey) -> Unit, onChangeP
         scope.launch {
             when (val outcome = vm.switchTo(server.id)) {
                 is SwitchOutcome.Done -> outcome.notice?.let(feedback::done)
-                is SwitchOutcome.NeedsPassword -> onOpen(ServerFormRoute(ServerForm.SignIn, outcome.server.id, outcome.note))
+                // The sessions ask for its sign-in form themselves.
+                is SwitchOutcome.NeedsPassword -> Unit
                 is SwitchOutcome.Failed -> feedback.show(outcome.message)
             }
         }

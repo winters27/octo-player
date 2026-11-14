@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -58,7 +59,8 @@ internal fun rememberChromeLook(interaction: MutableInteractionSource): ChromeLo
 
 // A lone round control floating over content, the same glaze as the bar.
 // Pressed, the glass pops out and the icon dips in. `accent` plays the
-// icon's gesture on every tap, like Pulse for a heart.
+// icon's gesture on every tap, like Pulse for a heart. While `enabled` is
+// false it shows dimmed and takes no press.
 @Composable
 fun GlazedIconButton(
     backdrop: HazeState,
@@ -69,6 +71,7 @@ fun GlazedIconButton(
     size: Dp = 56.dp,
     accent: IconAccent? = null,
     interactionSource: MutableInteractionSource? = null,
+    enabled: Boolean = true,
 ) {
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val look = rememberChromeLook(interaction)
@@ -82,11 +85,13 @@ fun GlazedIconButton(
                 scaleY = look.glass()
             }
             .focusRing(CircleShape, look.ring, OctoColors.FocusRing)
-            .hoverable(interaction)
-            .pointerHoverIcon(PointerIcon.Hand)
+            .alpha(if (enabled) 1f else OctoInk.DisabledAlpha)
+            .hoverable(interaction, enabled = enabled)
+            .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
+                enabled = enabled,
                 role = Role.Button,
                 onClick = {
                     gesture?.play()

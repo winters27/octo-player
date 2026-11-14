@@ -39,7 +39,8 @@ class JoinOpeningsTest {
     fun theShellCountsEachOpeningAndPassesItOn() {
         val shell = File(System.getProperty("octo.mainSources"), "app/winters/octo/ui/nav/MainShell.kt").readText()
         assertTrue(shell.contains("var joinOpens by rememberSaveable { mutableLongStateOf(0L) }"))
-        assertTrue(shell.contains("stacks.last().openJoin(FamilyJoinRoute(familyAppLink(what.link), opened = ++joinOpens))"))
+        assertTrue(shell.contains("nextOpening = { ++joinOpens }"))
+        assertTrue(shell.contains("stack.openJoin(FamilyJoinRoute(familyAppLink(what.link), opened = nextOpening()))"))
         assertTrue(shell.contains("join = parseFamilyLink(route.link), joinOpened = route.opened"))
     }
 }

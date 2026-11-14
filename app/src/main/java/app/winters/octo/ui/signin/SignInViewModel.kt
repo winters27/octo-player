@@ -11,6 +11,13 @@ import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.HeaderList
+import app.winters.octo.connection.JoinClients
+import app.winters.octo.connection.LinkAction
+import app.winters.octo.connection.LinkAnchor
+import app.winters.octo.connection.LinkForm
+import app.winters.octo.connection.LinkFormState
+import app.winters.octo.connection.LinkTake
+import app.winters.octo.connection.ReceivedAction
 import app.winters.octo.connection.ResolvedHeaders
 import app.winters.octo.connection.addressChanged
 import app.winters.octo.connection.authModeOf
@@ -18,11 +25,13 @@ import app.winters.octo.connection.calm
 import app.winters.octo.connection.flagsOf
 import app.winters.octo.connection.gatewayEdited
 import app.winters.octo.connection.kindPicked
+import app.winters.octo.connection.linkFacts
 import app.winters.octo.connection.methodPicked
 import app.winters.octo.connection.reactToFailure
+import app.winters.octo.connection.receivedFacts
 import app.winters.octo.connection.resolveConnectionHeaders
 import app.winters.octo.connection.sending
-import app.winters.octo.connection.ServerClients
+import app.winters.octo.connection.signInOpen
 import app.winters.octo.connection.letGo
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.gateway.Gateway
@@ -43,6 +52,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.winters.octo.connection.LegacyRetry
@@ -58,6 +68,7 @@ import app.winters.octo.data.SignInError
 import app.winters.octo.data.SignInRequest
 import app.winters.octo.data.userMessage
 import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.playback.SignInSwitch
 import app.winters.octo.server.accountLine
 import app.winters.octo.server.serverName
 import app.winters.octo.subsonic.AuthMode
@@ -69,6 +80,10 @@ import app.winters.octo.subsonic.serverUrl
 import app.winters.octo.subsonic.splitScheme
 import app.winters.octo.ui.nav.ServerForm
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import javax.inject.Inject
@@ -77,8 +92,10 @@ import javax.inject.Inject
 class SignInViewModel @Inject constructor(
     private val sessions: SessionRepository,
     private val switcher: ServerSwitch,
-    private val clients: ServerClients,
+    private val signIns: SignInSwitch,
+    private val clients: JoinClients,
     private val devices: DeviceIds,
+    private val running: SignInRunning,
 ) : ViewModel() {
     // A family link's card in place of the password: signing up from an
     // invite, or a sign-in coming from another device of one's own.
@@ -91,14 +108,21 @@ class SignInViewModel @Inject constructor(
     var handOverStep by mutableStateOf<String?>(null)
         private set
 
-    // Signed up from an invite, kept until signed in: an invite works once,
-    // so a certificate asked about afterwards does not sign up again.
-    private var signedUp: JoinOutcome.SignedUp? = null
+    // A sign-up made from an invite, kept until signed in: an invite works
+    // once, so a retry or a certificate asked about afterwards does not sign
+    // up again. It signs in at the address the form held when the sign-up
+    // started (never the home address a sign-up fell back to), and the
+    // invite's token tells the same invite opened again.
+    private class HeldSignUp(val account: JoinOutcome.SignedUp, val main: HttpUrl, val token: String)
+
+    private var signedUp by mutableStateOf<HeldSignUp?>(null)
 
     // A sign-in received from another device, kept until signed in with: a
-    // hand-over works once, so a certificate asked about afterwards does not
-    // redeem it again.
-    private var received: HandOverSignIn? = null
+    // hand-over works once, so a retry or a certificate asked about
+    // afterwards does not redeem it again.
+    private class HeldReceived(val signIn: HandOverSignIn, val token: String)
+
+    private var received by mutableStateOf<HeldReceived?>(null)
 
     // An invite opened: the new member's name and the password they choose,
     // twice. Signing up runs the invite's steps, then signs this phone in.
@@ -116,17 +140,43 @@ class SignInViewModel @Inject constructor(
     private var joinedFrom: Pair<FamilyLink, Long>? = null
 
     // The address in two parts, as the desktop keeps it: the scheme, shown
-    // as a button at the start of the field, and the rest as typed.
-    var address by mutableStateOf("")
-        private set
-    var scheme by mutableStateOf(Scheme.Https)
-        private set
+    // as a button at the start of the field, and the rest as typed. Each
+    // change of either, or of the home address, tells the form's link state
+    // what the form now points at.
+    private var addressText by mutableStateOf("")
+    var address: String
+        get() = addressText
+        private set(value) {
+            if (value == addressText) return
+            addressText = value
+            linkEdited()
+        }
+    private var schemeChoice by mutableStateOf(Scheme.Https)
+    var scheme: Scheme
+        get() = schemeChoice
+        private set(value) {
+            if (value == schemeChoice) return
+            schemeChoice = value
+            linkEdited()
+        }
 
     // Picked by hand (or typed, or saved): no longer follows the address.
     private var schemePicked = false
     var username by mutableStateOf("")
     var password by mutableStateOf("")
     var busy by mutableStateOf(false)
+        private set
+
+    // Of a request that runs, the part that only waits for the other device
+    // to allow a hand-over: leaving then is harmless and cancels it. Every
+    // other running request commits (a sign-up, a sign-in, a save) and is
+    // never left halfway.
+    var waiting by mutableStateOf(false)
+        private set
+    val committing: Boolean get() = busy && !waiting
+
+    // The request running, while it is the form's current one.
+    internal var linkJob: Job? = null
         private set
 
     // What the last attempt came to. Every write, a new failure included,
@@ -178,7 +228,14 @@ class SignInViewModel @Inject constructor(
     var legacyPassword by mutableStateOf(false)
     var useApiKey by mutableStateOf(false)
     var apiKey by mutableStateOf("")
-    var home by mutableStateOf("")
+    private var homeText by mutableStateOf("")
+    var home: String
+        get() = homeText
+        set(value) {
+            if (value == homeText) return
+            homeText = value
+            linkEdited()
+        }
 
     // The custom header rows, each with an id that stays with it, so the
     // rows draw keyed and an edit always lands on its own row. Every write
@@ -250,11 +307,36 @@ class SignInViewModel @Inject constructor(
     private var keepsSecret = false
     private var savedMode: AuthMode? = null
 
+    // Where family links may take this form, and the words of the last one
+    // refused (shown under the address).
+    private var links by mutableStateOf(LinkFormState(LinkForm.Fresh))
+    val linkNote: String? get() = links.note
+
+    // A finished sign-up held (the address then stays as it is), or a
+    // received sign-in.
+    val holdsSignUp: Boolean get() = signedUp != null
+    internal val holdsReceived: Boolean get() = received != null
+
+    // Marks this form in the app's set of open sign-ins while it is open,
+    // whichever of the four facts changes it. It never ends while the form
+    // lives.
+    internal val marking: Job = viewModelScope.launch {
+        snapshotFlow { signInOpen(busy, question != null, received != null, signedUp != null) }.collect { running.mark(this@SignInViewModel, it) }
+    }
+
     // The server's address, or null while what is typed isn't one.
     val url: HttpUrl? by derivedStateOf { serverUrl(scheme, address) }
 
     // Plain http to an address outside the home network.
     val insecure by derivedStateOf { url?.let { !it.isHttps && !isPrivateHost(it) } == true }
+
+    // The address, its scheme or the home changed: the form's link state
+    // hears what the form now points at (the address as built, the home as
+    // the app reads it).
+    private fun linkEdited() {
+        val homeRead = homeText.trim().takeIf(String::isNotEmpty)?.let(::normalizeServerUrl)?.toString()
+        links = links.edited(serverUrl(schemeChoice, addressText)?.toString(), homeRead, addressText.isNotBlank())
+    }
 
     // Takes what was typed or pasted into the address field. A full address
     // sets the scheme and leaves the rest; otherwise the scheme follows the
@@ -277,8 +359,9 @@ class SignInViewModel @Inject constructor(
     // Takes a family link (the https form a QR code carries, or the app's
     // own octo:// form, scanned, opened or pasted). An invite shows the
     // sign-up card; a sign-in from another device starts at once; a sign-in
-    // link fills in the server and username for the password. False for any
-    // other text.
+    // link fills in the server and username for the password. True for any
+    // link, taken or refused, so it is never typed into the address; false
+    // for any other text.
     fun takeJoinLink(text: String): Boolean {
         val link = parseFamilyLink(text) ?: return false
         startJoin(link)
@@ -297,19 +380,37 @@ class SignInViewModel @Inject constructor(
         startJoin(link)
     }
 
+    // Takes a family link into the form. One that comes while the form signs
+    // in, or while a certificate question waits, is refused, as is one a form
+    // for a kept server cannot take: its words go under the address and
+    // nothing else changes, but the camera closes. A link to another server
+    // forgets every detail of the last one before it fills anything in.
     fun startJoin(link: FamilyLink? = null) {
         scanning = false
-        error = null
         if (link == null) {
+            error = null
             joining = true
             return
         }
-        typeAddress(link.server)
-        // A link's home address becomes this account's home address, so the
-        // app uses the home network at home and the outside address away.
-        link.home?.let { home = it }
-        signedUp = null
-        received = null
+        val facts = linkFacts(link)
+        val action = links.take(facts, busy || question != null, home)
+        if (action !is LinkAction.Take) {
+            links = links.took(action)
+            return
+        }
+        error = null
+        if (action.kind == LinkTake.Forget) forget(facts.username)
+        if (action.kind != LinkTake.Fitting) {
+            typeAddress(action.address ?: link.server)
+            home = action.home.orEmpty()
+        }
+        links = links.took(action)
+        // The same invite or hand-over opened again keeps what it already
+        // made: each works once. A link to another server is never the same
+        // one, whatever its token.
+        val again = action.kind != LinkTake.Forget
+        if (!(again && link is FamilyInviteLink && signedUp?.token == link.token)) signedUp = null
+        if (!(again && link is FamilyHandOverLink && received?.token == link.token)) received = null
         invite = null
         handOver = null
         handOverStep = null
@@ -332,13 +433,37 @@ class SignInViewModel @Inject constructor(
         }
     }
 
+    // Leaves the family link. A step that commits (a sign-up, a sign-in) is
+    // never left halfway, whatever calls this; one waiting on the other
+    // device is cancelled, and nothing it would have done happens.
     fun stopJoin() {
+        if (committing) return
+        linkJob?.cancel()
+        linkJob = null
+        busy = false
+        waiting = false
+        handOverStep = null
+        leaveLink()
+    }
+
+    // What leaving the link clears: the link, a sign-in received for it and
+    // a sign-up made from it, whose new username stays in the username field
+    // (the server chose it, and the person may not have seen it).
+    private fun leaveLink() {
+        signedUp?.let { username = it.account.username }
+        signedUp = null
+        received = null
         joining = false
         invite = null
         handOver = null
-        handOverStep = null
-        received = null
         error = null
+        links = links.left()
+    }
+
+    // Words for the link note from outside the form: a link that came in
+    // while this or another sign-in was open.
+    fun noteLink(words: String) {
+        links = links.noted(words)
     }
 
     // What is missing before signing up, or null when it can go.
@@ -349,12 +474,61 @@ class SignInViewModel @Inject constructor(
             else -> inviteProblem(inviteName, invitePassword, inviteAgain)
         }
 
+    // Forgets every detail of the last server that a join or a sign-in
+    // reads, for a link or a received sign-in that goes to another: its
+    // header rows, sign-in page, way of signing in and secrets, what was
+    // typed for it, its client certificate and its trusted certificates (but
+    // those named in `keepPins`). The username stays only when the link names
+    // one (a prefill then fills it in). The name the person gave the server
+    // is never sent anywhere, so it stays.
+    private fun forget(linkUsername: String?, keepPins: Set<String> = emptySet()) {
+        list = list.replaced(emptyList())
+        firstWords = ""
+        secondWords = ""
+        gatewaySaved = GatewayKind.None
+        useGatewayForm(gatewayForm.copy(kind = GatewayKind.None))
+        legacyPassword = false
+        useApiKey = false
+        apiKey = ""
+        password = ""
+        inviteName = ""
+        invitePassword = ""
+        inviteAgain = ""
+        if (linkUsername.isNullOrBlank()) username = ""
+        takesApiKeys = null
+        clientCert = null
+        pins.keys.retainAll(keepPins)
+    }
+
+    // Runs the form's request as its current one. Its end clears the form's
+    // busy state only while it still is the current one, so a request left
+    // behind (cancelled, or replaced by a retry) never clears a newer one's.
+    private fun launchLink(work: suspend CoroutineScope.() -> Unit) {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                work()
+            } finally {
+                if (linkJob === coroutineContext.job) {
+                    busy = false
+                    waiting = false
+                    linkJob = null
+                }
+            }
+        }
+        linkJob = job
+        job.start()
+    }
+
     // Takes the sign-in another device of one's own hands over: redeems the
     // token from its link, waits for that device to allow it, opens what it
     // sends with the key from the link, and signs in with it like a typed one.
     // The form's sign-in page fields, headers and certificates go with it,
     // so a server behind a sign-in page or with a certificate of its own is
     // reached; a sign-in page that turns it away opens Advanced at its fields.
+    // What it receives is checked against the form first: a form for a kept
+    // server signs in to that server again, or refuses another; any other
+    // form forgets the last server's details for another and shows where the
+    // sign-in goes.
     fun receive() {
         val link = handOver ?: return
         if (busy) return
@@ -367,11 +541,14 @@ class SignInViewModel @Inject constructor(
                 return
             }
         }
-        val attempt = sentAddress
+        var attempt = sentAddress
         busy = true
+        // Waiting on the other device only while a redeem will run; a sign-in
+        // already received goes straight to signing in, which commits.
+        waiting = received == null
         error = null
-        viewModelScope.launch {
-            val signIn = received ?: run {
+        launchLink {
+            val signIn = received?.signIn ?: run {
                 val (http, security) = clients.forJoin(base, connection)
                 // Its own client, let go once the hand-over has answered.
                 val got = try {
@@ -381,7 +558,8 @@ class SignInViewModel @Inject constructor(
                 } finally {
                     http.letGo()
                 }
-                if (got is HandOverResult.Received) return@run got.signIn.also { received = it }
+                waiting = false
+                if (got is HandOverResult.Received) return@run got.signIn.also { received = HeldReceived(it, link.token) }
                 val refused = got as HandOverResult.Refused
                 handOverStep = null
                 // A certificate the phone does not trust is asked about, as
@@ -393,21 +571,43 @@ class SignInViewModel @Inject constructor(
                     error = refused.gateway?.let { GatewayWords.failure(it, refused.loginSent) } ?: refused.message
                     met(attempt, refused.gateway)
                 }
-                busy = false
-                return@launch
+                return@launchLink
             }
+            val check = links.received(receivedFacts(signIn))
+            if (check is ReceivedAction.Refuse) {
+                // The token is spent: the form leaves the hand-over, then says why.
+                handOverStep = null
+                leaveLink()
+                links = links.noted(check.why.words)
+                return@launchLink
+            }
+            if (check is ReceivedAction.ForgetAndAdopt) {
+                // A certificate trusted for an address both the link and the
+                // sign-in name stays trusted; nothing else of the last server
+                // does. The form then shows where the sign-in goes, and what
+                // it meets there is reported against that address.
+                val keep = check.addresses.filter { it in links.taken }.mapNotNull { it.toHttpUrlOrNull()?.host }.map(::pinKey).toSet()
+                forget(link.username, keep)
+                typeAddress(check.address)
+                home = check.home
+                links = links.adopted(check)
+                attempt = sentAddress
+            }
+            val own = check is ReceivedAction.Keep && check.useForm
             val request = SignInRequest(
-                address = signIn.server,
+                address = if (own) sentAddress else signIn.server,
                 username = signIn.username,
                 secret = signIn.secret,
                 authMode = runCatching { AuthMode.valueOf(signIn.mode) }.getOrDefault(AuthMode.Token),
-                home = signIn.home.orEmpty(),
+                home = if (own) home else signIn.home.orEmpty(),
                 headers = headers,
                 pins = pins.toMap(),
                 clientCertAlias = clientCert,
                 gateway = gatewayDraft,
             )
-            val (failed, words) = switcher.signIn(request)
+            // A form opened for a kept server brings that server up to date,
+            // never keeps it twice.
+            val (failed, words) = signIns.signIn(request, serverId.takeIf { links.kind == LinkForm.KeptServer })
             when (failed) {
                 null -> {
                     handOverStep = HANDOVER_SIGNED_IN
@@ -423,21 +623,23 @@ class SignInViewModel @Inject constructor(
                     met(attempt, gatewayOf(failed))
                 }
             }
-            busy = false
         }
     }
 
     // Signs up from the invite: the name and password chosen go to the
     // family page, then this phone signs in with that username and password
-    // like any typed sign-in. The server then is the one in use.
+    // like any typed sign-in. The server then is the one in use. A sign-up
+    // already made signs in at the address it was made for.
     fun join() {
         val url = url
         if (busy || joinProblem != null || url == null) return
         useGatewayForm(sending(gatewayForm))
+        val held = signedUp
+        val main = held?.main ?: url
         // Set up as signing in to the server would be: the certificates
         // trusted for it, its headers, its sign-in page fields and its client
         // certificate.
-        val connection = when (val form = formConnection(url, home, headers, gatewayDraft, pins.toMap(), clientCert)) {
+        val connection = when (val form = formConnection(main, home, headers, gatewayDraft, pins.toMap(), clientCert)) {
             is FormConnection.Ready -> form.settings
             is FormConnection.Problem -> {
                 error = form.text
@@ -446,40 +648,46 @@ class SignInViewModel @Inject constructor(
         }
         val attempt = sentAddress
         busy = true
+        waiting = false
         error = null
-        viewModelScope.launch {
-            val invited = invite ?: return@launch
-            // Its own client, let go once the family page has answered; its
-            // security still holds a certificate it refused, to ask about.
-            val (http, security) = clients.forJoin(url, connection)
-            val joined = try {
-                signedUp ?: withContext(Dispatchers.IO) {
-                    joinWithInvite(url, invited.token, inviteName, invitePassword, http, home = connection.home)
+        launchLink {
+            val invited = invite ?: return@launchLink
+            val account = held?.account ?: run {
+                // Its own client, let go once the family page has answered;
+                // its security still holds a certificate it refused, to ask
+                // about.
+                val (http, security) = clients.forJoin(main, connection)
+                val joined = try {
+                    withContext(Dispatchers.IO) {
+                        joinWithInvite(main, invited.token, inviteName, invitePassword, http, home = connection.home)
+                    }
+                } finally {
+                    http.letGo()
                 }
-            } finally {
-                http.letGo()
-            }
-            val account = when (joined) {
-                is JoinOutcome.SignedUp -> joined.also { signedUp = it }
-                // A certificate of the server's own is asked about as signing
-                // in asks; trusting it signs up again.
-                is JoinOutcome.Untrusted -> {
-                    val leaf = security.takeRejected(joined.host)
-                    if (leaf != null) question = SignInError.Untrusted(joined.host, leaf.fingerprint()) else error = "This server's certificate is not trusted."
-                    busy = false
-                    return@launch
-                }
-                // A sign-in page that turns the invite away opens Advanced at
-                // its fields.
-                is JoinOutcome.Failed -> {
-                    error = joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message
-                    met(attempt, joined.gateway)
-                    busy = false
-                    return@launch
+                when (joined) {
+                    is JoinOutcome.SignedUp -> joined.also {
+                        signedUp = HeldSignUp(it, main, invited.token)
+                        // The address field shows where the sign-in goes.
+                        if (sentAddress != main.toString()) typeAddress(main.toString())
+                    }
+                    // A certificate of the server's own is asked about as
+                    // signing in asks; trusting it signs up again.
+                    is JoinOutcome.Untrusted -> {
+                        val leaf = security.takeRejected(joined.host)
+                        if (leaf != null) question = SignInError.Untrusted(joined.host, leaf.fingerprint()) else error = "This server's certificate is not trusted."
+                        return@launchLink
+                    }
+                    // A sign-in page that turns the invite away opens Advanced
+                    // at its fields.
+                    is JoinOutcome.Failed -> {
+                        error = joined.gateway?.let { GatewayWords.failure(it, joined.loginSent) } ?: joined.message
+                        met(attempt, joined.gateway)
+                        return@launchLink
+                    }
                 }
             }
             val request = SignInRequest(
-                address = url.toString(),
+                address = main.toString(),
                 username = account.username,
                 secret = account.password,
                 authMode = AuthMode.Token,
@@ -489,7 +697,7 @@ class SignInViewModel @Inject constructor(
                 clientCertAlias = clientCert,
                 gateway = gatewayDraft,
             )
-            val (failed, words) = switcher.signIn(request)
+            val (failed, words) = signIns.signIn(request)
             when (failed) {
                 null -> {
                     notice = words
@@ -505,7 +713,6 @@ class SignInViewModel @Inject constructor(
                     met(attempt, gatewayOf(failed))
                 }
             }
-            busy = false
         }
     }
 
@@ -518,18 +725,21 @@ class SignInViewModel @Inject constructor(
     }
 
     // Starts from the saved connection of the server in use. Nothing secret
-    // is filled in.
+    // is filled in. It is a form for a kept server, whose links must fit it.
     fun startEditing() {
         if (editing) return
+        links = LinkFormState(LinkForm.KeptServer)
         serverId = sessions.servers.value.active ?: return
         editing = true
         fill(sessions.connectionDraft(serverId) ?: return)
     }
 
     // Opened from the list of servers: a new one to keep, a kept one to
-    // edit, or a kept one to sign in to again (its password asked for).
+    // edit, or a kept one to sign in to again (its password asked for). A
+    // form opened for a kept server takes only links that fit it.
     fun start(form: ServerForm, id: String?, note: String?) {
         if (this.form != null) return
+        links = LinkFormState(if (form == ServerForm.Add || id == null) LinkForm.Fresh else LinkForm.KeptServer)
         this.form = form
         serverId = id
         error = note
@@ -597,6 +807,8 @@ class SignInViewModel @Inject constructor(
         secondWords = ""
         advancedOpen = draft.authMode != AuthMode.Token || draft.home.isNotEmpty() ||
             draft.headers.isNotEmpty() || draft.clientCertAlias != null || draft.gateway != GatewayKind.None
+        // The server the form was filled from, which links must fit.
+        links = links.filled(LinkAnchor(draft.address, draft.home.takeIf(String::isNotBlank), draft.username))
     }
 
     // A blank header row at the end, and its id.
@@ -693,6 +905,7 @@ class SignInViewModel @Inject constructor(
             return
         }
         busy = true
+        waiting = false
         error = null
         val request = SignInRequest(
             address = url?.toString() ?: (scheme.prefix + address.trim()),
@@ -706,7 +919,7 @@ class SignInViewModel @Inject constructor(
             label = label.takeIf { form == ServerForm.Add || form == ServerForm.Edit },
             gateway = gatewayDraft,
         )
-        viewModelScope.launch {
+        launchLink {
             val id = serverId
             val failed = when {
                 // A new name alone needs nothing from the server.
@@ -719,7 +932,7 @@ class SignInViewModel @Inject constructor(
                 form == ServerForm.Add -> switcher.onItsOwn { sessions.add(request) }.also { failed ->
                     if (failed == null) notice = "Added ${addedName(request)}. Switch to it whenever you like."
                 }
-                else -> switcher.signIn(request, signsInAgainTo(form, serverId)).let { (failed, words) ->
+                else -> signIns.signIn(request, signsInAgainTo(form, serverId)).let { (failed, words) ->
                     notice = words
                     failed
                 }
@@ -744,7 +957,7 @@ class SignInViewModel @Inject constructor(
                             legacyPassword = true
                             busy = false
                             submit()
-                            return@launch
+                            return@launchLink
                         }
                         LegacyRetry.Unsafe -> error = SignInWords.LEGACY_UNSAFE
                         LegacyRetry.None -> error = failed.userMessage()
@@ -754,7 +967,6 @@ class SignInViewModel @Inject constructor(
                     met(request.address, gatewayOf(failed))
                 }
             }
-            busy = false
         }
     }
 
@@ -783,6 +995,13 @@ class SignInViewModel @Inject constructor(
     fun distrust() {
         question = null
         error = "Not connected. The server's certificate wasn't trusted."
+    }
+
+    // The page is gone for good: its request stops, and it leaves the app's
+    // set of open sign-ins.
+    override fun onCleared() {
+        linkJob?.cancel()
+        running.mark(this, false)
     }
 }
 

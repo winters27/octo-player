@@ -69,7 +69,7 @@ class NeedsHttpsStartTest {
         assertTrue(check.contains("inUseReach(inUse)"))
         val shell = source("ui/nav/MainShell.kt")
         assertTrue(shell.contains("signInAsked(ask)"))
-        assertTrue(shell.contains("ServerFormRoute(ServerForm.SignIn, ask.serverId, ask.note)"))
+        assertTrue(shell.contains("ServerFormRoute(ServerForm.SignIn, ask.serverId, note = ask.note, asked = true)"))
     }
 
     // Signing in again at the https address keeps the saved sign-in page
@@ -142,6 +142,6 @@ class NeedsHttpsStartTest {
         assertTrue(again.contains("keep(request, formFor = id, use = true)"))
         assertTrue(sessions.contains("SwitchResult.NeedsPassword(server, GatewayWords.NEEDS_HTTPS)"))
         assertTrue(source("playback/ServerSwitch.kt").contains("sessions.signInAgain(keptId, request)"))
-        assertTrue(source("ui/signin/SignInViewModel.kt").contains("switcher.signIn(request, signsInAgainTo(form, serverId))"))
+        assertTrue(source("ui/signin/SignInViewModel.kt").contains("signIns.signIn(request, signsInAgainTo(form, serverId))"))
     }
 }
