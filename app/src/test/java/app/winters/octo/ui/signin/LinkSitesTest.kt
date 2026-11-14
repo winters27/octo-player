@@ -99,7 +99,7 @@ class LinkSitesTest {
         // test (no merged resources), so its wiring is read from the sheet
         // itself: a tap outside its card answers nothing, and Back answers
         // No. Red when the outside tap answers No.
-        val trust = code(between(source("ui/signin/SignInScreen.kt"), "private fun TrustSheet(", "PopupQuestion("))
+        val trust = code(between(source("ui/signin/SignInScreen.kt"), "internal fun TrustSheet(", "PopupQuestion("))
         assertTrue(trust.contains("onDismiss = {},"))
         assertTrue(trust.contains("onBack = { onCancel() true },"))
         assertTrue(code(source("ui/common/Layout.kt")).contains("fun BackButton(onBack: () -> Unit, enabled: Boolean = true)"))
