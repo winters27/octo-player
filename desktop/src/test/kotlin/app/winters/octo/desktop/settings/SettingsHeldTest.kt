@@ -264,9 +264,11 @@ class SettingsHeldTest {
         assertEquals("info", store.current.sidePanel)
         store.update { it.copy(sidePanel = "queue") }
         assertEquals(SettingsHold.Free, store.hold.value)
-        assertArrayEquals("not deleted after a write", older, pending().readBytes())
+        assertTrue("not deleted after a write", pending().exists())
+        assertArrayEquals(older, pending().readBytes())
         store.flush()
-        assertArrayEquals("not deleted by the exit's flush", older, pending().readBytes())
+        assertTrue("not deleted by the exit's flush", pending().exists())
+        assertArrayEquals(older, pending().readBytes())
         disk.refuseReplace += "settings.json"
         store.update { it.copy(sidePanel = "info") }
         assertEquals("nothing kept beside the file", SettingsHold.Unkept, store.hold.value)
