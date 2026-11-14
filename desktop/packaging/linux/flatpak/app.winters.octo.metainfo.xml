@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.winters.octo</id>
+  <name>Octo</name>
+  <summary>Play your music from Octo, Navidrome and Subsonic servers</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <developer id="app.winters">
+    <name>winters27</name>
+  </developer>
+  <description>
+    <p>
+      Octo is a music player for your own server. With an Octo server, the music it finds sits
+      beside your library, and keeping a song is one press. With Navidrome or any Subsonic server,
+      it is a full player for the music you have.
+    </p>
+    <ul>
+      <li>One search for your music and what Octo found, all of it playable at once</li>
+      <li>Albums with the songs you have marked, and one press to add the rest</li>
+      <li>Synced lyrics, gapless playback, an equalizer, ReplayGain and a sleep timer</li>
+      <li>Several servers with one-click switching, and a queue that follows you to your phone</li>
+      <li>Live lists built from rules, Library health, a mini player and media keys</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">app.winters.octo.desktop</launchable>
+  <url type="homepage">https://github.com/winters27/octo-player</url>
+  <url type="bugtracker">https://github.com/winters27/octo-player/issues</url>
+  <url type="vcs-browser">https://github.com/winters27/octo-player</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Home, with the stations Octo paints</caption>
+      <image>https://raw.githubusercontent.com/winters27/octo-player/main/desktop/packaging/linux/flatpak/screenshots/home.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>An album, with the songs you have marked</caption>
+      <image>https://raw.githubusercontent.com/winters27/octo-player/main/desktop/packaging/linux/flatpak/screenshots/album.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The full player</caption>
+      <image>https://raw.githubusercontent.com/winters27/octo-player/main/desktop/packaging/linux/flatpak/screenshots/player.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Live lyrics, word by word</caption>
+      <image>https://raw.githubusercontent.com/winters27/octo-player/main/desktop/packaging/linux/flatpak/screenshots/lyrics.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Search: your music, then what Octo found</caption>
+      <image>https://raw.githubusercontent.com/winters27/octo-player/main/desktop/packaging/linux/flatpak/screenshots/search.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#B9A6FF</color>
+    <color type="primary" scheme_preference="dark">#3B1F99</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <releases>
+    <release version="1.12.0" date="2026-11-14"/>
+  </releases>
+</component>

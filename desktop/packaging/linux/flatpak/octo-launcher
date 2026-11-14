@@ -1,0 +1,4 @@
+#!/bin/sh
+# Starts Octo inside its Flatpak, handing on the files and octo:// links it
+# was opened with. The app's Java runtime and libraries are under /app/octo.
+exec /app/octo/bin/Octo "$@"

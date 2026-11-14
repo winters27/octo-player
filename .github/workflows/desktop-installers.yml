@@ -1,10 +1,11 @@
 # Builds the desktop installers on each system, since each is only made on
 # its own: the MSI and a portable zip on Windows, the DMG on macOS, and the
-# DEB, RPM and a portable zip on Linux. Run by hand from the Actions tab, the
-# installers are kept as the run's artifacts. On a desktop-v<version> tag
-# (desktop-v1.2.0, or desktop-v1.3.0-beta.1 for an early version) they are
-# also published, signed, as a release on the public Octo repository, where
-# the installed apps find them (publish-player-release.yml).
+# DEB, RPM, a Flatpak bundle and a portable zip on Linux. Run by hand from
+# the Actions tab, the installers are kept as the run's artifacts. On a
+# desktop-v<version> tag (desktop-v1.2.0, or desktop-v1.3.0-beta.1 for an
+# early version) they are also published, signed, as a release on the
+# public Octo repository, where the installed apps find them
+# (publish-player-release.yml).
 name: desktop-installers
 
 on:
@@ -43,7 +44,7 @@ jobs:
             tasks: ":desktop:packageMsi :desktop:packagePortableZip"
           # macOS stays out until the Mac build has been opened on a Mac.
           - os: ubuntu-latest
-            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip"
+            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageFlatpak"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -54,7 +55,24 @@ jobs:
       - name: Linux build packages
         if: runner.os == 'Linux'
         # ALSA headers for the audio engine, and the tools the DEB and RPM need.
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm flatpak flatpak-builder
+
+      - name: Flatpak runtime
+        if: runner.os == 'Linux'
+        # The runtime and SDK the bundle is built on, from Flathub (see
+        # desktop/packaging/linux/flatpak/flatpak.py). Tried three times, as
+        # Flathub's mirrors sometimes drop a download.
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          for try in 1 2 3; do
+            flatpak install --user -y --noninteractive flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08 && exit 0
+            sleep 20
+          done
+          exit 1
+
+      - name: Flatpak files agree
+        if: runner.os == 'Linux'
+        run: python3 desktop/packaging/linux/flatpak/flatpak.py self-test
 
       - uses: actions/setup-java@v6
         with:
@@ -92,6 +110,7 @@ jobs:
             desktop/build/compose/binaries/main/dmg/*.dmg
             desktop/build/compose/binaries/main/deb/*.deb
             desktop/build/compose/binaries/main/rpm/*.rpm
+            desktop/build/compose/binaries/main/flatpak/*.flatpak
             desktop/build/compose/binaries/main/zip/*.zip
           if-no-files-found: error
 

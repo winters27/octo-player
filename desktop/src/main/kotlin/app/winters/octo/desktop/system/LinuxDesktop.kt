@@ -260,7 +260,8 @@ class LinuxNotifier(private val iconPath: String?) : Notifier {
             runCatching {
                 val bus = connection ?: DBusConnectionBuilder.forSessionBus().build().also { connection = it }
                 val service = bus.getRemoteObject("org.freedesktop.Notifications", "/org/freedesktop/Notifications", DesktopNotifications::class.java)
-                lastId = service.Notify("Octo", lastId, iconPath.orEmpty(), title, text, emptyList(), mapOf("category" to Variant("x-gnome.music"), "transient" to Variant(true)), 5000)
+                val hints = mapOf("category" to Variant("x-gnome.music"), "transient" to Variant(true), "desktop-entry" to Variant(linuxDesktopId()))
+                lastId = service.Notify("Octo", lastId, iconPath.orEmpty(), title, text, emptyList(), hints, 5000)
             }
         }
     }

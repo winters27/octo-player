@@ -53,7 +53,7 @@ QUIET = re.compile(r"^(ci|tools|build|scripts|test|tests|docs)(\([^)]*\))?:", re
 # commit touched, which release notes leave out.
 AREA = re.compile(r"^[a-z][a-z0-9 /-]{0,30}: ")
 # Files the manifest describes, by name: Octo-<version>-<system>-<chip>[-portable].<type>
-DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|zip)$")
+DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|flatpak|zip)$")
 ANDROID_NAME = re.compile(r"^Octo-(?P<version>.+)-android\.apk$")
 MANIFEST = "update.json"
 SIGNATURE = "update.json.sig"
@@ -99,7 +99,7 @@ def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     systems = {"windows": "windows", "macos": "macos", "linux": "linux"}
     chips = {"x64": "x64", "arm64": "arm64"}
-    wanted = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "zip"]}
+    wanted = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "flatpak", "zip"]}
     staged = []
     folders = sorted(p for p in artifacts.iterdir() if p.is_dir() and p.name.startswith("octo-desktop-"))
     if not folders:
@@ -264,7 +264,8 @@ def self_test() -> None:
         for folder, names in {
             "octo-desktop-Windows-X64": ["msi/Octo-1.0.0.msi", "zip/Octo-1.0.0-win32-x86-64.zip"],
             "octo-desktop-macOS-ARM64": ["dmg/Octo-1.0.0.dmg"],
-            "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "zip/Octo-1.0.0-linux-x86-64.zip"],
+            "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "flatpak/Octo-1.0.0-linux-x64.flatpak",
+                                       "zip/Octo-1.0.0-linux-x86-64.zip"],
         }.items():
             for name in names:
                 path = artifacts / folder / name
@@ -274,13 +275,15 @@ def self_test() -> None:
         staged = stage_desktop("1.2.0", artifacts, out)
         assert sorted(p.name for p in staged) == sorted([
             "Octo-1.2.0-windows-x64.msi", "Octo-1.2.0-windows-x64-portable.zip", "Octo-1.2.0-macos-arm64.dmg",
-            "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64-portable.zip",
+            "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64.flatpak", "Octo-1.2.0-linux-x64-portable.zip",
         ]), staged
         manifest = json.loads(write_manifest("desktop", "desktop-v1.2.0", "- Hello.", out).read_bytes())
-        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 6
+        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 7
+        flatpak = next(a for a in manifest["assets"] if a["kind"] == "flatpak")
+        assert (flatpak["os"], flatpak["arch"], flatpak["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.flatpak")
         msi = next(a for a in manifest["assets"] if a["kind"] == "msi")
         assert msi == {"name": "Octo-1.2.0-windows-x64.msi", "sha256": hashlib.sha256(b"msi/Octo-1.0.0.msi").hexdigest(), "size": 18, "os": "windows", "arch": "x64", "kind": "msi"}
-        assert (out / SUMS).read_text().count("\n") == 6
+        assert (out / SUMS).read_text().count("\n") == 7
         # A rehearsal build is never staged or described for a release.
         assert refuses(lambda: stage_desktop("1.1.0-rehearsal.1", artifacts, root / "never"))
         assert refuses(lambda: stage_android("1.1.0-rehearsal.1", root / "app-release.apk", root / "never"))

@@ -368,6 +368,16 @@ class DesktopUpdatesTest {
         assertTrue(updaterAvailability(null, installed = false, portable = false, forced = true, hasKeys = true) is UpdaterAvailability.Off)
     }
 
+    // Inside a Flatpak, Octo's program looks installed (jpackage names it),
+    // but it can't run an installer: Flatpak updates it, and it says so,
+    // even when forced.
+    @Test
+    fun theFlatpakCopySaysFlatpakUpdatesIt() {
+        assertEquals(UpdaterAvailability.Off(FLATPAK_UPDATES), updaterAvailability("1.12.0", installed = true, portable = false, forced = false, hasKeys = true, flatpak = true))
+        assertEquals(UpdaterAvailability.Off(FLATPAK_UPDATES), updaterAvailability("1.12.0", installed = true, portable = false, forced = true, hasKeys = true, flatpak = true))
+        assertTrue(FLATPAK_UPDATES.none { it == '—' || it == '–' })
+    }
+
     @Test
     fun theDevelopmentBuildNeverUpdates() {
         // This test runs from Gradle: Java, not Octo's program, no stamped version.

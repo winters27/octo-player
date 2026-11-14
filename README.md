@@ -60,7 +60,7 @@ For Android 10 and newer. Your phone's music and your server's make one library.
 
 Download the latest release:
 
-- [Octo for Windows and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, and a `.deb`, `.rpm` or portable zip for Linux. The Windows installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
+- [Octo for Windows and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, and a `.deb`, `.rpm`, `.flatpak` or portable zip for Linux. The Windows installer needs no administrator rights. Install the Flatpak with `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub. It isn't code signed yet, so Windows asks the first time you open Octo.
 - [Octo for Android](https://github.com/winters27/octo/releases/tag/android-v1.11.0): an `.apk` for Android 10 and newer. Allow your browser or file manager to install apps when Android asks.
 - Or add [Octo's F-Droid repository](https://winters27.github.io/octo/fdroid/) in F-Droid, Droid-ify or Neo Store, and the Android app updates there like any other.
 

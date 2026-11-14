@@ -1,0 +1,79 @@
+{
+  "app-id": "app.winters.octo",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "25.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "octo",
+  "separate-locales": false,
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=x11",
+    "--socket=wayland",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--filesystem=home",
+    "--filesystem=/media:ro",
+    "--filesystem=/run/media:ro",
+    "--filesystem=/mnt:ro",
+    "--own-name=org.mpris.MediaPlayer2.octo",
+    "--talk-name=org.freedesktop.Notifications",
+    "--talk-name=org.freedesktop.secrets",
+    "--system-talk-name=org.freedesktop.login1",
+    "--filesystem=xdg-run/discord-ipc-0",
+    "--filesystem=xdg-run/app/com.discordapp.Discord:create",
+    "--filesystem=xdg-run/app/dev.vencord.Vesktop:create"
+  ],
+  "modules": [
+    {
+      "name": "octo",
+      "buildsystem": "simple",
+      "build-options": {
+        "strip": false,
+        "no-debuginfo": true
+      },
+      "build-commands": [
+        "mkdir -p /app/octo",
+        "cp -a octo/bin octo/lib /app/octo/",
+        "rm -f /app/octo/lib/app/octo-portable",
+        "chmod 755 /app/octo/bin/Octo",
+        "find /app/octo -type f \\( -name '*.so*' -o -path '*/runtime/bin/*' -o -name jspawnhelper -o -name jexec \\) -exec chmod 755 {} +",
+        "install -Dm755 octo-launcher /app/bin/octo",
+        "install -Dm644 app.winters.octo.desktop /app/share/applications/app.winters.octo.desktop",
+        "install -Dm644 app.winters.octo.metainfo.xml /app/share/metainfo/app.winters.octo.metainfo.xml",
+        "install -Dm644 app.winters.octo.png /app/share/icons/hicolor/512x512/apps/app.winters.octo.png"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://github.com/winters27/octo/releases/download/desktop-v1.12.0/Octo-1.12.0-linux-x64-portable.zip",
+          "sha256": "filled in by flatpak.py flathub from the released zip",
+          "dest": "octo",
+          "only-arches": ["x86_64"],
+          "x-checker-data": {
+            "type": "json",
+            "url": "https://api.github.com/repos/winters27/octo/releases",
+            "version-query": "[.[] | select(.tag_name | startswith(\"desktop-v\")) | select(.prerelease | not)] | first | .tag_name | sub(\"^desktop-v\"; \"\")",
+            "url-query": "\"https://github.com/winters27/octo/releases/download/desktop-v\" + $version + \"/Octo-\" + $version + \"-linux-x64-portable.zip\""
+          }
+        },
+        {
+          "type": "file",
+          "path": "octo-launcher"
+        },
+        {
+          "type": "file",
+          "path": "app.winters.octo.desktop"
+        },
+        {
+          "type": "file",
+          "path": "app.winters.octo.metainfo.xml"
+        },
+        {
+          "type": "file",
+          "path": "app.winters.octo.png"
+        }
+      ]
+    }
+  ]
+}

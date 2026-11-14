@@ -76,7 +76,16 @@ fun linuxDesktopEntry(program: String): String {
 // when it differs, and makes Octo the handler for octo:// links. Audio files
 // only gain "Open with Octo"; the listener's usual player stays the default.
 // True once written.
-fun registerWithLinuxDesktop(program: String, applications: java.io.File, makeDefault: Boolean = true): Boolean {
+fun registerWithLinuxDesktop(
+    program: String,
+    applications: java.io.File,
+    makeDefault: Boolean = true,
+    env: (String) -> String? = System::getenv,
+): Boolean {
+    // A Flatpak exports its own entry, which starts Octo in its sandbox and
+    // claims the files and links; the program inside it can't be run from
+    // outside.
+    if (inFlatpak(env)) return true
     val entry = java.io.File(applications, LINUX_ENTRY)
     val text = linuxDesktopEntry(program)
     if (entry.isFile && runCatching { entry.readText() }.getOrNull() == text) return true
@@ -100,6 +109,16 @@ fun linuxApplicationsFolder(env: (String) -> String? = System::getenv, home: Str
 
 // The package's entry name, which the media controls announce too.
 private const val LINUX_ENTRY = "octo-Octo.desktop"
+
+// Whether this Octo runs inside a Flatpak, which exports its own desktop
+// entry and is kept up to date by Flatpak.
+fun inFlatpak(env: (String) -> String? = System::getenv): Boolean = !env("FLATPAK_ID").isNullOrBlank()
+
+// The desktop entry Octo runs from, without ".desktop": the Flatpak's id
+// inside one, else the packages' entry. The media controls and notices name
+// it, so the desktop shows Octo's own name and icon beside them.
+fun linuxDesktopId(env: (String) -> String? = System::getenv): String =
+    env("FLATPAK_ID")?.takeIf(String::isNotBlank) ?: LINUX_ENTRY.removeSuffix(".desktop")
 
 // The audio types the installers associate with Octo.
 private val AUDIO_TYPES = listOf("audio/mpeg", "audio/flac", "audio/mp4", "audio/aac", "audio/ogg", "audio/opus", "audio/wav", "audio/aiff")

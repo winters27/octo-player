@@ -8,6 +8,7 @@ import app.winters.octo.connection.distrustingTls
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.separateProfile
+import app.winters.octo.desktop.system.inFlatpak
 import app.winters.octo.desktop.system.installedProgram
 import app.winters.octo.update.GITHUB_API
 import app.winters.octo.update.InstallWhen
@@ -44,14 +45,22 @@ sealed interface UpdaterAvailability {
 // The file name the portable zip carries beside the app's jars.
 const val PORTABLE_MARK = "octo-portable"
 
+// What the Flatpak copy says in place of the updater.
+const val FLATPAK_UPDATES =
+    "This is the Flatpak copy, so Flatpak keeps it up to date: use your software center, or flatpak update. " +
+        "A copy installed from a .flatpak file updates by installing the next one from Octo's releases page."
+
 fun updaterAvailability(
     version: String? = System.getProperty("octo.version"),
     installed: Boolean = installedProgram() != null,
     portable: Boolean = runningFolder()?.let { File(it, PORTABLE_MARK).isFile } == true,
     forced: Boolean = System.getProperty(FORCE_PROPERTY) == "true",
     hasKeys: Boolean = trustedKeys().isNotEmpty(),
+    flatpak: Boolean = inFlatpak(),
 ): UpdaterAvailability {
     val running = PlayerVersion.parse(version) ?: return UpdaterAvailability.Off("This is a development build, so it doesn't update itself.")
+    // A Flatpak can't run an installer, and Flatpak itself keeps it up to date.
+    if (flatpak) return UpdaterAvailability.Off(FLATPAK_UPDATES)
     if (!hasKeys) return UpdaterAvailability.Off("This build has no key to check updates with.")
     if (forced) return UpdaterAvailability.On(running)
     if (portable) return UpdaterAvailability.Off("This is the portable copy. New versions are on Octo's releases page.")

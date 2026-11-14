@@ -135,8 +135,9 @@ object Mpris {
         "CanRaise" to true,
         "HasTrackList" to false,
         "Identity" to "Octo",
-        // The launcher file the Linux packages install: package name, then app name.
-        "DesktopEntry" to "octo-Octo",
+        // The launcher file Octo runs from: the packages' (package name, then
+        // app name), or the Flatpak's id.
+        "DesktopEntry" to linuxDesktopId(),
         "SupportedUriSchemes" to listOf("file", "octo"),
         "SupportedMimeTypes" to listOf("audio/mpeg", "audio/flac", "audio/mp4", "audio/aac", "audio/ogg", "audio/opus", "audio/wav", "audio/aiff"),
         "CanSetFullscreen" to false,

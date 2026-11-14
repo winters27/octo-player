@@ -230,6 +230,7 @@ dependencies {
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.okhttp.tls)
 }
 
 // The client certificate tests open the files in fixtures/gateway/certs.
@@ -548,4 +549,26 @@ val packagePortableZip by tasks.registering(Zip::class) {
     from(file("portable/octo-portable")) { into(if (hostName.startsWith("windows")) "Octo/app" else "Octo/lib/app") }
     archiveFileName = "Octo-$desktopVersion-$jnaFolder.zip"
     destinationDirectory = layout.buildDirectory.dir("compose/binaries/main/zip")
+}
+
+// The app as a Flatpak bundle, from the same app image as the DEB and RPM:
+// build/compose/binaries/main/flatpak/Octo-<version>-linux-x64.flatpak.
+// Linux only, with flatpak-builder and Flathub's runtime; the tools and the
+// sandbox are in packaging/linux/flatpak/flatpak.py.
+val packageFlatpak by tasks.registering(Exec::class) {
+    group = "compose desktop"
+    description = "Packs the app into a Flatpak bundle (Linux x64, needs flatpak-builder)."
+    dependsOn("createDistributable")
+    val image = layout.buildDirectory.dir("compose/binaries/main/app/Octo")
+    val out = layout.buildDirectory.dir("compose/binaries/main/flatpak")
+    inputs.dir(file("packaging/linux/flatpak"))
+    outputs.dir(out)
+    doFirst {
+        if (!hostName.startsWith("linux") || hostArch != "x86-64") throw GradleException("The Flatpak is built on Linux x64.")
+        out.get().asFile.deleteRecursively()
+    }
+    commandLine(
+        "python3", file("packaging/linux/flatpak/flatpak.py").absolutePath, "bundle",
+        "--image", image.get().asFile.absolutePath, "--version", desktopVersion, "--out", out.get().asFile.absolutePath,
+    )
 }

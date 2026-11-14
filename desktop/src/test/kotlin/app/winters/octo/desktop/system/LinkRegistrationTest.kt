@@ -65,4 +65,21 @@ class LinkRegistrationTest {
         assertEquals(java.io.File("/x/data", "applications"), linuxApplicationsFolder(mapOf("XDG_DATA_HOME" to "/x/data")::get, "/home/b"))
         assertEquals(java.io.File("/home/b/.local/share", "applications"), linuxApplicationsFolder({ null }, "/home/b"))
     }
+
+    // Inside a Flatpak nothing is written: the Flatpak's own entry starts
+    // Octo in its sandbox. The media controls and notices name that entry.
+    @Test
+    fun aFlatpakWritesNoEntryAndNamesItsOwn() {
+        val folder = kotlin.io.path.createTempDirectory("octo-apps").toFile()
+        val flatpak = mapOf("FLATPAK_ID" to "app.winters.octo")::get
+        try {
+            assertTrue(registerWithLinuxDesktop("/app/octo/bin/Octo", folder, makeDefault = false, env = flatpak))
+            assertTrue(folder.listFiles().isNullOrEmpty())
+        } finally {
+            folder.deleteRecursively()
+        }
+        assertTrue(inFlatpak(flatpak))
+        assertEquals("app.winters.octo", linuxDesktopId(flatpak))
+        assertEquals("octo-Octo", linuxDesktopId { null })
+    }
 }
