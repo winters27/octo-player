@@ -37,6 +37,26 @@ final class SoundProcessor: @unchecked Sendable {
         return SongSetUp(songId: song.id, stored: stored, followsSameAlbum: follows)
     }
 
+    /// A song's ReplayGain as the decks apply it, in dB, by the settings now.
+    func replayGainDb(_ song: SongLoudness?) -> Double { songGainDb(settings.read().settings, song) }
+
+    /// How a song queued after `previous` would be judged for loudness, as `songSetUp` judges it
+    /// but without moving the album run: the values its source keeps, and whether it comes from
+    /// the same album.
+    func queuedLoudness(_ song: Song, after previous: Song?) -> SongLoudness {
+        queuedSongLoudness(stored: Self.stored(song), album: Self.album(song), afterAlbum: previous.flatMap(Self.album))
+    }
+
+    private static func album(_ song: Song) -> String? {
+        albumKey(albumId: song.albumId, albumTitle: song.album, albumArtist: nil, artist: song.artist)
+    }
+
+    private static func stored(_ song: Song) -> ReplayGainInfo? {
+        song.replayGain.flatMap {
+            ReplayGainTags.stored(trackGain: $0.trackGain, trackPeak: $0.trackPeak, albumGain: $0.albumGain, albumPeak: $0.albumPeak)
+        }
+    }
+
     /// The tap for a song's audio track. The song's loudness is fixed as the tap is made: the
     /// tags in its sound when they carry a gain, else the values its source keeps.
     func makeTap(for setUp: SongSetUp, asset: AVAsset) async -> MTAudioProcessingTap? {

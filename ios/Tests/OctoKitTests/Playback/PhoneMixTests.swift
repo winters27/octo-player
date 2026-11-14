@@ -394,6 +394,21 @@ private func plan(kind: TransitionKind = .blend, startMs: Int = 100_000, entryMs
         #expect(!editKeepsBlend(currentBefore: "a", currentAfter: "a", registeredNext: nil, nextAfter: next))
     }
 
+    @Test func theIncomingSongsGainIsWhatTheDecksApplyToEachSong() {
+        var settings = SoundSettings()
+        settings.replayGain = .track
+        // A tagged -8 dB, B untagged after it: B plays 8 dB louder than A.
+        let a = SongLoudness(ReplayGainTags.stored(trackGain: -8, trackPeak: nil, albumGain: nil, albumPeak: nil), followsSameAlbum: false)
+        let b = queuedSongLoudness(stored: nil, album: "b", afterAlbum: "a")
+        #expect(abs(blendIncomingGainDb(settings, current: a, next: b) - 8) < 1e-9)
+        // ReplayGain off: both at their own level.
+        settings.replayGain = .off
+        #expect(blendIncomingGainDb(settings, current: a, next: b) == 0)
+        // A queued song follows the one on now from the same album only with a known album.
+        #expect(queuedSongLoudness(stored: nil, album: "a", afterAlbum: "a").followsSameAlbum)
+        #expect(!queuedSongLoudness(stored: nil, album: nil, afterAlbum: nil).followsSameAlbum)
+    }
+
     @Test func pauseAtTheEndOfTheSongSetInTheRunUpUndoesTheStartBeforeItIsWritten() {
         // Registered and not yet handed over: undone first, then written, then followed up.
         #expect(endOfSongWrite(old: false, new: true, registered: true) == .disarmThenWrite)

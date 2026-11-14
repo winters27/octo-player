@@ -55,7 +55,8 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         self.lengths = lengths
         streamContextNow = streamContext
         output = DeckOutput(decks: decks)
-        crossfader = Crossfader(player: self, spare: second, mix: output.mix, scout: scout, profiles: profiles, lengths: lengths)
+        crossfader = Crossfader(player: self, spare: second, mix: output.mix, sound: sound, scout: scout, profiles: profiles,
+                                lengths: lengths)
         output.onInterruption = { [weak self] began, shouldResume in self?.interruption(began: began, shouldResume: shouldResume) }
     }
 

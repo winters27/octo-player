@@ -33,6 +33,8 @@ final class Crossfader {
     private unowned let player: PlaybackEngine
     private(set) var spare: Deck
     private let mix: PhoneMix
+    /// The decks' sound shaping, for each song's ReplayGain; nil plays every song at its own level.
+    private let sound: SoundProcessor?
     private let scout: Scout?
     private let profiles: ServerProfiles?
     private let lengths: RealLengths
@@ -180,10 +182,12 @@ final class Crossfader {
         }
     }
 
-    init(player: PlaybackEngine, spare: Deck, mix: PhoneMix, scout: Scout?, profiles: ServerProfiles?, lengths: RealLengths) {
+    init(player: PlaybackEngine, spare: Deck, mix: PhoneMix, sound: SoundProcessor?, scout: Scout?, profiles: ServerProfiles?,
+         lengths: RealLengths) {
         self.player = player
         self.spare = spare
         self.mix = mix
+        self.sound = sound
         self.scout = scout
         self.profiles = profiles
         self.lengths = lengths
@@ -772,7 +776,8 @@ final class Crossfader {
         let context = TransitionContext(
             nowMs: now, playedMs: heard.map { Int(Double($0.heardMs) * Double(speed)) } ?? position,
             repeatOne: repeatOne, stopAtEndOfSong: stopAtEnd, pace: Double(speed), skipSilence: player.skipSilence,
-            currentGenre: current.genre, nextGenre: nextItem.genre, bodyLevelDb: level, tempoPrior: tempoPrior)
+            currentGenre: current.genre, nextGenre: nextItem.genre, bodyLevelDb: level, tempoPrior: tempoPrior,
+            incomingGainDb: incomingGainDb(deck, current, nextItem))
         let tailAnalysis = tail?.entryId == key.current ? tail?.analysis : nil
         let headAnalysis = head?.entryId == key.next ? head?.analysis : nil
         let made = planTransition(current: currentSong, next: nextSong, tail: tailAnalysis, head: headAnalysis,
@@ -782,6 +787,20 @@ final class Crossfader {
         if made.kind == .gapless { return }
         let measured = tailAnalysis.map { analysis in level.map(analysis.withBodyLevel) ?? analysis }
         outgoingGate = measured?.features.gateDb ?? level.map { max(silenceFloorDb, $0 - silenceBelowBodyDb) }
+    }
+
+    /// How much louder the decks will play the next song than the one on now, in dB: the one on
+    /// now as its deck judged it (with its own tags once the deck has read them), the next as it
+    /// will be judged following it. 0 without the sound shaping.
+    private func incomingGainDb(_ deck: Deck, _ current: QueueItem, _ next: QueueItem) -> Double {
+        guard let sound else { return 0 }
+        let currentSong = soundSong(current)
+        let playing = deck.current.flatMap { source in
+            source.item.entryId == current.entryId ? source.setUp?.loudness(tags: source.loudness) : nil
+        }
+        let now = playing ?? sound.queuedLoudness(currentSong, after: nil)
+        let following = sound.queuedLoudness(soundSong(next), after: currentSong)
+        return blendIncomingGainDb(sound.settings.read().settings, current: now, next: following)
     }
 
     // MARK: The spare

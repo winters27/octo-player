@@ -104,6 +104,23 @@ extension TransitionPlan {
     }
 }
 
+/// A song's ReplayGain as a deck applies it, in dB, by `settings` (0 with ReplayGain off).
+public func songGainDb(_ settings: SoundSettings, _ song: SongLoudness?) -> Double {
+    20 * log10(replayGainFactor(settings, song))
+}
+
+/// The planner's `incomingGainDb`: how much louder the decks play the next song than the one on
+/// now, in dB, each at its ReplayGain by `settings`.
+public func blendIncomingGainDb(_ settings: SoundSettings, current: SongLoudness?, next: SongLoudness?) -> Double {
+    songGainDb(settings, next) - songGainDb(settings, current)
+}
+
+/// How a song about to follow `after` would be judged for loudness, without the album run's
+/// state: the values its source keeps, and whether it comes from the same album.
+public func queuedSongLoudness(stored: ReplayGainInfo?, album: String?, afterAlbum: String?) -> SongLoudness {
+    SongLoudness(stored, followsSameAlbum: album != nil && album == afterAlbum)
+}
+
 /// How a write of "pause at the end of this song" lands.
 public enum EndOfSongWrite: Sendable, Equatable {
     /// The same value again: nothing changes, and no blend is touched.
