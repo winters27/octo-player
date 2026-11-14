@@ -63,6 +63,16 @@ class NotInLibraryTest {
     }
 
     @Test
+    fun aSongTheServerOwnsHasNeitherTheButtonNorTheMark() {
+        val owned = setOf("find:s2")
+        assertEquals(AddSign.None, rowAddSign("find:s2", owned, offersAdd = true, owned = owned))
+        assertEquals(AddSign.None, rowAddSign("find:s2", owned, offersAdd = false, owned = owned))
+        assertFalse(isOutsideLibrary("find:s2", owned))
+        // A find beside it keeps its own.
+        assertEquals(AddSign.Mark, rowAddSign("find:e1", owned, offersAdd = false, owned = owned))
+    }
+
+    @Test
     fun rowsBesideAddButtonsKeepTheirSpace() {
         // In a list offering the button, a library song leaves the space
         // empty so every length sits in one column.

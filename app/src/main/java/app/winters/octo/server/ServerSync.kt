@@ -658,6 +658,16 @@ class ServerSync @Inject constructor(
         return unlessCopying(work, copying, _syncing)
     }
 
+    // Takes in songs of the server's own library that a list named and the
+    // copy lacks (see OwnedFinds), with the albums they are on, as a search's
+    // are (takeInIfFree). Answers whether any of them is in the library now;
+    // false while a copy runs, which brings them itself, so nothing waits
+    // behind it to read them again.
+    suspend fun takeInOwned(songs: List<Song>): Boolean {
+        if (songs.isEmpty() || synchronized(this) { job?.isActive == true }) return false
+        return takeInIfFree(Arriving(songs, emptyList())) == true
+    }
+
     // Puts server songs and albums into the library ahead of the next full
     // copy: each album in `albumIds` read as the server has it now, with
     // all its songs, and each of `songs` too (alone when its album could

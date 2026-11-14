@@ -79,6 +79,7 @@ import app.winters.octo.discovery.ArtistExtrasSource
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.OnlineArtist
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.discovery.SimilarArtist
 import app.winters.octo.discovery.inLibraryOnly
 import app.winters.octo.player.PlayerSettings
@@ -153,6 +154,7 @@ class ArtistViewModel @AssistedInject constructor(
     private val loaders: ListLoaders,
     private val reads: LibraryReads,
     db: CatalogDatabase,
+    private val owned: OwnedFinds,
 ) : ViewModel() {
     val artist: StateFlow<ArtistEntity?> =
         dao.artist(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -187,7 +189,7 @@ class ArtistViewModel @AssistedInject constructor(
             }
         }
         .combine(player.prefs.map { it.libraryOnly }.distinctUntilChanged()) { extras, libraryOnly ->
-            if (libraryOnly) extras?.inLibraryOnly() else extras
+            if (libraryOnly) extras?.inLibraryOnly(owned.ids.value) else extras
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 

@@ -1,6 +1,7 @@
 package app.winters.octo.ui.search
 
 import app.winters.octo.ui.common.LocalReduceMotion
+import app.winters.octo.ui.common.LocalOwnedFinds
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
@@ -125,8 +126,9 @@ fun SearchScreen(onOpen: (NavKey) -> Unit, vm: SearchViewModel = hiltViewModel()
     // "Library songs only" leaves out what the server found online.
     val libraryOnly = LocalLibraryOnly.current
     val setLibraryOnly = LocalSetLibraryOnly.current
-    val top = if (libraryOnly) anyTop?.inLibraryOnly() else anyTop
-    val chart = if (libraryOnly) anyChart?.inLibraryOnly() else anyChart
+    val owned = LocalOwnedFinds.current
+    val top = if (libraryOnly) anyTop?.inLibraryOnly(owned) else anyTop
+    val chart = if (libraryOnly) anyChart?.inLibraryOnly(owned) else anyChart
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 120.dp
     val keyboard = LocalSoftwareKeyboardController.current
     val list = rememberLazyListState()

@@ -14,6 +14,7 @@ import app.winters.octo.catalog.HoldKind
 import app.winters.octo.catalog.OnlineDao
 import app.winters.octo.catalog.OnlineSongEntity
 import app.winters.octo.catalog.SongIdentity
+import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.Session
@@ -103,6 +104,10 @@ class Downloads @Inject constructor(
     // Finds a start plays before their rows are written: a write to one's
     // row waits for its keep.
     private val finds: FindMap,
+    // Songs the server owns that the copy lacked: never downloaded, and
+    // linked to their library songs once a copy brings them.
+    private val owned: OwnedFinds,
+    private val sources: SourceDao,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -217,9 +222,10 @@ class Downloads @Inject constructor(
     }
 
     // Asks the server to download one find. Answers whether it was asked.
-    // A download that failed is asked for again the same way.
+    // A download that failed is asked for again the same way. A song the
+    // server owns already is never asked for.
     suspend fun request(track: TrackEntity): Boolean {
-        if (!isFind(track.id)) return false
+        if (!isFind(track.id) || track.id in owned) return false
         val client = client() ?: return false
         return try {
             client.star(listOf(track.id.removePrefix(FIND_PREFIX)))
@@ -242,7 +248,7 @@ class Downloads @Inject constructor(
         return try {
             client.starAlbums(listOf(albumId))
             val now = System.currentTimeMillis()
-            val asked = songs.filter { isFind(it.id) }
+            val asked = songs.filter { isFind(it.id) && it.id !in owned }
             markRequested(online, finds, asked.map { it.id }, now)
             hint.added()
             val coming = asked.filter { state(it.id) != DownloadState.Done }
@@ -268,7 +274,7 @@ class Downloads @Inject constructor(
             val ask = arrivals.opened(title)
             try {
                 pages { page ->
-                    val asked = page.filter { isFind(it.id) }
+                    val asked = page.filter { isFind(it.id) && it.id !in owned }
                     markRequested(online, finds, asked.map { it.id }, now)
                     val coming = asked.filter { state(it.id) != DownloadState.Done }
                     arrivals.joined(ask, coming.map { it.id })
@@ -302,6 +308,7 @@ class Downloads @Inject constructor(
         val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
         online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         forgetDeleted(serverSourceId(client.primaryUrl))
+        linkOwnedFinds(sources, online, finds, serverSourceId(client.primaryUrl), owned.serverIds())
         val waiting = online.waiting().ifEmpty { return }
         adoptWaiting(
             waiting,

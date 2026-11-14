@@ -421,7 +421,7 @@ private fun SongFace(
     ownership: Boolean = false,
     highlight: Boolean = false,
 ) {
-    val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd)
+    val sign = rowAddSign(track.id, LocalAdoptedFinds.current, offerAdd, LocalOwnedFinds.current)
     val end: (@Composable () -> Unit)? = when (rowEnd(sign, librarySpace, hasTrailing = trailing != null)) {
         RowEnd.AddButton -> ({ AddToLibraryButton(track, size = AddButtonSize, iconSize = AddIconSize) })
         RowEnd.AddSpace -> ({ Spacer(Modifier.width(AddButtonSize)) })

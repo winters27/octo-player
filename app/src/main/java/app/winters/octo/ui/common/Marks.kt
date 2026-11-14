@@ -75,12 +75,14 @@ fun isOutOfReach(track: TrackEntity): Boolean {
 
 // After a song's artist or length: a filled arrow for a song downloaded to
 // the phone, the cloud for one that streams, nothing for a phone file.
-// A song found online has none: its artwork or add button says it.
+// A song found online has none: its artwork or add button says it. A song
+// the server owns that the phone's copy lacks streams like any library
+// song, so it has the cloud.
 @Composable
 fun SourceMark(track: TrackEntity) {
     when {
         isDownloaded(track) -> DownloadedMark()
-        !track.onPhone && !isFind(track.id) -> CloudMark()
+        !track.onPhone && (!isFind(track.id) || track.id in LocalOwnedFinds.current) -> CloudMark()
     }
 }
 

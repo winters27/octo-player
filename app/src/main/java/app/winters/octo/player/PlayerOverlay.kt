@@ -169,6 +169,7 @@ import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.AddToLibraryButton
 import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
+import app.winters.octo.ui.common.LocalOwnedFinds
 import app.winters.octo.ui.common.LocalPressSpot
 import app.winters.octo.ui.common.pressSpot
 import app.winters.octo.ui.common.rememberOpenedBeside
@@ -1086,11 +1087,15 @@ private fun TitleBlock(now: NowPlaying, calm: Boolean, onOpenArtist: (String) ->
 }
 
 // Beside the song: a heart for Liked songs, glowing while it is in them,
-// or the add button for a song not in the library, and the song's menu.
+// or the add button for a song not in the library, and the song's menu. A
+// song the server owns that the phone's copy has not brought in yet has
+// neither, only its place.
 @Composable
 private fun SongButtons(now: NowPlaying, model: PlayerViewModel) {
     val menu = LocalSongMenu.current
-    if (now.trackId != null && isFind(now.trackId)) {
+    if (now.trackId != null && now.trackId in LocalOwnedFinds.current) {
+        Spacer(Modifier.size(TitleButtonSize))
+    } else if (now.trackId != null && isFind(now.trackId)) {
         val find by model.find.collectAsStateWithLifecycle()
         // Held back until the find for this song has loaded, not the last one.
         find?.takeIf { it.id == now.trackId }?.let { AddToLibraryButton(it, size = TitleButtonSize, iconSize = titleIcons().size) }

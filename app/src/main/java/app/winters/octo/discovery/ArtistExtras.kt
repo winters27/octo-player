@@ -40,10 +40,11 @@ data class ArtistExtras(
     val similar: List<SimilarArtist> = emptyList(),
 )
 
-// The extras as "Library songs only" shows them: top songs in the library,
-// and similar artists the library has.
-fun ArtistExtras.inLibraryOnly(): ArtistExtras =
-    copy(topSongs = librarySongsOnly(topSongs, true) { isFind(it.id) }, similar = similar.filter { it.libraryId != null })
+// The extras as "Library songs only" shows them: top songs in the library
+// (with those the server owns, `owned`, that the phone's copy lacks), and
+// similar artists the library has.
+fun ArtistExtras.inLibraryOnly(owned: Set<String> = emptySet()): ArtistExtras =
+    copy(topSongs = librarySongsOnly(topSongs, true) { isFind(it.id) && it.id !in owned }, similar = similar.filter { it.libraryId != null })
 
 // Reads what the server knows about library artists: their top songs, a
 // biography and artists like them. Kept for as long as the app runs, per

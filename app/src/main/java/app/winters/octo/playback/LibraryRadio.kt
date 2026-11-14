@@ -13,6 +13,7 @@ import app.winters.octo.catalog.read
 import app.winters.octo.catalog.readLong
 import app.winters.octo.catalog.searchKey
 import app.winters.octo.discovery.Discovery
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.discovery.librarySongsOnly
 import app.winters.octo.listening.PlayCount
 import app.winters.octo.listening.PlayTotals
@@ -95,10 +96,13 @@ class LibraryRadio internal constructor(
     private val suggestions: suspend (TrackEntity, Int) -> List<TrackEntity>,
     private val prefs: Flow<PlayerPrefs>,
     private val page: Int = RADIO_PAGE,
+    // Songs the server owns that the phone's copy lacks (OwnedFinds): library
+    // songs, kept under "Library songs only".
+    private val owned: () -> Set<String> = { emptySet() },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
-    @Inject constructor(db: CatalogDatabase, totals: PlayTotals, discovery: Discovery, settings: PlayerSettings) :
-        this(db, totals, { seed, count -> discovery.radio(seed, count) }, settings.prefs)
+    @Inject constructor(db: CatalogDatabase, totals: PlayTotals, discovery: Discovery, settings: PlayerSettings, ownedFinds: OwnedFinds) :
+        this(db, totals, { seed, count -> discovery.radio(seed, count) }, settings.prefs, owned = { ownedFinds.ids.value })
 
     internal var hooks = RadioHooks()
 
@@ -129,7 +133,8 @@ class LibraryRadio internal constructor(
             Log.w("Octo", "radio: server suggestions failed: ${e.javaClass.simpleName}")
             emptyList()
         }
-        val kept = librarySongsOnly(suggested, prefs.libraryOnly) { isFind(it.id) }
+        val mine = owned()
+        val kept = librarySongsOnly(suggested, prefs.libraryOnly) { isFind(it.id) && it.id !in mine }
         val genres = seeds.mapNotNullTo(HashSet()) { genreKeyOf(it.genre) }
         val artists = seeds.mapNotNullTo(HashSet()) { artistKeyOf(it.artist, it.artistId) }
         var walked: Walked? = null

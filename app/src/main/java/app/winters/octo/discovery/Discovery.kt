@@ -34,7 +34,14 @@ import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.ui.paging.serverAlbumVote
+import android.util.Log
+import app.winters.octo.catalog.findId
 import dagger.Lazy
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -43,6 +50,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -154,9 +162,18 @@ class Discovery @Inject constructor(
     private val drains: Drains,
     // Finds whose rows are kept behind the answer that found them.
     private val finds: FindMap,
+    // Songs of the server's library its lists named that the copy lacks.
+    private val owned: OwnedFinds,
 ) {
     // Names each drained answer read here, so two never share a file.
     private val drained = AtomicLong()
+
+    // Brings owned songs in behind the read that named them.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // The owned songs being brought in now, by server id, so two reads of
+    // one list ask for them once.
+    private val bringing = ConcurrentHashMap.newKeySet<String>()
 
     // Lists the server no longer has, found out on their own page, by id.
     private val _gone = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -374,8 +391,44 @@ class Discovery @Inject constructor(
         return tracks
     }
 
-    // What each song sent is, in order, with the finds among them kept.
-    private suspend fun resolveEach(sourceId: String, songs: List<Song>): List<Resolved> = resolveEachRead(sources, catalog, online, finds, sourceId, songs)
+    // What each song sent is, in order, with the finds among them kept. The
+    // server's own songs the copy lacks are noted as owned and brought in.
+    private suspend fun resolveEach(sourceId: String, songs: List<Song>): List<Resolved> =
+        resolveEachRead(sources, catalog, online, finds, sourceId, songs).also { bringIn(sourceId, songs, it) }
+
+    // Notes which of the songs sent (`each`, as resolved) the server owns and
+    // the copy lacks, and brings those in behind this read, ahead of the next
+    // full copy, linking each one's find to the library song it became so a
+    // queue holding the find plays that. While a copy runs, the copy brings
+    // them instead.
+    private fun bringIn(sourceId: String, songs: List<Song>, each: List<Resolved>) {
+        val found = each.filterIsInstance<Resolved.Found>()
+        if (found.isEmpty()) return
+        val (mine, outside) = found.partition { it.owned }
+        owned.note(emptyList(), outside.map { it.song.id })
+        val wanted = mine.mapTo(HashSet()) { it.song.nativeId }
+        ownedSongs(sourceId, songs.filter { it.id in wanted })
+    }
+
+    // Songs of the server's own library a read named that the copy lacks, on
+    // server `sourceId`: noted as owned, and brought in as bringIn says.
+    fun ownedSongs(sourceId: String, songs: List<Song>) {
+        if (songs.isEmpty()) return
+        owned.note(songs.map { findId(it.id) })
+        val asking = songs.distinctBy { it.id }.filter { bringing.add(it.id) }
+        if (asking.isEmpty()) return
+        scope.launch {
+            try {
+                if (sync.get().takeInOwned(asking)) linkOwnedFinds(sources, online, finds, sourceId, asking.map { it.id })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "owned songs take-in failed: ${e.javaClass.simpleName}")
+            } finally {
+                bringing.removeAll(asking.map { it.id }.toSet())
+            }
+        }
+    }
 
     // The server's id for a song: a find's own, a library song's server copy,
     // or, for a song only on the phone, the same song as the server knows it:
@@ -447,7 +500,7 @@ internal suspend fun resolveEachRead(
     val before = found.map { it.id }.chunked(900).flatMap { online.byIds(it) }.associateBy { it.id }
     val kept = found.map { f -> before[f.id]?.let { keptFind(f, it) } ?: f }.associateBy { it.id }
     finds.post(kept.values)
-    return resolved.map { r -> if (r is Resolved.Found) kept[r.song.id]?.let(Resolved::Found) ?: r else r }
+    return resolved.map { r -> if (r is Resolved.Found) kept[r.song.id]?.let { r.copy(song = it) } ?: r else r }
 }
 
 // The server's own id of the album on server `sourceId` that most of a

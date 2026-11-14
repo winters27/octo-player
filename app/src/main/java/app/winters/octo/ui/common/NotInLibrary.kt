@@ -26,10 +26,12 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.AdoptedSongs
 import app.winters.octo.discovery.DownloadPhase
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.player.PlayerSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -43,6 +45,11 @@ const val NotInLibraryText = "Not in your library"
 // Songs found online that have since been downloaded into the library, so
 // their artwork goes back to clean before the list around them refreshes.
 val LocalAdoptedFinds = compositionLocalOf<Set<String>> { emptySet() }
+
+// Songs the server owns that the phone's copy lacked when a list named them
+// (OwnedFinds), by find id: shown as library songs, never with an add button.
+// They are in LocalAdoptedFinds too.
+val LocalOwnedFinds = compositionLocalOf<Set<String>> { emptySet() }
 
 // The same finds, each with the library song it became, so a find's row
 // can turn into that song. Null until known.
@@ -61,6 +68,7 @@ class AdoptedFindsViewModel @Inject constructor(
     downloads: Downloads,
     private val player: PlayerSettings,
     val songs: AdoptedSongs,
+    ownedFinds: OwnedFinds,
 ) : ViewModel() {
     // "Library songs only", for every screen.
     val libraryOnly: StateFlow<Boolean> = player.prefs
@@ -72,8 +80,10 @@ class AdoptedFindsViewModel @Inject constructor(
         viewModelScope.launch { player.setLibraryOnly(on) }
     }
 
-    val adopted: StateFlow<Set<String>> = downloads.phases
-        .map(::adoptedFinds)
+    val owned: StateFlow<Set<String>> = ownedFinds.ids
+
+    // Finds downloaded into the library, and songs the server owns already.
+    val adopted: StateFlow<Set<String>> = combine(downloads.phases, ownedFinds.ids) { phases, mine -> adoptedFinds(phases) + mine }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
@@ -91,12 +101,14 @@ class AdoptedFindsViewModel @Inject constructor(
 fun ProvideAdoptedFinds(vm: AdoptedFindsViewModel = hiltViewModel(), content: @Composable () -> Unit) {
     val adopted by vm.adopted.collectAsStateWithLifecycle()
     val adoptions by vm.adoptions.collectAsStateWithLifecycle()
+    val owned by vm.owned.collectAsStateWithLifecycle()
     val appCalm by vm.reduceMotion.collectAsStateWithLifecycle()
     val libraryOnly by vm.libraryOnly.collectAsStateWithLifecycle()
     CompositionLocalProvider(
         LocalLibraryOnly provides libraryOnly,
         LocalSetLibraryOnly provides vm::setLibraryOnly,
         LocalAdoptedFinds provides adopted,
+        LocalOwnedFinds provides owned,
         LocalAdoptions provides adoptions,
         LocalAdoptedSongs provides vm.songs,
         LocalReduceMotion provides (appCalm || rememberSystemReduceMotion()),
@@ -122,9 +134,10 @@ enum class AddSign { Button, Mark, None }
 
 // In a list that offers the button, a find keeps it after it is added, so
 // the check has its moment before the row turns into the library song.
-// Elsewhere a find gets the mark until it is in the library.
-fun rowAddSign(trackId: String, adopted: Set<String>, offersAdd: Boolean): AddSign = when {
-    !isFind(trackId) -> AddSign.None
+// Elsewhere a find gets the mark until it is in the library. A song the
+// server owns already (`owned`) has neither.
+fun rowAddSign(trackId: String, adopted: Set<String>, offersAdd: Boolean, owned: Set<String> = emptySet()): AddSign = when {
+    !isFind(trackId) || trackId in owned -> AddSign.None
     offersAdd -> AddSign.Button
     trackId in adopted -> AddSign.None
     else -> AddSign.Mark

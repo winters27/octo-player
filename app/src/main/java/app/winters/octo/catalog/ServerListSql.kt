@@ -71,6 +71,14 @@ internal const val SERVER_FIRST_FINDS_SQL =
     "SELECT position, songId, title, artist, lengthMs, album, albumId, artistId, coverId, mimeType, bitrate, explicit " +
         "FROM server_entry WHERE owner = ? AND position > ? AND firstFind = 1 ORDER BY position LIMIT ?"
 
+// Whether a read carries Octo's marks: any entry marked as outside the library.
+internal const val SERVER_MARKED_SQL = "SELECT EXISTS(SELECT 1 FROM server_entry WHERE owner = ? AND external = 1)"
+
+// The finds of a read the server did not mark, each once, in order, up to a limit.
+internal const val SERVER_OWNED_SQL =
+    "SELECT songId, title, artist, lengthMs, album, albumId, artistId, coverId " +
+        "FROM server_entry WHERE owner = ? AND firstFind = 1 AND external = 0 ORDER BY position LIMIT ?"
+
 // A find the library has downloaded since shows as the song it became.
 internal const val SERVER_ADOPT_SQL = "UPDATE server_entry SET trackId = ?, kind = 1 WHERE owner = ? AND trackId = ?"
 

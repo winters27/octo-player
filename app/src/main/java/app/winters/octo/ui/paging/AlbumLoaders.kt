@@ -227,13 +227,15 @@ class AlbumListing(
         val targets = adopted.values.distinct().chunked(900).flatMap { catalog.tracksByIdsUnordered(it) }
             .filter { it.albumId == albumId }.mapTo(HashSet()) { it.id }
         return songs.zip(resolved).mapNotNull { (song, r) ->
-            when (val each = asAdopted(if (r is Resolved.Found) kept[r.song.id]?.let(Resolved::Found) ?: r else r, present.keys)) {
+            when (val each = asAdopted(if (r is Resolved.Found) kept[r.song.id]?.let { r.copy(song = it) } ?: r else r, present.keys)) {
                 // A song the library no longer has is left out, as today.
                 is Resolved.InLibrary -> if (each.trackId in present) song to Triple(each.trackId, false, null) else null
                 is Resolved.Found -> {
                     // Only a song the server marks as outside the library
-                    // stays a find; others come in with the next copy.
-                    if (!song.isExternal) return@mapNotNull null
+                    // stays a find. One it owns is never offered as found
+                    // online; it comes in with the next copy or look, and
+                    // the album shows it from then on.
+                    if (each.owned || !song.isExternal) return@mapNotNull null
                     val shown = adopted[each.song.id]?.takeIf { it in targets } ?: each.song.id
                     song to Triple(shown, isFind(shown), (song.track?.takeIf { it > 0 } to song.discNumber?.takeIf { it > 0 }))
                 }

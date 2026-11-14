@@ -29,6 +29,7 @@ import app.winters.octo.discovery.ChartAnswer
 import app.winters.octo.discovery.ChartLists
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.discovery.SearchTopSongs
 import app.winters.octo.discovery.ServerListKind
 import app.winters.octo.discovery.ServerReads
@@ -149,7 +150,13 @@ class CarLibrary @Inject constructor(
     merge: CatalogMerge,
     // Finds a start plays before their rows are written.
     private val finds: FindMap,
+    // Songs the server owns that the phone's copy lacked: shown as library songs.
+    private val owned: OwnedFinds,
 ) {
+    // Finds downloaded into the library, and songs the server owns already:
+    // neither is marked as outside the library.
+    private fun inLibraryFinds(): Set<String> = adoptedFinds(downloads.phases.value) + owned.ids.value
+
     // The cover style the listener chose for playlists, as the phone draws them.
     @Volatile private var coverStyle = PlaylistCoverStyle.Designed
     private val look = CarLook(context) { coverStyle }
@@ -163,7 +170,7 @@ class CarLibrary @Inject constructor(
         catalog = catalog,
         look = look,
         doneAmong = { ids -> offline.doneAmong(ids) },
-        adopted = { adoptedFinds(downloads.phases.value) },
+        adopted = ::inLibraryFinds,
         order = ::order,
         albumWithFinds = ::albumWithFinds,
         libraryOnly = ::libraryOnly,
@@ -202,7 +209,7 @@ class CarLibrary @Inject constructor(
                 ).map(sorting::order),
             ) { it.toList() },
             CarInput.Pins to pins.shown,
-            CarInput.Adopted to downloads.phases.map(::adoptedFinds),
+            CarInput.Adopted to combine(downloads.phases, owned.ids) { phases, mine -> adoptedFinds(phases) + mine },
             CarInput.Downloads to offline.doneVersion,
             CarInput.LibraryOnly to player.prefs.map { it.libraryOnly },
             CarInput.Offer to serverQueue.offer.map(::resumeOfferKey),
@@ -309,7 +316,7 @@ class CarLibrary @Inject constructor(
     // the phone files them under when it is sorted by name. Every list here
     // is album-, artist- or answer-sized.
     private suspend fun listed(node: CarNode, ownAccord: Boolean): CarListing? {
-        val adopted = adoptedFinds(downloads.phases.value)
+        val adopted = inLibraryFinds()
         suspend fun songs(tracks: List<TrackEntity>, list: CarNode): List<MediaItem> {
             val done = offline.doneAmong(tracks.map { it.id })
             return tracks.map { look.song(it, list, isOutsideLibrary(it.id, adopted), it.id in done) }
@@ -359,7 +366,7 @@ class CarLibrary @Inject constructor(
             is CarNode.Artist -> catalog.artist(node.id).first()?.let(look::artist)
             is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let(look::playlist)
             is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveSongs.covers(it.id, it.query)) }
-            is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, adoptedFinds(downloads.phases.value)), offline.isDone(it.id)) }
+            is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, inLibraryFinds()), offline.isDone(it.id)) }
             is CarNode.OctoList -> look.folder(node, node.name)
             is CarNode.Station -> look.radio(node)
             is CarNode.ChartList -> look.folder(node, node.name)
@@ -406,7 +413,7 @@ class CarLibrary @Inject constructor(
     // playlists, and the server's artists last when the library has none.
     // Each kind with more than shown ends with "See all".
     suspend fun searchItems(answer: CarSearchAnswer): List<MediaItem> {
-        val adopted = adoptedFinds(downloads.phases.value)
+        val adopted = inLibraryFinds()
         val rows = carSearchRows(answer)
         val done = offline.doneAmong(rows.flatMap { row -> row.entries.mapNotNull { (it as? SearchEntry.Song)?.track?.id } })
         return rows.flatMap { row ->
@@ -429,7 +436,7 @@ class CarLibrary @Inject constructor(
 
     // A kind of a search whole, for its "See all".
     private suspend fun foundAll(answer: CarSearchAnswer, kind: FoundKind): List<MediaItem> {
-        val adopted = adoptedFinds(downloads.phases.value)
+        val adopted = inLibraryFinds()
         val done = if (kind == FoundKind.Songs) offline.doneAmong(foundSongs(answer).map { it.id }) else emptySet()
         val list = CarNode.Found(answer.token, FoundKind.Songs)
         return when (kind) {
@@ -444,7 +451,7 @@ class CarLibrary @Inject constructor(
     // What the server found outside the library, after a search tried again.
     private fun outsideRows(answer: CarSearchAnswer): List<MediaItem> {
         if (answer.outsideFailed) return listOf(look.retry(answer.token))
-        val adopted = adoptedFinds(downloads.phases.value)
+        val adopted = inLibraryFinds()
         val found = answer.outside ?: return emptyList()
         val list = CarNode.Found(answer.token, FoundKind.Songs)
         return found.artists.map { look.grouped(look.onlineArtist(it), "Artists") } +
@@ -526,7 +533,7 @@ class CarLibrary @Inject constructor(
     private suspend fun onlineArtistPage(node: CarNode.OnlineArtist, adopted: Set<String>): List<MediaItem> {
         val view = onlineArtistView(node)
         val only = libraryOnly()
-        val top = view.top.filter { !only || !isOutsideLibrary(it.id, emptySet()) }.take(ARTIST_TOP_SHOWN)
+        val top = view.top.filter { !only || !isOutsideLibrary(it.id, owned.ids.value) }.take(ARTIST_TOP_SHOWN)
         val done = offline.doneAmong(top.map { it.id })
         return top.map { look.grouped(look.song(it, node, isOutsideLibrary(it.id, adopted), it.id in done), "Top songs") } +
             view.albums.map { look.grouped(look.onlineAlbum(it), "Albums") }
@@ -550,7 +557,7 @@ class CarLibrary @Inject constructor(
             lists.keptFor<Behind<List<TrackEntity>>>(node)?.value
         }
         val only = libraryOnly()
-        return top?.let { songs -> if (only) songs.filterNot { isOutsideLibrary(it.id, emptySet()) } else songs }
+        return top?.let { songs -> if (only) songs.filterNot { isOutsideLibrary(it.id, owned.ids.value) } else songs }
     }
 
     // Home in the car: the resume row, then the phone's shelves in the
@@ -602,7 +609,7 @@ class CarLibrary @Inject constructor(
     // car hears when they are back.
     private suspend fun homeShelves(wanted: Set<HomeSection>): Map<HomeSection, List<MediaItem>> {
         val server = shelves.current()
-        val adopted = adoptedFinds(downloads.phases.value)
+        val adopted = inLibraryFinds()
         val played = if (wanted.any { it in PLAYED }) playedShelves() else null
         val done = offline.doneAmong(played?.mostPlayed.orEmpty().map { it.id } + server.chart.take(CHARTS_ROW).map { it.id })
         fun song(track: TrackEntity, list: CarNode) = look.song(track, list, isOutsideLibrary(track.id, adopted), track.id in done)

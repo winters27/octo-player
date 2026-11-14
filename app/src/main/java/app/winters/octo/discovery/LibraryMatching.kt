@@ -22,11 +22,13 @@ internal fun suggestionsOf(ids: List<String?>, songs: List<Song>): Map<String, S
     }.toMap()
 
 // What one song from the server is to the app: a song already in the
-// library, or one found online.
+// library, or one the app has no library song for. That one is found online,
+// or, when `owned`, a song of the server's library the phone's copy has not
+// brought in yet: it plays by the server's id like a find, but it is no find.
 sealed interface Resolved {
     data class InLibrary(val trackId: String) : Resolved
 
-    data class Found(val song: OnlineSongEntity) : Resolved
+    data class Found(val song: OnlineSongEntity, val owned: Boolean = false) : Resolved
 }
 
 // The id the app knows a resolved song by: the library song's, or the find's.
@@ -94,7 +96,12 @@ fun OnlineSongEntity.asTrack() = TrackEntity(
 // that library song, unless the server marks it as outside the library (a
 // link left by an older copy is not trusted then). A song with the same
 // title and artist as a library song is that song too, so a copy on the
-// phone plays instead of a stream. Anything else was found online.
+// phone plays instead of a stream. Anything else has no library song. A
+// list that carries Octo's marks (any song in it marked as outside) is taken
+// at its word: a song in it with no mark is the server's own, one added since
+// the phone's last copy or still to come in a first one, so it is owned, not
+// found online. A list with no marks cannot be told apart, so its songs the
+// library lacks count as found.
 fun resolveSongs(
     songs: List<Song>,
     sourceId: String,
@@ -103,10 +110,11 @@ fun resolveSongs(
     now: Long,
 ): List<Resolved> {
     val byTitle = TitleIndex(library, { it.title }, { it.artist })
+    val marked = songs.any { it.isExternal }
     return songs.map { song ->
         if (!song.isExternal) links[song.id]?.let { return@map Resolved.InLibrary(it) }
         val length = knownLengthMs(song)
         val same = byTitle.candidates(song.title, song.artist.orEmpty()).firstOrNull { sameSong(song.title, song.artist.orEmpty(), length, it) }
-        if (same != null) Resolved.InLibrary(same.id) else Resolved.Found(song.toFind(sourceId, now))
+        if (same != null) Resolved.InLibrary(same.id) else Resolved.Found(song.toFind(sourceId, now), owned = marked && !song.isExternal)
     }
 }

@@ -185,13 +185,18 @@ fun songActions(
     disk: Boolean = false,
     requestCopy: Boolean = false,
     removeFromMine: Boolean = false,
+    // A find that is the server's own song, which the phone's copy has not
+    // brought in yet (OwnedFinds): nothing to download or ask for.
+    owned: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
     if (radio) add(SongAction.StartRadio)
     if (find) {
-        add(SongAction.Download)
-        if (requestCopy) add(SongAction.RequestCopy)
+        if (!owned) {
+            add(SongAction.Download)
+            if (requestCopy) add(SongAction.RequestCopy)
+        }
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
     } else {

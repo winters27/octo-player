@@ -45,6 +45,7 @@ import app.winters.octo.offline.Reasons
 import app.winters.octo.offline.reasons
 import app.winters.octo.output.OutputChoice
 import app.winters.octo.ui.common.Artwork
+import app.winters.octo.ui.common.LocalOwnedFinds
 import app.winters.octo.ui.common.GlassMenuAction
 import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuGroups
@@ -183,6 +184,7 @@ private fun SongActionsPage(
         disk = onDisk,
         requestCopy = vm.family.outside.offersRequest,
         removeFromMine = inMine,
+        owned = trackId in LocalOwnedFinds.current,
     )
     // A family member whose songs are saved rather than added.
     val saves = vm.family.outside.addLabel != null

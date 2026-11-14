@@ -62,6 +62,40 @@ class LibraryMatchingTest {
     }
 
     @Test
+    fun aMarkedListsUnmarkedSongTheCopyLacksIsTheServersOwn() {
+        // Octo marked one song as outside, so the list is taken at its word:
+        // the unmarked song the phone's copy has no link or title for was
+        // added to the library since the last copy, not found online.
+        val outside = song("e1", "Genesis", "Justice").copy(isExternal = true)
+        val added = song("s2", "Aerodynamic", "Daft Punk")
+        val out = resolveSongs(listOf(outside, added), "server:x", emptyMap(), emptyList(), 0)
+        val (find, owned) = out.map { it as Resolved.Found }
+        assertFalse(find.owned)
+        assertTrue(owned.owned)
+        assertEquals("find:s2", owned.song.id)
+    }
+
+    @Test
+    fun aMarkedListStillPrefersTheLinkedOrSameSongInTheLibrary() {
+        val outside = song("e1", "Genesis", "Justice").copy(isExternal = true)
+        val phone = track("p9", "Digital Love", "Daft Punk", ms = 301_000)
+        val out = resolveSongs(
+            listOf(outside, song("s1", "One More Time", "Daft Punk"), song("s9", "Digital Love", "Daft Punk")),
+            "server:x", mapOf("s1" to "p1"), listOf(phone), 0,
+        )
+        assertEquals(listOf(Resolved.InLibrary("p1"), Resolved.InLibrary("p9")), out.drop(1))
+    }
+
+    @Test
+    fun anUnmarkedListKeepsTheTitleFallbackAndCallsTheRestFound() {
+        // No song carries a mark, so the list cannot be told apart.
+        val phone = track("p9", "Digital Love", "Daft Punk", ms = 301_000)
+        val out = resolveSongs(listOf(song("s9", "Digital Love", "Daft Punk"), song("s2", "Aerodynamic", "Daft Punk")), "server:x", emptyMap(), listOf(phone), 0)
+        assertEquals(Resolved.InLibrary("p9"), out[0])
+        assertFalse((out[1] as Resolved.Found).owned)
+    }
+
+    @Test
     fun theSameSongOnThePhoneWinsOverAStream() {
         val phone = track("p9", "Digital Love", "Daft Punk", ms = 301_000)
         val out = resolveSongs(listOf(song("s9", "Digital Love", "Daft Punk")), "server:x", emptyMap(), listOf(phone), 0)

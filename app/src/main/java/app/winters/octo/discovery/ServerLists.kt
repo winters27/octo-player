@@ -17,6 +17,8 @@ import app.winters.octo.catalog.SERVER_COPY_SQL
 import app.winters.octo.catalog.SERVER_ENTRY_INSERT_SQL
 import app.winters.octo.catalog.SERVER_FINDS_BY_SONG_SQL
 import app.winters.octo.catalog.SERVER_FIRST_FINDS_SQL
+import app.winters.octo.catalog.SERVER_MARKED_SQL
+import app.winters.octo.catalog.SERVER_OWNED_SQL
 import app.winters.octo.catalog.SERVER_FIRST_OF_SONG_SQL
 import app.winters.octo.catalog.SERVER_GROUP_SQL
 import app.winters.octo.catalog.SERVER_HEADS_SQL
@@ -217,6 +219,9 @@ class ServerReads internal constructor(
     private val server: () -> ServerSide?,
     // Notes which radio source suggested each resolved song.
     private val suggested: (Map<String, String>) -> Unit = {},
+    // Takes the server's own songs a read named that the copy lacks, on the
+    // server of that source id (Discovery.ownedSongs).
+    private val owned: (String, List<Song>) -> Unit = { _, _ -> },
     // Notes an album's animated art from its answer.
     private val animated: suspend (SubsonicClient, AlbumWithSongs) -> Unit = { _, _ -> },
     private val now: () -> Long = System::currentTimeMillis,
@@ -242,6 +247,7 @@ class ServerReads internal constructor(
             }
         },
         suggested = { discovery.get().noteSuggestions(it) },
+        owned = { sourceId, songs -> discovery.get().ownedSongs(sourceId, songs) },
         animated = { client, album -> animatedArts.note(client, album.id, album.animatedArt) },
         levels = levels,
     )
@@ -591,6 +597,7 @@ class ServerReads internal constructor(
         if (open > 0) pool(owner, open)
         settle(owner)
         finds(owner, sourceId, at)
+        ownedSongs(owner, sourceId)
         note(owner, read.carried)
         withContext(NonCancellable) { for (table in listOf("server_key", "server_match", "server_lookup")) db.deleteOwned(table, owner) }
         return baseline
@@ -763,6 +770,20 @@ class ServerReads internal constructor(
             if (rows.size < page) return
             after = rows.last().first
         }
+    }
+
+    // Step five: in a read that carries Octo's marks, a find the server did
+    // not mark is a song of its own library the copy lacks (see
+    // resolveSongs), handed on to be noted as owned and brought in.
+    private fun ownedSongs(owner: String, sourceId: String) {
+        if (db.readLong(SERVER_MARKED_SQL, owner) != 1L) return
+        val songs = db.read(SERVER_OWNED_SQL, owner, OWNED_KEPT) { c ->
+            Song(
+                id = c.getString(0), title = c.getString(1), artist = c.getString(2), duration = (c.getLong(3) / 1000).toInt(),
+                album = c.getString(4), albumId = c.stringOrNull(5), artistId = c.stringOrNull(6), coverArt = c.stringOrNull(7),
+            )
+        }
+        if (songs.isNotEmpty()) owned(sourceId, songs)
     }
 
     // The radio sources the read's songs carry, noted by the songs they
