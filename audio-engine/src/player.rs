@@ -1154,6 +1154,14 @@ impl Player {
         if lane.current().is_live() && !failed && !ended {
             return;
         }
+        // How far the playing song has to go decides when the next one is
+        // lined up and whether that is in time for the longest intro
+        // (`Upcoming::early`), so after a start or a seek nothing is lined up
+        // until the song's first frame has a place, unless its end is
+        // already in hand.
+        if !failed && lane.position().is_none() && lane.left_after_end_secs().is_none() {
+            return;
+        }
         let remaining = self.remaining_secs(current, lane);
         let speed = self.pace.speed as f64;
         let mut window = PREPARE_SECS + self.crossfade_ms as f64 / 1_000.0 * speed;

@@ -1,7 +1,7 @@
 //! The whole engine, playing through the silent device.
 
 use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1435,6 +1435,119 @@ fn a_smart_plan_is_made_with_the_decoded_lengths() {
     assert_eq!((start_ms, overlap_ms), (9_500, 500), "{reason}");
     pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}
+
+// A server for the song at `path` that answers no call until `open` is set,
+// so the song's decoder opens only then.
+fn held_server(path: &Path, open: Arc<AtomicBool>) -> crate::testing::http_server::ScriptServer {
+    let body = std::fs::read(path).unwrap();
+    crate::testing::http_server::ScriptServer::start(move |_, stream, stopped| {
+        use std::io::Write;
+        while !open.load(Ordering::Acquire) {
+            if stopped.load(Ordering::Acquire) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(&body);
+    })
+}
+
+// A 16 s blend ending with the outgoing song, the longest intro, saying
+// which lengths it was planned from.
+fn longest_intro_plan(input: &crate::automix::PlanInput) -> crate::automix::TransitionPlan {
+    let len = input.current.duration_ms as i64;
+    let why = format!("lengths {} and {}", input.current.duration_ms, input.next.duration_ms);
+    crate::automix::TransitionPlan::fixed_crossfade(len, 16_000, &why)
+}
+
+#[test]
+fn a_next_song_that_opens_late_still_has_its_intro_decided_in_time() {
+    // A 24 s song with an 8 s crossfade and smart transitions: song B is
+    // lined up as A starts, 24 s from its end, so before the 20 s a 16 s
+    // intro, its 3 s lead and the margin need. B's server answers nothing
+    // until the plan is made, and with both songs profiled nothing else is
+    // waited for: the decision is made 20 s from the end with B still
+    // opening, by its listed length, in time for the intro to start as
+    // planned at 8 s.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 24, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    let open = Arc::new(AtomicBool::new(false));
+    let server = held_server(&b, open.clone());
+    let late =
+        QueueItem { source: server.url("/b.wav"), duration_ms: Some(20_000), ..item("b", Path::new("")) };
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_test_planner(Some(longest_intro_plan));
+    engine.set_crossfade(8_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.set_song_profile("a".into(), Some(profile_of(24_000, 0))).unwrap();
+    engine.set_song_profile("b".into(), Some(profile_of(20_000, 0))).unwrap();
+    engine.load(vec![item("a", &a), late], 0, 0, true).unwrap();
+    let planned =
+        play_until(&pump, &events, "plan", 1_500, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { start_ms, overlap_ms, reason, .. } = planned else { unreachable!() };
+    assert!(!server.asked().is_empty(), "B was asked for");
+    assert_eq!((start_ms, overlap_ms), (8_000, 16_000), "{reason}");
+    assert!(reason.contains("lengths 24000 and 20000"), "{reason}");
+    assert!(!reason.contains("late"), "{reason}");
+    // B opens after the decision and before the intro's start: the intro
+    // plays as planned.
+    open.store(true, Ordering::Release);
+    let fade =
+        play_until(&pump, &events, "intro", 1_000, |e| matches!(e, EngineEvent::CrossfadeStarted { .. }));
+    assert_eq!(
+        fade,
+        EngineEvent::CrossfadeStarted { from_id: "a".into(), to_id: "b".into(), duration_ms: 16_000 }
+    );
+    engine.shutdown();
+}
+
+#[test]
+fn a_next_song_lined_up_inside_its_intro_window_waits_for_its_decoder() {
+    // Started 6 s into the same 24 s song, B is lined up 18 s from A's end,
+    // inside the window a 16 s intro needs: it never had the time for one,
+    // so the decision waits for B's decoder until the crossfade's own
+    // deadline, 12 s from the end, and is made with the length the decoder
+    // found rather than the one listed.
+    let dir = temp_dir();
+    let (a, b) = (dir.join("a.wav"), dir.join("b.wav"));
+    write_wav(&a, RATE, 2, &sine(300.0, RATE, 2, 0, RATE as usize * 24, 0.3));
+    write_wav(&b, RATE, 2, &sine(500.0, RATE, 2, 0, RATE as usize * 20, 0.3));
+    let open = Arc::new(AtomicBool::new(false));
+    let server = held_server(&b, open.clone());
+    let late =
+        QueueItem { source: server.url("/b.wav"), duration_ms: Some(60_000), ..item("b", Path::new("")) };
+    let (engine, events, _, pump) = driven_engine();
+    engine.set_test_planner(Some(length_telling_plan));
+    engine.set_crossfade(8_000).unwrap();
+    engine
+        .set_automix(crate::automix::AutomixSettings { smart_transitions: true, ..Default::default() })
+        .unwrap();
+    engine.set_song_profile("a".into(), Some(profile_of(24_000, 0))).unwrap();
+    engine.set_song_profile("b".into(), Some(profile_of(20_000, 0))).unwrap();
+    engine.load(vec![item("a", &a), late], 0, 6_000, true).unwrap();
+    // 4 s on, 14 s from A's end, B has not opened and nothing is decided.
+    for _ in 0..400 {
+        pump.play();
+    }
+    assert!(!server.asked().is_empty(), "B was asked for");
+    let early = events.find(|e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    assert!(early.is_none(), "decided before B opened: {early:?}");
+    open.store(true, Ordering::Release);
+    let planned =
+        play_until(&pump, &events, "plan", 600, |e| matches!(e, EngineEvent::TransitionPlanned { .. }));
+    let EngineEvent::TransitionPlanned { reason, .. } = planned else { unreachable!() };
+    assert!(reason.contains("lengths 24000 and 20000"), "{reason}");
     engine.shutdown();
 }
 
