@@ -5,7 +5,6 @@ import app.winters.octo.ui.nav.FamilyRoute
 import app.winters.octo.family.family
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
@@ -63,6 +62,7 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.serverupdate.upToDateLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
+import app.winters.octo.ui.common.AnswerRow
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.rememberCopyNoticeAsk
@@ -345,10 +345,11 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
         PasswordInput(draft.new, "New password") { draft = draft.copy(new = it); problem = null }
         PasswordInput(draft.confirm, "New password again", last = true, onDone = ::change) { draft = draft.copy(confirm = it); problem = null }
         problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            AccentButton("Change password", onClick = ::change, loading = busy)
-            GlazeButton("Cancel", onClick = close, enabled = !busy)
-        }
+        AnswerRow(
+            main = { AccentButton("Change password", onClick = ::change, loading = busy) },
+            other = { GlazeButton("Cancel", onClick = close, enabled = !busy) },
+            gap = 12.dp,
+        )
     }
 }
 

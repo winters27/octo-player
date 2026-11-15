@@ -698,7 +698,7 @@ private fun calloutTarget(host: CalloutHost, group: LayoutCoordinates, gap: Int)
 // the animation is now, so content that shrinks under the scroll mid-way (a
 // part closing, which clamps the scroll) does not carry it past the target.
 // A drag still cancels it, as it cancels any scroll.
-private suspend fun ScrollState.glideTo(target: Int) {
+internal suspend fun ScrollState.glideTo(target: Int) {
     scroll {
         animate(value.toFloat(), target.toFloat(), animationSpec = spring()) { now, _ -> scrollBy(now - value) }
     }

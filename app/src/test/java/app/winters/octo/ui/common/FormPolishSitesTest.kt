@@ -89,4 +89,19 @@ class FormPolishSitesTest {
         assertFalse(screen.contains("topFade("))
         assertTrue(screen.contains("fade = with(density) { BottomFade.roundToPx() },"))
     }
+
+    // Every sign-in pop-up that pairs a lit answer with Cancel draws the two
+    // through the one answer row (side by side while they fit, stacked
+    // otherwise): the questions (Trust, Sign out, Remove) and Change
+    // password, whose form cannot be drawn without its server. Red when
+    // either goes back to a plain Row, where large text cuts Cancel.
+    @Test
+    fun everySignInPopupsAnswersShareOneRow() {
+        val question = between(source("ui/common/PopupForms.kt"), "fun PopupQuestion(", "\n}\n")
+        assertTrue(question, question.contains("AnswerRow(\n            main = { AccentButton(confirm, onClick = onConfirm) },\n            other = { GlazeButton(cancel, onClick = onCancel) },"))
+        assertFalse(question, question.contains("Row(Modifier"))
+        val password = between(source("ui/settings/ServerPage.kt"), "private fun PasswordForm(", "\n}\n")
+        assertTrue(password, password.contains("AnswerRow(\n            main = { AccentButton(\"Change password\", onClick = ::change, loading = busy) },\n            other = { GlazeButton(\"Cancel\", onClick = close, enabled = !busy) },"))
+        assertFalse(password, password.contains("Row(horizontalArrangement"))
+    }
 }
