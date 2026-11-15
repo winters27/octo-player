@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -201,7 +202,7 @@ private fun ColumnScope.CertificatePassword(app: AppState, form: SignInForm, pat
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            AccentButton(SignInWords.CERT_PASSWORD_USE, ::use, enabled = password.isNotEmpty(), loading = busy, size = ButtonSize.Medium)
+            AccentButton(SignInWords.CERT_PASSWORD_USE, ::use, Modifier.widthIn(min = SheetMainButton), enabled = password.isNotEmpty(), loading = busy, size = ButtonSize.Medium)
         }
     }
 }

@@ -38,7 +38,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -46,7 +45,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
@@ -141,6 +142,10 @@ internal val CalloutEnd = 8.dp
 // what runs on past them.
 internal val PageFade = 24.dp
 internal val SheetFade = 12.dp
+
+// The least width of a sheet's or pop-up's main button, so a short word
+// ("Add", "Save", "Use") never makes it narrower than Cancel beside it.
+internal val SheetMainButton = 96.dp
 
 // The least of a choice row a value may take beside its name.
 private const val VALUE_SHARE = 0.45f
@@ -482,9 +487,21 @@ internal fun AdvancedHead(open: Boolean, onClick: () -> Unit) {
             Txt(SignInWords.ADVANCED, FormType.group, OctoColors.TextPrimary)
             Txt(SignInWords.ADVANCED_LINE, FormType.description, OctoColors.TextSecondary, maxLines = twoLines())
         }
-        Glyph(OctoIcons.Chevron, Modifier.alignBy { it.measuredHeight / 2 + caps }.rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
+        Glyph(
+            OctoIcons.Chevron,
+            Modifier.alignBy { it.measuredHeight / 2 + caps }.graphicsLayer {
+                rotationZ = turn
+                transformOrigin = CaretInk
+            },
+            size = IconSize.Toolbar,
+            tint = OctoColors.TextSecondary,
+        )
     }
 }
+
+// The middle of the caret's ink: Phosphor's caret-right sits from 88 to
+// 184 of its 256 box, so it turns about there and stays on its line.
+private val CaretInk = TransformOrigin(136f / 256f, 0.5f)
 
 // A choice: its name, the line under it, and the chosen option's words at
 // the row's end (under the name when the two do not fit side by side).
@@ -523,7 +540,15 @@ internal fun <T> ChoiceFormRow(
             horizontalArrangement = Arrangement.spacedBy(Space.M),
         ) {
             Box(Modifier.weight(1f).alignBy(FirstBaseline)) { NameAndValue(title, description, value) }
-            Glyph(OctoIcons.Chevron, Modifier.alignBy { it.measuredHeight / 2 + caps }.rotate(if (open) 270f else 90f), size = IconSize.Table, tint = OctoColors.TextSecondary)
+            Glyph(
+                OctoIcons.Chevron,
+                Modifier.alignBy { it.measuredHeight / 2 + caps }.graphicsLayer {
+                    rotationZ = if (open) 270f else 90f
+                    transformOrigin = CaretInk
+                },
+                size = IconSize.Table,
+                tint = OctoColors.TextSecondary,
+            )
         }
         if (open) {
             Column(Modifier.fillMaxWidth().padding(start = Space.M, end = Space.M, bottom = Space.M).selectableGroup()) {
@@ -608,12 +633,16 @@ private fun ChoiceOption(text: String, helper: String?, chosen: Boolean, pick: (
 }
 
 // Where the parts a callout brings into view are: the sign-in page group,
-// the Special setups group and the API key row.
+// the Special setups group and the API key row. Also where Advanced's
+// groups are, and whether Advanced was just opened from its head, so its
+// first group is brought into view once.
 @Stable
 internal class FormPlaces {
     var gateway by mutableStateOf<LayoutCoordinates?>(null)
     var special by mutableStateOf<LayoutCoordinates?>(null)
     var key by mutableStateOf<LayoutCoordinates?>(null)
+    var advanced by mutableStateOf<LayoutCoordinates?>(null)
+    var openedFromHead = false
 }
 
 // Whether a field took the keyboard while a callout waited, so the callout
