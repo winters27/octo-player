@@ -266,11 +266,10 @@ fun AppState.openJoinLink(url: String) {
 // Opens a family link, from a launch, the clipboard or a pasted link:
 // signed out, the sign-in page fills in; signed in, a sheet does the same,
 // and the link's server becomes the one in use once signed in. A link never
-// replaces a sign-in that is open (running, a question waiting, or a
-// sign-up or sealed sign-in held): signed out, or while a switch from the
-// page is on its way, the page's link note says so; signed in, the open
-// sheet's link note and the notice say so, the notice with Use it, which
-// opens the link again from here.
+// replaces a sign-in that is open (running, a question waiting, a sign-up
+// or sealed sign-in held, or a switch on its way): signed out, the page's
+// link note says so; signed in, the open sheet's link note and the notice
+// say so, the notice with Use it, which opens the link again from here.
 fun AppState.openFamilyLink(link: FamilyLink) {
     if (connection == null) {
         val form = signInForm
@@ -281,9 +280,9 @@ fun AppState.openFamilyLink(link: FamilyLink) {
         form.take(link)
         return
     }
-    val open = popups.request
-    if (open != null && open.open()) {
-        open.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+    val open = popups.request?.takeIf { it.open() }
+    if (open != null || switching != null) {
+        open?.noteLink(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
         notice = SignInWords.LINK_WHILE_SIGN_IN_OPEN
         noticeDetail = null
         noticeAction = NoticeAction(SignInWords.LINK_WHILE_SIGN_IN_OPEN, "Use it") { openFamilyLink(link) }
@@ -306,7 +305,8 @@ fun AppState.openFamilyLink(link: FamilyLink) {
 
 // The sheet a link opens while signed in: the link's card and Advanced
 // scroll; the result line and the buttons stay at its foot. A certificate
-// the system does not trust is asked about in its place.
+// the system does not trust is asked about in its place. Nothing goes while
+// a switch is on its way.
 @Composable
 private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -323,7 +323,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
         }
     }
     fun go() {
-        if (form.busy) return
+        if (form.busy || app.switching != null) return
         form.sending()
         form.busy = true
         form.waiting = form.handOver != null && form.received == null
@@ -406,7 +406,7 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
         }
     }
-    PopupPadding { LinkFooter(form, ::go, onLeave = { if (form.invite != null) form.leaveLink() else if (!form.committing) close() }, onClose = { if (!form.committing) close() }) }
+    PopupPadding { LinkFooter(form, ::go, onLeave = { if (form.invite != null) form.leaveLink() else if (!form.committing) close() }, held = app.switching != null, onClose = { if (!form.committing) close() }) }
 }
 
 // The part of the sign-in a family link fills, as the page's main card:
@@ -505,9 +505,9 @@ internal fun LinkCard(
 // is held, which only the password sign-in leaves; the way to that sign-in
 // sits under the buttons on their right edge, as Paste a family link does.
 // With anything else Cancel leaves the link (`onLeave`). Nothing leaves
-// while the request commits, and nothing goes while `held` (a switch from
-// the page on its way). The page draws it in its card; the sheet keeps it
-// under its scrolling part.
+// while the request commits, and nothing goes while `held` (a switch on its
+// way). The page draws it in its card; the sheet keeps it under its
+// scrolling part.
 @Composable
 internal fun ColumnScope.LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit, held: Boolean = false, onClose: (() -> Unit)? = null) {
     val invite = form.invite

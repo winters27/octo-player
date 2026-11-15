@@ -32,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
@@ -206,8 +207,8 @@ val PopupMaxHeight = 560.dp
 // Shows floating glass pop-ups over the whole window: menus at the pointer,
 // small forms, song details. One shows at a time, and a new one replaces
 // the old, unless it is kept over it (`keepUnder`, a sheet's certificate
-// asking for its password): the old one then waits as it is, out of sight,
-// and comes back once the new one closes.
+// asking for its password, while that sheet is the one on top): the old one
+// then waits as it is, out of sight, and comes back once the new one closes.
 @Stable
 class PopupHost {
     var request by mutableStateOf<PopupRequest?>(null)
@@ -235,9 +236,10 @@ class PopupHost {
     // it but its own buttons) and when a sign-in is open in it (`open`,
     // then a link must not replace it), where a refused link's words go
     // (`noteLink`), and whether a family link opened it (`link`). A question
-    // a pop-up asks on its way (`keepUnder`) keeps that pop-up under it
-    // rather than replacing it, and `returnTo` takes the keyboard once it
-    // closes.
+    // a pop-up asks on its way (`keepUnder`, that pop-up's own request) keeps
+    // that pop-up under it rather than replacing it, while it is still the
+    // one on top; whatever else is on top by then is replaced. `returnTo`
+    // takes the keyboard once it closes.
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
@@ -249,12 +251,12 @@ class PopupHost {
         open: () -> Boolean = { false },
         noteLink: (String) -> Unit = {},
         link: Boolean = false,
-        keepUnder: Boolean = false,
+        keepUnder: PopupRequest? = null,
         returnTo: FocusRequester? = null,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
         if (this.busy) return
-        val under = if (keepUnder) request else null
+        val under = keepUnder?.takeIf { it === request }
         request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link, under, returnTo)
     }
 
@@ -300,6 +302,9 @@ class PopupHost {
 }
 
 val LocalPopups = staticCompositionLocalOf { PopupHost() }
+
+// The pop-up the content under it is drawn in; none on a page.
+val LocalPopupRequest = staticCompositionLocalOf<PopupRequest?> { null }
 
 private const val POPUP_MS = OctoDuration.Hover
 
@@ -473,7 +478,7 @@ private fun PopupCard(host: PopupHost, request: PopupRequest, backdrop: HazeStat
                         .then(if (request.scrollsItself) Modifier else Modifier.scrollbar(scroll).verticalScroll(scroll))
                         .padding(vertical = 6.dp),
                 ) {
-                    request.content(this) { host.close(request) }
+                    CompositionLocalProvider(LocalPopupRequest provides request) { request.content(this) { host.close(request) } }
                 }
             }
         },

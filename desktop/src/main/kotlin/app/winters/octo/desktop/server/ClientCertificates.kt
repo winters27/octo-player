@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.server
 
 import app.winters.octo.audio.ClientCertificate
+import app.winters.octo.audio.clientIdentityProblem
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.fingerprint
 import app.winters.octo.connection.mask
@@ -203,8 +204,7 @@ object CertificateWords {
 
 // Opens a PKCS #12 file with its password: the key entry that may sign in
 // a client, its chain, and the key as the audio engine takes it. `problem`
-// is the engine's own check of that key; it says null when there is no
-// engine to ask.
+// is the engine's own check of that key (engineKeyProblem).
 fun openCertificate(
     bytes: ByteArray,
     password: String,
@@ -249,6 +249,18 @@ fun openCertificate(
     val engineKey = engineKeyOf(key, leaf) ?: return CertificateOpened.Refused(SignInWords.CERT_KEY_KIND)
     if (problem(chain.map(X509Certificate::getEncoded), engineKey) != null) return CertificateOpened.Refused(SignInWords.CERT_KEY_KIND)
     return CertificateOpened.Found(LoadedCertificate(name, key, chain, engineKey))
+}
+
+// Why the audio engine could not sign with this chain (DER, the client's own
+// first) and PKCS#8 DER key, or null when it can: its library's own answer,
+// which needs no engine open (a P-521 key, RSA under 2048 bits and RSA-PSS
+// open in the JDK, yet the engine cannot sign with them). Where the library
+// will not load, Octo plays through the silent player, which signs nothing,
+// so every key is taken.
+fun engineKeyProblem(chain: List<ByteArray>, key: ByteArray): String? = try {
+    clientIdentityProblem(chain, key)
+} catch (e: LinkageError) {
+    null
 }
 
 // Client sign-in, and any use at all, as extended key usages name them.
@@ -393,10 +405,6 @@ class EngineIdentity {
             givenKey = null
         }
     }
-
-    // What the engine says about a key it would be given, or null when it
-    // takes it, or when no engine is attached (the silent player).
-    fun problemWith(chain: List<ByteArray>, key: ByteArray): String? = synchronized(this) { engine }?.clientIdentityProblem(chain, key)
 
     override fun toString() = "EngineIdentity(given=${givenKey != null})"
 }

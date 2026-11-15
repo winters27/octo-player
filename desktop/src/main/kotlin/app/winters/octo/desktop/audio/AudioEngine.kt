@@ -16,7 +16,6 @@ import app.winters.octo.audio.TrustedCertificate
 import app.winters.octo.audio.OutputDevice as EngineDevice
 import app.winters.octo.audio.OutputFormat as EngineFormat
 import app.winters.octo.audio.RepeatMode as EngineRepeat
-import app.winters.octo.audio.clientIdentityProblem as engineIdentityProblem
 
 // Where the engine's clock says the listener is: which queue item, how far
 // in (with a fraction, for word-by-word lyrics), and its length when known.
@@ -104,10 +103,6 @@ interface AudioEngine : AutoCloseable {
     // next connection on, or none with null. One the engine cannot present
     // throws EngineException, and none is offered then.
     fun setClientCertificate(certificate: ClientCertificate?)
-
-    // Why the engine could not present this chain (DER, the client's own
-    // first) with this PKCS#8 DER key, or null when it can.
-    fun clientIdentityProblem(chain: List<ByteArray>, key: ByteArray): String?
 }
 
 // The Rust engine behind the interface. Every call returns at once; the
@@ -208,9 +203,6 @@ class NativeAudioEngine(private val engine: Engine) : AudioEngine {
     }
 
     override fun setClientCertificate(certificate: ClientCertificate?) = ifOpen(Unit) { engine.setClientCertificate(certificate) }
-
-    // Asked of the engine's library, which needs no engine open.
-    override fun clientIdentityProblem(chain: List<ByteArray>, key: ByteArray): String? = engineIdentityProblem(chain, key)
 
     override fun close() {
         if (closed) return

@@ -37,9 +37,6 @@ class FakeEngine : AudioEngine {
     var pins: Map<String, String>? = null
     var certificate: ClientCertificate? = null
 
-    // What clientIdentityProblem answers.
-    var identityProblem: String? = null
-
     // The profiles handed over, by queue item id.
     val profiles = java.util.concurrent.ConcurrentHashMap<String, SongProfile>()
 
@@ -155,8 +152,6 @@ class FakeEngine : AudioEngine {
         this.certificate = certificate
         calls += if (certificate == null) "certificate none" else "certificate ${certificate.chain.size}"
     }
-
-    override fun clientIdentityProblem(chain: List<ByteArray>, key: ByteArray): String? = identityProblem
 
     override fun close() {}
 }

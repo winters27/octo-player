@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -28,8 +29,10 @@ import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.LocalPopupRequest
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
+import app.winters.octo.design.PopupRequest
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
@@ -62,6 +65,8 @@ import java.time.format.FormatStyle
 @Composable
 internal fun CertificateRow(app: AppState, form: SignInForm, replacingId: String?, url: HttpUrl?, home: HttpUrl?) {
     val scope = rememberCoroutineScope()
+    val choose = LocalChooseCertificateFile.current
+    val opener = LocalPopupRequest.current
     val shown = app.accounts.certificateShown(form.certificateDraft, replacingId, url, home)
     val sends = (shown as? CertificateShown.Sends)?.choice
     // A certificate shown that is not read yet is read now; an answer for
@@ -87,7 +92,7 @@ internal fun CertificateRow(app: AppState, form: SignInForm, replacingId: String
             GlazeCapsule(
                 null,
                 if (name == null) SignInWords.CERT_CHOOSE else SignInWords.CERT_CHANGE,
-                { chooseCertificate(app, form, scope) },
+                { choose(app.os)?.let { openChosenCertificate(app, form, it.absolutePath, scope, opener) } },
                 Modifier.focusRequester(form.certificateButton),
                 enabled = !form.certificateOpening,
                 height = ControlHeight.M,
@@ -133,23 +138,33 @@ internal fun chooseCertificateFile(os: DesktopOs): File? {
     return File(dialog.directory, name)
 }
 
-// Opens a chosen file off the window's thread, with an empty password
-// first; only a file that needs one asks for it.
-private fun chooseCertificate(app: AppState, form: SignInForm, scope: CoroutineScope) {
-    val file = chooseCertificateFile(app.os) ?: return
-    val path = file.absolutePath
+// The window the row's Choose picks a file in: the system's own, unless a
+// test gives one of its own.
+internal val LocalChooseCertificateFile = staticCompositionLocalOf<(DesktopOs) -> File?> { ::chooseCertificateFile }
+
+// Opens a file chosen on the row, with an empty password first; only a
+// file that needs one asks for it, over `opener` (the pop-up the row is
+// drawn in, none on the page). The file is read and opened off the window's
+// thread, in the row's `scope`. Choose is off while it opens and on again
+// however the opening ends, a scope ended with the row (Advanced closed)
+// included; a newer opening, or a link that started the form over, owns
+// the flag from then on.
+internal fun openChosenCertificate(app: AppState, form: SignInForm, path: String, scope: CoroutineScope, opener: PopupRequest?) {
     val turn = Any()
     form.certificateTurn = turn
     form.certificateOpening = true
     form.certificateProblem = null
     scope.launch {
-        val opened = app.accounts.openPicked(path, "")
-        if (form.certificateTurn !== turn) return@launch
-        form.certificateOpening = false
-        when {
-            opened is CertificateOpened.Found -> form.useCertificate(PickedCertificate(path, "", opened.certificate))
-            opened is CertificateOpened.Refused && opened.wrongPassword -> askCertificatePassword(app, form, path, turn)
-            opened is CertificateOpened.Refused -> form.certificateProblem = opened.words
+        try {
+            val opened = app.accounts.openPicked(path, "")
+            if (form.certificateTurn !== turn) return@launch
+            when {
+                opened is CertificateOpened.Found -> form.useCertificate(PickedCertificate(path, "", opened.certificate))
+                opened is CertificateOpened.Refused && opened.wrongPassword -> askCertificatePassword(app, form, path, turn, opener)
+                opened is CertificateOpened.Refused -> form.certificateProblem = opened.words
+            }
+        } finally {
+            if (form.certificateTurn === turn) form.certificateOpening = false
         }
     }
 }
@@ -157,13 +172,16 @@ private fun chooseCertificate(app: AppState, form: SignInForm, scope: CoroutineS
 // Asks for the password the picked file was saved with, in the middle of the
 // window, drawn as a sheet as the server sheets are: the pop-up gives the
 // field the keyboard once the sheet's rows are drawn. The page behind is
-// shaded as under every sheet. Asked from a server sheet, it keeps that
-// sheet under it, which comes back as it was once the ask closes, however it
-// closes; the keyboard then goes back to the row's Choose or Change.
-internal fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any) {
+// shaded as under every sheet. Asked from a pop-up (`opener`, a server
+// sheet) that is still the one on top, it keeps that pop-up under it, which
+// comes back as it was once the ask closes, however it closes; the keyboard
+// then goes back to the row's Choose or Change. Anything else on top by then
+// (a menu opened while the file was read) is replaced, as any sheet
+// replaces it.
+internal fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any, opener: PopupRequest?) {
     val opening = Any()
     val first = FocusRequester()
-    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true, first = first, keepUnder = true, returnTo = form.certificateButton) { close ->
+    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true, first = first, keepUnder = opener, returnTo = form.certificateButton) { close ->
         key(opening) { CompositionLocalProvider(LocalInSheet provides true) { CertificatePassword(app, form, path, turn, first, close) } }
     }
 }

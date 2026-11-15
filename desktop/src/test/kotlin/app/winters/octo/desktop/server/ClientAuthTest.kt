@@ -215,21 +215,44 @@ class ClientAuthTest {
         setup.accounts.edit(first.connection.server.id, SignInRequest(server.address, "winters", "", certificate = use("second-rsa.p12"))) as SignInOutcome.Done
         val before = setup.accounts.security.staleRetries.get()
         server.leaves.clear()
-        withContext(Dispatchers.IO) { http.newCall(Request(server.url().resolve("rest/ping")!!)).execute().close() }
+        val answered = withContext(Dispatchers.IO) { runCatching { http.newCall(Request(server.url().resolve("rest/ping")!!)).execute().close() } }
+        assertTrue("the next call is answered: ${answered.exceptionOrNull()}", answered.isSuccess)
         assertEquals(listOf<String?>(second), server.leaves.toList())
         assertEquals(1, setup.accounts.security.staleRetries.get() - before)
         assertEquals("slow", slow.await())
     }
 
-    // Two ports of one host: only the server's own port gets its certificate.
+    // Two ports of one host: only the server's own port gets its certificate,
+    // and the other answers. Red when the key manager offers it to the other
+    // port: the identity check then turns the call down, so it is never
+    // answered.
     @Test
     fun anotherPortOfTheSameHostGetsNone() = runTest {
         val server = serve()
         val otherPort = serve(Auth.Wanted)
         val setup = Setup()
         setup.accounts.signIn(SignInRequest(server.address, "winters", "pw", certificate = use("rsa2048.p12"))) as SignInOutcome.Done
-        withContext(Dispatchers.IO) { setup.http.newCall(Request(otherPort.url().resolve("rest/ping")!!)).execute().close() }
+        val answered = withContext(Dispatchers.IO) { runCatching { setup.http.newCall(Request(otherPort.url().resolve("rest/ping")!!)).execute().use { it.code } } }
+        assertEquals("the other port answers: ${answered.exceptionOrNull()}", 200, answered.getOrNull())
         assertEquals(listOf<String?>(null), otherPort.leaves.toList())
+    }
+
+    // The key manager names its certificate only for a socket to one of its
+    // own origins; asked over a socket to another port of the host, or one
+    // it knows nothing of, it names none. Red when the origin gate is left
+    // out.
+    @Test
+    fun theKeyManagerOffersItsCertificateOnlyToItsOwnOrigins() {
+        val opened = openCertificate(cert("rsa2048.p12").readBytes(), PASSWORD, "rsa2048.p12", CertFixtures.NOW) { _, _ -> null }
+        val identity = KeyIdentity((opened as CertificateOpened.Found).certificate)
+        val own = TlsOrigin("music.test", 443)
+        val ownSocket = java.net.Socket()
+        val otherSocket = java.net.Socket()
+        val marks = mapOf(ownSocket to SocketMark(own), otherSocket to SocketMark(TlsOrigin("music.test", 8443)))
+        val keys = HostKeyManager(identity, { setOf(own) }, { marks[it] }) { _, _, _ -> }
+        assertEquals("its own origin", identity.alias, keys.chooseClientAlias(arrayOf("RSA"), null, ownSocket))
+        assertNull("another port of the host", keys.chooseClientAlias(arrayOf("RSA"), null, otherSocket))
+        assertNull("a socket it knows nothing of", keys.chooseClientAlias(arrayOf("RSA"), null, java.net.Socket()))
     }
 
     @Test
@@ -264,7 +287,8 @@ class ClientAuthTest {
             http.connectionPool.evictAll()
             change = { setup.accounts.security.configure(server.url(), null, emptyMap(), b) }
             server.leaves.clear()
-            withContext(Dispatchers.IO) { http.newCall(Request(server.url().resolve("rest/ping")!!)).execute().close() }
+            val answered = withContext(Dispatchers.IO) { runCatching { http.newCall(Request(server.url().resolve("rest/ping")!!)).execute().close() } }
+            assertTrue("$tls: the call is answered: ${answered.exceptionOrNull()}", answered.isSuccess)
             assertEquals(tls.toString(), listOf<String?>(second), server.leaves.toList())
         }
     }

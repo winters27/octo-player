@@ -263,6 +263,10 @@ class Accounts(
     private val clock: () -> Instant = Instant::now,
     // How long reading a certificate file may take.
     certificateReadMs: Long = CERT_READ_MS,
+    // Whether the audio engine can sign with a certificate's key: its own
+    // library, asked with no engine open, so the start checks the saved
+    // certificate before the engine is attached; the tests give their own.
+    private val engineCheck: (chain: List<ByteArray>, key: ByteArray) -> String? = ::engineKeyProblem,
 ) {
     // What a try at a server found, or why it failed. `tried` is the client
     // certificate it sent and how loading it went.
@@ -962,12 +966,13 @@ class Accounts(
     }
 
     // Opens a file the person just chose, with `password` (the form tries an
-    // empty one first): the certificate, or why not.
+    // empty one first): the certificate, or why not. The file is opened off
+    // the caller's thread, since its key's password check takes a while.
     suspend fun openPicked(path: String, password: String): CertificateOpened {
         val name = certificateName(path)
         val bytes = readBytes(path).getOrElse { return CertificateOpened.Refused(unreadableRead(it, name).words) }
             ?: return CertificateOpened.Refused(CertificateWords.notFound(name))
-        return openCertificate(bytes, password, name, clock(), engineIdentity::problemWith)
+        return withContext(Dispatchers.Default) { openCertificate(bytes, password, name, clock(), engineCheck) }
     }
 
     // A client for checking a server at these addresses (the main one
@@ -1036,7 +1041,7 @@ class Accounts(
     private fun loadSavedNow(id: String, file: CertFile): CertificateLoad {
         val item = certItemNow(id).getOrElse { return storeUnread(it) }
         if (item == null || item.path != file.path) return CertificateLoad.Unreadable(CertificateWords.needsPassword(file.name), again = true)
-        return opening(file.name, item.password, readBytesNow(file.path))
+        return openingNow(file.name, item.password, readBytesNow(file.path))
     }
 
     private suspend fun readBytes(path: String): Result<ByteArray?> {
@@ -1060,11 +1065,16 @@ class Accounts(
     }
 
     // Opens the bytes of a file named `name` with `password`: Found, or
-    // Unreadable with why. No bytes is a read past the bound.
-    private fun opening(name: String, password: String, read: Result<ByteArray?>): CertificateLoad {
+    // Unreadable with why. No bytes is a read past the bound. Off the
+    // caller's thread, since its key's password check takes a while.
+    private suspend fun opening(name: String, password: String, read: Result<ByteArray?>): CertificateLoad =
+        withContext(Dispatchers.Default) { openingNow(name, password, read) }
+
+    // The same, on this thread, for the start.
+    private fun openingNow(name: String, password: String, read: Result<ByteArray?>): CertificateLoad {
         val bytes = read.getOrElse { return unreadableRead(it, name) }
             ?: return CertificateLoad.Unreadable(CertificateWords.notFound(name), again = false)
-        return when (val opened = openCertificate(bytes, password, name, clock(), engineIdentity::problemWith)) {
+        return when (val opened = openCertificate(bytes, password, name, clock(), engineCheck)) {
             is CertificateOpened.Found -> CertificateLoad.Found(opened.certificate)
             is CertificateOpened.Refused -> CertificateLoad.Unreadable(if (opened.wrongPassword) CertificateWords.needsPassword(name) else opened.words, again = true)
         }
