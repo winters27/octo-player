@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.FrameSize
@@ -28,6 +29,7 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.desktop.settings.name
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.FamilyHandOverLink
 import app.winters.octo.subsonic.FamilyInviteLink
@@ -1105,6 +1107,28 @@ class SignInLayoutTest {
         }
     }
 
+    // The pop-ups that ask for a password give the keyboard to their first
+    // field once their group's rows are drawn, the second opened straight
+    // after the first closes: Change password to the current password, the
+    // certificate's ask to its password. Red with each sheet asking for it
+    // itself as it is composed, before the group's rows (laid out in their
+    // own pass) hold the field.
+    @Test(timeout = 120_000)
+    fun thePasswordPopupsGiveTheKeyboardToTheirFirstField() {
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { changePassword(s.app) }
+            s.settle(600).close()
+            assertEquals("Change password", "Current password", s.focused()?.name())
+            s.onUi {
+                s.app.popups.close()
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+            }
+            s.settle(600).close()
+            assertEquals("the certificate's ask", SignInWords.CERT_PASSWORD_FIELD, s.focused()?.name())
+        }
+    }
+
     // Pictures for the polish pass, in desktop/build/shots. They run only
     // with OCTO_SHOTS=1, and each first checks the state it pictures.
 
@@ -1509,26 +1533,41 @@ class SignInLayoutTest {
         settle(600).close()
     }
 
-    // In a tall window with Advanced open and the card wheeled back down to
-    // its pin (opening lifts it), the wheel's first turns toward the end
-    // lift the whole card, its words going up with it and never moving
-    // inside it, until its top meets the window's top pad; only then do the
-    // words move inside it. Over the card and beside it alike, the words
-    // move once for each pixel scrolled. Red with the card held at its pin,
-    // where the words move inside it from the first turn.
+    // Opens Advanced with a click in a tall window, where the open card
+    // glides up to sit balanced, then gives it more than fits (three headers
+    // and a sign-in page's two fields): the card stays where it sat, under
+    // the window's top pad, with its words running past the room. Gives where
+    // the card sat.
+    private fun A11yScene.balancedThenTall(): Float {
+        settle(600).close()
+        click(text(SignInWords.ADVANCED))
+        settle(600).close()
+        val balanced = cardTop()
+        tallAdvanced()
+        assertEquals("the card stays where it sat as rows are added", balanced, cardTop(), 1f)
+        assertTrue("it sits under the pad at $balanced", balanced > pagePad + 40f)
+        return balanced
+    }
+
+    // In a tall window with Advanced open and the card under the top pad
+    // (it sat balanced, then rows were added; a wheel turned back never takes
+    // an open card under its balanced place, so this is the one way there),
+    // the wheel's first turns toward the end lift the whole card, its words
+    // going up with it and never moving inside it, until its top meets the
+    // window's top pad; only then do the words move inside it. Over the card
+    // and beside it alike, the words move once for each pixel scrolled. Red
+    // with the card held where it rests, where the words move inside it from
+    // the first turn.
     @Test(timeout = 120_000)
     fun theWheelLiftsTheCardBeforeItsWordsMoveInsideIt() {
         page(height = 1_600).use { s ->
-            s.settle(600).close()
-            val pin = s.cardTop()
-            s.tallAdvanced()
+            val balanced = s.balancedThenTall()
             val title = s.text("Octo")
-            s.scrollToStart(title)
-            assertEquals("back at its pin", pin, s.cardTop(), 1f)
             val scroll = scrollOf(title)
             val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
-            assertTrue("more than fits once lifted: ${range.maxValue()} past a pin of $pin", range.maxValue() > pin - pagePad + 100f)
+            assertTrue("more than fits once lifted: ${range.maxValue() - range.value()} left past a card at $balanced", range.maxValue() - range.value() > balanced - pagePad + 100f)
             val rest = title.positionInRoot.y
+            val from = range.value()
             val inside = rest - s.cardTop()
             var turn = 0
             while (title.positionInRoot.y - s.cardTop() > inside - 100f) {
@@ -1537,7 +1576,7 @@ class SignInLayoutTest {
                 s.wheel(s.wheelSpot(turn), 1f, scroll)
                 val top = s.cardTop()
                 val y = title.positionInRoot.y
-                assertEquals("turn $turn: the words move once per pixel scrolled", rest - range.value(), y, 0.5f)
+                assertEquals("turn $turn: the words move once per pixel scrolled", rest - (range.value() - from), y, 0.5f)
                 if (top > pagePad + 0.5f) assertEquals("turn $turn: the card at $top lifts with its words still inside it", inside, y - top, 0.5f)
             }
             assertTrue("it took more than one turn", turn > 1)
@@ -1545,32 +1584,102 @@ class SignInLayoutTest {
         }
     }
 
-    // Turned back toward the start, the wheel brings the words home to the
-    // top of the lifted card first, and only then lowers the card, until it
-    // rests at its pin again. Red with the card held at its pin (it never
-    // lifts).
+    // Opened with a click in a tall window, the card glides up to sit
+    // balanced, and there it stays while Advanced is open: ten wheel turns
+    // back, over the card and over the page beside it, leave its top within 1
+    // of where the glide left it. Red with the scroll free to go back past
+    // that place, where the first turn lowers the card toward its rest (431
+    // of bare page over it at 1600).
     @Test(timeout = 120_000)
-    fun theWheelBackTakesTheWordsHomeThenLowersTheCardToItsPin() {
+    fun aWheelBackLeavesTheOpenCardWhereItsGlideEnded() {
         page(height = 1_600).use { s ->
             s.settle(600).close()
-            val pin = s.cardTop()
+            s.click(s.text(SignInWords.ADVANCED))
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            val (top, bottom) = s.cardEdges()
+            val (roomTop, roomBottom) = s.room()
+            assertEquals("balanced once the glide ends: ${top - roomTop} over, ${roomBottom - bottom} under", top - roomTop, roomBottom - bottom, 1f)
+            val scroll = scrollOf(s.text("Octo"))
+            for (turn in 1..10) {
+                s.wheel(s.wheelSpot(turn), -1f, scroll)
+                assertEquals("turn $turn back: the card's top", top, s.cardTop(), 1f)
+            }
+        }
+    }
+
+    // How many pixels of the card's bar lane (its right 14 columns, top to
+    // foot) change when the pointer moves over the middle of the card, from a
+    // frame with the pointer away from it.
+    private fun A11yScene.barShown(): Int {
+        val (top, bottom) = cardEdges()
+        val right = (width + 480) / 2
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(5f, height - 5f)) }
+        val hidden = settle(1_800)
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(width / 2f, (top + bottom) / 2f)) }
+        val shown = settle(300)
+        val before = Bitmap.makeFromImage(hidden)
+        val after = Bitmap.makeFromImage(shown)
+        var changed = 0
+        for (x in right - 14 until right) {
+            for (y in top.toInt() until bottom.toInt()) {
+                if (distance(before.getColor(x, y), after.getColor(x, y)) > 24.0) changed++
+            }
+        }
+        before.close()
+        after.close()
+        hidden.close()
+        shown.close()
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(5f, height - 5f)) }
+        return changed
+    }
+
+    // The balanced open card shows all its words, so a pointer moving over it
+    // wakes no thumb: the card's bar counts from where a scroll back stops,
+    // and from there the card fits. Red with the bar counting from the
+    // scroll's start (a thumb at 83% of the track, saying there is more above
+    // a card that shows everything).
+    @Test(timeout = 120_000)
+    fun theBalancedOpenCardWakesNoThumb() {
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(600).close()
+            val (top, bottom) = s.cardEdges()
+            val (roomTop, roomBottom) = s.room()
+            assertEquals("balanced: ${top - roomTop} over, ${roomBottom - bottom} under", top - roomTop, roomBottom - bottom, 1f)
+            assertEquals("pixels of a thumb over the balanced card", 0, s.barShown())
+        }
+    }
+
+    // With more than fits once lifted, the wheel turned back brings the words
+    // home to the top of the lifted card and stops there: on every turn the
+    // card's top stays at the window's top pad, and it never lowers toward its
+    // pin while Advanced is open. Red with the scroll free to go back past
+    // the lift, where the card comes down to its pin once the words are home.
+    @Test(timeout = 120_000)
+    fun theWheelBackTakesTheWordsHomeAndStopsAtThePad() {
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            val inside = s.text("Octo").positionInRoot.y - s.cardTop()
             s.tallAdvanced()
             val title = s.text("Octo")
             val scroll = scrollOf(title)
             val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
-            val inside = title.positionInRoot.y - s.cardTop()
             s.scrollToEnd(title)
             assertEquals("lifted to the pad", pagePad, s.cardTop(), 0.5f)
             var turn = 0
-            while (range.value() > 0f) {
-                check(turn < 80) { "the wheel stopped at ${range.value()}" }
+            var last = range.value()
+            var still = 0
+            while (still < 3) {
+                check(turn < 80) { "the wheel kept going at ${range.value()} of ${range.maxValue()}" }
                 turn++
                 s.wheel(s.wheelSpot(turn), -1f, scroll)
-                val top = s.cardTop()
-                if (top > pagePad + 0.5f) assertEquals("turn $turn: the words are home before the card at $top comes down", inside, title.positionInRoot.y - top, 0.5f)
+                assertEquals("turn $turn back: the card's top stays at the pad", pagePad, s.cardTop(), 0.5f)
+                still = if (abs(range.value() - last) < 0.5f) still + 1 else 0
+                last = range.value()
             }
-            assertEquals("back at its pin", pin, s.cardTop(), 1f)
-            assertEquals(inside, title.positionInRoot.y - s.cardTop(), 0.5f)
+            assertEquals("the words are home at the top of the card", inside, title.positionInRoot.y - s.cardTop(), 0.5f)
         }
     }
 
@@ -1633,27 +1742,125 @@ class SignInLayoutTest {
         }
     }
 
-    // The lift in a tall window: Advanced open with the card wheeled back
-    // to its pin, the card lifted half way, and lifted to the top with its
-    // words moved 120 inside it.
+    // The lift in a tall window: Advanced open with the card where it sat
+    // balanced before rows were added (under the top pad), the card lifted
+    // half way from there, and lifted to the top with its words moved 120
+    // inside it.
     @Test(timeout = 300_000)
     fun picturesOfTheLift() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         page(height = 1_600).use { s ->
-            s.settle(600).close()
-            val pin = s.cardTop()
-            s.tallAdvanced()
-            s.scrollToStart(s.text("Octo"))
-            assertEquals(pin, s.cardTop(), 1f)
+            val balanced = s.balancedThenTall()
             s.shot("polish-page-lift-rest")
             val title = s.text("Octo")
-            s.placeTop(title, title.positionInRoot.y - ((pin - pagePad) / 2f).toInt())
+            s.placeTop(title, title.positionInRoot.y - ((balanced - pagePad) / 2f).toInt())
             s.shot("polish-page-lift-half")
             val range = scrollOf(title).config[SemanticsProperties.VerticalScrollAxisRange]
             val inside = minOf(120f, range.maxValue() - range.value() - (s.cardTop() - pagePad))
             s.placeTop(title, title.positionInRoot.y - (s.cardTop() - pagePad) - inside)
             assertEquals(pagePad, s.cardTop(), 0.5f)
             s.shot("polish-page-lift-top")
+        }
+    }
+
+    // A wheel turned back on the open card: the balanced card in a 1600
+    // window after three turns back, at rest and with the pointer over it;
+    // and the card with more than fits, wheeled back from its end until the
+    // wheel moves nothing.
+    @Test(timeout = 300_000)
+    fun picturesOfTheWheelBack() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            s.click(s.text(SignInWords.ADVANCED))
+            s.settle(600).close()
+            val scroll = scrollOf(s.text("Octo"))
+            for (turn in 1..3) s.wheel(s.wheelSpot(turn), -1f, scroll)
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(5f, s.height - 5f)) }
+            s.shot("polish-page-open-1600-wheel-back", ms = 1_800)
+            val (top, bottom) = s.cardEdges()
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(s.width / 2f, (top + bottom) / 2f)) }
+            s.shot("polish-page-open-1600-pointer", ms = 300)
+        }
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            s.tallAdvanced()
+            val title = s.text("Octo")
+            val scroll = scrollOf(title)
+            val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+            s.scrollToEnd(title)
+            var turn = 0
+            var last = -1f
+            while (abs(range.value() - last) >= 0.5f && turn < 60) {
+                last = range.value()
+                turn++
+                s.wheel(s.wheelSpot(turn), -1f, scroll)
+            }
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(5f, s.height - 5f)) }
+            s.shot("polish-page-lift-wheel-back", ms = 1_800)
+        }
+    }
+
+    // The filled button off and ready: each light theme's and Octo's Add
+    // sheet before anything is typed and once the form is filled in.
+    @Test(timeout = 300_000)
+    fun picturesOfTheFilledButtonOffAndReady() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        signedIn().use { s ->
+            for (theme in listOf(ThemeChoice.Paper, ThemeChoice.Daylight, ThemeChoice.Octo)) {
+                s.onUi {
+                    s.app.popups.close()
+                    s.app.settings.pickTheme(theme)
+                }
+                s.settle(600).close()
+                s.onUi { addServer(s.app) }
+                s.shot("polish-button-off-${theme.name.lowercase()}")
+                s.type(s.named(SignInWords.SERVER_ADDRESS).single { it.inPopup() }, s.server.address)
+                s.type(s.named(SignInWords.USERNAME).single { it.inPopup() }, "winters")
+                s.type(s.named(SignInWords.PASSWORD).single { it.inPopup() }, "pw")
+                s.shot("polish-button-ready-${theme.name.lowercase()}")
+            }
+        }
+    }
+
+    // The pop-ups that ask for a password, as sheets: Change password and the
+    // certificate password's ask in Octo at the usual size and at 130%, on
+    // Paper, and each with its notes (a weak new password and the passwords
+    // not matching; a file that can't be opened).
+    @Test(timeout = 300_000)
+    fun picturesOfThePopupForms() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), reduceMotion = true, textScale = scale).use { s ->
+                val size = if (scale == 1f) "" else "-130"
+                s.onUi { changePassword(s.app) }
+                s.shot("polish-popup-change-password$size")
+                s.onUi {
+                    s.app.popups.close()
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                }
+                s.shot("polish-popup-certificate-password$size")
+                s.onUi { s.app.popups.close() }
+            }
+        }
+        signedIn().use { s ->
+            s.onUi { s.app.settings.pickTheme(ThemeChoice.Paper) }
+            s.settle(600).close()
+            s.onUi { changePassword(s.app) }
+            s.shot("polish-popup-change-password-paper")
+            s.type(s.named("Current password").single { it.inPopup() }, "pw")
+            s.type(s.named("New password").single { it.inPopup() }, "abc")
+            s.type(s.named("New password again").single { it.inPopup() }, "abd")
+            s.click(s.inPopup("Change password"))
+            s.shot("polish-popup-change-password-notes")
+            s.onUi {
+                s.app.popups.close()
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+            }
+            s.shot("polish-popup-certificate-password-paper")
+            s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
+            s.click(s.inPopup(SignInWords.CERT_PASSWORD_USE))
+            s.shot("polish-popup-certificate-password-error", ms = 1_800)
         }
     }
 
@@ -1704,28 +1911,33 @@ class SignInLayoutTest {
         }
     }
 
-    // The open pop-up's main button, named by its words, is 96 wide or more,
-    // the least a sheet's main button may be, and its foot still fits the pop-up:
-    // the button ends inside it, and Cancel (and Test connection before it)
-    // end before the next one starts.
+    // The open pop-up's main button, named by its words, is as wide as a
+    // sheet's main button may least be and never narrower than the Cancel
+    // beside it, and its foot still fits the pop-up: the button ends inside
+    // it, and Cancel (and Test connection before it) end before the next one
+    // starts.
     private fun A11yScene.mainButtonFits(words: String, how: String) {
         val button = generateSequence(inPopup(words)) { it.parent }.first { it.clickable }
         val popup = nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == POPUP_TAG }
         val left = button.positionInRoot.x
         val right = left + button.size.width
-        assertTrue("$words $how is ${button.size.width} wide", button.size.width >= 96)
+        assertTrue("$words $how is ${button.size.width} wide", button.size.width >= SheetMainButton.value)
         assertTrue("$words $how ends at $right, past the pop-up's ${popup.positionInRoot.x + popup.size.width}", right <= popup.positionInRoot.x + popup.size.width)
         val cancel = named("Cancel").single { it.inPopup() }
+        val cancelButton = generateSequence(cancel) { it.parent }.first { it.clickable }
+        assertTrue("$words $how is ${button.size.width}, narrower than Cancel's ${cancelButton.size.width}", button.size.width >= cancelButton.size.width)
         assertTrue("Cancel $how runs into $words", cancel.positionInRoot.x + cancel.size.width <= left)
         named("Test connection").singleOrNull { it.inPopup() }?.let { test ->
             assertTrue("Test connection $how runs into Cancel", test.positionInRoot.x + test.size.width <= cancel.positionInRoot.x)
         }
     }
 
-    // Every sign-in pop-up's main button is 96 wide or more, at the usual
-    // text size and at 130%, and its foot still fits: Add, Save and Sign in
-    // in the server sheets, Change password, the certificate password's Use,
-    // and Trust in the changed-certificate question. Red with the buttons
+    // Every sign-in pop-up's main button is 112 wide or more and never
+    // narrower than its Cancel, at the usual text size and at 130%, and its
+    // foot still fits: Add, Save and Sign in in the server sheets, Change
+    // password, the certificate password's Use it, and Trust in the
+    // changed-certificate question. Red with the buttons at least 96 (Add,
+    // Save and Sign in 96 beside a 98 or 99 Cancel at 130%), and with them
     // sized to their words (Add 50 wide beside an 80 Cancel).
     @Test(timeout = 240_000)
     fun everySignInPopupsMainButtonHasItsLeastWidth() {
@@ -1768,6 +1980,119 @@ class SignInLayoutTest {
                 s.mainButtonFits(SignInWords.TRUST_CONFIRM, how)
                 s.onUi { s.app.popups.close() }
             }
+        }
+    }
+
+    // How many rows the first letter of a line of words inks, as drawn: in
+    // the letter's own box where the laid-out text gives it, else in the
+    // first seven columns of the words (a page title's).
+    private fun capRows(image: Image, words: SemanticsNode): Int {
+        val laid = mutableListOf<TextLayoutResult>()
+        words.config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(laid)
+        val box = words.area()
+        val letter = laid.firstOrNull()?.getBoundingBox(0)
+        val area = if (letter == null) {
+            Area(box.left, box.top, box.left + 7, box.bottom)
+        } else {
+            Area(box.left + letter.left.toInt(), box.top + letter.top.toInt(), box.left + kotlin.math.ceil(letter.right).toInt(), box.top + kotlin.math.ceil(letter.bottom).toInt())
+        }
+        val rows = inkRows(image, area)
+        return rows.last() - rows.first() + 1
+    }
+
+    // Capitals that stand on the baseline, with nothing hanging under it.
+    private val standing = ('A'..'Z').toSet() - setOf('J', 'Q')
+
+    // The open pop-up's title is its loudest words: its capital stands taller
+    // than the capital starting any other words shown whole in it, as drawn.
+    // Words inside an entry (its hint, under the caret) are the entry's, not
+    // a level of the pop-up's.
+    private fun A11yScene.titleIsLoudest(title: String, how: String) {
+        val image = settle(700)
+        val entries = nodes().filter { it.config.contains(SemanticsProperties.EditableText) }.map { it.boundsInRoot }
+        val shown = nodes().filter { node ->
+            val words = node.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") { it.text }.orEmpty()
+            words.firstOrNull() in standing && node.inPopup() && node.size.height > 0 &&
+                node.boundsInRoot.height >= node.size.height - 0.5f && entries.none { it.contains(node.boundsInRoot.center) }
+        }
+        val head = shown.filter { node -> node.config[SemanticsProperties.Text].joinToString(" ") { it.text } == title }.minBy { it.positionInRoot.y }
+        val tall = capRows(image, head)
+        val others = (shown - head).map { node -> node.config[SemanticsProperties.Text].joinToString(" ") { it.text } to capRows(image, node) }
+        image.close()
+        assertTrue("$how: '$title' shows other words", others.isNotEmpty())
+        val next = others.maxBy { it.second }
+        println("TITLE $how '$title' $tall rows, next '${next.first.take(40)}' ${next.second}")
+        assertTrue("$how: '$title' capital is $tall rows, '${next.first}' ${next.second}", tall > next.second)
+    }
+
+    // Every sign-in pop-up's title is its loudest words, at the usual text
+    // size and at 130%: the three server sheets, Change password and the
+    // certificate password's ask (the form sheets' 24 bold title, 17 rows over
+    // 12 at the usual size), and the changed-certificate question (the
+    // question sheets' title, as Settings' own questions have). Red with the
+    // pop-ups that ask for a password titled by a menu's caption, no taller
+    // than the sentence and the buttons under it.
+    @Test(timeout = 240_000)
+    fun everySignInPopupsTitleIsItsLoudestWords() {
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), reduceMotion = true, textScale = scale).use { s ->
+                val how = "at ${scale}x"
+                val server = s.app.connection!!.server
+                s.onUi { addServer(s.app) }
+                s.titleIsLoudest("Add a server", how)
+                s.onUi {
+                    s.app.popups.close()
+                    editServer(s.app, server)
+                }
+                s.titleIsLoudest("Edit ${server.name}", how)
+                s.onUi {
+                    s.app.popups.close()
+                    signInTo(s.app, server)
+                }
+                s.titleIsLoudest("Sign in to ${server.name}", how)
+                s.onUi {
+                    s.app.popups.close()
+                    changePassword(s.app)
+                }
+                s.titleIsLoudest("Change password", how)
+                s.onUi {
+                    s.app.popups.close()
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                }
+                s.titleIsLoudest(SignInWords.CERT_PASSWORD_TITLE, how)
+                s.onUi {
+                    s.app.popups.close()
+                    askAboutChangedCertificate(s.app.popups, s.app.accounts.security, CertificateQuestion("music.example.com", "AB".repeat(32)))
+                }
+                s.titleIsLoudest(SignInWords.TRUST_CHANGED_TITLE, how)
+                s.onUi { s.app.popups.close() }
+            }
+        }
+    }
+
+    // A pop-up that asks for a password names each field once, over its
+    // entry in a group's row, and never again as the entry's own hint, which
+    // says the field is required: Change password's three fields and the
+    // certificate password's one. Red with the names repeated as their
+    // fields' hints ("Current password" over "Current password").
+    @Test(timeout = 120_000)
+    fun aPopupsFieldsSayTheirNamesOnce() {
+        signedIn().use { s ->
+            s.onUi { changePassword(s.app) }
+            s.settle(600).close()
+            for (name in listOf("Current password", "New password", "New password again")) {
+                assertEquals("'$name' shown", 1, s.withText(name).count { it.inPopup() })
+                assertEquals("an entry named '$name'", 1, s.named(name).count { it.inPopup() })
+            }
+            assertEquals("hints saying required", 3, s.withText(SignInWords.REQUIRED).count { it.inPopup() })
+            s.onUi {
+                s.app.popups.close()
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+            }
+            s.settle(600).close()
+            assertEquals("'${SignInWords.CERT_PASSWORD_FIELD}' shown", 1, s.withText(SignInWords.CERT_PASSWORD_FIELD).count { it.inPopup() })
+            assertEquals("its hint says required", 1, s.withText(SignInWords.REQUIRED).count { it.inPopup() })
+            assertEquals("the line under its name", 1, s.withText(SignInWords.CERT_PASSWORD_HINT).count { it.inPopup() })
         }
     }
 
@@ -1831,6 +2156,45 @@ class SignInLayoutTest {
         }
     }
 
+    // The rows of the card's bar lane where its resting thumb draws: the
+    // lane 4 to 7 in from the card's right edge standing 8 or more over the
+    // glass 15 to 18 in (where no words are) in lightness, between the ends
+    // of the bar's track. Drawn with the pointer away and the bar at rest.
+    private fun A11yScene.restingRows(): Int {
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(5f, height - 5f)) }
+        val image = settle(1_800)
+        val (top, bottom) = cardEdges()
+        val right = (width + 480) / 2
+        val bitmap = Bitmap.makeFromImage(image)
+        fun mean(from: Int, y: Int): Double = (from until from + 4).map { lightness(bitmap.getColor(it, y)) }.average()
+        val rows = (top.toInt() + 22 until bottom.toInt() - 22).count { y -> mean(right - 7, y) - mean(right - 18, y) >= 8.0 }
+        bitmap.close()
+        image.close()
+        return rows
+    }
+
+    // The card's resting thumb says there is more only while words are
+    // hidden past the card's own padding: none on the closed card at 130%
+    // text in a 900 window, whose words run past it by less than its 32 of
+    // padding, and there on the open card in that window, lifted with its
+    // words running on. Red with the thumb shown whenever the card runs past
+    // at all (a rail down the closed card's whole edge for about 1 of empty
+    // padding).
+    @Test(timeout = 120_000)
+    fun theRestingThumbShowsOnlyWhenWordsAreHidden() {
+        largerText().use { s ->
+            s.settle(600).close()
+            val range = scrollOf(s.text("Octo")).config[SemanticsProperties.VerticalScrollAxisRange]
+            assertTrue("the closed card runs past its view by ${range.maxValue()}, under its padding", range.maxValue() > 0f && range.maxValue() < 32f)
+            assertEquals("rows of a resting thumb on the closed card", 0, s.restingRows())
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            assertEquals("lifted to the pad", pagePad, s.cardTop(), 0.5f)
+            val open = s.restingRows()
+            assertTrue("rows of a resting thumb on the open card: $open", open > 50)
+        }
+    }
+
     // Opened, Advanced's chevron still sits on its title, and an open
     // choice's on its name: within 1 of the middle of their words' capitals
     // at the usual text size and at 130%. Red with the chevrons set a fixed
@@ -1888,6 +2252,114 @@ class SignInLayoutTest {
             assertTrue("Trust $trust:1 against the pop-up", trust >= 1.8)
             assertTrue("Try again ${Integer.toHexString(link)} against Sign in ${Integer.toHexString(plain)}", distance(link, plain) < 12.0)
         }
+    }
+
+    // CIELAB chroma under D65: how colored, 0 for a gray.
+    private fun chroma(c: Int): Double {
+        fun lin(v: Int): Double {
+            val x = v / 255.0
+            return if (x <= 0.04045) x / 12.92 else ((x + 0.055) / 1.055).pow(2.4)
+        }
+        val r = lin(c shr 16 and 0xFF)
+        val g = lin(c shr 8 and 0xFF)
+        val b = lin(c and 0xFF)
+        fun f(t: Double): Double = if (t > 0.008856) Math.cbrt(t) else 7.787 * t + 16.0 / 116.0
+        val x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047)
+        val y = f(0.2126 * r + 0.7152 * g + 0.0722 * b)
+        val z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883)
+        return sqrt((500 * (x - y)).pow(2) + (200 * (y - z)).pow(2))
+    }
+
+    // Words' contrast as drawn: what they sit on is the middle color, by
+    // luminance, of their box's edge, and the pixel standing furthest from it
+    // is a stem's full color.
+    private fun wordsContrast(image: Image, area: Area): Double {
+        val bitmap = Bitmap.makeFromImage(image)
+        val edge = ArrayList<Int>()
+        for (x in area.left until area.right) {
+            edge += bitmap.getColor(x, area.top)
+            edge += bitmap.getColor(x, area.bottom - 1)
+        }
+        for (y in area.top until area.bottom) {
+            edge += bitmap.getColor(area.left, y)
+            edge += bitmap.getColor(area.right - 1, y)
+        }
+        val under = edge.sortedBy { luminance(it) }[edge.size / 2]
+        var most = 1.0
+        for (y in area.top until area.bottom) for (x in area.left until area.right) most = maxOf(most, contrast(bitmap.getColor(x, y), under))
+        bitmap.close()
+        return most
+    }
+
+    // A filled button as drawn, found by its words: whether it is off, how
+    // far its fill stands off the surface at `surfaceX` level with its middle
+    // (its fill read 12 in from its left end), how colored the fill and that
+    // surface are, and its words' contrast on its fill.
+    private class ButtonSeen(val off: Boolean, val fill: Double, val fillChroma: Double, val surfaceChroma: Double, val words: Double) {
+        override fun toString() = "${if (off) "off" else "ready"}: fill %.2f:1 off the surface (chroma %.1f against %.1f), words %.2f:1".format(fill, fillChroma, surfaceChroma, words)
+    }
+
+    private fun A11yScene.buttonSeen(words: () -> SemanticsNode, surfaceX: Int): ButtonSeen {
+        val image = settle(700)
+        val label = words()
+        val button = generateSequence(label) { it.parent }.first { it.clickable }
+        val y = button.middle().toInt()
+        val surface = pixel(image, surfaceX, y)
+        val fill = pixel(image, button.positionInRoot.x.toInt() + 12, y)
+        val seen = ButtonSeen(button.config.contains(SemanticsProperties.Disabled), contrast(fill, surface), chroma(fill), chroma(surface), wordsContrast(image, label.area()))
+        image.close()
+        return seen
+    }
+
+    // A filled button that cannot be used yet reads as off, never as ready,
+    // on every theme: each theme's Add sheet with its Add before anything is
+    // typed, against the same Add once the form is filled in, and the
+    // sign-in page's Sign in (Octo's dark look on every theme) before and
+    // after. Off, its words read 3:1 or more on its own fill, as a label, and
+    // under the 4.5:1 of words that can be used; its fill stands 1.1 to 1.5
+    // off the surface round it (it shows as a button, faintly) and adds no
+    // color of its own (its chroma at most 6 over the surface's). Ready, the same
+    // button's fill stands 2:1 or more off that surface, with words 4.5:1 or
+    // more. Red with the whole button faded: on Paper white words at 2.5:1 on
+    // a pale accent fill 2.3:1 off the sheet.
+    @Test(timeout = 300_000)
+    fun aFilledButtonThatCannotBeUsedReadsOffOnEveryTheme() {
+        val problems = mutableListOf<String>()
+        fun judge(where: String, off: ButtonSeen, ready: ButtonSeen) {
+            println("OFF BUTTON $where: $off; $ready")
+            if (!off.off || ready.off) problems += "$where: not off then ready ($off; $ready)"
+            if (off.words < 3.0 || off.words >= 4.5) problems += "$where: off words %.2f:1, not 3 to 4.5".format(off.words)
+            if (off.fill < 1.1 || off.fill > 1.5) problems += "$where: off fill %.2f:1 off the surface, not 1.1 to 1.5".format(off.fill)
+            if (off.fillChroma > off.surfaceChroma + 6.0) problems += "$where: off fill chroma %.1f over the surface's %.1f".format(off.fillChroma, off.surfaceChroma)
+            if (ready.fill < 2.0) problems += "$where: ready fill %.2f:1 off the surface".format(ready.fill)
+            if (ready.words < 4.5) problems += "$where: ready words %.2f:1".format(ready.words)
+        }
+        signedIn().use { s ->
+            for (theme in ThemeChoice.entries) {
+                s.onUi {
+                    s.app.popups.close()
+                    s.app.settings.pickTheme(theme)
+                }
+                s.settle(600).close()
+                s.onUi { addServer(s.app) }
+                s.settle(600).close()
+                val left = s.popupLeft().toInt() + 8
+                val off = s.buttonSeen({ s.inPopup("Add") }, left)
+                s.type(s.named(SignInWords.SERVER_ADDRESS).single { it.inPopup() }, s.server.address)
+                s.type(s.named(SignInWords.USERNAME).single { it.inPopup() }, "winters")
+                s.type(s.named(SignInWords.PASSWORD).single { it.inPopup() }, "pw")
+                judge("${theme.label} Add sheet", off, s.buttonSeen({ s.inPopup("Add") }, left))
+            }
+            s.onUi { s.app.popups.close() }
+        }
+        page().use { s ->
+            s.settle(600).close()
+            val left = (s.width - 480) / 2 + 8
+            val off = s.buttonSeen({ s.text("Sign in") }, left)
+            s.fill("https://music.example.com")
+            judge("sign-in page", off, s.buttonSeen({ s.text("Sign in") }, left))
+        }
+        assertTrue(problems.joinToString("\n"), problems.isEmpty())
     }
 
     // The page's words set 130% larger, as the text size setting makes them.

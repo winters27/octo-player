@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -23,18 +24,14 @@ import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.ControlHeight
-import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
-import app.winters.octo.design.MenuTitle
-import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
-import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.server.CertificateChoice
 import app.winters.octo.desktop.server.CertificateDraft
@@ -156,22 +153,25 @@ private fun chooseCertificate(app: AppState, form: SignInForm, scope: CoroutineS
 }
 
 // Asks for the password the picked file was saved with, in the middle of the
-// window.
+// window, drawn as a sheet as the server sheets are: the pop-up gives the
+// field the keyboard once the sheet's rows are drawn.
 internal fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any) {
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet) { close -> key(opening) { CertificatePassword(app, form, path, turn, close) } }
+    val first = FocusRequester()
+    app.popups.showCentred(width = SettingsSize.Sheet, first = first) { close ->
+        key(opening) { CompositionLocalProvider(LocalInSheet provides true) { CertificatePassword(app, form, path, turn, first, close) } }
+    }
 }
 
-// The password the certificate file was saved with. A file that still
-// can't be opened says why here.
+// The password the certificate file was saved with, under the sheet's own
+// title in a group's row that says what it is. A file that still can't be
+// opened says why in the group's error note.
 @Composable
-private fun ColumnScope.CertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any, close: () -> Unit) {
+private fun ColumnScope.CertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any, first: FocusRequester, close: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val first = remember { FocusRequester() }
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 
     fun use() {
         if (busy || password.isEmpty()) return
@@ -191,11 +191,23 @@ private fun ColumnScope.CertificatePassword(app: AppState, form: SignInForm, pat
         }
     }
 
-    MenuTitle(SignInWords.CERT_PASSWORD_TITLE)
+    FormSheetTitle(SignInWords.CERT_PASSWORD_TITLE)
     PopupPadding {
-        Txt(SignInWords.CERT_PASSWORD_HINT, DesktopType.meta, OctoColors.TextSecondary, maxLines = 2)
-        SecretField(password, { password = it; problem = null }, SignInWords.CERT_PASSWORD_FIELD, ::use, first)
-        problem?.let { Txt(it, DesktopType.meta, OctoColors.Error, maxLines = 3) }
+        FormGroup(null, notes = { problem?.let { FormNote(it, NoteKind.Error) } }) {
+            FormFieldRow(
+                SignInWords.CERT_PASSWORD_FIELD,
+                description = SignInWords.CERT_PASSWORD_HINT,
+                value = password,
+                onChange = {
+                    password = it
+                    problem = null
+                },
+                placeholder = SignInWords.REQUIRED,
+                secret = true,
+                onSubmit = ::use,
+                focus = first,
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs),
             horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),

@@ -109,7 +109,7 @@ public enum SignInWords {
     public static let certPasswordTitle = "Certificate password"
     public static let certPasswordHint = "The password the certificate file was saved with."
     public static let certPasswordField = "Password"
-    public static let certPasswordUse = "Use It"
+    public static let certPasswordUse = "Use it"
 
     public static func certificateLine(_ name: String, date: String) -> String { "\(name), expires \(date)" }
 

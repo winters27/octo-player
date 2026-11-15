@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -47,8 +48,13 @@ fun Modifier.scrollbar(state: LazyGridState, bottom: Dp = 0.dp): Modifier = comp
 // A `resting` one keeps a thinner, fainter thumb while what scrolls does
 // not fit, so a list cut off at its foot says there is more. `top` keeps
 // the bar clear of the top as `bottom` does of the foot (a rounded card's
-// corners).
-fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean = false, top: Dp = 0.dp): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom, resting, top) }
+// corners). The bar counts from `start`, the least offset a scroll back
+// reaches, so what lies before it is never offered as room to go back to.
+fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean = false, top: Dp = 0.dp, start: () -> Int = { 0 }): Modifier = composed {
+    val from by rememberUpdatedState(start)
+    val inner = rememberScrollbarAdapter(state)
+    scrollbar(state, remember(inner) { FromAdapter(inner) { from().toDouble() } }, bottom, resting, top)
+}
 
 private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp, resting: Boolean = false, top: Dp = 0.dp): Modifier = composed {
     val rest = OctoColors.TextPrimary.copy(alpha = ScrollbarRestAlpha)
@@ -184,6 +190,16 @@ private class Track(width: Float, height: Float, density: androidx.compose.ui.un
         val room = (length - size).coerceAtLeast(1f)
         return ((y - top) / room).coerceIn(0f, 1f) * (content - view).coerceAtLeast(0.0)
     }
+}
+
+// A scroll's bar counted from `start`: what lies before it is neither shown
+// as room to scroll back into nor reached by a drag.
+private class FromAdapter(private val inner: ScrollbarAdapter, private val start: () -> Double) : ScrollbarAdapter {
+    override val scrollOffset: Double get() = (inner.scrollOffset - start()).coerceAtLeast(0.0)
+    override val contentSize: Double get() = inner.contentSize - start()
+    override val viewportSize: Double get() = inner.viewportSize
+
+    override suspend fun scrollTo(scrollOffset: Double) = inner.scrollTo(scrollOffset + start())
 }
 
 // Whether the bar is awake for a stirring pointer (and when it last
