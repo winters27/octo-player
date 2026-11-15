@@ -1,0 +1,10 @@
+{
+  "about": "Backups' offline sections and the Download format a restore of each leaves the device showing. A backup from before the setting existed, or one naming a format this app does not know, restores Opus.",
+  "cases": [
+    {"name": "made before the setting", "offline": {"downloadQuality": "Kbps128", "wifiOnly": true}, "downloadFormat": "Opus"},
+    {"name": "AAC picked", "offline": {"downloadQuality": "Kbps128", "downloadFormat": "Aac"}, "downloadFormat": "Aac"},
+    {"name": "MP3 picked", "offline": {"downloadQuality": "Kbps256", "downloadFormat": "Mp3"}, "downloadFormat": "Mp3"},
+    {"name": "Opus picked", "offline": {"downloadFormat": "Opus"}, "downloadFormat": "Opus"},
+    {"name": "a format from a newer Octo", "offline": {"downloadFormat": "Flac"}, "downloadFormat": "Opus"}
+  ]
+}
