@@ -20,6 +20,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import app.winters.octo.playlists.PlaylistFolderStore
+import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.playlists.PlaylistsPagePrefs
+import app.winters.octo.ui.nav.PlaylistFolderRoute
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -80,7 +85,17 @@ class PlaylistsViewModel @Inject constructor(
     liveSongs: LiveListSongs,
     private val discovery: Discovery,
     private val keptOcto: KeptOctoListsFiles,
+    folderStore: PlaylistFolderStore,
+    private val pagePrefs: PlaylistsPagePrefs,
 ) : ViewModel() {
+    // Whether folders are offered, and the folders.
+    val folders: StateFlow<FolderView> =
+        combine(folderStore.offered, folderStore.tree) { on, tree -> FolderView(on, tree) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FolderView.Off)
+
+    // Whether the library upkeep group is open, as this phone remembers it.
+    val upkeepOpen: StateFlow<Boolean> = pagePrefs.upkeepOpen.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun setUpkeepOpen(open: Boolean) = pagePrefs.setUpkeepOpen(open)
     // The live lists, in the order they were made, above the playlists.
     val liveLists: StateFlow<List<LiveList>> =
         liveListStore.lists.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -155,22 +170,27 @@ class PlaylistsViewModel @Inject constructor(
 // What the plus on the header makes, in order: a playlist, a live list, or
 // a playlist from a file. Liked songs is not here; hearted songs live on
 // the Favorites page.
+// A folder only while folders are offered.
 enum class PlaylistsAdd(val label: String, val detail: String?) {
     New("New playlist", null),
+    NewFolder(PlaylistFolderWords.NEW_FOLDER, null),
     NewLive("New live list", "Songs picked by rules, always up to date"),
     Import("Import a playlist file", "M3U or M3U8"),
 }
 
 private fun PlaylistsAdd.icon(): Int = when (this) {
     PlaylistsAdd.New -> OctoIcons.AddToPlaylist
+    PlaylistsAdd.NewFolder -> OctoIcons.PlaylistFolder
     PlaylistsAdd.NewLive -> OctoIcons.Filter
     PlaylistsAdd.Import -> OctoIcons.Folder
 }
 
-// Every playlist: a plus on the header to make or import one, how the last
-// import went while there is one, then the listener's own and the server's
-// in the chosen order, the one changed last at the top to
-// begin with, then the lists Octo made, by kind.
+// Every playlist: the title alone, then Sort and the plus (New playlist,
+// New folder while folders are offered, New live list, Import), how the
+// last import went while there is one, then the live lists, the folders A
+// to Z, a gap, the playlists in no folder in the chosen order (the one
+// changed last at the top to begin with), the library upkeep group, and
+// the lists Octo made, by kind.
 @Composable
 fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsViewModel = hiltViewModel()) {
     val playlists by vm.playlists.collectAsStateWithLifecycle()
@@ -178,9 +198,13 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
     val liveLists by vm.liveLists.collectAsStateWithLifecycle()
     val liveCovers by vm.liveCovers.collectAsStateWithLifecycle()
     val octoLists by vm.octoLists.collectAsStateWithLifecycle()
+    val folders by vm.folders.collectAsStateWithLifecycle()
+    val upkeepOpen by vm.upkeepOpen.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     val menus = LocalSongMenu.current.collections
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importFile) }
+    val rows = remember(playlists, folders) { folderPageRows(playlists?.items.orEmpty(), folders.shown, null) }
+    val adds = PlaylistsAdd.entries.filter { it != PlaylistsAdd.NewFolder || folders.on }
 
     val state = rememberLazyListState()
     playlists?.let { TopOnNewOrder(it.order, state) }
@@ -194,16 +218,17 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
                     lead = listOfNotNull(playlists?.let { sorted -> sortItem(SortList.Playlists, sorted.order, vm::setOrder) }),
                     actions = {
                         HeaderMore(
-                            PlaylistsAdd.entries.map { add ->
+                            adds.map { add ->
                                 MoreItem(add.label, add.icon(), detail = add.detail, opensPage = add != PlaylistsAdd.Import) {
                                     when (add) {
                                         PlaylistsAdd.New -> sheets.show(PlaylistSheet.Create())
+                                        PlaylistsAdd.NewFolder -> sheets.show(PlaylistSheet.NewFolder(parent = null))
                                         PlaylistsAdd.NewLive -> onOpen(LiveListEditRoute())
                                         PlaylistsAdd.Import -> pickFile.launch(PlaylistFileTypes)
                                     }
                                 }
                             },
-                            title = "New playlist, live list or import",
+                            title = if (folders.on) "New playlist, folder, live list or import" else "New playlist, live list or import",
                             icon = OctoIcons.AddToLibrary,
                         )
                     },
@@ -213,18 +238,19 @@ fun PlaylistsScreen(onOpen: (NavKey) -> Unit, onBack: () -> Unit, vm: PlaylistsV
             items(liveLists, key = { "live:${it.id}" }) { list ->
                 LiveListLine(list, liveCovers[list.id].orEmpty(), onClick = { onOpen(LiveListRoute(list.id)) }, onLongClick = { sheets.show(PlaylistSheet.LiveOptions(list.id, list.name)) })
             }
-            sortedRows(playlists?.items.orEmpty(), key = { it.id }) { playlist ->
-                PlaylistLine(
-                    playlist.name,
-                    if (playlist.family) "By Family · ${songs(playlist.songCount)}" else songs(playlist.songCount),
-                    onClick = { onOpen(PlaylistRoute(playlist.id)) },
-                    onServer = playlist.onServer,
-                    onLongClick = { menus.open(CollectionTarget.Playlist(playlist.id)) },
-                ) {
-                    PlaylistArtwork(playlist.id, playlist.name, playlist.covers, 56.dp, footer = phonePlaylistFooter(playlist.songCount), glyph = playlistGlyph(playlist.octoNotice, null)) {
-                        PlaylistCover(playlist.covers, 56.dp)
-                    }
-                }
+            items(rows.folders, key = { "folder:${it.folder.id}" }) { line ->
+                FolderRow(
+                    line,
+                    onClick = { onOpen(PlaylistFolderRoute(line.folder.id)) },
+                    onLongClick = { sheets.show(PlaylistSheet.FolderOptions(line.folder.id, line.folder.name)) },
+                )
+            }
+            if (rows.folders.isNotEmpty() && rows.playlists.isNotEmpty()) item(key = "folders-gap") { TopicGap() }
+            sortedRows(rows.playlists, key = { it.id }) { playlist ->
+                OwnPlaylistLine(playlist, onOpen) { menus.open(CollectionTarget.Playlist(playlist.id)) }
+            }
+            upkeepRows(rows.upkeep, rows.upkeepNote, upkeepOpen, vm::setUpkeepOpen) { playlist ->
+                OwnPlaylistLine(playlist, onOpen) { menus.open(CollectionTarget.Playlist(playlist.id)) }
             }
             octoListRows(octoLists, onOpen)
         }

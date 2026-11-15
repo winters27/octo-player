@@ -39,6 +39,7 @@ internal class PlaylistWalks(
     private val page: Int = SET_PAGE,
 ) {
     private val work = db.playlistWorkDao()
+    private val sources = db.sourceDao()
 
     // The phone's rows of a pinned set, as the set stood when it was
     // pinned, into playlist_local, each with its ord as its place.
@@ -64,16 +65,23 @@ internal class PlaylistWalks(
     // songsToSend (SEND_SLOT: each row's server song by serverSongFor) or
     // familySongsToSend (PHONE_SLOT: the server's own id for a row that
     // came from it, otherwise the same): the local rows in order, less the
-    // songs only on the phone. Answers how many ids hold a line break.
-    suspend fun sends(sourceId: String, slot: Int): Int {
+    // songs only on the phone. With `outside` (a server listing
+    // octoPlaylistSongs, the listener's own playlist) every row goes by
+    // outsideSongFor, into either slot. Answers how many ids hold a line break.
+    suspend fun sends(sourceId: String, slot: Int, outside: Boolean = false): Int {
         var odd = 0
         var position = 0L
         eachLocalPage { rows ->
             val copies = copiesOf(sourceId, rows.map { it.trackId })
+            val library = if (outside) libraryIdsOf(sourceId, rows.mapNotNull { it.serverSongId }) else emptySet()
             val out = rows.mapNotNull { row ->
                 val local = Row(row.trackId, row.serverSongId)
                 val copy = copies[row.trackId].orEmpty()
-                (if (slot == PHONE_SLOT) row.serverSongId ?: serverSongFor(local, copy) else serverSongFor(local, copy))
+                when {
+                    outside -> outsideSongFor(local, copy, library)
+                    slot == PHONE_SLOT -> row.serverSongId ?: serverSongFor(local, copy)
+                    else -> serverSongFor(local, copy)
+                }
             }
             if (out.isNotEmpty()) {
                 db.withTransaction { work.insertSend(out.map { PlaylistSendEntity(slot, position++, it) }) }
@@ -341,6 +349,36 @@ internal class PlaylistWalks(
     // A list's values as a call sends them, a page at a time from the
     // table as the call is written.
     fun sendValues(slot: Int, size: Int): PagedValues = TableValues(size) { from, limit -> work.sendPageNow(slot, from, limit) }
+
+    // The base a push keeps when its write-back was refused: the SEND list
+    // less the songs the server skipped, written as the PHONE list (empty
+    // on a push's replace path), which a base is written from. Answers how
+    // many of its ids hold a line break.
+    suspend fun pushedLessSkipped(skipped: Collection<String>): Int {
+        val out = skipped.toHashSet()
+        var odd = 0
+        var from = 0L
+        var position = 0L
+        while (true) {
+            val rows = work.sendPage(SEND_SLOT, from, page)
+            if (rows.isEmpty()) break
+            val kept = rows.filter { it !in out }
+            if (kept.isNotEmpty()) {
+                db.withTransaction { work.insertSend(kept.map { PlaylistSendEntity(PHONE_SLOT, position++, it) }) }
+                odd += kept.count { '\n' in it }
+            }
+            if (rows.size < page) break
+            from += rows.size
+        }
+        return odd
+    }
+
+    // Which of these server ids the library links to a song on this server.
+    private suspend fun libraryIdsOf(sourceId: String, serverIds: List<String>): Set<String> {
+        val ids = serverIds.distinct()
+        if (ids.isEmpty()) return emptySet()
+        return ids.chunked(page).flatMap { sources.libraryLinks(sourceId, it) }.mapTo(HashSet()) { it.serverId }
+    }
 
     // A kind of change's values in place order: the song ids, or with
     // `asPlaces` the places, or with `asCopies` "id@copy".

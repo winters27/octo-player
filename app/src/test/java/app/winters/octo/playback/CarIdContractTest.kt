@@ -14,6 +14,7 @@ class CarIdContractTest {
             "livelist:ll-1", "genre:Hip-Hop%2FRap", "list:og1:Deep+Cuts", "station:or1:Discovery+Radio",
             "chartlist:trending:Trending+Songs", "oalbum:ext-1", "oartist:ext-2", "found:k3x9:songs", "top:k3x9",
             "retry:k3x9", "az:A:tab:albums", "part:3:playlist:3f2a-uuid", "song:find:ext-1|in:list:og1:Deep+Cuts",
+            "folder:pfAbc123", "part:2:folder:pfAbc123",
         ).forEach { id -> assertEquals(id, parseCarId(id)?.let(::carId)) }
     }
 

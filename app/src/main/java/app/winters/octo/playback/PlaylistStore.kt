@@ -16,6 +16,12 @@ import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.playlists.PlaylistSync
+import app.winters.octo.catalog.isFind
+import app.winters.octo.playlists.PlaylistFolderStore
+import app.winters.octo.playlists.PlaylistFolderTree
+import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.subsonic.PLAYLIST_SONGS_EXTENSION
+import app.winters.octo.ui.common.Feedback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -45,15 +51,19 @@ class PlaylistStore @Inject constructor(
     private val userDao: UserDao,
     private val catalog: CatalogDao,
     private val sync: PlaylistSync,
-    sessions: SessionRepository,
+    private val sessions: SessionRepository,
     db: CatalogDatabase,
     private val owners: WorkOwners,
     private val sets: PlaylistSets,
     private val edits: PlaylistEdits,
     private val ids: SongIds,
+    private val findMap: FindMap,
+    private val folders: PlaylistFolderStore,
+    private val feedback: Feedback,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val songs = PlaylistSongs(catalog, ids)
+    private val online = db.onlineDao()
+    private val songs = PlaylistSongs(catalog, ids, keptFinds = { found -> keptFinds(found) })
 
     private val summaries = PlaylistSummaries(
         db,
@@ -70,6 +80,34 @@ class PlaylistStore @Inject constructor(
     // One playlist's summary, as it changes; null while it is not shown.
     fun summary(id: String): Flow<PlaylistSummary?> = summaries.one(id)
 
+    // Whether the server in use keeps songs found online in the listener's
+    // playlists (octoPlaylistSongs): only then do they go in.
+    val findsOpen: Boolean
+        get() = (sessions.state.value as? SessionState.SignedIn)?.session?.extensions?.any { it.startsWith("$PLAYLIST_SONGS_EXTENSION:") } == true
+
+    // Whether a playlist holds a song found online now.
+    suspend fun holdsFind(id: String): Boolean = userDao.holdsFindNow(id)
+
+    // The finds among `found` whose rows are written, from the server in
+    // use, once each one's keep has landed.
+    private suspend fun keptFinds(found: List<String>): Set<String> {
+        if (found.isEmpty()) return emptySet()
+        found.forEach { findMap.awaitKept(it) }
+        val source = (sessions.state.value as? SessionState.SignedIn)?.session?.sourceId ?: return emptySet()
+        return found.chunked(PAGE).flatMap { online.byIds(it) }.filter { it.sourceId == source }.mapTo(HashSet()) { it.id }
+    }
+
+    // A playlist only on the phone that now holds a song found online goes
+    // to the server, as Save to server does, so the song keeps playing and
+    // binds to its download there; the listener is told.
+    private suspend fun saveForFinds(id: String) {
+        if (!findsOpen) return
+        val row = userDao.playlistRow(id) ?: return
+        if (!savesForFinds(row.sourceId, userDao.holdsFindNow(id), findsOpen)) return
+        sync.saveToServer(id)
+        feedback.show(PlaylistFolderWords.SAVED_FOR_FINDS)
+    }
+
     // Makes a playlist, with the songs in it if any are given (library songs
     // only, in the order given), and gives back the id it will have.
     fun create(name: String, trackIds: List<String> = emptyList()): String {
@@ -81,6 +119,7 @@ class PlaylistStore @Inject constructor(
                 sync.created(id)
             } else {
                 createWith(id, name, now) { emit -> songPages(trackIds).invoke { emit(it.map { s -> NewItem(s.trackId, s.relinkKey) }) } }
+                if (trackIds.any(::isFind)) saveForFinds(id)
             }
         }
         return id
@@ -92,7 +131,7 @@ class PlaylistStore @Inject constructor(
         if (sets.create(PlaylistEntity(id, name.trim(), createdAt = now, updatedAt = now), songs.heldItems(pages))) sync.created(id)
     }
 
-    private fun songPages(trackIds: List<String>): suspend (suspend (List<SongToAdd>) -> Unit) -> Unit = { page -> songs.pages(trackIds, page) }
+    private fun songPages(trackIds: List<String>): suspend (suspend (List<SongToAdd>) -> Unit) -> Unit = { page -> songs.pages(trackIds, page, finds = findsOpen) }
 
     private fun heldSongs(pages: suspend (suspend (List<SongToAdd>) -> Unit) -> Unit) = songs.heldSongs(pages)
 
@@ -110,6 +149,7 @@ class PlaylistStore @Inject constructor(
                 emit(fresh.map { NewItem(it.trackId, it.relinkKey) })
             }
         }
+        saveForFinds(id)
         return id to count
     }
 
@@ -117,19 +157,30 @@ class PlaylistStore @Inject constructor(
     // when the copy began, library songs only and repeats kept, read a page
     // at a time from its set pinned for the copy, so an edit or a sync
     // meanwhile changes nothing it reads.
+    // While the server keeps songs found online in playlists, the copy keeps
+    // its finds too (with the server ids they came from), and a copy holding
+    // one goes to the server.
     suspend fun duplicate(sourceId: String, name: String): String? {
         val owner = owners.walk()
         val pinned = sets.pin(owner, sourceId) ?: return null
-        try {
-            return createFrom(name) { emit ->
+        val finds = findsOpen
+        val id = try {
+            createFrom(name) { emit ->
                 sets.walk(pinned) { page ->
                     val library = catalog.tracksByIdsUnordered(page.map { it.trackId }.distinct()).associateBy { it.id }
-                    emit(page.mapNotNull { row -> library[row.trackId]?.let { NewItem(it.id, it.relinkKey) } })
+                    emit(
+                        page.mapNotNull { row ->
+                            library[row.trackId]?.let { NewItem(it.id, it.relinkKey) }
+                                ?: row.takeIf { finds && isFind(it.trackId) }?.let { NewItem(it.trackId, it.relinkKey, it.serverSongId) }
+                        },
+                    )
                 }
             }
         } finally {
             withContext(NonCancellable) { sets.releasePin(owner, sourceId) }
         }
+        if (finds) saveForFinds(id)
+        return id
     }
 
     // Makes a playlist named `name` from songs too many to hold: `pages`
@@ -158,7 +209,10 @@ class PlaylistStore @Inject constructor(
     fun delete(id: String) {
         scope.launch {
             val playlist = userDao.playlistRow(id) ?: return@launch
-            if (sets.deletePlaylist(id)) sync.deleted(playlist)
+            if (sets.deletePlaylist(id)) {
+                folders.forget(playlist.serverId ?: PlaylistFolderTree.localKey(id))
+                sync.deleted(playlist)
+            }
         }
     }
 
@@ -169,6 +223,7 @@ class PlaylistStore @Inject constructor(
             val rows = edits.add(id, songPages(trackIds), distinct = false, newOnly = false, now = System.currentTimeMillis())
                 ?: return@launch
             sync.changed(id)
+            if (trackIds.any(::isFind)) saveForFinds(id)
             added(rows)
         }
     }
@@ -178,6 +233,7 @@ class PlaylistStore @Inject constructor(
     suspend fun addPages(id: String, newOnly: Boolean, pages: suspend (suspend (List<SongToAdd>) -> Unit) -> Unit): AddedRows? {
         val rows = edits.add(id, heldSongs(pages), distinct = true, newOnly = newOnly, now = System.currentTimeMillis()) ?: return null
         sync.changed(id)
+        saveForFinds(id)
         return rows
     }
 
@@ -245,17 +301,31 @@ class PlaylistStore @Inject constructor(
 // How many songs one page of an add or a new playlist reads.
 private const val PAGE = 500
 
+// Whether a playlist goes to the server because of a song found online in
+// it: one only on the phone (no server), holding a find, while the server
+// in use keeps such songs in playlists.
+internal fun savesForFinds(sourceId: String?, holdsFind: Boolean, findsOpen: Boolean): Boolean = findsOpen && holdsFind && sourceId == null
+
 // The songs a playlist's add or new playlist writes, each page on the ids
 // its songs name now and handed to the write inside one Read hold
 // (SongIds), a hold a page.
-internal class PlaylistSongs(private val catalog: CatalogDao, private val ids: SongIds, private val page: Int = PAGE) {
-    // The library songs among `trackIds`, in their order, a page at a time.
-    suspend fun pages(trackIds: List<String>, emit: suspend (List<SongToAdd>) -> Unit) {
+internal class PlaylistSongs(
+    private val catalog: CatalogDao,
+    private val ids: SongIds,
+    private val page: Int = PAGE,
+    // The finds among these whose rows are written, waited for outside any hold.
+    private val keptFinds: suspend (List<String>) -> Set<String> = { emptySet() },
+) {
+    // The library songs among `trackIds`, in their order, a page at a time;
+    // with `finds`, the songs found online among them whose rows are
+    // written too, where they stand.
+    suspend fun pages(trackIds: List<String>, emit: suspend (List<SongToAdd>) -> Unit, finds: Boolean = false) {
         for (chunk in trackIds.chunked(page)) {
+            val kept = if (finds) keptFinds(chunk.filter(::isFind).distinct()) else emptySet()
             ids.write {
                 val now = ids.songs(chunk)
                 val found = catalog.tracksByIdsUnordered(now.distinct()).associateBy { it.id }
-                emit(now.mapNotNull { found[it]?.let { t -> SongToAdd(t.id, t.relinkKey) } })
+                emit(now.mapNotNull { id -> found[id]?.let { t -> SongToAdd(t.id, t.relinkKey) } ?: id.takeIf { it in kept }?.let { SongToAdd(it, "") } })
             }
         }
     }

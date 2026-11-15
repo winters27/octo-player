@@ -52,6 +52,9 @@ import kotlinx.serialization.Serializable
 @Serializable data object DownloadsRoute : NavKey
 @Serializable data class PlaylistRoute(val id: String) : NavKey
 
+// A playlist folder's page.
+@Serializable data class PlaylistFolderRoute(val id: String) : NavKey
+
 // A live list: songs picked by rules, kept on the phone.
 @Serializable data class LiveListRoute(val id: String) : NavKey
 

@@ -35,8 +35,13 @@ data class LinkedPlaylist(
     val syncedStamp: String?,
     // A family playlist, whose own changes are sent on top of everyone else's.
     val family: Boolean = false,
-    // A family playlist the listener may not change here: it only follows the server.
+    // A family playlist the listener may not change here, or an imported
+    // playlist's copy: it only follows the server.
     val pullOnly: Boolean = false,
+    // The listener's own playlist on a server listing octoPlaylistSongs:
+    // changed on both sides, it sends its own changes on top of the
+    // server's, as a family playlist does.
+    val ownRules: Boolean = false,
 )
 
 sealed interface PlaylistStep {
@@ -73,16 +78,20 @@ fun stampOf(changed: String?, songCount: Int) = "${changed.orEmpty()}|$songCount
 // the family's, leaving out other read-only ones and stations, which the
 // stations shelf shows. A family playlist a listener without editing may not
 // change is kept as a copy that only follows the server.
+// An imported playlist's copy (octoImport) comes too, as a copy that only
+// follows the server.
 fun importable(playlists: List<Playlist>, stationIds: Set<String>, username: String): List<Playlist> =
     playlists.filter {
         it.id !in stationIds &&
-            (isFamilyPlaylist(it.owner, username, it.octoFamily) || (!it.readonly && ownedBy(it.owner, username)))
+            (isFamilyPlaylist(it.owner, username, it.octoFamily) || it.octoImport || (!it.readonly && ownedBy(it.owner, username)))
     }
 
 // The playlists a new one made on a server too old to answer with it
 // can be: the user's own by that name not linked yet, never the family's.
 fun newestNamedCandidates(playlists: List<Playlist>, name: String, username: String, linked: Set<String>): List<Playlist> =
-    importable(playlists, emptySet(), username).filter { it.name == name && it.id !in linked && !isFamilyPlaylist(it.owner, username, it.octoFamily) }
+    importable(playlists, emptySet(), username).filter {
+        it.name == name && it.id !in linked && !it.octoImport && !isFamilyPlaylist(it.owner, username, it.octoFamily)
+    }
 
 // How long the phone's copy of the server's playlists counts as fresh when
 // the playlists come on screen.
@@ -137,9 +146,10 @@ fun planLinked(server: ServerPlaylist?, playlist: LinkedPlaylist, stillThere: Bo
         }
     }
     return when {
-        serverChanged && playlist.edited -> if (playlist.family) {
-            // Both changed: a family playlist sends the phone's own changes on
-            // top of everyone else's.
+        serverChanged && playlist.edited -> if (playlist.family || playlist.ownRules) {
+            // Both changed: a family playlist, and the listener's own on a
+            // server listing octoPlaylistSongs, sends the phone's own changes
+            // on top of everyone else's.
             PlaylistStep.Push(playlist.localId, server.id)
         } else {
             // Both changed: the server's songs, and the phone's name if it was renamed here.
@@ -165,6 +175,21 @@ fun serverSongFor(row: Row, copies: List<String>): String? = when {
     isFind(row.trackId) -> row.trackId.removePrefix(FIND_PREFIX)
     else -> row.serverSongId
 }
+
+// The server song to send for a row on a server listing octoPlaylistSongs:
+// the server's own id for a row that came from it as a song found online
+// (an id that is none of the song's copies and that the library links to
+// no song: `libraryIds` are the row page's server ids the library links),
+// never a library song matched to it by title; otherwise serverSongFor's.
+// A library row whose copy moved keeps the id the server's list still holds.
+fun outsideSongFor(row: Row, copies: List<String>, libraryIds: Set<String>): String? {
+    val own = row.serverSongId
+    return if (own != null && own !in copies && own !in libraryIds) own else serverSongFor(row, copies)
+}
+
+// The changed time a stamp (stampOf) holds, as the server sent it; null
+// when it holds none.
+fun changedOf(stamp: String?): String? = stamp?.substringBeforeLast('|', "")?.takeIf { it.isNotEmpty() }
 
 // A server playlist's songs as phone rows: each server song with the
 // library song or find it is. `trackIds` line up with `serverSongIds`.

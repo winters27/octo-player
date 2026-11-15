@@ -62,6 +62,8 @@ import app.winters.octo.ui.output.OutputList
 import app.winters.octo.ui.output.OutputsViewModel
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
+import app.winters.octo.ui.playlist.refusesFinds
+import app.winters.octo.ui.playlist.takesSongs
 import app.winters.octo.ui.server.ShareLinkPage
 import app.winters.octo.ui.server.ShareRequest
 import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
@@ -154,8 +156,10 @@ private fun SongActionsPage(
     // The playlist added to last, while it is still there.
     val playlists by sheets.playlists.collectAsStateWithLifecycle()
     val recent by sheets.recentIds.collectAsStateWithLifecycle()
-    // A family playlist the listener may only listen to is never the quick add.
-    val last = recent.firstOrNull()?.let { id -> playlists.firstOrNull { it.id == id && (!it.family || it.familyMayAdd) } }
+    // A playlist the listener may only listen to, or for a song found online
+    // an upkeep list that refuses it, is never the quick add.
+    val find = isFind(trackId)
+    val last = recent.firstOrNull()?.let { id -> playlists.firstOrNull { it.id == id && it.takesSongs && !(find && it.refusesFinds) } }
     val context = state.lastContext
     val isLiked by remember(trackId) { vm.liked(trackId) }.collectAsStateWithLifecycle(false)
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
@@ -185,6 +189,7 @@ private fun SongActionsPage(
         requestCopy = vm.family.outside.offersRequest,
         removeFromMine = inMine,
         owned = trackId in LocalOwnedFinds.current,
+        playlistAdds = vm.playlistAdds,
     )
     // A family member whose songs are saved rather than added.
     val saves = vm.family.outside.addLabel != null

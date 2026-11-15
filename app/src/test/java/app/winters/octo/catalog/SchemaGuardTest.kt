@@ -455,8 +455,13 @@ internal val SCHEMA_COLUMNS: Map<String, Map<String, IdClass>> = run {
         "pinned_item" to cols(trigger = "itemId", none = "kind relinkKey position"),
         "playlist" to cols(
             none = "id name createdAt updatedAt serverId sourceId syncedAt syncedName serverStamp octoNotice family syncedSongs " +
-                "familyMayAdd familyMayRemove familyMayRename familyMayDelete itemSet baseSet syncedSongsKept",
+                "familyMayAdd familyMayRemove familyMayRename familyMayDelete itemSet baseSet syncedSongsKept upkeep octoImport upkeepKind",
         ),
+        // playlist folders, where playlists sit, the folder changes waiting to go, and the base step's marks
+        "playlist_folder" to cols(none = "space id name parent created"),
+        "playlist_place" to cols(none = "space playlistKey folderId localOnly"),
+        "folder_op" to cols(none = "seq space kind folderId name parent playlistKeys at"),
+        "playlist_base_mark" to cols(none = "sourceId at"),
         "playlist_item" to cols(trigger = "trackId", none = "id playlistId itemSet relinkKey ord itemKey serverSongId"),
         "playlist_synced_song" to cols(none = "playlistId songId copies baseSet"),
         "playlist_meta" to cols(none = "id nextItemKey"),

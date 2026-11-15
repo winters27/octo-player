@@ -82,6 +82,14 @@ data class PlaylistEntity(
     @ColumnInfo(defaultValue = "0") val baseSet: Long = 0,
     // Whether a base is kept in playlist_synced_song, even an empty one.
     @ColumnInfo(defaultValue = "0") val syncedSongsKept: Boolean = false,
+    // One of Octo's library upkeep lists, as the server marks its copy
+    // (octoUpkeep), and which kind (octoUpkeepKind: "action", "notice" or
+    // "request"; null when the server names none).
+    @ColumnInfo(defaultValue = "0") val upkeep: Boolean = false,
+    val upkeepKind: String? = null,
+    // An imported playlist's read-only copy (octoImport): it only follows
+    // the server, takes no songs here, and is never renamed or deleted here.
+    @ColumnInfo(defaultValue = "0") val octoImport: Boolean = false,
 )
 
 @Entity(

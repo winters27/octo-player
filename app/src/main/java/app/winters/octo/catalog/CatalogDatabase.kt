@@ -18,9 +18,10 @@ import app.winters.octo.offline.DownloadDao
 import app.winters.octo.offline.DownloadEntity
 import app.winters.octo.server.CopyDao
 
-// The version the code expects. 18 to 19 is a hand-written migration
-// (Migration18To19.kt), so it is not in autoMigrations.
-const val CATALOG_VERSION = 19
+// The version the code expects. 18 to 19 and 19 to 20 are hand-written
+// migrations (Migration18To19.kt, Migration19To20.kt), so they are not in
+// autoMigrations.
+const val CATALOG_VERSION = 20
 
 // The file the library lives in.
 const val CATALOG_FILE = "catalog.db"
@@ -54,6 +55,7 @@ const val CATALOG_FILE = "catalog.db"
         HealthSplitEntity::class, HealthSplitSongEntity::class, FixUndoEntity::class,
         MatchQueryEntity::class, MatchTitleEntity::class, MatchLookupEntity::class,
         SaveFoundEntity::class, SaveRefEntity::class, SaveNodeEntity::class, SaveSetEntity::class, SaveRenameEntity::class,
+        PlaylistFolderEntity::class, PlaylistPlaceEntity::class, FolderOpEntity::class, PlaylistBaseMarkEntity::class,
     ],
     version = CATALOG_VERSION,
     exportSchema = true,
@@ -95,4 +97,6 @@ abstract class CatalogDatabase : RoomDatabase() {
     abstract fun queueDao(): QueueDao
 
     abstract fun saveDao(): SaveDao
+
+    abstract fun playlistFolderDao(): PlaylistFolderDao
 }

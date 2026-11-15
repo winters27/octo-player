@@ -10,6 +10,8 @@ import app.winters.octo.catalog.HoldKind
 import app.winters.octo.catalog.NewItem
 import app.winters.octo.catalog.PHONE_SLOT
 import app.winters.octo.catalog.PinnedSet
+import app.winters.octo.catalog.PlaylistEdits
+import app.winters.octo.catalog.findId
 import app.winters.octo.catalog.PlaylistEntity
 import app.winters.octo.catalog.PlaylistSets
 import app.winters.octo.catalog.REMOVE_KIND
@@ -48,6 +50,10 @@ private const val TRIES = 3
 // How many changes or base songs one page of a family push takes.
 private const val CHANGE_PAGE = 500
 
+// How many skipped songs one read of their rows takes (two lists of them,
+// under SQLite's 999 values).
+private const val SKIPPED_CHUNK = 400
+
 // How a step's emptying of its work tables is told apart when writes are
 // counted, and how many rows each of its transactions deletes.
 internal const val CLEAR_WRITE = "playlist work clear"
@@ -74,6 +80,12 @@ internal class SyncServer(
     val formPost: Boolean,
     // Whether family playlist rows say who may rename or delete them and the server takes removals by song.
     val familyRules: Boolean,
+    // Whether the server lists octoPlaylistSongs: the listener's own
+    // playlists hold songs found online, a push sends the server's own ids
+    // for them, every replace carries octoIfStamp and octoOwnIds, removals
+    // go by song, and a playlist changed on both sides takes the phone's own
+    // changes on top of the server's.
+    val playlistSongs: Boolean = false,
 )
 
 // Points in a step where a test can step in.
@@ -89,6 +101,12 @@ internal open class StepHooks {
 
     // A change call of a family push went through.
     open suspend fun sent(call: Int) {}
+
+    // A push's songs went to the server; its write-back is next.
+    open suspend fun pushed(playlistId: String) {}
+
+    // The base step read a playlist's songs; its base is written next.
+    open suspend fun seeding(playlistId: String) {}
 }
 
 // The database side of each playlist sync step (PlaylistSync runs them):
@@ -115,10 +133,17 @@ internal class PlaylistSteps(
     // A server playlist the phone deleted is no longer waiting to go.
     private val forgetDeleted: suspend (account: String, serverId: String) -> Unit,
     private val now: () -> Long = System::currentTimeMillis,
+    // Tells the listener something: songs the server skipped, a playlist
+    // kept aside as "(from this phone)".
+    private val notice: (String) -> Unit = {},
+    // A folder placement changed here and waits to go to the server.
+    private val foldersChanged: () -> Unit = {},
 ) {
     private val user = db.userDao()
     private val work = db.playlistWorkDao()
     private val state = db.workDao()
+    private val folderDao = db.playlistFolderDao()
+    private val edits = PlaylistEdits(db, sets)
     private val reading = AtomicLong()
 
     internal var hooks = StepHooks()
@@ -154,6 +179,14 @@ internal class PlaylistSteps(
         val listing = client.playlists().firstOrNull { it.id == serverId }
         val listed = listing?.let { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) }
         if (listing == null || listed == null || listed.stamp != playlist.serverStamp) {
+            // Changed on both sides, on a server listing octoPlaylistSongs:
+            // with a base kept, the phone's own changes go on top of the
+            // server's; with none (only across the upgrade), the phone's
+            // version is kept aside and the playlist takes the server's.
+            if (listed != null && server.playlistSongs && playlist.edited && !linked.pullOnly) {
+                if (playlist.syncedSongsKept) return withWork { pushFamily(server, playlist, serverId) }
+                return fromThisPhone(server, playlist, serverId, listed)
+            }
             // When the server changed too since both last agreed, it is
             // settled like a sync would instead.
             planLinked(listed, linked)?.let { run(server, it) }
@@ -202,8 +235,10 @@ internal class PlaylistSteps(
         val full = read.head
         val isFamily = isFamilyPlaylist(full.owner, server.client.username, full.octoFamily)
         val access = full.access(server.client.username, me, server.familyRules)
-        val twin = twinOf(full.name, read)
+        // An imported playlist's copy is never a phone playlist's twin.
+        val twin = if (full.octoImport) null else twinOf(full.name, read)
         if (twin != null) {
+            var linkedTwin = false
             sets.withSet(twin.id) {
                 val old = user.playlistRow(twin.id)?.baseSet ?: return@withSet
                 val base = sets.newBaseSet(twin.id) ?: return@withSet
@@ -211,7 +246,10 @@ internal class PlaylistSteps(
                 val rights = if (isFamily) FamilyRights(access.add, access.remove, access.rename, access.delete) else null
                 val linked = sets.flipTwin(twin.id, old, base, serverId, server.sourceId, twin.updatedAt, full.name, stamp, isFamily, rights)
                 sets.deleteBaseSet(twin.id, if (linked) old else base)
+                linkedTwin = linked
             }
+            // Its folder placement on the phone goes to the server with it.
+            if (linkedTwin && folderDao.placeOnServer(server.account, twin.id, serverId, now())) foldersChanged()
             return
         }
         val at0 = now()
@@ -231,6 +269,9 @@ internal class PlaylistSteps(
             familyMayRemove = isFamily && access.remove,
             familyMayRename = isFamily && access.rename,
             familyMayDelete = isFamily && access.delete,
+            upkeep = full.octoUpkeep,
+            upkeepKind = full.octoUpkeepKind,
+            octoImport = full.octoImport,
         )
         // The playlist shows empty until its songs are written and shown in one step.
         user.insertPlaylist(row)
@@ -277,21 +318,46 @@ internal class PlaylistSteps(
 
     // A linked playlist's songs and name go to the server when they differ
     // from the server's.
+    // On a server listing octoPlaylistSongs the replace carries the stamp
+    // the phone checked (octoIfStamp) and octoOwnIds, sends the server's own
+    // ids for songs found online, and ends with the family write-back. A
+    // replace the server refuses because its list changed since
+    // (octoConflict) is settled like a playlist changed on both sides.
     private suspend fun pushSongs(server: SyncServer, playlist: PlaylistEntity, serverId: String, songCount: Int, stamp: String) {
         val client = server.client
         val there = reads.read(client, serverId, nextRead(), songCount)
-        snapshotInto(server, playlist.id, SEND_SLOT)
+        snapshotInto(server, playlist.id, SEND_SLOT, outside = server.playlistSongs)
         var sent = false
+        val skipped = ArrayList<String>()
         if (!walks.sameAsSend(there.number)) {
-            client.replacePlaylistSongs(serverId, walks.sendValues(SEND_SLOT, work.sendCount(SEND_SLOT)), server.formPost)
+            try {
+                client.replacePlaylistSongs(
+                    serverId,
+                    walks.sendValues(SEND_SLOT, work.sendCount(SEND_SLOT)),
+                    server.formPost,
+                    ifStamp = if (server.playlistSongs) changedOf(playlist.serverStamp) else null,
+                    ownIds = server.playlistSongs,
+                    skipped = { skipped += it },
+                )
+            } catch (e: SubsonicException.Server) {
+                if (!e.conflict) throw e
+                val now = user.playlistRow(playlist.id) ?: return
+                if (now.syncedSongsKept) pushFamily(server, now, serverId) else fromThisPhone(server, now, serverId, null)
+                return
+            }
             sent = true
         }
         if (there.head.name != playlist.name) {
             client.updatePlaylist(serverId, name = playlist.name)
             sent = true
         }
-        val after = if (sent) listingStamp(server, serverId) ?: return else stamp
-        user.markSynced(playlist.id, playlist.updatedAt, playlist.name, after)
+        if (!server.playlistSongs) {
+            val after = if (sent) listingStamp(server, serverId) ?: return else stamp
+            user.markSynced(playlist.id, playlist.updatedAt, playlist.name, after)
+            return
+        }
+        hooks.pushed(playlist.id)
+        pushWriteBack(server, playlist, serverId, skipped)
     }
 
     // Sends a family playlist's own changes since both sides last agreed, on
@@ -301,14 +367,21 @@ internal class PlaylistSteps(
     // send of more than one call's worth goes a call at a time, removals
     // first from the end of the list, each landed call taken into the base
     // at once, so a send that fails part way is never sent twice.
+    // The listener's own playlist (one changed on both sides, on a server
+    // listing octoPlaylistSongs) goes the same way: its songs by the
+    // server's ids, adds and removals both, removals by song. Songs the
+    // server skipped leave the playlist after the write-back.
     private suspend fun pushFamily(server: SyncServer, playlist: PlaylistEntity, serverId: String) {
         val client = server.client
         val current = reads.read(client, serverId, nextRead())
         val there = current.head
-        val phoneOdd = snapshotInto(server, playlist.id, PHONE_SLOT)
-        val pullOnly = !playlist.familyMayAdd && !playlist.familyMayRemove
+        val own = !playlist.family
+        val phoneOdd = snapshotInto(server, playlist.id, PHONE_SLOT, outside = own && server.playlistSongs)
+        val bySong = server.familyRules || (own && server.playlistSongs)
+        val pullOnly = !own && !playlist.familyMayAdd && !playlist.familyMayRemove
         var base = playlist.baseSet
         var held = false
+        val skipped = ArrayList<String>()
         // Without a base kept, the base is the phone's songs: nothing is wanted.
         if (!pullOnly) {
             if (playlist.syncedSongsKept) {
@@ -318,7 +391,7 @@ internal class PlaylistSteps(
                 if (work.changeCount(REMOVE_KIND) > 0) {
                     val cleanOnly: Boolean?
                     val listedCount: Int?
-                    if (server.familyRules) {
+                    if (bySong) {
                         cleanOnly = false
                         listedCount = current.size.toInt()
                     } else {
@@ -340,8 +413,8 @@ internal class PlaylistSteps(
                 val removals = if (sendRemovals) work.changeCount(REMOVE_KIND) else 0
                 val adds = work.changeCount(ADD_KIND)
                 if (removals > 0 || adds > 0) {
-                    if (server.familyRules && removals > 0) walks.copyNumbers(current.number)
-                    base = send(server, playlist.id, serverId, current, base, removals, adds, after, phoneOdd > 0)
+                    if (bySong && removals > 0) walks.copyNumbers(current.number)
+                    base = send(server, playlist.id, serverId, current, base, removals, adds, after, phoneOdd > 0, bySong, skipped)
                 }
             }
             walks.dropRead(current.number)
@@ -369,6 +442,7 @@ internal class PlaylistSteps(
             serverStamp = stamp,
         )
         remap(server, playlist.copy(baseSet = base), updated, full, keep = true)
+        dropSkipped(playlist.id, skipped)
     }
 
     // Sends a family push's changes and keeps the base after them. Answers
@@ -383,17 +457,20 @@ internal class PlaylistSteps(
         adds: Int,
         after: BaseAfter,
         phoneOdd: Boolean,
+        bySong: Boolean,
+        skipped: MutableList<String>,
     ): Long {
         val client = server.client
         if (server.formPost || (removals <= PLAYLIST_SONGS_PER_CALL && adds <= PLAYLIST_SONGS_PER_CALL)) {
             val kinds = if (removals > 0) setOf(ADD_KIND, REMOVE_KIND) else setOf(ADD_KIND)
             sendChecked(server, serverId, current, kinds, null) {
-                if (server.familyRules) {
+                if (bySong) {
                     client.updatePlaylist(
                         serverId,
                         songIdsToAdd = walks.changeValues(ADD_KIND, adds),
                         songsToRemove = if (removals > 0) walks.changeValues(REMOVE_KIND, removals, asCopies = true) else NO_VALUES,
                         formPost = server.formPost,
+                        skipped = { skipped += it },
                     )
                 } else {
                     client.updatePlaylist(
@@ -401,6 +478,7 @@ internal class PlaylistSteps(
                         songIdsToAdd = walks.changeValues(ADD_KIND, adds),
                         songIndexesToRemove = if (removals > 0) walks.changeValues(REMOVE_KIND, removals, asPlaces = true) else NO_VALUES,
                         formPost = server.formPost,
+                        skipped = { skipped += it },
                     )
                 }
             }
@@ -416,7 +494,7 @@ internal class PlaylistSteps(
                 if (chunk.isEmpty()) break
                 val positions = chunk.mapTo(LinkedHashSet()) { it.position }
                 sendChecked(server, serverId, current, setOf(REMOVE_KIND), mapOf(REMOVE_KIND to positions)) {
-                    if (server.familyRules) {
+                    if (bySong) {
                         client.updatePlaylist(serverId, songIdsToAdd = NO_VALUES, songsToRemove = PagedValues.of(chunk.map { "${it.songId}@${it.copy}" }))
                     } else {
                         client.updatePlaylist(serverId, songIdsToAdd = NO_VALUES, songIndexesToRemove = PagedValues.of(chunk.map { "${it.position}" }))
@@ -433,7 +511,7 @@ internal class PlaylistSteps(
             if (chunk.isEmpty()) break
             val positions = chunk.mapTo(LinkedHashSet()) { it.position }
             sendChecked(server, serverId, current, setOf(ADD_KIND), mapOf(ADD_KIND to positions)) {
-                client.updatePlaylist(serverId, songIdsToAdd = PagedValues.of(chunk.map { it.songId }))
+                client.updatePlaylist(serverId, songIdsToAdd = PagedValues.of(chunk.map { it.songId }), skipped = { skipped += it })
             }
             tookIn(playlistId, startBase, ADD_KIND, positions)
             hooks.sent(++calls)
@@ -506,13 +584,32 @@ internal class PlaylistSteps(
     }
 
     // Makes the server's copy of a phone playlist and links the two.
+    // A folder placement it had on the phone goes to the server in the
+    // transaction that links it. On a server listing octoPlaylistSongs its
+    // songs found online go by their own ids and it ends with the family
+    // write-back, so it keeps a base like every linked playlist.
     private suspend fun createSongs(server: SyncServer, playlist: PlaylistEntity) {
-        snapshotInto(server, playlist.id, SEND_SLOT)
-        val made = server.client.createPlaylist(playlist.name, walks.sendValues(SEND_SLOT, work.sendCount(SEND_SLOT)), server.formPost)
+        snapshotInto(server, playlist.id, SEND_SLOT, outside = server.playlistSongs)
+        val skipped = ArrayList<String>()
+        val made = server.client.createPlaylist(
+            playlist.name,
+            walks.sendValues(SEND_SLOT, work.sendCount(SEND_SLOT)),
+            server.formPost,
+            skipped = { skipped += it },
+        )
         val serverId = made?.id ?: newestNamed(server, playlist.name) ?: return
         // Linked at once, so a failure from here on can never make it twice.
         val first = made?.let { stampOf(it.changed, it.songCount) }.orEmpty()
-        user.linkPlaylist(playlist.id, serverId, server.sourceId, playlist.updatedAt, playlist.name, first)
+        val placed = db.withTransaction {
+            user.linkPlaylist(playlist.id, serverId, server.sourceId, playlist.updatedAt, playlist.name, first)
+            folderDao.placeOnServer(server.account, playlist.id, serverId, now())
+        }
+        if (placed) foldersChanged()
+        if (server.playlistSongs) {
+            val linked = user.playlistRow(playlist.id) ?: return
+            pushWriteBack(server, linked, serverId, skipped)
+            return
+        }
         listingStamp(server, serverId)?.let { user.markSynced(playlist.id, playlist.updatedAt, playlist.name, it) }
     }
 
@@ -521,7 +618,7 @@ internal class PlaylistSteps(
     // many of the list's ids hold a line break. A save part way would show
     // an item on an old id whose copy moved, which the send leaves out, so
     // the snapshot waits for no save to be part way.
-    private suspend fun snapshotInto(server: SyncServer, playlistId: String, slot: Int): Int = stableRead(merge, HoldKind.Walk, {}, WholeCheck(merge)) {
+    private suspend fun snapshotInto(server: SyncServer, playlistId: String, slot: Int, outside: Boolean = false): Int = stableRead(merge, HoldKind.Walk, {}, WholeCheck(merge)) {
         clear(listOf("playlist_local", "playlist_send"))
         val set = sets.pin(SYNC_OWNER, playlistId)
         try {
@@ -529,7 +626,7 @@ internal class PlaylistSteps(
         } finally {
             if (set != null) withContext(NonCancellable) { sets.releasePin(SYNC_OWNER, playlistId) }
         }
-        walks.sends(server.sourceId, slot)
+        walks.sends(server.sourceId, slot, outside)
     }
 
     // A write-back of `expected`'s rows from `read` (pull and a family
@@ -636,6 +733,98 @@ internal class PlaylistSteps(
         }
     }
 
+    // The one-time base step for a server listing octoPlaylistSongs, the
+    // first thing every holder of the sync lock runs (SyncLock): until the
+    // server's mark is written, each of the listener's own linked playlists
+    // of this server that is unedited since its last sync gets a base, the
+    // songs the phone would send for it under the outside rule. A row edited
+    // or unlinked while the step runs keeps no base (its flip is refused).
+    // The mark is written after every row, so a failure part way (a full
+    // disk) leaves the step for the next holder.
+    suspend fun ensureBase(server: SyncServer) {
+        if (!server.playlistSongs || user.baseSeeded(server.sourceId)) return
+        withWork {
+            for (row in user.serverPlaylists(server.sourceId)) {
+                if (row.family || row.octoImport || row.serverId == null || row.syncedAt != row.updatedAt) continue
+                seedBase(server, row)
+            }
+        }
+        user.markBaseSeeded(server.sourceId, now())
+    }
+
+    private suspend fun seedBase(server: SyncServer, row: PlaylistEntity) {
+        val odd = snapshotInto(server, row.id, PHONE_SLOT, outside = true)
+        hooks.seeding(row.id)
+        sets.withSet(row.id) {
+            val base = sets.newBaseSet(row.id) ?: return@withSet
+            walks.writeBase(row.id, base, null, odd > 0)
+            if (sets.flipSeeded(row, base)) sets.deleteBaseSet(row.id, row.baseSet) else sets.deleteBaseSet(row.id, base)
+        }
+    }
+
+    // The family write-back after a push: the server's list read after it
+    // becomes the playlist's songs (songs only on the phone kept where they
+    // were) and its base, in one step, refused when the playlist was
+    // changed here during the push. Then only the base moves, to the songs
+    // pushed less those the server skipped, and the server's stamp stays as
+    // it was, so the change made meanwhile goes on top of the server's list
+    // next time, keeping anything another device added. Songs the server
+    // skipped leave the playlist either way.
+    private suspend fun pushWriteBack(server: SyncServer, playlist: PlaylistEntity, serverId: String, skipped: List<String>) {
+        val stamp = listingStamp(server, serverId) ?: return
+        val full = reads.read(server.client, serverId, nextRead())
+        if (!reads.resolve(full.number)) return
+        val at = maxOf(now(), playlist.updatedAt + 1)
+        val updated = playlist.copy(name = full.head.name, updatedAt = at, syncedAt = at, syncedName = full.head.name, serverStamp = stamp)
+        if (!remap(server, playlist, updated, full, keep = true)) {
+            val odd = walks.pushedLessSkipped(skipped)
+            phoneBase(playlist.id, playlist.baseSet, odd > 0)
+        }
+        dropSkipped(playlist.id, skipped)
+    }
+
+    // Songs the server skipped (octoSkipped) leave the playlist, and the
+    // listener hears it once; nothing when it skipped none.
+    private suspend fun dropSkipped(playlistId: String, skipped: List<String>) {
+        if (skipped.isEmpty()) return
+        val keys = skipped.distinct().chunked(SKIPPED_CHUNK).flatMap { ids -> user.rowKeysOf(playlistId, ids, ids.map(::findId)) }
+        if (keys.isNotEmpty()) edits.removeAll(playlistId, keys.distinct(), now())
+        notice(PlaylistFolderWords.SKIPPED_SONGS)
+    }
+
+    // A playlist changed on both sides with no base kept (only across the
+    // upgrade): the phone's version is kept as a playlist only on the
+    // phone, "<name> (from this phone)", the linked one takes the server's
+    // list, and the listener is told. A copy holding songs found online goes
+    // to the server at once, so they keep playing.
+    private suspend fun fromThisPhone(server: SyncServer, playlist: PlaylistEntity, serverId: String, known: ServerPlaylist?) {
+        val listed = known ?: server.client.playlists().firstOrNull { it.id == serverId }?.let { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) }
+            ?: return
+        val copyId = copyAside(playlist, PlaylistFolderWords.fromThisPhone(playlist.name)) ?: return
+        notice(PlaylistFolderWords.bothChanged(playlist.name))
+        run(server, PlaylistStep.Pull(playlist.id, serverId, listed.stamp, keepName = false))
+        if (user.holdsFindNow(copyId)) {
+            user.keepOnServer(copyId, server.sourceId)
+            user.playlistRow(copyId)?.let { create(server, it) }
+        }
+    }
+
+    // A new playlist only on the phone holding a playlist's rows as they
+    // are, each with the server id it came from. Answers its id.
+    private suspend fun copyAside(playlist: PlaylistEntity, name: String): String? {
+        val pinned = sets.pin(SYNC_OWNER, playlist.id) ?: return null
+        val id = UUID.randomUUID().toString()
+        val at = now()
+        val made = try {
+            sets.create(PlaylistEntity(id, name, createdAt = at, updatedAt = at)) { emit ->
+                sets.walk(pinned) { page -> emit(page.map { NewItem(it.trackId, it.relinkKey, it.serverSongId) }) }
+            }
+        } finally {
+            withContext(NonCancellable) { sets.releasePin(SYNC_OWNER, playlist.id) }
+        }
+        return id.takeIf { made }
+    }
+
     // The playlist's stamp as the server lists it now, or null when the
     // server no longer lists it. Always from the list of playlists, the
     // same place a sync compares with.
@@ -652,7 +841,13 @@ internal class PlaylistSteps(
     }
 }
 
-internal fun PlaylistEntity.linked(): LinkedPlaylist? =
+// `ownRules`: the server lists octoPlaylistSongs, so the listener's own
+// playlist changed on both sides is pushed with the family rule.
+internal fun PlaylistEntity.linked(ownRules: Boolean = false): LinkedPlaylist? =
     serverId?.let {
-        LinkedPlaylist(id, it, name, edited, syncedName, serverStamp, family, pullOnly = family && !familyMayAdd && !familyMayRemove)
+        LinkedPlaylist(
+            id, it, name, edited, syncedName, serverStamp, family,
+            pullOnly = octoImport || (family && !familyMayAdd && !familyMayRemove),
+            ownRules = ownRules && !family && !octoImport,
+        )
     }

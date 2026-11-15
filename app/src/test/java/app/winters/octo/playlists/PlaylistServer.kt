@@ -43,6 +43,8 @@ class PlaylistServer(
         var changes: Int = 0,
         val octoFamily: Boolean? = null,
         val created: String = "2026-01-01T00:00:00Z",
+        var upkeep: Boolean = false,
+        var octoImport: Boolean = false,
     )
 
     // One request as the server saw it.
@@ -62,6 +64,19 @@ class PlaylistServer(
 
     // A playlist's answer, written as this says when set (a test's own body).
     @Volatile var playlistBody: ((Held, String) -> MockResponseBody)? = null
+
+    // Ids this server leaves out of a change, naming them in octoSkipped, as
+    // Octo does with ids it can't keep.
+    val skipping: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+    // Refuses the next replace sent with octoIfStamp as stale (octoConflict),
+    // having first let `onConflict` change the playlist, as another device would.
+    @Volatile var conflictNext = false
+    @Volatile var onConflict: (Held) -> Unit = {}
+
+    // Runs right after a change is applied, as another device changing the
+    // playlist then would.
+    @Volatile var afterChange: (Held) -> Unit = {}
 
     private var changeCalls = 0
     private var made = 0
@@ -96,6 +111,8 @@ class PlaylistServer(
             append("""{"id":${quote(held.id)},"name":${quote(held.name)},"owner":${quote(held.owner)},"songCount":${held.entries.size}""")
             append(""","changed":"${stamp(held)}","created":"${held.created}"""")
             held.octoFamily?.let { append(""","octoFamily":$it""") }
+            if (held.upkeep) append(""","octoUpkeep":true""")
+            if (held.octoImport) append(""","octoImport":true,"readonly":true""")
         }
 
     fun songJson(id: String): String = json.encodeToString(Song.serializer(), songs[id] ?: Song(id))
@@ -134,11 +151,21 @@ class PlaylistServer(
         when (endpoint) {
             "createPlaylist" -> {
                 val target = one("playlistId")?.let(playlists::get)
+                val ifStamp = one("octoIfStamp")
+                if (target != null && ifStamp != null && (conflictNext || ifStamp != stamp(target))) {
+                    conflictNext = false
+                    onConflict(target)
+                    return MockResponse.Builder()
+                        .body("""{"subsonic-response":{"status":"failed","error":{"code":0,"message":"The playlist changed. Read it again.","octoConflict":true}}}""")
+                        .build()
+                }
                 val held = target ?: Held("pl${++made}", one("name").orEmpty(), username, ArrayList()).also { playlists[it.id] = it }
+                val (kept, skipped) = all("songId").partition { it !in skipping }
                 held.entries.clear()
-                held.entries += all("songId")
+                held.entries += kept
                 held.changes = ++ticks
-                return ok(""","playlist":${full(held)}""")
+                afterChange(held)
+                return ok(""","playlist":${full(held)}""" + skippedJson(skipped))
             }
             "updatePlaylist" -> {
                 val held = one("playlistId")?.let(playlists::get) ?: return ok()
@@ -152,9 +179,11 @@ class PlaylistServer(
                     before.indices.filter { before[it] == id }.getOrNull(copy - 1)?.let { gone += it }
                 }
                 gone.sortedDescending().forEach { held.entries.removeAt(it) }
-                held.entries += all("songIdToAdd")
+                val (kept, skipped) = all("songIdToAdd").partition { it !in skipping }
+                held.entries += kept
                 held.changes = ++ticks
-                return ok()
+                afterChange(held)
+                return ok(skippedJson(skipped))
             }
             "deletePlaylist" -> {
                 playlists.remove(one("id"))
@@ -173,6 +202,8 @@ class PlaylistServer(
     }
 
     private fun quote(text: String) = Json.encodeToString(String.serializer(), text)
+
+    private fun skippedJson(ids: List<String>) = if (ids.isEmpty()) "" else ""","octoSkipped":[${ids.joinToString(",") { quote(it) }}]"""
 }
 
 // A body written in pieces through `write`, for answers a test shapes.

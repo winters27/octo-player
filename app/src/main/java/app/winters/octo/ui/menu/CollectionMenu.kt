@@ -27,7 +27,10 @@ import app.winters.octo.playback.LibraryRadio
 import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.playback.PlaylistStore
+import app.winters.octo.playlists.PlaylistFolderStore
 import app.winters.octo.playback.RadioAround
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.playback.RadioSeeds
 import app.winters.octo.playback.Shown
 import app.winters.octo.playback.queueAddWords
@@ -57,7 +60,7 @@ sealed interface CollectionTarget {
 
 // The pages of a collection's menu: its actions first, then what some of
 // them open in its place.
-enum class CollectionPage { Actions, AddToPlaylist, Rename, Delete, FindFlac }
+enum class CollectionPage { Actions, AddToPlaylist, Rename, Delete, FindFlac, MoveToFolder }
 
 // Which album, artist or playlist the menu is open for, if any. A long
 // press on its card or row opens it.
@@ -88,7 +91,7 @@ class CollectionMenuState {
 enum class CollectionAction {
     Play, Shuffle, PlayNext, AddToQueue, AddToPlaylist, Download, FindFlac, StartRadio,
     AddToFavourites, RemoveFromFavourites, PinToHome, Unpin, MoveToFront,
-    GoToArtist, Rename, Duplicate, Delete,
+    GoToArtist, Rename, Duplicate, Delete, MoveToFolder,
 }
 
 // Where a collection stands on Home: not pinned, pinned, or pinned first.
@@ -143,10 +146,18 @@ fun artistActions(radio: Boolean, favourite: Boolean = false, pin: PinSpot = Pin
 // An empty playlist has nothing to play, only itself to pin, rename, copy
 // or delete. A family playlist is renamed and deleted only by a family
 // manager (`renames`, `deletes`).
-fun playlistActions(empty: Boolean, pin: PinSpot = PinSpot.None, renames: Boolean = true, deletes: Boolean = true): List<CollectionAction> = buildList {
+// One that can be filed while folders are offered `moves` to a folder.
+fun playlistActions(
+    empty: Boolean,
+    pin: PinSpot = PinSpot.None,
+    renames: Boolean = true,
+    deletes: Boolean = true,
+    moves: Boolean = false,
+): List<CollectionAction> = buildList {
     if (!empty) addAll(Playing)
     pin(pin)
     if (renames) add(CollectionAction.Rename)
+    if (moves) add(CollectionAction.MoveToFolder)
     add(CollectionAction.Duplicate)
     if (deletes) add(CollectionAction.Delete)
 }
@@ -158,12 +169,16 @@ private val CollectionMenuOrder = listOf(
     listOf(CollectionAction.AddToPlaylist, CollectionAction.AddToFavourites, CollectionAction.RemoveFromFavourites, CollectionAction.Download, CollectionAction.FindFlac),
     listOf(CollectionAction.PinToHome, CollectionAction.Unpin, CollectionAction.MoveToFront),
     listOf(CollectionAction.GoToArtist),
-    listOf(CollectionAction.Rename, CollectionAction.Duplicate, CollectionAction.Delete),
+    listOf(CollectionAction.Rename, CollectionAction.MoveToFolder, CollectionAction.Duplicate, CollectionAction.Delete),
 )
 
 // The actions offered, in their groups, leaving out empty groups.
 fun collectionMenuGroups(actions: List<CollectionAction>): List<List<CollectionAction>> =
     CollectionMenuOrder.map { group -> group.filter { it in actions } }.filter { it.isNotEmpty() }
+
+// An album's songs as Add to playlist takes them: with its songs found
+// online while the server keeps them in playlists (`finds`).
+fun albumAddSpec(albumId: String, finds: Boolean): ListSpec = ListSpec.Album(albumId, withFinds = finds)
 
 // Where a pin is in the row Home shows.
 fun pinSpot(shown: List<PinKey>, key: PinKey): PinSpot = when (shown.indexOf(key)) {
@@ -191,8 +206,19 @@ class CollectionMenuViewModel @Inject constructor(
     private val pins: PinStore,
     private val upgrades: Upgrades,
     private val db: CatalogDatabase,
+    folders: PlaylistFolderStore,
 ) : ViewModel() {
     val favouriteAlbums: StateFlow<Set<String>> = favourites.albums
+
+    // Whether playlist folders are offered.
+    val foldersOffered: StateFlow<Boolean> = folders.offered.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), folders.offeredNow())
+
+    // The songs Add to playlist takes: an album's songs found online too
+    // while the server keeps them in playlists; otherwise what plays.
+    fun addSpecOf(target: CollectionTarget): ListSpec = when (target) {
+        is CollectionTarget.Album -> albumAddSpec(target.id, store.findsOpen)
+        else -> specOf(target)
+    }
     val favouriteArtists: StateFlow<Set<String>> = favourites.artists
 
     // The pins Home shows, in row order.

@@ -40,6 +40,9 @@ sealed interface CarNode {
     data class Album(val id: String) : CarNode
     data class Artist(val id: String) : CarNode
     data class Playlist(val id: String) : CarNode
+
+    // A playlist folder: its folders, then its playlists.
+    data class PlaylistFolder(val id: String) : CarNode
     data class LiveList(val id: String) : CarNode
     data class Genre(val name: String) : CarNode
 
@@ -108,6 +111,7 @@ fun carId(node: CarNode): String = when (node) {
     is CarNode.Album -> "album:${node.id}"
     is CarNode.Artist -> "artist:${node.id}"
     is CarNode.Playlist -> "playlist:${node.id}"
+    is CarNode.PlaylistFolder -> "folder:${node.id}"
     is CarNode.LiveList -> "livelist:${node.id}"
     is CarNode.Genre -> "genre:" + encode(node.name)
     is CarNode.OctoList -> "list:" + encode(node.id) + ":" + carIdName(node.name)
@@ -153,6 +157,7 @@ fun parseCarId(id: String): CarNode? = when {
     id.startsWith("album:") -> CarNode.Album(id.removePrefix("album:"))
     id.startsWith("artist:") -> CarNode.Artist(id.removePrefix("artist:"))
     id.startsWith("playlist:") -> CarNode.Playlist(id.removePrefix("playlist:"))
+    id.startsWith("folder:") -> CarNode.PlaylistFolder(id.removePrefix("folder:"))
     id.startsWith("livelist:") -> CarNode.LiveList(id.removePrefix("livelist:"))
     id.startsWith("genre:") -> decode(id.removePrefix("genre:"))?.let { CarNode.Genre(it) }
     id.startsWith("list:") -> named(id.removePrefix("list:"))?.let { (key, name) -> CarNode.OctoList(key, name) }
@@ -298,6 +303,7 @@ fun carInputsOf(node: CarNode): Set<CarInput> = when (node) {
     is CarNode.Album -> setOf(CarInput.Library, CarInput.Adopted, CarInput.LibraryOnly, CarInput.Downloads)
     is CarNode.Artist -> setOf(CarInput.Library, CarInput.Sorts, CarInput.Adopted, CarInput.LibraryOnly, CarInput.Totals)
     is CarNode.Playlist -> setOf(CarInput.Playlists, CarInput.Downloads, CarInput.Adopted)
+    is CarNode.PlaylistFolder -> setOf(CarInput.Playlists, CarInput.Sorts, CarInput.CoverStyle)
     is CarNode.LiveList -> setOf(CarInput.Library, CarInput.LiveLists, CarInput.Liked, CarInput.Totals)
     CarNode.Charts, CarNode.Chart, is CarNode.OctoList, is CarNode.Station, is CarNode.ChartList -> setOf(CarInput.Shelves, CarInput.Adopted)
     is CarNode.OnlineAlbum, is CarNode.OnlineArtist, is CarNode.Found, is CarNode.Top, is CarNode.Retry -> setOf(CarInput.Adopted, CarInput.LibraryOnly)

@@ -189,6 +189,8 @@ fun songActions(
     // brought in yet (OwnedFinds): nothing to download or ask for, and its
     // heart, as any library song has.
     owned: Boolean = false,
+    // The server keeps songs found online in playlists (octoPlaylistSongs).
+    playlistAdds: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
     add(SongAction.AddToQueue)
@@ -197,6 +199,10 @@ fun songActions(
         if (!owned) {
             add(SongAction.Download)
             if (requestCopy) add(SongAction.RequestCopy)
+        }
+        if (playlistAdds) {
+            if (lastPlaylist) add(SongAction.AddToLastPlaylist)
+            add(SongAction.AddToPlaylist)
         }
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
@@ -306,6 +312,9 @@ class SongMenuViewModel @Inject constructor(
 ) : ViewModel() {
     // Whether this one song is liked, as that changes.
     fun liked(trackId: String): Flow<Boolean> = likes.likedFlow(trackId)
+
+    // Whether a song found online can go in a playlist on this server.
+    val playlistAdds: Boolean get() = playlists.findsOpen
     val downloadStates: StateFlow<Map<String, DownloadState>> = downloads.states
 
     // What a swipe right on a song row does, as Settings say.

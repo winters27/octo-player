@@ -152,6 +152,7 @@ internal class SyncRig(
     val formPost: Boolean = false,
     val familyRules: Boolean = false,
     val me: FamilyMe? = null,
+    val playlistSongs: Boolean = false,
 ) : Closeable {
     private val dir = Files.createTempDirectory("plsync").toFile()
     val oracleDb = openTestCatalog()
@@ -226,6 +227,7 @@ internal class SyncRig(
         "account",
         formPost,
         familyRules,
+        playlistSongs,
     )
 
     // Runs a step on both sides.

@@ -15,6 +15,8 @@ import app.winters.octo.family.FamilyHub
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.FAMILY_PLAYLISTS_EXTENSION
 import app.winters.octo.subsonic.FORM_POST_EXTENSION
+import app.winters.octo.subsonic.PLAYLIST_SONGS_EXTENSION
+import app.winters.octo.ui.common.Feedback
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.access
 import app.winters.octo.subsonic.isFamilyPlaylist
@@ -28,8 +30,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,6 +58,8 @@ class PlaylistSync @Inject constructor(
     db: CatalogDatabase,
     merge: CatalogMerge,
     freeSpace: FreeSpace,
+    private val folders: PlaylistFolderStore,
+    feedback: Feedback,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,10 +73,13 @@ class PlaylistSync @Inject constructor(
         PlaylistWalks(db, sets),
         familyPlan = { family.plan() },
         forgetDeleted = { account, serverId -> store.removeDeleted(account, serverId) },
+        notice = { feedback.show(it) },
+        foldersChanged = { folders.later() },
     )
 
-    // One change to the server's playlists at a time.
-    private val lock = Mutex()
+    // One change to the server's playlists at a time, each holder starting
+    // with the one-time base step for its server.
+    private val lock = SyncLock { server -> steps.ensureBase(server) }
 
     // Edits waiting to be sent, by playlist.
     private val waits = HashMap<String, Job>()
@@ -99,7 +104,8 @@ class PlaylistSync @Inject constructor(
     suspend fun afterSync() {
         val server = signedIn() ?: return
         reconciledAt = System.currentTimeMillis()
-        lock.withLock { reconcile(server) }
+        lock.withLock(server) { reconcile(server) }
+        folders.freshen()
     }
 
     // When the server's playlists were last brought together with the
@@ -114,7 +120,8 @@ class PlaylistSync @Inject constructor(
         reconciledAt = now
         scope.launch {
             val server = signedIn() ?: return@launch
-            lock.withLock { failureOf { reconcile(server) } }
+            lock.withLock(server) { failureOf { reconcile(server) } }
+            folders.freshen()
         }
     }
 
@@ -158,7 +165,7 @@ class PlaylistSync @Inject constructor(
             val server = signedIn() ?: return@launch
             if (playlist.sourceId != server.sourceId) return@launch
             store.addDeleted(server.account, serverId)
-            lock.withLock { failureOf { steps.deleteOnServer(server, serverId) } }
+            lock.withLock(server) { failureOf { steps.deleteOnServer(server, serverId) } }
         }
     }
 
@@ -173,7 +180,7 @@ class PlaylistSync @Inject constructor(
 
     private suspend fun send(localId: String) {
         val server = signedIn() ?: return
-        lock.withLock {
+        lock.withLock(server) {
             val playlist = user.playlistRow(localId) ?: return@withLock
             if (playlist.sourceId != server.sourceId) return@withLock
             failureOf {
@@ -202,7 +209,7 @@ class PlaylistSync @Inject constructor(
         val steps = planPlaylists(
             server = keep.map { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) },
             others = all.mapTo(HashSet()) { it.id } - keep.mapTo(HashSet()) { it.id },
-            linked = kept.mapNotNull { it.linked() },
+            linked = kept.mapNotNull { it.linked(ownRules = server.playlistSongs) },
             waiting = kept.filter { it.serverId == null }.map { it.id },
             deleted = store.deleted(server.account),
         )
@@ -212,6 +219,15 @@ class PlaylistSync @Inject constructor(
         for (row in user.serverPlaylists(server.sourceId)) {
             val notice = row.serverId?.let(notices::get)
             if (row.serverId != null && notice != row.octoNotice) user.markNotice(row.id, notice)
+        }
+        // Octo's library upkeep lists and imported playlists' copies, as the server marks them.
+        val marked = keep.associateBy { it.id }
+        for (row in user.serverPlaylists(server.sourceId)) {
+            val playlist = row.serverId?.let(marked::get) ?: continue
+            if (playlist.octoUpkeep != row.upkeep || playlist.octoUpkeepKind != row.upkeepKind) {
+                user.markUpkeep(row.id, playlist.octoUpkeep, playlist.octoUpkeepKind)
+            }
+            if (playlist.octoImport != row.octoImport) user.markImport(row.id, playlist.octoImport)
         }
         // Which of them the server lists as the family's, and what the
         // listener may do with each.
@@ -247,6 +263,7 @@ class PlaylistSync @Inject constructor(
             session.id,
             session.extensions.any { it.startsWith("$FORM_POST_EXTENSION:") },
             session.extensions.any { it.startsWith("$FAMILY_PLAYLISTS_EXTENSION:") },
+            session.extensions.any { it.startsWith("$PLAYLIST_SONGS_EXTENSION:") },
         )
     }
 

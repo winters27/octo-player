@@ -33,6 +33,7 @@ import app.winters.octo.catalog.PlaylistRowView
 import app.winters.octo.catalog.PlaylistSummary
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.WorkOwners
+import app.winters.octo.playlists.PlaylistFolderStore
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.elevation3
 import app.winters.octo.playback.ListSpec
@@ -82,7 +83,10 @@ class PlaylistViewModel @AssistedInject constructor(
     reads: LibraryReads,
     db: CatalogDatabase,
     owners: WorkOwners,
+    folders: PlaylistFolderStore,
 ) : ViewModel() {
+    // Whether playlist folders are offered.
+    val foldersOffered: StateFlow<Boolean> = folders.offered.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), folders.offeredNow())
     // The playlist's row; null once it is deleted, and before first read.
     val playlist: StateFlow<Loaded<PlaylistEntity?>> =
         userDao.playlist(id).map { Loaded(it) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Loaded(null, read = false))
@@ -111,7 +115,7 @@ class PlaylistViewModel @AssistedInject constructor(
 
     // Whether songs can be taken out of this playlist here: not from a family
     // playlist unless the last sync found the listener may.
-    fun takesOut(playlist: PlaylistEntity): Boolean = !playlist.family || playlist.familyMayRemove
+    fun takesOut(playlist: PlaylistEntity): Boolean = !playlist.octoImport && (!playlist.family || playlist.familyMayRemove)
 
     private fun name() = summary.value?.name ?: playlist.value.value?.name
 
@@ -171,6 +175,7 @@ fun PlaylistScreen(
     val summary by vm.summary.collectAsStateWithLifecycle()
     val phoneOnly by vm.phoneOnly.collectAsStateWithLifecycle()
     val serverAvailable by vm.serverAvailable.collectAsStateWithLifecycle()
+    val foldersOn by vm.foldersOffered.collectAsStateWithLifecycle()
     val sheets = LocalPlaylistSheets.current
     // Leaves the page once the playlist is deleted.
     val gone = loaded.read && loaded.value == null
@@ -244,8 +249,9 @@ fun PlaylistScreen(
                                         canDownload = (counts?.serverOnly ?: 0) > 0,
                                         keep = true,
                                         family = playlist.family,
-                                        canRename = !playlist.family || playlist.familyMayRename,
-                                        canDelete = !playlist.family || playlist.familyMayDelete,
+                                        canRename = playlist.renamesHere,
+                                        canDelete = playlist.deletesHere,
+                                        placeKey = playlist.placeKey.takeIf { foldersOn && !playlist.upkeep },
                                     ),
                                 )
                             },
@@ -298,7 +304,7 @@ fun PlaylistScreen(
                                     SongRow(
                                         entry.row.track,
                                         // No moving songs while picking them, or in a family playlist.
-                                        trailing = if (selecting || playlist.family) null else ({ DragHandle(Modifier.draggableHandle(onDragStopped = { drop() })) }),
+                                        trailing = if (selecting || playlist.family || playlist.octoImport) null else ({ DragHandle(Modifier.draggableHandle(onDragStopped = { drop() })) }),
                                         menuContext = SongMenuContext(playlistId = playlist.id, playlistItemId = entry.key.id.toLong().takeIf { takesOut }),
                                         selectKey = entry.key.id,
                                         // A swipe left takes the song out here.

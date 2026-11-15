@@ -23,6 +23,13 @@ data class PlaylistSummary(
     val familyMayRemove: Boolean = false,
     val familyMayRename: Boolean = false,
     val familyMayDelete: Boolean = false,
+    // Its id on the server, once it is there, which its folder placement goes by.
+    val serverId: String? = null,
+    // One of Octo's library upkeep lists, and an imported playlist's copy;
+    // the upkeep list's kind as the server names it.
+    val upkeep: Boolean = false,
+    val octoImport: Boolean = false,
+    val upkeepKind: String? = null,
 )
 
 // One song of a playlist, as much of it as the list of playlists needs.
@@ -84,6 +91,10 @@ data class PlaylistRow(
     val familyMayRename: Boolean,
     val familyMayDelete: Boolean,
     val itemSet: Long,
+    val serverId: String? = null,
+    val upkeep: Boolean = false,
+    val octoImport: Boolean = false,
+    val upkeepKind: String? = null,
 )
 
 // A playlist's song count and length, with the change and the item set
@@ -108,7 +119,7 @@ data class LikedCover(val likedAt: Long, val trackId: String, val albumId: Strin
 
 internal const val PLAYLIST_ROW_COLUMNS = """
     SELECT id, name, createdAt, updatedAt, sourceId, octoNotice, family, familyMayAdd, familyMayRemove, familyMayRename,
-        familyMayDelete, itemSet
+        familyMayDelete, itemSet, serverId, upkeep, octoImport, upkeepKind
     FROM playlist
 """
 
@@ -170,6 +181,10 @@ fun summaryOf(row: PlaylistRow, songCount: Int, durationMs: Long, covers: List<S
     familyMayRemove = row.familyMayRemove,
     familyMayRename = row.familyMayRename,
     familyMayDelete = row.familyMayDelete,
+    serverId = row.serverId,
+    upkeep = row.upkeep,
+    octoImport = row.octoImport,
+    upkeepKind = row.upkeepKind,
 )
 
 // How far apart two neighboring playlist rows' ord values are.

@@ -1,5 +1,7 @@
 package app.winters.octo.catalog
 
+import app.winters.octo.playlists.PlaylistFolderTree
+
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
@@ -460,6 +462,14 @@ class PlaylistSets internal constructor(
         if (changed == 1) Flip.Shown else Flip.Changed
     }
 
+    // A base the base step seeded, shown in one transaction only while the
+    // playlist is as the step read it: not edited (updatedAt and syncedAt
+    // both as read), linked to the same server playlist of the same server,
+    // not a family playlist, and showing the same base.
+    internal suspend fun flipSeeded(expected: PlaylistEntity, baseSet: Long): Boolean = db.withTransaction {
+        dao.flipSeeded(expected.id, expected.baseSet, baseSet, expected.updatedAt, expected.syncedAt, expected.serverId, expected.sourceId) == 1
+    }
+
     // A phone playlist found to be a server playlist's twin: linked to it,
     // marked a family playlist or not (with what the listener may do, when
     // it is one), and its base the new set `baseSet`, in one transaction.
@@ -499,7 +509,14 @@ class PlaylistSets internal constructor(
     private suspend fun unlink(playlistId: String, write: suspend (base: Long) -> Int) = withSet(playlistId) {
         val old = dao.baseSetOf(playlistId) ?: return@withSet
         val base = newBaseSet(playlistId) ?: return@withSet
-        if (db.withTransaction { write(base) } == 1) deleteBaseSet(playlistId, old)
+        val serverId = dao.serverIdOf(playlistId)
+        val unlinked = db.withTransaction {
+            val done = write(base)
+            // Its folder placement stays, as the phone-only playlist's.
+            if (done == 1 && serverId != null) db.playlistFolderDao().turnLocal(serverId, PlaylistFolderTree.localKey(playlistId))
+            done
+        }
+        if (unlinked == 1) deleteBaseSet(playlistId, old)
     }
 }
 
@@ -656,6 +673,18 @@ interface PlaylistSetDao {
 
     @Query("UPDATE playlist SET baseSet = :to, syncedSongsKept = 1, syncedSongs = NULL WHERE id = :playlistId AND baseSet = :from AND itemSet >= 0")
     suspend fun flipBase(playlistId: String, from: Long, to: Long): Int
+
+    @Query(
+        """
+        UPDATE playlist SET baseSet = :to, syncedSongsKept = 1, syncedSongs = NULL
+        WHERE id = :playlistId AND baseSet = :from AND itemSet >= 0 AND family = 0
+          AND updatedAt = :updatedAt AND syncedAt IS :syncedAt AND serverId IS :serverId AND sourceId IS :sourceId
+        """,
+    )
+    suspend fun flipSeeded(playlistId: String, from: Long, to: Long, updatedAt: Long, syncedAt: Long?, serverId: String?, sourceId: String?): Int
+
+    @Query("SELECT serverId FROM playlist WHERE id = :playlistId")
+    suspend fun serverIdOf(playlistId: String): String?
 
     @Query(
         "UPDATE playlist SET itemSet = -1, baseSet = :baseSet " +

@@ -116,6 +116,7 @@ import app.winters.octo.ui.playlist.PlaylistSheetsHost
 import app.winters.octo.ui.livelists.LiveListEditScreen
 import app.winters.octo.ui.livelists.LiveListScreen
 import app.winters.octo.ui.playlist.PlaylistsScreen
+import app.winters.octo.ui.playlist.PlaylistFolderScreen
 import app.winters.octo.ui.search.SearchScreen
 import app.winters.octo.ui.search.SearchShellViewModel
 import app.winters.octo.ui.server.LocalShareSheet
@@ -472,6 +473,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<FavouritesRoute> { FavouritesScreen(open, back, openingSegment(it)) }
         entry<DownloadsRoute> { DownloadsScreen(back) }
         entry<PlaylistRoute> { PlaylistScreen(it.id, back) }
+        entry<PlaylistFolderRoute> { PlaylistFolderScreen(it.id, open, back) }
         entry<LiveListRoute> { LiveListScreen(it.id, back) }
         // Once saved, a new live list's screen takes the editor's place.
         entry<LiveListEditRoute> { route ->

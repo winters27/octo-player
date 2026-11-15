@@ -50,6 +50,7 @@ import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.ListSpec
 import app.winters.octo.playback.ListStart
 import app.winters.octo.playback.PlaybackConnection
+import app.winters.octo.playback.PlaylistStore
 import app.winters.octo.playback.QUEUE_WINDOW
 import app.winters.octo.playback.queueAddWords
 import kotlinx.coroutines.flow.Flow
@@ -73,7 +74,10 @@ class SelectionBarViewModel @Inject constructor(
     private val likes: LikeStore,
     private val offline: OfflineDownloads,
     private val feedback: Feedback,
+    private val playlists: PlaylistStore,
 ) : ViewModel() {
+    // Whether songs found online can go in a playlist on this server.
+    val playlistAdds: Boolean get() = playlists.findsOpen
     // Which of these songs are liked, as that changes.
     fun likedAmong(ids: List<String>): Flow<Set<String>> = likes.likedAmong(ids)
 
@@ -212,8 +216,8 @@ private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, 
                 BarButton(OctoIcons.Play, "Play", each) { act { vm.play(target) } }
                 BarButton(OctoIcons.PlayNext, "Play next", each) { act { vm.add(target, next = true) } }
                 BarButton(OctoIcons.AddToQueue, "Add to queue", each) { act { vm.add(target, next = false) } }
-                BarButton(OctoIcons.AddToPlaylist, "Add to playlist", each, enabled = library.isNotEmpty()) {
-                    act { vm.withOrdered(target) { rows -> sheets.show(PlaylistSheet.Pick(rows.map { it.trackId }.filterNot(::isFind))) } }
+                BarButton(OctoIcons.AddToPlaylist, "Add to playlist", each, enabled = playlistPickIds(ids, vm.playlistAdds).isNotEmpty()) {
+                    act { vm.withOrdered(target) { rows -> sheets.show(PlaylistSheet.Pick(playlistPickIds(rows.map { it.trackId }, vm.playlistAdds))) } }
                 }
                 BarButton(OctoIcons.Download, "Download", each, enabled = canDownload) { act { vm.download(library) } }
                 BarButton(
@@ -229,6 +233,10 @@ private fun SelectionBar(target: SelectionTarget, phoneFiles: PhoneFileActions, 
         }
     }
 }
+
+// The picked songs that can go in a playlist: library songs, and songs
+// found online while the server keeps them in playlists (`finds`).
+internal fun playlistPickIds(ids: List<String>, finds: Boolean): List<String> = if (finds) ids else ids.filterNot(::isFind)
 
 // One of the bar's buttons: an icon, named for screen readers. One that
 // cannot act on these songs is dimmed.

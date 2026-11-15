@@ -37,6 +37,13 @@ import app.winters.octo.data.AlbumUpgrade
 import app.winters.octo.ui.playlist.AddSource
 import app.winters.octo.ui.playlist.PlaylistPickerPage
 import app.winters.octo.ui.playlist.PlaylistSheetsViewModel
+import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.ui.playlist.FolderMoveTarget
+import app.winters.octo.ui.playlist.MoveToFolderPage
+import app.winters.octo.ui.playlist.deletes
+import app.winters.octo.ui.playlist.fileable
+import app.winters.octo.ui.playlist.placeKey
+import app.winters.octo.ui.playlist.renames
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.upgrade.KEEPS_ORIGINAL
 import app.winters.octo.ui.upgrade.findHigherQualityAsk
@@ -73,7 +80,8 @@ fun CollectionMenuHost(
                 }
                 // The songs are named by what they are, and walked a page at
                 // a time once a playlist is picked.
-                CollectionPage.AddToPlaylist -> PlaylistPickerPage(AddSource.Spec(vm.specOf(target)), onBack = back, onDone = state::close)
+                CollectionPage.AddToPlaylist -> PlaylistPickerPage(AddSource.Spec(vm.addSpecOf(target)), onBack = back, onDone = state::close)
+                CollectionPage.MoveToFolder -> PlaylistMoveToFolder(target, vm, onBack = back, onDone = state::close)
                 CollectionPage.Rename -> PlaylistRename(target, onBack = back, onDone = state::close)
                 CollectionPage.Delete -> PlaylistDelete(target, vm, onBack = back, onDone = state::close)
                 CollectionPage.FindFlac -> AlbumFindFlac(target, vm, onBack = back, onDone = state::close)
@@ -138,9 +146,16 @@ private fun PlaylistMenu(target: CollectionTarget.Playlist, state: CollectionMen
     val pinned by vm.pinned.collectAsStateWithLifecycle()
     val shown = playlist ?: return
     val pin = PinKey(PinKind.Playlist, target.id)
-    val renames = !shown.family || shown.familyMayRename
-    val deletes = !shown.family || shown.familyMayDelete
-    val actions = playlistActions(empty = shown.songCount == 0, pin = pinSpot(pinned, pin), renames = renames, deletes = deletes)
+    val foldersOn by vm.foldersOffered.collectAsStateWithLifecycle()
+    // An imported playlist's copy is never renamed or deleted here; one that
+    // can be filed moves to a folder while folders are offered.
+    val actions = playlistActions(
+        empty = shown.songCount == 0,
+        pin = pinSpot(pinned, pin),
+        renames = shown.renames,
+        deletes = shown.deletes,
+        moves = foldersOn && shown.fileable,
+    )
     CollectionActionsPage(
         shown.name,
         songs(shown.songCount),
@@ -208,6 +223,7 @@ private fun CollectionActionsPage(
                 CollectionAction.MoveToFront -> OctoIcons.Pin to "Move to front"
                 CollectionAction.GoToArtist -> OctoIcons.Artist to "Go to artist"
                 CollectionAction.Rename -> OctoIcons.Rename to "Rename"
+                CollectionAction.MoveToFolder -> OctoIcons.PlaylistFolder to PlaylistFolderWords.MOVE_TO_FOLDER
                 CollectionAction.Duplicate -> OctoIcons.AddToPlaylist to "Duplicate"
                 CollectionAction.Delete -> OctoIcons.Delete to "Delete"
             }
@@ -216,6 +232,7 @@ private fun CollectionActionsPage(
                 CollectionAction.Rename -> CollectionPage.Rename
                 CollectionAction.Delete -> CollectionPage.Delete
                 CollectionAction.FindFlac -> CollectionPage.FindFlac
+                CollectionAction.MoveToFolder -> CollectionPage.MoveToFolder
                 else -> null
             }
             GlassMenuAction(icon, label, opensPage = page != null, destructive = action == CollectionAction.Delete, onClick = {
@@ -264,6 +281,21 @@ private fun AlbumFindFlac(target: CollectionTarget, vm: CollectionMenuViewModel,
             onDone()
         }, onCancel = onBack)
     }
+}
+
+// Moving a playlist to a folder, a page of its menu.
+@Composable
+private fun PlaylistMoveToFolder(
+    target: CollectionTarget,
+    vm: CollectionMenuViewModel,
+    onBack: () -> Unit,
+    onDone: () -> Unit,
+    sheets: PlaylistSheetsViewModel = hiltViewModel(),
+) {
+    val playlist = target as? CollectionTarget.Playlist ?: return
+    val shown by remember(playlist) { vm.playlist(playlist.id) }.collectAsStateWithLifecycle(null)
+    val summary = shown ?: return
+    MoveToFolderPage(FolderMoveTarget.Playlists(listOf(summary.placeKey), summary.name), onBack = onBack, onDone = onDone, vm = sheets)
 }
 
 // Asking before a playlist is deleted, a page of its menu.

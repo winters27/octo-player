@@ -5,10 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PlaylistsLeadTest {
-    // The three lines that led the list are now one plus on the header.
+    // The lines that led the list are now one plus on the header.
     @Test
-    fun thePlusMakesAPlaylistALiveListOrImportsOne() {
-        assertEquals(listOf("New playlist", "New live list", "Import a playlist file"), PlaylistsAdd.entries.map { it.label })
+    fun thePlusMakesAPlaylistAFolderALiveListOrImportsOne() {
+        assertEquals(listOf("New playlist", "New folder", "New live list", "Import a playlist file"), PlaylistsAdd.entries.map { it.label })
         assertEquals("M3U or M3U8", PlaylistsAdd.Import.detail)
     }
 

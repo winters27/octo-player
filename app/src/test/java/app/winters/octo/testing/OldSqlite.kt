@@ -1,5 +1,6 @@
 package app.winters.octo.testing
 
+import app.winters.octo.catalog.CATALOG_VERSION
 import app.winters.octo.catalog.SAVE_RENAME_TRIGGERS
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -12,8 +13,9 @@ import java.sql.DriverManager
 // with the library's schema: for checking that a query runs there and how
 // it runs.
 object OldSqlite {
-    // An empty library database at a schema version, from Room's own file.
-    fun open(version: Int = 19): Connection {
+    // An empty library database at a schema version (the current one
+    // unless named), from Room's own file.
+    fun open(version: Int = CATALOG_VERSION): Connection {
         // Loaded by name, so the driver registers itself with the class
         // loader the test runs in (Robolectric has its own).
         Class.forName("org.sqlite.JDBC")

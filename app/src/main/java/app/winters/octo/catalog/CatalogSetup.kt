@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 // would hold up every read.
 fun RoomDatabase.Builder<CatalogDatabase>.catalogSetup(): RoomDatabase.Builder<CatalogDatabase> =
     setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-        .addMigrations(MIGRATION_18_19)
+        .addMigrations(MIGRATION_18_19, MIGRATION_19_20)
         .addCallback(CatalogCallback)
 
 // A new library starts with the one row each of the playlist row keys and

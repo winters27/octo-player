@@ -69,6 +69,10 @@ object OctoIcons {
     // A folder, for browsing music the way it is filed.
     val Folder = R.drawable.sym_folder
 
+    // A playlist folder: a folder holding a note, apart from the folders
+    // music is filed in. Drawn for Octo in the Phosphor Regular style.
+    val PlaylistFolder = R.drawable.sym_playlist_folder
+
     // How a list is ordered, and which way it runs.
     val Sort = R.drawable.sym_sort
     // Rules: filters, and the mark of a live list.

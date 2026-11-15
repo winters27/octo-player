@@ -159,9 +159,12 @@ class UpgradeGuard internal constructor(
 
     private fun need(): Long = maxOf(floor, writeErrorAsk, upgradeNeed())
 
-    // The most the upgrade takes: a share of the whole file, and the rows it
-    // writes that the file holds in a smaller form.
-    private fun upgradeNeed(): Long = wholeFileNeed() + baseRowsNeed() + queueRowsNeed() + playlistRowsNeed()
+    // The most the upgrade takes. From version 19 on it only adds tables and
+    // columns (Migration19To20.kt), so a little room does; from 18 it is a
+    // share of the whole file and the rows it writes that the file holds in
+    // a smaller form. A file whose version can't be read asks for the most.
+    private fun upgradeNeed(): Long =
+        if (reportedVersion() >= TABLES_ONLY_FROM) TABLES_ONLY_BYTES else wholeFileNeed() + baseRowsNeed() + queueRowsNeed() + playlistRowsNeed()
 
     // The version the database reports, read without changing the file: a
     // file SQLite finds damaged is left as it is (Android's default handler
@@ -212,6 +215,11 @@ private const val QUEUE_ROW_BYTES = 200L
 internal const val PLAYLIST_ROW_BYTES = 350L
 
 private const val WRITE_ERROR = "write-error"
+
+// The first version whose upgrade only adds tables and columns, and the
+// room it asks for (a few pages each, and their log).
+private const val TABLES_ONLY_FROM = 19
+private const val TABLES_ONLY_BYTES = 1L shl 20
 
 // The schema version SQLite keeps at byte 60 of the file, or 0 when the
 // file is too short to have one.

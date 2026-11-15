@@ -424,6 +424,40 @@ interface UserDao {
     @Query("UPDATE playlist SET octoNotice = :notice WHERE id = :id")
     suspend fun markNotice(id: String, notice: String?)
 
+    // Whether the server marks its copy as one of Octo's library upkeep lists, and which kind.
+    @Query("UPDATE playlist SET upkeep = :upkeep, upkeepKind = :kind WHERE id = :id")
+    suspend fun markUpkeep(id: String, upkeep: Boolean, kind: String?)
+
+    // Whether the server marks its copy as an imported playlist's copy.
+    @Query("UPDATE playlist SET octoImport = :octoImport WHERE id = :id")
+    suspend fun markImport(id: String, octoImport: Boolean)
+
+    // Whether a playlist's songs hold a song found online now.
+    @Query(
+        """
+        SELECT EXISTS(SELECT 1 FROM playlist p CROSS JOIN playlist_item i ON i.playlistId = p.id AND i.itemSet = p.itemSet
+            WHERE p.id = :id AND p.itemSet >= 0 AND i.trackId >= 'find:' AND i.trackId < 'find;')
+        """,
+    )
+    suspend fun holdsFindNow(id: String): Boolean
+
+    // The keys of a playlist's rows of these songs: by the server id a row
+    // came from, or by the song found online it is.
+    @Query(
+        """
+        SELECT i.itemKey FROM playlist p CROSS JOIN playlist_item i ON i.playlistId = p.id AND i.itemSet = p.itemSet
+        WHERE p.id = :id AND p.itemSet >= 0 AND (i.serverSongId IN (:serverIds) OR i.trackId IN (:trackIds))
+        """,
+    )
+    suspend fun rowKeysOf(id: String, serverIds: List<String>, trackIds: List<String>): List<Long>
+
+    // Whether a server's playlists had their bases seeded (PlaylistSteps.ensureBase).
+    @Query("SELECT EXISTS(SELECT 1 FROM playlist_base_mark WHERE sourceId = :sourceId)")
+    suspend fun baseSeeded(sourceId: String): Boolean
+
+    @Query("INSERT OR REPLACE INTO playlist_base_mark (sourceId, at) VALUES (:sourceId, :at)")
+    suspend fun markBaseSeeded(sourceId: String, at: Long)
+
     // Whether the server lists its copy of a playlist as a family playlist.
     @Query("UPDATE playlist SET family = :family WHERE id = :id")
     suspend fun markFamily(id: String, family: Boolean)

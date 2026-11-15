@@ -6,6 +6,8 @@ import app.winters.octo.catalog.PlaylistSets
 import app.winters.octo.catalog.SongToAdd
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.WorkOwners
+import app.winters.octo.catalog.isFind
+import app.winters.octo.catalog.PlaylistRowView
 import app.winters.octo.catalog.rawQuery
 import app.winters.octo.playback.ListSpec
 import app.winters.octo.ui.paging.ListLoaders
@@ -28,6 +30,15 @@ sealed interface AddSource {
 
 // How many songs one chunk of a count reads.
 private const val CHUNK = 900
+
+// The song a list's row adds to a playlist: a library song, or with
+// `finds` a song found online (a playlist's row of one, or an album's); none
+// for anything else.
+internal fun addableRow(row: Any?, finds: Boolean): TrackEntity? = when (row) {
+    is TrackEntity -> row.takeIf { finds || !isFind(it.id) }
+    is PlaylistRowView -> row.track.takeIf { row.inLibrary || (finds && isFind(it.id)) }
+    else -> null
+}
 
 // A pinned set's distinct library songs in id order from just past
 // `after`, as the set stood when it was pinned: its untouched rows and each
@@ -81,15 +92,20 @@ class AddSources @Inject constructor(
     // test can step in between them.
     internal var counted: suspend (chunk: Int) -> Unit = {}
     private val catalog = db.dao()
+    private val online = db.onlineDao()
 
-    // The library songs an add brings, in their order, a page at a time.
-    suspend fun pages(source: AddSource, emit: suspend (List<SongToAdd>) -> Unit) {
+    // The library songs an add brings, in their order, a page at a time;
+    // with `finds` (the server keeps songs found online in playlists, and the
+    // playlist takes them), the songs found online among them too, those
+    // whose rows are written.
+    suspend fun pages(source: AddSource, emit: suspend (List<SongToAdd>) -> Unit, finds: Boolean = false) {
         when (source) {
             is AddSource.Ids -> for (chunk in source.ids.chunked(CHUNK)) {
                 val found = catalog.tracksByIdsUnordered(chunk.distinct()).associateBy { it.id }
-                emit(chunk.mapNotNull { found[it]?.let { t -> SongToAdd(t.id, t.relinkKey) } })
+                val kept = if (finds) online.byIds(chunk.filter(::isFind).distinct()).mapTo(HashSet()) { it.id } else emptySet()
+                emit(chunk.mapNotNull { id -> found[id]?.let { t -> SongToAdd(t.id, t.relinkKey) } ?: id.takeIf { it in kept }?.let { SongToAdd(it, "") } })
             }
-            is AddSource.Spec -> walkSpec(source.spec) { tracks -> emit(tracks.map { SongToAdd(it.id, it.relinkKey) }) }
+            is AddSource.Spec -> walkSpec(source.spec, finds) { tracks -> emit(tracks.map { SongToAdd(it.id, it.relinkKey) }) }
         }
     }
 
@@ -107,8 +123,9 @@ class AddSources @Inject constructor(
         }
     }
 
-    // The library songs of a list in its order, a page at a time.
-    private suspend fun walkSpec(spec: ListSpec, page: suspend (List<TrackEntity>) -> Unit) {
+    // The library songs of a list in its order, a page at a time; with
+    // `finds`, its songs found online too.
+    private suspend fun walkSpec(spec: ListSpec, finds: Boolean = false, page: suspend (List<TrackEntity>) -> Unit) {
         val owner = owners.walk()
         @Suppress("UNCHECKED_CAST")
         val loader = loaders.forSpec(spec, owner) as? app.winters.octo.ui.paging.ListLoader<Any> ?: return
@@ -117,13 +134,7 @@ class AddSources @Inject constructor(
             while (true) {
                 val rows = loader.after(after, CHUNK)
                 if (rows.isEmpty()) return
-                val tracks = rows.mapNotNull { row ->
-                    when (val r = row.row) {
-                        is TrackEntity -> r
-                        is app.winters.octo.catalog.PlaylistRowView -> r.track.takeIf { r.inLibrary }
-                        else -> null
-                    }
-                }
+                val tracks = rows.mapNotNull { row -> addableRow(row.row, finds) }
                 page(tracks)
                 if (rows.size < CHUNK) return
                 after = rows.last().key

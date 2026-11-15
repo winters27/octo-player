@@ -32,7 +32,7 @@ class MigrationCollationTest {
         for (name in expected.keys) assertEquals(name, expected[name], actual[name])
     }
 
-    // A version 18 file upgraded by the migration alone, as Room would run it.
+    // A version 18 file upgraded by the migrations alone, as Room would run them.
     private fun upgraded(): File {
         val file = File(Files.createTempDirectory("old").toFile(), CATALOG_FILE)
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
@@ -44,7 +44,10 @@ class MigrationCollationTest {
                 .name(file.path)
                 .callback(object : SupportSQLiteOpenHelper.Callback(CATALOG_VERSION) {
                     override fun onCreate(db: SupportSQLiteDatabase) = Unit
-                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = MIGRATION_18_19.migrate(db)
+                    override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                        MIGRATION_18_19.migrate(db)
+                        MIGRATION_19_20.migrate(db)
+                    }
                 })
                 .build(),
         )

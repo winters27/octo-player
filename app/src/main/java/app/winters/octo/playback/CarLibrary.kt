@@ -57,6 +57,10 @@ import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.playlists.PlaylistArtSettings
+import app.winters.octo.playlists.PlaylistFolderStore
+import app.winters.octo.playlists.PlaylistFolderTree
+import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.ui.playlist.placeKey
 import app.winters.octo.server.QueueSync
 import app.winters.octo.server.ResumeOffer
 import app.winters.octo.server.ServerSync
@@ -147,6 +151,7 @@ class CarLibrary @Inject constructor(
     private val owners: WorkOwners,
     private val servers: ServerReads,
     private val totals: PlayTotals,
+    private val folders: PlaylistFolderStore,
     merge: CatalogMerge,
     // Finds a start plays before their rows are written.
     private val finds: FindMap,
@@ -195,7 +200,13 @@ class CarLibrary @Inject constructor(
     val inputs: Flow<CarInput> = carInputs(
         listOf(
             CarInput.Library to carLibraryInput(serverSync.ready, serverSync.last.map { it?.at }, catalog.libraryTrackCount()),
-            CarInput.Playlists to playlists.playlists.map { all -> all.map { Triple(it.id, it.name, it.songCount) } },
+            // A folder pull or a placement changes what the tab and each folder hold.
+            CarInput.Playlists to combine(
+                playlists.playlists.map { all -> all.map { listOf(it.id, it.name, it.songCount, it.upkeep, it.serverId) } },
+                folders.offered,
+                folders.tree,
+                ::Triple,
+            ),
             CarInput.Liked to likes.changes,
             CarInput.Favorites to combine(favourites.likedAlbumIds(), favourites.likedArtistIds(), ::Pair),
             CarInput.LiveLists to liveLists.lists,
@@ -243,6 +254,7 @@ class CarLibrary @Inject constructor(
             is CarNode.Shelf -> carFitOrParts(node, shelfItems(node), splitRows, style = shelfStyles(node.section).first)
             CarNode.Radio -> carHomeAnswer(null, radioShelves(), homeParts)
             CarNode.Playlists -> carFitOrParts(node, playlistsTab(), splitRows, style = CarStyle.List)
+            is CarNode.PlaylistFolder -> carFitOrParts(node, folderItems(node.id), splitRows, style = CarStyle.List)
             CarNode.Library -> libraryRows()
             CarNode.Favorites -> favoriteRows()
             CarNode.Charts -> shelves.current().charts.map(look::chart)
@@ -266,6 +278,7 @@ class CarLibrary @Inject constructor(
     private suspend fun partOf(node: CarNode.Part): List<MediaItem> {
         val items = when (val parent = node.parent) {
             CarNode.Playlists -> playlistsTab()
+            is CarNode.PlaylistFolder -> folderItems(parent.id)
             is CarNode.Shelf -> shelfItems(parent)
             is CarNode.Heading -> listed(parent.parent, ownAccord = false)?.under(parent.heading).orEmpty()
             else -> listed(parent, ownAccord = false)?.all().orEmpty()
@@ -365,6 +378,7 @@ class CarLibrary @Inject constructor(
             is CarNode.Album -> catalog.album(node.id).first()?.let(look::album)
             is CarNode.Artist -> catalog.artist(node.id).first()?.let(look::artist)
             is CarNode.Playlist -> playlists.playlists.first().firstOrNull { it.id == node.id }?.let(look::playlist)
+            is CarNode.PlaylistFolder -> folderRow(node.id)
             is CarNode.LiveList -> liveLists.lists.first().firstOrNull { it.id == node.id }?.let { look.liveList(it, liveSongs.covers(it.id, it.query)) }
             is CarNode.Song -> trackOf(node.trackId)?.let { look.song(it, node.list, isOutsideLibrary(it.id, inLibraryFinds()), offline.isDone(it.id)) }
             is CarNode.OctoList -> look.folder(node, node.name)
@@ -702,18 +716,45 @@ class CarLibrary @Inject constructor(
         return CarList(ListSpec.ServerQueue, NoSource, network = true)
     }
 
-    // Playlists: Liked songs, the live lists, the playlists in the phone's
-    // order (less the server's library action lists, which act on songs
-    // added), then the lists Octo made, under each kind's heading. Each
-    // list's covers are found by a walk that stops at four.
+    // Playlists: Liked songs, the live lists, the folders A to Z (while
+    // folders are offered), the playlists in no folder in the phone's order
+    // (never Octo's library upkeep lists, which act on songs added), then
+    // the lists Octo made, under each kind's heading. Each list's covers are
+    // found by a walk that stops at four.
     private suspend fun playlistsTab(): List<MediaItem> {
         val liked = user.likedCount().first()
         val live = liveLists.lists.first().map { list -> look.liveList(list, liveSongs.covers(list.id, list.query)) }
         val order = sorting.order(SortList.Playlists).first()
-        val own = sortPlaylists(playlists.playlists.first().filterNot { isToolPlaylist(it.name) }, order).map(look::playlist)
+        val own = carFolderChildren(carTree(), null, sortPlaylists(carPlaylists(playlists.playlists.first()), order)).map(::carChild)
         val octo = shelves.current().groups.flatMap { (group, items) -> items.map { look.grouped(look.station(it), group.title) } }
         val likedCovers = if (liked > 0) likes.likedCovers() else emptyList()
         return listOfNotNull(liked.takeIf { it > 0 }?.let { look.liked(it, likedCovers) }) + live + own + octo
+    }
+
+    // The folders a car shows, or none while folders are not offered.
+    private suspend fun carTree(): PlaylistFolderTree? = if (folders.offered.first()) folders.tree.first() else null
+
+    // A folder's rows: its folders, then its playlists in the phone's order.
+    private suspend fun folderItems(id: String): List<MediaItem> {
+        val tree = carTree() ?: return emptyList()
+        val order = sorting.order(SortList.Playlists).first()
+        return carFolderChildren(tree, id, sortPlaylists(carPlaylists(playlists.playlists.first()), order)).map(::carChild)
+    }
+
+    // A folder's own row, for a car that asks about it by its id.
+    private suspend fun folderRow(id: String): MediaItem? {
+        val tree = carTree() ?: return null
+        val folder = tree.folder(id) ?: return null
+        val keys = carPlaylists(playlists.playlists.first()).map { it.placeKey }
+        val subtitle = PlaylistFolderWords.folderSubtitle(tree.playlistsIn(id, keys).size, tree.children(id).size)
+        return look.folder(CarNode.PlaylistFolder(id), folder.name, OctoIcons.PlaylistFolder, subtitle = subtitle, browsable = CarStyle.List)
+    }
+
+    // A folder or playlist as a car's row: a folder browses, its glyph as its picture.
+    private fun carChild(child: CarFolderChild): MediaItem = when (child) {
+        is CarFolderChild.Folder ->
+            look.folder(CarNode.PlaylistFolder(child.folder.id), child.folder.name, OctoIcons.PlaylistFolder, subtitle = child.subtitle, browsable = CarStyle.List)
+        is CarFolderChild.Playlist -> look.playlist(child.playlist)
     }
 
     private fun libraryRows(): List<MediaItem> =
