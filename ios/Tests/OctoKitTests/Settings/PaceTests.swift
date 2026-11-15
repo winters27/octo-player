@@ -98,8 +98,10 @@ import Testing
         #expect(CacheSize.allCases.map(\.label) == ["Off", "1 GB", "2 GB", "5 GB", "10 GB"])
         #expect(CacheSize.gb2.bytes == 2 * 1_073_741_824)
         #expect(StreamQuality.allCases.map(\.label) == ["Original", "320 kbps", "256 kbps", "192 kbps", "128 kbps"])
-        #expect(StreamQuality.mp3(kbps: 320).downloadLabel == "320 kbps MP3")
-        #expect(StreamQuality.original.downloadLabel == "Original")
+        #expect(StreamQuality.mp3(kbps: 320).downloadLabel(.mp3) == "320 kbps MP3")
+        #expect(StreamQuality.mp3(kbps: 128).downloadLabel(.opus) == "128 kbps Opus")
+        #expect(StreamQuality.mp3(kbps: 256).downloadLabel(.aac) == "256 kbps AAC")
+        #expect(StreamQuality.original.downloadLabel(.opus) == "Original")
     }
 
     @Test func radioTuningAsksForMoreWhenMostlyOutside() {

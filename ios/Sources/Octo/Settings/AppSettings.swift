@@ -56,6 +56,7 @@ final class AppSettings {
         player = Self.readPlayer(playerKeys)
         stream = Self.readStream(playerStore)
         offline = Self.readOffline(offlineStore)
+        opusAbility = offlineStore.string(forKey: Self.opusAbilityKey).flatMap(OpusAbility.init(rawValue:))
         keepScreenOn = lyricsStore.object(forKey: Keys.keepScreenOn) as? Bool ?? true
         lyricsLook = Self.readLook(lyricsStore)
         outputTimings = Self.readOutputTimings(lyricsStore)
@@ -266,6 +267,27 @@ final class AppSettings {
         offline.downloadQuality = value
     }
 
+    func setDownloadFormat(_ value: DownloadFormat) {
+        offlineStore.set(value.storedName, forKey: Keys.downloadFormat)
+        offline.downloadFormat = value
+    }
+
+    /// Whether this phone plays the Opus files it writes, on the system version it runs now: nil
+    /// until the bundled tone has been tried here (`OpusProbe`).
+    private(set) var opusAbility: OpusAbility?
+
+    /// Keeps what the tone found on this system version.
+    func setOpusAbility(_ value: OpusAbility) {
+        offlineStore.set(value.rawValue, forKey: Self.opusAbilityKey)
+        opusAbility = value
+    }
+
+    /// Where the ability is kept: one answer per system version, so a newer system tries again.
+    private static var opusAbilityKey: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "opus.caf.ability.\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
     func setWifiOnly(_ on: Bool) {
         offlineStore.set(on, forKey: Keys.wifiOnly)
         offline.wifiOnly = on
@@ -295,6 +317,7 @@ final class AppSettings {
         setPrefetchWifi(prefs.prefetchWifi)
         setPrefetchMobile(prefs.prefetchMobile)
         setDownloadQuality(prefs.downloadQuality)
+        setDownloadFormat(prefs.downloadFormat)
         setWifiOnly(prefs.wifiOnly)
         setStreamOnWifi(prefs.streamOnWifi)
         setKeepLiked(prefs.keepLiked)
@@ -515,6 +538,7 @@ final class AppSettings {
         static let prefetchWifi = "prefetch_wifi"
         static let prefetchMobile = "prefetch_mobile"
         static let downloadQuality = "download_quality"
+        static let downloadFormat = "download_format"
         static let wifiOnly = "wifi_only"
         static let streamOnWifi = "stream_on_wifi"
         static let keepLiked = "keep_liked"
@@ -677,6 +701,7 @@ final class AppSettings {
         p.prefetchWifi = (s.object(forKey: Keys.prefetchWifi) as? Int ?? 3).held(to: OfflinePrefs.prefetchRange)
         p.prefetchMobile = (s.object(forKey: Keys.prefetchMobile) as? Int ?? 1).held(to: OfflinePrefs.prefetchRange)
         p.downloadQuality = StreamQuality.stored(s.string(forKey: Keys.downloadQuality), or: .original)
+        p.downloadFormat = DownloadFormat.named(s.string(forKey: Keys.downloadFormat))
         p.wifiOnly = s.object(forKey: Keys.wifiOnly) as? Bool ?? true
         p.streamOnWifi = s.object(forKey: Keys.streamOnWifi) as? Bool ?? false
         p.keepLiked = s.object(forKey: Keys.keepLiked) as? Bool ?? false

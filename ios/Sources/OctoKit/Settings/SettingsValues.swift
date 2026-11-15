@@ -397,8 +397,9 @@ extension StreamQuality: StoredChoice {
     /// As the settings show it: "Original" or "320 kbps".
     public var label: String { kbps.map { "\($0) kbps" } ?? "Original" }
 
-    /// As the download quality shows it: "Original" or "320 kbps MP3".
-    public var downloadLabel: String { kbps.map { "\($0) kbps MP3" } ?? "Original" }
+    /// As the download quality shows it, in the format smaller downloads are made as: "Original" or
+    /// "320 kbps Opus".
+    public func downloadLabel(_ format: DownloadFormat) -> String { kbps.map { "\($0) kbps \(format.label)" } ?? "Original" }
 
     /// Original, as the pickers say it.
     public static let originalLabel = "Original (as the file is, FLAC stays FLAC)"
@@ -504,6 +505,8 @@ public struct OfflinePrefs: Sendable, Equatable, Codable {
     public var prefetchWifi = 3
     public var prefetchMobile = 1
     public var downloadQuality: StreamQuality = .original
+    /// The type smaller downloads are made as. Opus for everyone who never chose, older backups included.
+    public var downloadFormat: DownloadFormat = .opus
     public var wifiOnly = true
     /// Stream on Wi-Fi even when a downloaded copy is on the phone.
     public var streamOnWifi = false
@@ -514,7 +517,7 @@ public struct OfflinePrefs: Sendable, Equatable, Codable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case cacheSize, prefetchWifi, prefetchMobile, downloadQuality, wifiOnly, streamOnWifi, keepLiked, keptPlaylists
+        case cacheSize, prefetchWifi, prefetchMobile, downloadQuality, downloadFormat, wifiOnly, streamOnWifi, keepLiked, keptPlaylists
     }
 
     public init(from decoder: Decoder) throws {
@@ -523,6 +526,7 @@ public struct OfflinePrefs: Sendable, Equatable, Codable {
         prefetchWifi = c.value(.prefetchWifi, or: 3)
         prefetchMobile = c.value(.prefetchMobile, or: 1)
         downloadQuality = c.choice(.downloadQuality, or: .original)
+        downloadFormat = c.choice(.downloadFormat, or: .opus)
         wifiOnly = c.value(.wifiOnly, or: true)
         streamOnWifi = c.value(.streamOnWifi, or: false)
         keepLiked = c.value(.keepLiked, or: false)
@@ -535,6 +539,7 @@ public struct OfflinePrefs: Sendable, Equatable, Codable {
         try c.encode(prefetchWifi, forKey: .prefetchWifi)
         try c.encode(prefetchMobile, forKey: .prefetchMobile)
         try c.encode(downloadQuality.storedName, forKey: .downloadQuality)
+        try c.encode(downloadFormat.storedName, forKey: .downloadFormat)
         try c.encode(wifiOnly, forKey: .wifiOnly)
         try c.encode(streamOnWifi, forKey: .streamOnWifi)
         try c.encode(keepLiked, forKey: .keepLiked)

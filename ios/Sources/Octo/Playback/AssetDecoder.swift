@@ -140,6 +140,7 @@ final class AssetDecoder: SongDecoding {
         case kAudioFormatMPEGLayer3: "audio/mpeg"
         case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2: "audio/mp4a-latm"
         case kAudioFormatLinearPCM: "audio/wav"
+        case kAudioFormatOpus: "audio/opus"
         default: nil
         }
     }

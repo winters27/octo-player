@@ -408,6 +408,7 @@ public enum BackupFile {
     static func offlineJSON(_ o: OfflineBackup) -> OrderedJSON {
         .object([("cacheSize", .string(o.cacheSize.storedName)), ("prefetchWifi", .int(Int64(o.prefetchWifi))),
                  ("prefetchMobile", .int(Int64(o.prefetchMobile))), ("downloadQuality", .string(o.downloadQuality.storedName)),
+                 ("downloadFormat", .string(o.downloadFormat.storedName)),
                  ("wifiOnly", .bool(o.wifiOnly)), ("streamOnWifi", .bool(o.streamOnWifi)), ("keepLiked", .bool(o.keepLiked)),
                  ("keptPlaylists", .strings(o.keptPlaylists.sorted()))])
     }

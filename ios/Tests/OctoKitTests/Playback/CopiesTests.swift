@@ -362,9 +362,10 @@ import Testing
         #expect(sniffedAudioMime(bytes("caff")) == "audio/x-caf")
         #expect(sniffedAudioMime([0xFF, 0xFB, 0x90, 0x64]) == "audio/mpeg")
         #expect(sniffedAudioMime([0xFF, 0xF1, 0x50, 0x80]) == "audio/aac")
-        // Tags first, an Ogg page, too few bytes: the listing decides.
+        // An Ogg page is named, so a file that is one never opens under its listed type.
+        #expect(sniffedAudioMime(bytes("OggS")) == "audio/ogg")
+        // Tags first, too few bytes: the listing decides.
         #expect(sniffedAudioMime(bytes("ID3") + [4, 0, 0]) == nil)
-        #expect(sniffedAudioMime(bytes("OggS")) == nil)
         #expect(sniffedAudioMime(bytes("fLa")) == nil)
         #expect(sniffedAudioMime([]) == nil)
     }

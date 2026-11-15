@@ -34,7 +34,7 @@ extension KeptDownload {
 public struct DownloadedFile: Sendable, Equatable {
     public var sourceId: String
     public var serverId: String
-    /// What the file is: the server's type, or MP3 when a smaller one was asked for.
+    /// What the file is, by its bytes: the server's type for the file as it is, or the smaller copy's.
     public var format: String?
     /// The size of the file on the phone.
     public var sizeBytes: Int64
@@ -43,9 +43,11 @@ public struct DownloadedFile: Sendable, Equatable {
     /// The server's size and type for the song's file now.
     public var serverSize: Int64?
     public var serverType: String?
+    /// Where the file is: its name says whether it was made smaller.
+    public var path: String
 
     public init(sourceId: String, serverId: String, format: String?, sizeBytes: Int64, fileSize: Int64?, serverSize: Int64?,
-                serverType: String?) {
+                serverType: String?, path: String = "") {
         self.sourceId = sourceId
         self.serverId = serverId
         self.format = format
@@ -53,15 +55,17 @@ public struct DownloadedFile: Sendable, Equatable {
         self.fileSize = fileSize
         self.serverSize = serverSize
         self.serverType = serverType
+        self.path = path
     }
 }
 
 /// What to do with a finished download, now the server may have swapped the song's file for
 /// another: see `checkKeptCopy`. A download is the file as it is when it has the server's type,
-/// unless that type is MP3, which smaller downloads are made as too.
+/// unless that type is MP3, which smaller downloads were made as before they were marked, or its name
+/// carries the smaller mark.
 public func checkDownload(_ file: DownloadedFile) -> KeptCopyCheck {
     checkKeptCopy(keptFor: file.fileSize, serverSize: file.serverSize, copySize: file.sizeBytes,
-                  asIs: file.format != nil && file.format == file.serverType && file.format != "audio/mpeg")
+                  asIs: file.format != nil && file.format == file.serverType && file.format != "audio/mpeg" && !isMadeSmallerName(file.path))
 }
 
 /// What changes to bring the downloads in step with the rules: songs to start downloading, songs

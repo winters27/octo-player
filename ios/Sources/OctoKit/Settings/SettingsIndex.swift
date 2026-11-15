@@ -265,6 +265,8 @@ public enum SettingsIndex {
                                                 ["free space", "storage", "delete"], section: "Cache")
     public static let downloadQuality = SettingEntry("download_quality", .streaming, "Download quality", "The file downloads come as",
                                                      ["bitrate", "kbps", "offline"], section: "Downloads")
+    public static let downloadFormat = SettingEntry("download_format", .streaming, DownloadFormat.title, DownloadFormat.help,
+                                                    ["opus", "aac", "mp3", "format", "codec", "offline"], section: "Downloads")
     public static let wifiOnly = SettingEntry("wifi_only", .streaming, "Download on Wi-Fi only", "Downloads wait for Wi-Fi", ["mobile data", "cellular"],
                                               section: "Downloads")
     public static let keepLiked = SettingEntry("keep_liked", .streaming, "Keep Liked songs downloaded", "Liked songs follow your likes offline",
@@ -346,7 +348,7 @@ public enum SettingsIndex {
         changePassword, serverKind, serverAnswer, serverScan, octoAdmin, importMusic, family, signInElsewhere, lastSynced, syncNow,
         queueSync, playlistsToServer, shares, scanServer, listeningNow, disconnect,
         copies, accountHome, accountAway, deviceQuality, streamWifi, startAfter, streamMobile, cacheSize, fetchWifi, fetchMobile,
-        clearCache, downloadQuality, wifiOnly, keepLiked, streamOnWifi, downloadedMusic,
+        clearCache, downloadQuality, downloadFormat, wifiOnly, keepLiked, streamOnWifi, downloadedMusic,
         lyricsOnline, lyricsScreenOn, lyricsStyle, lyricsEmphasis, lyricsGlow, lyricsLift, lyricsMotionSpeed, lyricsInactiveScale,
         lyricsFade, lyricsCascade, lyricsKeepCompleted, lyricsArc, lyricsBloomFast, lyricsOutputTiming,
         listenBrainz, sendPlays, nowPlaying, scrobblingDisconnect,

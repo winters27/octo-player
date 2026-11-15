@@ -99,13 +99,14 @@ extension CatalogStore {
     /// The finished downloads from this server, each beside its server song as the last sync saw it.
     public func doneFiles(_ sourceId: String) throws -> [DownloadedFile] {
         try db.query("""
-            SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType
+            SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType, d.path
             FROM download d JOIN source_track s ON s.sourceId = d.sourceId AND s.nativeId = d.serverId
             WHERE d.state = 'Done' AND d.sourceId = ?
             """, [sourceId]) { row in
             DownloadedFile(sourceId: row.string("sourceId"), serverId: row.string("serverId"), format: row.optionalString("format"),
                            sizeBytes: row.int64("sizeBytes"), fileSize: row.optionalInt64("fileSize"),
-                           serverSize: row.optionalInt64("serverSize"), serverType: row.optionalString("serverType"))
+                           serverSize: row.optionalInt64("serverSize"), serverType: row.optionalString("serverType"),
+                           path: row.string("path"))
         }
     }
 

@@ -47,12 +47,18 @@ struct StreamingSettingsPage: View {
                 }
             }
             SettingsGroup(title: "Downloads", icon: SettingsIcon.download) {
-                ChoiceRow(SettingsIndex.downloadQuality, value: kept.downloadQuality.downloadLabel, values: StreamQuality.allCases.map(\.downloadLabel), question: SettingsQuestion(
+                ChoiceRow(SettingsIndex.downloadQuality, value: kept.downloadQuality.downloadLabel(kept.downloadFormat),
+                          values: StreamQuality.allCases.map { $0.downloadLabel(kept.downloadFormat) }, question: SettingsQuestion(
                     SettingsIndex.downloadQuality.title, StreamQuality.allCases, current: kept.downloadQuality,
                     answer: { quality in
                         quality == .original ? SettingsAnswer(StreamQuality.originalLabel)
-                            : SettingsAnswer(quality.downloadLabel, SettingsWords.downloadDetail(quality))
+                            : SettingsAnswer(quality.downloadLabel(kept.downloadFormat), SettingsWords.downloadDetail(quality))
                     }, pick: settings.setDownloadQuality))
+                // Always shown, so the page never moves when the quality changes; it says when it applies.
+                ChoiceRow(SettingsIndex.downloadFormat, value: kept.downloadFormat.label, helper: DownloadFormat.help,
+                          question: SettingsQuestion(
+                    SettingsIndex.downloadFormat.title, DownloadFormat.allCases, current: kept.downloadFormat,
+                    answer: { SettingsAnswer($0.label, $0.detail) }, pick: settings.setDownloadFormat))
                 ToggleRow(SettingsIndex.wifiOnly, isOn: kept.wifiOnly, onChange: settings.setWifiOnly)
                 ToggleRow(SettingsIndex.keepLiked, isOn: kept.keepLiked, helper: "Liked songs from your server, kept in step with your likes.",
                           onChange: settings.setKeepLiked)

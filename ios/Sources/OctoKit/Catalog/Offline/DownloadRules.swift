@@ -239,7 +239,8 @@ public func downloadMaxKbps(mimeType: String?, bitrate: Int?, quality: StreamQua
     return cap
 }
 
-/// The type of file a download makes: the server's, or MP3 when a smaller one is asked for.
-public func downloadFormat(serverMimeType: String?, maxKbps: Int?) -> String? {
-    maxKbps == nil ? serverMimeType : "audio/mpeg"
+/// The type of file a download is named by before its bytes arrive: the server's, or the asked
+/// format's type when a smaller one is asked for.
+public func downloadFormat(serverMimeType: String?, maxKbps: Int?, asked: DownloadFormat = .mp3) -> String? {
+    maxKbps == nil ? serverMimeType : asked.mimeType
 }

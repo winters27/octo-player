@@ -6,11 +6,48 @@ public let downloadNameChars = 80
 
 /// The file a downloaded song is saved as: "Artist - Title [a1b2c3d4].flac". Characters no file
 /// system takes are replaced, and the part in brackets comes from the server and the song's id
-/// there, so two songs never share a name even when their titles match.
-public func downloadFileName(artist: String, title: String, sourceId: String, serverId: String, format: String?) -> String {
+/// there, so two songs never share a name even when their titles match. A download made smaller than
+/// the server's file carries the smaller mark inside its bracket ("[a1b2c3d4~s]"), which a title can
+/// never reach.
+public func downloadFileName(artist: String, title: String, sourceId: String, serverId: String, format: String?,
+                             madeSmaller: Bool = false) -> String {
     let readable = [artist, title].map(downloadSafePart).filter { !$0.isEmpty }.joined(separator: " - ")
     let stem = downloadTrimEnd(downloadPrefix(readable.isEmpty ? "Song" : readable, utf16Units: downloadNameChars))
-    return "\(stem) [\(downloadShortHash("\(sourceId)|\(serverId)"))].\(downloadExtension(for: format))"
+    let named = "\(stem) [\(downloadShortHash("\(sourceId)|\(serverId)"))]"
+    return "\(madeSmaller ? madeSmallerStem(named) : named).\(downloadExtension(for: format))"
+}
+
+/// The mark a smaller download's name carries inside its last bracket.
+private let smallerMark = "~s"
+
+/// A name stem ending in "[...]" with the smaller mark put inside that bracket. A stem not ending in
+/// "]" is given back as it is.
+public func madeSmallerStem(_ stem: String) -> String {
+    guard stem.hasSuffix("]"), !stem.hasSuffix("\(smallerMark)]") else { return stem }
+    return String(stem.dropLast()) + "\(smallerMark)]"
+}
+
+/// Whether a download's file (a path or a name) was made smaller than the server's file, by the mark
+/// its name carries.
+public func isMadeSmallerName(_ path: String) -> Bool {
+    let name = path.split(separator: "/").last.map(String.init) ?? path
+    return name.firstMatch(of: /\[[0-9a-f]{8}~s\]\.[A-Za-z0-9]+$/) != nil
+}
+
+/// The name a download finishes under: the name it was started under, with the ending `ext` and the
+/// smaller mark as its bytes turned out (a song asked as it is can arrive as a smaller copy, and an
+/// Opus or AAC copy is kept in a CAF or an M4A).
+public func finishedFileName(_ startName: String, ext: String, madeSmaller: Bool) -> String {
+    let stem = startName.lastIndex(of: ".").map { String(startName[..<$0]) } ?? startName
+    let plain = stem.hasSuffix("\(smallerMark)]") ? String(stem.dropLast(smallerMark.count + 1)) + "]" : stem
+    return "\(madeSmaller ? madeSmallerStem(plain) : plain).\(ext)"
+}
+
+/// The pieces of downloads a closed app left at the top of the downloads folder: every file whose name
+/// ends in ".part". Folders (the removed files waiting out their undo, the animated art) are never
+/// looked in.
+public func leftoverDownloadParts(_ entries: [(name: String, isFile: Bool)]) -> [String] {
+    entries.filter { $0.isFile && $0.name.hasSuffix(".part") }.map(\.name)
 }
 
 /// The file ending for a type of audio.
@@ -21,6 +58,7 @@ public func downloadExtension(for mimeType: String?) -> String {
     case "audio/flac", "audio/x-flac": return "flac"
     case "audio/mp4", "audio/x-m4a", "audio/m4a", "audio/alac": return "m4a"
     case "audio/aac", "audio/aacp": return "aac"
+    case "audio/x-caf": return "caf"
     case "audio/ogg", "audio/vorbis": return "ogg"
     case "audio/opus": return "opus"
     case "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave": return "wav"

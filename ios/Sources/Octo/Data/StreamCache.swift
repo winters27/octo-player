@@ -154,6 +154,19 @@ actor StreamCache {
         return true
     }
 
+    /// Lets a saved song go, file and all: its server let go of the file it was saved from. The
+    /// song's write generation moves on first, so nothing a play began before brings it back.
+    func drop(_ key: String) {
+        let song = savedSongOf(key)
+        let bar = song.firstIndex(of: "|") ?? song.endIndex
+        let serverId = bar < song.endIndex ? String(song[song.index(after: bar)...]) : ""
+        writes.bump(sourceId: String(song[..<bar]), serverId: serverId)
+        try? FileManager.default.removeItem(at: file(key))
+        index.remove([key])
+        dirty = true
+        save()
+    }
+
     /// The server answered for a saved song: a saved copy of another file (another type, whole
     /// length or video) goes, file and all, then the song is described as the server gave it. True
     /// when the saved copy went. An answer to a request begun under an older `generation` (the

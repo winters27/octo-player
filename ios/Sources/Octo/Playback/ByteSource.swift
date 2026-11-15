@@ -444,10 +444,19 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         guard (200..<300).contains(http.statusCode) else {
             task = nil
             errorsInARow += 1
-            // A refusal is asked again like a broken connection, except a place past the end.
-            if http.statusCode != 416 && errorsInARow <= 3 && online() {
+            switch refusalAction(status: http.statusCode, offset: taskStart, errorsInARow: errorsInARow, online: online()) {
+            case .reopen:
+                // The server let go of the file the song was read from: the saved copy goes before
+                // the player opens the song again (so the reopen never reads the old bytes), from
+                // the file the server has now, at its place.
+                ignoreSaved = true
+                if let savedKey {
+                    _ = try? blocking { await StreamCache.shared.drop(savedKey) }
+                }
+                failure = PlayError(.sourceChanged, detail: "the server let go of the song's file")
+            case .retry:
                 retryLater()
-            } else {
+            case .fail:
                 failure = PlayError(.badHttpStatus, httpStatus: http.statusCode, detail: "HTTP \(http.statusCode)")
             }
             condition.broadcast()

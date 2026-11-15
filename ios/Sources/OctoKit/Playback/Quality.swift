@@ -87,6 +87,7 @@ public func sniffedAudioMime(_ head: [UInt8]) -> String? {
     if starts("RIFF"), starts("WAVE", at: 8) { return "audio/wav" }
     if starts("FORM"), starts("AIFF", at: 8) || starts("AIFC", at: 8) { return "audio/aiff" }
     if starts("caff") { return "audio/x-caf" }
+    if starts("OggS") { return "audio/ogg" }
     if starts("ftyp", at: 4) { return "audio/mp4" }
     // An MPEG frame starts with eleven set bits. ADTS (AAC) has its layer bits zero; MP3 and
     // layers I and II do not.

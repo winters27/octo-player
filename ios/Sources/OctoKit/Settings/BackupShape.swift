@@ -184,7 +184,8 @@ extension BackupShape {
 
     static let offline = fields(
         BackupField("cacheSize", .choice), BackupField("prefetchWifi", .int), BackupField("prefetchMobile", .int),
-        BackupField("downloadQuality", .choice), BackupField("wifiOnly", .flag), BackupField("streamOnWifi", .flag),
+        BackupField("downloadQuality", .choice), BackupField("downloadFormat", .choice), BackupField("wifiOnly", .flag),
+        BackupField("streamOnWifi", .flag),
         BackupField("keepLiked", .flag), BackupField("keptPlaylists", .list(.text))
     )
 
