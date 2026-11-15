@@ -275,6 +275,15 @@ data class Playlist(
     val octoFamilyCreatedBy: String? = null,
     val octoFamilyMayRename: Boolean? = null,
     val octoFamilyMayDelete: Boolean? = null,
+    // One of Octo's library upkeep lists (its library actions, its notices,
+    // and a family member's own request and remove lists), as a server
+    // listing octoPlaylistSongs marks the listener's own.
+    val octoUpkeep: Boolean = false,
+    // An imported playlist's read-only copy, which Octo keeps.
+    val octoImport: Boolean = false,
+    // Which kind of upkeep list it is (UPKEEP_KIND_ACTION, _NOTICE or
+    // _REQUEST), sent with octoUpkeep; null when the server names none.
+    val octoUpkeepKind: String? = null,
 )
 
 @Serializable
@@ -305,6 +314,9 @@ data class PlaylistWithSongs(
     val octoFamilyCreatedBy: String? = null,
     val octoFamilyMayRename: Boolean? = null,
     val octoFamilyMayDelete: Boolean? = null,
+    val octoUpkeep: Boolean = false,
+    val octoImport: Boolean = false,
+    val octoUpkeepKind: String? = null,
 )
 
 // Where one of a playlist's songs sits on the server, for writing a

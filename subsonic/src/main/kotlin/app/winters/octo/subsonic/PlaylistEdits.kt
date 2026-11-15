@@ -1,6 +1,12 @@
 package app.winters.octo.subsonic
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 
 // The OpenSubsonic extension a server lists when it takes a call's params
 // in a form body, so a long list of songs fits in one call.
@@ -27,11 +33,36 @@ fun replaceSongsCalls(
     songIds: List<String>,
     formPost: Boolean,
     perCall: Int = PLAYLIST_SONGS_PER_CALL,
+    ifStamp: String? = null,
+    ownIds: Boolean = false,
 ): List<PlaylistCall> {
     val batches = songBatches(songIds, formPost, perCall)
-    val first = PlaylistCall("createPlaylist", listOf("playlistId" to playlistId) + batches.first().map { "songId" to it })
+    val first = PlaylistCall("createPlaylist", replaceParams(playlistId, ifStamp, ownIds) + batches.first().map { "songId" to it })
     return listOf(first) + addSongsCalls(playlistId, batches.drop(1))
 }
+
+// The param a replace carries so the server refuses it when the playlist
+// changed since the phone read it (the changed time the server sent), and
+// the one that says the replace names the server's own ids (no 1.12.0
+// title matches to pair).
+const val IF_STAMP_PARAM = "octoIfStamp"
+const val OWN_IDS_PARAM = "octoOwnIds"
+
+// A replace's first params: the playlist, then the stamp and own-ids marks
+// when given. Only the first call of a replace carries them: the calls
+// after it add to the list it made.
+internal fun replaceParams(playlistId: String, ifStamp: String?, ownIds: Boolean): List<Pair<String, String>> =
+    listOf("playlistId" to playlistId) +
+        listOfNotNull(ifStamp?.takeIf(String::isNotEmpty)?.let { IF_STAMP_PARAM to it }, if (ownIds) OWN_IDS_PARAM to "1" else null)
+
+// The ids an answer to a playlist change says the server skipped
+// (octoSkipped), from the answer's own object; none when it names none.
+internal fun skippedIn(answer: JsonObject?): List<String> =
+    (answer?.get("octoSkipped") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+
+// The same, from a whole answer's text.
+internal fun skippedInBody(body: String): List<String> =
+    skippedIn(runCatching { Json.parseToJsonElement(body).jsonObject["subsonic-response"]?.jsonObject }.getOrNull())
 
 // The calls that make a new playlist: the first batch goes with the name,
 // and the rest are added once the server says the new id.

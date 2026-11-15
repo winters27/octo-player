@@ -26,6 +26,9 @@ enum class OctoListGroup(val title: String) {
 // Navidrome's own ids can have the same shape. Only call it for a server
 // that runs Octo.
 fun octoListGroup(playlist: Playlist, listener: String, guess: Boolean = true): OctoListGroup? {
+    // An imported playlist's copy is the listener's own: it sits with their
+    // playlists and can be filed, never in From Octo.
+    if (playlist.octoImport) return null
     val owner = playlist.owner.orEmpty()
     if (listener.isNotBlank() && owner.isNotBlank() && !owner.equals(listener, ignoreCase = true)) return null
     playlist.octoGroup?.let { return groupOf(it) }

@@ -281,9 +281,16 @@ internal class StreamedForm(private val call: PagedCall) : RequestBody() {
 // makes them: a form body holds every song in one call; otherwise the
 // songs go in batches of `perCall`, the first replacing the list and the
 // rest added to its end.
-internal fun replaceSongsPaged(playlistId: String, songs: PagedValues, formPost: Boolean, perCall: Int = PLAYLIST_SONGS_PER_CALL): Sequence<PagedCall> {
+internal fun replaceSongsPaged(
+    playlistId: String,
+    songs: PagedValues,
+    formPost: Boolean,
+    perCall: Int = PLAYLIST_SONGS_PER_CALL,
+    ifStamp: String? = null,
+    ownIds: Boolean = false,
+): Sequence<PagedCall> {
     val batches = batchesOf(songs, formPost, perCall)
-    return sequenceOf(PagedCall("createPlaylist", listOf("playlistId" to playlistId), listOf("songId" to batches.first()))) +
+    return sequenceOf(PagedCall("createPlaylist", replaceParams(playlistId, ifStamp, ownIds), listOf("songId" to batches.first()))) +
         addSongsPaged(playlistId, batches.drop(1))
 }
 

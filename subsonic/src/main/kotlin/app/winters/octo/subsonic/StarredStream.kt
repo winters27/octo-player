@@ -18,11 +18,11 @@ enum class StarredKind(val wire: String) {
 const val STARRED_PAGE = 500
 
 // The error a Subsonic answer reports, by its code.
-internal fun subsonicError(code: Int, message: String): SubsonicException = when (code) {
+internal fun subsonicError(code: Int, message: String, conflict: Boolean = false): SubsonicException = when (code) {
     40, 44 -> SubsonicException.WrongCredentials(message)
     41, 42 -> SubsonicException.AuthNotSupported(code, message)
     70 -> SubsonicException.NotFound(message)
-    else -> SubsonicException.Server(code, message)
+    else -> SubsonicException.Server(code, message, conflict)
 }
 
 // Reads a getStarred2 answer as it arrives and hands on what it lists, a

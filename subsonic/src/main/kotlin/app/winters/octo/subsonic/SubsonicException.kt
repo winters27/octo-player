@@ -15,8 +15,10 @@ sealed class SubsonicException(message: String, cause: Throwable? = null) :
     // The thing asked for does not exist (code 70).
     class NotFound(message: String) : SubsonicException(message)
 
-    // Any other error the server reported.
-    class Server(val code: Int, message: String) : SubsonicException(message)
+    // Any other error the server reported. `conflict` is Octo's answer to a
+    // replace sent with octoIfStamp whose playlist changed since that stamp
+    // (octoConflict): nothing was changed, and the list wants reading again.
+    class Server(val code: Int, message: String, val conflict: Boolean = false) : SubsonicException(message)
 
     // Something answered, but not a Subsonic server. `status` is the HTTP
     // status when the answer was an error page. `gateway` names the sign-in

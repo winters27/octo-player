@@ -821,25 +821,51 @@ class SubsonicClient(
     // The same for songs too many to hold, sent from `songs` a page at a
     // time. The answer is read for whether it went well and for the new
     // playlist without its songs, which are skipped as they arrive.
-    suspend fun createPlaylist(name: String, songs: PagedValues, formPost: Boolean = false): PlaylistWithSongs? {
+    // `skipped` hears the ids a server listing octoPlaylistSongs says it
+    // left out (octoSkipped), once per call that skipped any.
+    suspend fun createPlaylist(
+        name: String,
+        songs: PagedValues,
+        formPost: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
+    ): PlaylistWithSongs? {
         val (first, rest) = createPaged(name, songs, formPost)
-        val created = sendForHead(first, formPost, head = true)
+        val created = sendForHead(first, formPost, head = true, skipped = skipped)
         if (rest.any()) {
             val id = created?.id ?: throw SubsonicException.Server(0, "The server did not say the new playlist's id")
-            addSongsPaged(id, rest).forEach { sendForHead(it, formPost) }
+            addSongsPaged(id, rest).forEach { sendForHead(it, formPost, skipped = skipped) }
         }
         return created
     }
 
     // Makes a playlist's songs exactly these, in this order: createPlaylist
-    // with the playlist's id replaces its whole list.
-    suspend fun replacePlaylistSongs(id: String, songIds: List<String>, formPost: Boolean = false) {
-        replaceSongsPaged(id, PagedValues.of(songIds), formPost).forEach { sendCall(it, formPost) }
+    // with the playlist's id replaces its whole list. `ifStamp` (the changed
+    // time the server sent for it) makes Octo refuse it when the playlist
+    // changed since (SubsonicException.Server with `conflict`); `ownIds`
+    // says the ids are the server's own; `skipped` hears the ids it left out.
+    suspend fun replacePlaylistSongs(
+        id: String,
+        songIds: List<String>,
+        formPost: Boolean = false,
+        ifStamp: String? = null,
+        ownIds: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
+    ) {
+        replaceSongsPaged(id, PagedValues.of(songIds), formPost, ifStamp = ifStamp, ownIds = ownIds).forEach { call ->
+            skippedInBody(sendCall(call, formPost)).takeIf { it.isNotEmpty() }?.let(skipped)
+        }
     }
 
     // The same for songs too many to hold, sent from `songs` a page at a time.
-    suspend fun replacePlaylistSongs(id: String, songs: PagedValues, formPost: Boolean = false) {
-        replaceSongsPaged(id, songs, formPost).forEach { sendForHead(it, formPost) }
+    suspend fun replacePlaylistSongs(
+        id: String,
+        songs: PagedValues,
+        formPost: Boolean = false,
+        ifStamp: String? = null,
+        ownIds: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
+    ) {
+        replaceSongsPaged(id, songs, formPost, ifStamp = ifStamp, ownIds = ownIds).forEach { sendForHead(it, formPost, skipped = skipped) }
     }
 
     // Changes a playlist's details, takes songs out by their place in the
@@ -854,6 +880,7 @@ class SubsonicClient(
         songIndexesToRemove: List<Int> = emptyList(),
         songsToRemove: List<Pair<String, Int>> = emptyList(),
         formPost: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
     ) {
         updatePaged(
             id, name, comment, public,
@@ -861,7 +888,7 @@ class SubsonicClient(
             PagedValues.of(songIndexesToRemove.map { "$it" }),
             PagedValues.of(songsToRemove.map { (song, copy) -> "$song@$copy" }),
             formPost,
-        ).forEach { sendCall(it, formPost) }
+        ).forEach { call -> skippedInBody(sendCall(call, formPost)).takeIf { it.isNotEmpty() }?.let(skipped) }
     }
 
     // The same for songs too many to hold: songs to add, places to take out
@@ -876,8 +903,11 @@ class SubsonicClient(
         songIndexesToRemove: PagedValues = NO_VALUES,
         songsToRemove: PagedValues = NO_VALUES,
         formPost: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
     ) {
-        updatePaged(id, name, comment, public, songIdsToAdd, songIndexesToRemove, songsToRemove, formPost).forEach { sendForHead(it, formPost) }
+        updatePaged(id, name, comment, public, songIdsToAdd, songIndexesToRemove, songsToRemove, formPost).forEach {
+            sendForHead(it, formPost, skipped = skipped)
+        }
     }
 
     suspend fun deletePlaylist(id: String) = send("deletePlaylist", listOf("id" to id))
@@ -890,7 +920,12 @@ class SubsonicClient(
     // went well, as `exchange` checks it, and with `head` the playlist it
     // names without its songs (null when it names none), as createPlaylist
     // reads it.
-    private suspend fun sendForHead(call: PagedCall, formPost: Boolean, head: Boolean = false): PlaylistWithSongs? {
+    private suspend fun sendForHead(
+        call: PagedCall,
+        formPost: Boolean,
+        head: Boolean = false,
+        skipped: (List<String>) -> Unit = {},
+    ): PlaylistWithSongs? {
         val root = try {
             val response = http.newCall(requestOf(call, formPost)).await()
             withContext(Dispatchers.IO) {
@@ -910,6 +945,7 @@ class SubsonicClient(
         }
         return withContext(Dispatchers.Default) {
             decodeRoot(root, null, ServerInfo.serializer(), null)
+            skippedIn(root).takeIf { it.isNotEmpty() }?.let(skipped)
             if (head) decodeRoot(root, null, CreatedPlaylist.serializer(), null).playlist else null
         }
     }
@@ -1043,7 +1079,8 @@ class SubsonicClient(
             val error = root["error"] as? JsonObject
             val code = (error?.get("code") as? JsonPrimitive)?.intOrNull ?: 0
             val message = (error?.get("message") as? JsonPrimitive)?.contentOrNull ?: "Request failed"
-            throw subsonicError(code, message)
+            val conflict = (error?.get("octoConflict") as? JsonPrimitive)?.booleanOrNull == true
+            throw subsonicError(code, message, conflict)
         }
         val payload = if (key == null) root else root[key]
         return when {
@@ -1141,12 +1178,13 @@ class SubsonicClient(
         }
 
     // Like get, for params that may repeat a name.
+    // With no `default`, an answer missing `key` is an error.
     internal suspend fun <T> getWith(
         endpoint: String,
         params: List<Pair<String, String>>,
         key: String,
         serializer: KSerializer<T>,
-        default: T,
+        default: T? = null,
     ): T {
         val url = url(endpoint).newBuilder().apply { params.forEach { (name, value) -> addQueryParameter(name, value) } }.build()
         val body = fetch(url, endpoint)
