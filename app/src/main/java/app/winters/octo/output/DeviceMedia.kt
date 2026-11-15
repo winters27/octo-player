@@ -9,7 +9,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.connection.ConnectionSecurity
+import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.EXTRA_MIME
+import app.winters.octo.playback.StreamRef
 import app.winters.octo.playback.Streams
 import app.winters.octo.playback.artworkBitmap
 import app.winters.octo.playback.artworkRef
@@ -37,6 +39,8 @@ class DeviceMedia @Inject constructor(
     @ApplicationContext private val context: Context,
     private val streams: Streams,
     private val security: ConnectionSecurity,
+    // Read when a download's type is one a device does not play.
+    private val downloads: dagger.Lazy<OfflineDownloads>,
 ) : MediaForDevice {
     @Volatile private var server: MediaServer? = null
 
@@ -67,7 +71,7 @@ class DeviceMedia @Inject constructor(
 
     override fun canPlay(item: MediaItem, output: RemoteOutput): Boolean = when (val source = sourceOf(item)) {
         is CastSource.Skipped -> false
-        is CastSource.PhoneFile -> output.accepts(phoneType(item, source.uri))
+        is CastSource.PhoneFile -> phoneFileCast(output.accepts(phoneType(item, source.uri)), downloads.get().isDownloadFile(source.uri)) != PhoneFileCast.Refuse
         else -> true
     }
 
@@ -85,27 +89,37 @@ class DeviceMedia @Inject constructor(
             seekable = seekable,
             live = live,
         )
+        // A server song as the device gets it: by an address of its own, or
+        // relayed by the phone, labeled as what the relay really sends.
+        suspend fun serverSong(ref: StreamRef): RemoteMedia? {
+            val preferred = requestForDevice(streams.deviceRequest(ref), ref.mimeType, output::accepts)
+            // A file as it is may come as another file than listed: the server says which.
+            val answered = if (preferred.maxKbps == null) streams.answeredType(ref, preferred) else null
+            val (request, named) = deviceMediaFor(preferred, ref.mimeType, answered, output::accepts)
+            val type = named ?: meta.extra(EXTRA_MIME) ?: "audio/mpeg"
+            // A file as it is can be sought in; one made on the way cannot.
+            val seekable = request.maxKbps == null
+            return if (security.reachableByOtherDevices()) {
+                streams.deviceAddress(ref, request)?.let { song(it, type, seekable) }
+            } else {
+                val pinned = ref.pin(request)
+                val sent = relayType(streams.savedType(pinned), type)
+                val relay = RelayedContent(streams::downloadSource, streamUri(pinned).toUri(), sent)
+                server?.offer(key, relay, extensionFor(sent))?.let { song(it, sent, seekable) }
+            }
+        }
         try {
             when (val source = sourceOf(item)) {
-                is CastSource.Server -> {
-                    val preferred = requestForDevice(streams.deviceRequest(source.ref), source.ref.mimeType, output::accepts)
-                    // A file as it is may come as another file than listed: the server says which.
-                    val answered = if (preferred.maxKbps == null) streams.answeredType(source.ref, preferred) else null
-                    val (request, named) = deviceMediaFor(preferred, source.ref.mimeType, answered, output::accepts)
-                    val type = named ?: meta.extra(EXTRA_MIME) ?: "audio/mpeg"
-                    // A file as it is can be sought in; one made on the way cannot.
-                    val seekable = request.maxKbps == null
-                    if (security.reachableByOtherDevices()) {
-                        streams.deviceAddress(source.ref, request)?.let { song(it, type, seekable) }
-                    } else {
-                        val relay = RelayedContent(streams::downloadSource, streamUri(source.ref.pin(request)).toUri(), type)
-                        server?.offer(key, relay, extensionFor(type))?.let { song(it, type, seekable) }
-                    }
-                }
+                is CastSource.Server -> serverSong(source.ref)
                 is CastSource.PhoneFile -> {
                     val type = phoneType(item, source.uri)
-                    if (!output.accepts(type)) return@withContext null
-                    server?.offer(key, PhoneFileContent(context, source.uri.toUri(), type), extensionFor(type))?.let { song(it, type, seekable = true) }
+                    when (phoneFileCast(output.accepts(type), downloads.get().isDownloadFile(source.uri))) {
+                        PhoneFileCast.Serve ->
+                            server?.offer(key, PhoneFileContent(context, source.uri.toUri(), type), extensionFor(type))?.let { song(it, type, seekable = true) }
+                        PhoneFileCast.FromServer ->
+                            downloads.get().serverCopyOfFile(item.mediaId, source.uri)?.let { serverSong(streams.refFor(it)) }
+                        PhoneFileCast.Refuse -> null
+                    }
                 }
                 is CastSource.Web -> {
                     val type = meta.extra(EXTRA_MIME) ?: mimeFromName(source.url.substringBefore('?')) ?: "audio/mpeg"

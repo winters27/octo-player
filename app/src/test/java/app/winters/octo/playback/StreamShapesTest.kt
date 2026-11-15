@@ -179,4 +179,32 @@ class StreamShapesTest {
         assertEquals(StreamRequest(null) to "audio/mp4", deviceMediaFor(StreamRequest(null), "audio/mp4", null, playsFlac))
         assertEquals(StreamRequest(320) to "audio/mpeg", deviceMediaFor(StreamRequest(320), "audio/flac", null, playsFlac))
     }
+
+    // A later part refused with 503 (the kept copy the play read is gone):
+    // the saved copy goes and the song opens again. From the first byte a
+    // 503 is the server's refusal as it is, and the song fails as before.
+    @Test
+    fun aRefusedLaterPartLetsTheSavedCopyGoAndOpensTheSongAgain() {
+        val store = Store().apply { kept["k"] = StreamShape("audio/flac", 31_000_000) }
+        val refusing = object : DataSource by Server(preview) {
+            override fun open(dataSpec: DataSpec): Long =
+                throw androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException(
+                    503, "Service Unavailable", null, emptyMap(), dataSpec, ByteArray(0),
+                )
+        }
+        val guard = ShapeGuardDataSource(refusing, { true }, store)
+        try {
+            guard.open(spec(position = 1_000_000, key = "k"))
+            fail("a refused later part opens the song again")
+        } catch (e: StreamChanged) {
+            // what the service reopens the song on
+        }
+        assertEquals(listOf("k"), store.dropped)
+        try {
+            guard.open(spec(position = 0, key = "k"))
+            fail("a refusal from the first byte stays a refusal")
+        } catch (e: androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+            assertEquals(503, e.responseCode)
+        }
+    }
 }

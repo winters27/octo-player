@@ -27,8 +27,9 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.playback.StreamUnavailable
 import app.winters.octo.playback.Streams
 import app.winters.octo.playback.bitrateOf
+import app.winters.octo.playback.downloadRequest
+import app.winters.octo.playback.expectedBytes
 import app.winters.octo.playback.signInPageIn
-import app.winters.octo.playback.streamRequest
 import app.winters.octo.playback.streamUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -83,6 +84,10 @@ private const val RETRY_AFTER_MS = 5_000L
 // How long the file of a download removed by hand is set aside, so the
 // removal can be taken back. A little longer than the undo line stays up.
 private const val UNDO_KEEP_MS = 10_000L
+
+// How many of a download's first bytes are kept to tell what it is: enough
+// for an ID3 tag of a few kilobytes before the audio.
+private const val HEAD_BYTES = 4096
 
 // A download let go of, with its file set aside while it can still come back.
 private data class SetAside(val row: DownloadEntity, val file: File?)
@@ -183,7 +188,11 @@ class OfflineDownloads @Inject constructor(
             saved.refreshUsed()
             watchRules()
         }
-        scope.launch { runQueue() }
+        scope.launch {
+            // Parts of downloads the app closed on go before any download runs.
+            leftoverParts(downloadDir()).forEach { it.delete() }
+            runQueue()
+        }
         // A new connection, a changed setting or a sign-in may let waiting downloads go.
         context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(
             object : ConnectivityManager.NetworkCallback() {
@@ -328,6 +337,21 @@ class OfflineDownloads @Inject constructor(
             }
         }
 
+    // Whether a queue address is a file in the downloads folder.
+    fun isDownloadFile(uri: String): Boolean {
+        val path = uri.toUri().takeIf { it.scheme == "file" }?.path ?: uri.takeIf { it.startsWith("/") } ?: return false
+        val dir = downloadDir().canonicalPath + File.separator
+        return runCatching { File(path).canonicalPath.startsWith(dir) }.getOrDefault(false)
+    }
+
+    // The server copy a downloaded file of `trackId` was made from, for a
+    // device that does not play the file's type.
+    suspend fun serverCopyOfFile(trackId: String, uri: String): app.winters.octo.catalog.SourceTrackEntity? {
+        val path = uri.toUri().takeIf { it.scheme == "file" }?.path ?: uri
+        val row = dao.forTrack(trackId).firstOrNull { it.state == DownloadStatus.Done && it.path == path } ?: return null
+        return dao.serverCopy(row.sourceId, row.serverId)
+    }
+
     // A downloaded file that turns out to be an HTML page (a sign-in page's
     // answer kept before such answers were refused) is deleted, and the
     // downloads of `trackId` kept in it download again. A download kept in it
@@ -428,23 +452,27 @@ class OfflineDownloads @Inject constructor(
             return
         }
         book.markDownloading(row.sourceId, row.serverId)
-        val request = streamRequest(copy.mimeType, bitrateOf(copy), settings.prefs.first().downloadQuality)
+        val prefs = settings.prefs.first()
+        val request = downloadRequest(copy.mimeType, bitrateOf(copy), prefs.downloadQuality, prefs.downloadFormat)
         val ref = streams.refFor(copy).pin(request)
         val dir = downloadDir()
-        val format = request.mimeType(copy.mimeType)
-        val target = File(dir, downloadFileName(copy.artist, copy.title, row.sourceId, row.serverId, format))
-        val part = File(dir, target.name + ".part")
+        val asked = request.mimeType(copy.mimeType)
+        val part = File(dir, downloadFileName(copy.artist, copy.title, row.sourceId, row.serverId, asked, madeSmaller = request.maxKbps != null) + ".part")
         try {
-            val size = copyInto(streamUri(ref), part) { progress ->
+            val got = copyInto(streamUri(ref), part, expectedBytes(copy.durationMs, request.maxKbps)) { progress ->
                 book.setProgress(row.sourceId, row.serverId, progress)
             }
             if (dao.get(row.sourceId, row.serverId) == null) {
                 part.delete()
                 return
             }
-            if (target.exists()) target.delete()
-            if (!part.renameTo(target)) throw IOException("Could not save the file")
-            book.finish(row.sourceId, row.serverId, target.absolutePath, size, format, copy.sizeBytes?.takeIf { it > 0 })
+            val arrival = arrivalOf(got.head, got.headCount, got.type, copy.mimeType, request)
+            val target = File(dir, downloadFileName(copy.artist, copy.title, row.sourceId, row.serverId, arrival.label, arrival.madeSmaller))
+            val finished = finishArrival(part, target, arrival.rewrap) {
+                dao.get(row.sourceId, row.serverId)?.state == DownloadStatus.Downloading
+            }
+            if (!finished) return
+            book.finish(row.sourceId, row.serverId, target.absolutePath, target.length(), arrival.label, copy.sizeBytes?.takeIf { it > 0 })
             // A song downloaded again under a new name lets its old file go.
             if (row.path.isNotEmpty() && row.path != target.absolutePath) File(row.path).delete()
             tries.remove(key)
@@ -481,15 +509,22 @@ class OfflineDownloads @Inject constructor(
         }
     }
 
-    // Reads a server song into a file, telling how far it has got. Returns
-    // how many bytes were written.
-    private suspend fun copyInto(uri: String, file: File, onProgress: suspend (Float) -> Unit): Long = withContext(Dispatchers.IO) {
+    // What a download read: how many bytes, its first bytes (up to
+    // HEAD_BYTES) for telling what it is, and the type the server said.
+    private class Read(val bytes: Long, val head: ByteArray, val headCount: Int, val type: String?)
+
+    // Reads a server song into a file, telling how far it has got, against
+    // the server's length or, when it sends none, `expected`.
+    private suspend fun copyInto(uri: String, file: File, expected: Long, onProgress: suspend (Float) -> Unit): Read = withContext(Dispatchers.IO) {
         val source = streams.downloadSource()
         try {
-            val length = source.open(DataSpec(uri.toUri()))
+            val length = source.open(DataSpec(uri.toUri())).takeIf { it > 0 } ?: expected
+            val type = source.responseHeaders.entries.firstOrNull { it.key.equals("Content-Type", ignoreCase = true) }?.value?.firstOrNull()
             var written = 0L
             var reported = 0L
             val buffer = ByteArray(64 * 1024)
+            val head = ByteArray(HEAD_BYTES)
+            var headCount = 0
             FileOutputStream(file).use { out ->
                 while (true) {
                     ensureActive()
@@ -498,6 +533,11 @@ class OfflineDownloads @Inject constructor(
                     // A sign-in page saved as the song before such answers
                     // were refused is never downloaded as it.
                     if (written == 0L) refuseHtmlStart(buffer, read)
+                    if (headCount < HEAD_BYTES) {
+                        val take = minOf(read, HEAD_BYTES - headCount)
+                        System.arraycopy(buffer, 0, head, headCount, take)
+                        headCount += take
+                    }
                     out.write(buffer, 0, read)
                     written += read
                     val now = System.currentTimeMillis()
@@ -509,7 +549,7 @@ class OfflineDownloads @Inject constructor(
                     }
                 }
             }
-            written
+            Read(written, head, headCount, type)
         } finally {
             source.close()
         }

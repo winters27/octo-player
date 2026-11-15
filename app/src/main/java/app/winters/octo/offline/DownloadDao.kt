@@ -70,6 +70,8 @@ data class DownloadedFile(
     val fileSize: Long?,
     val serverSize: Long?,
     val serverType: String?,
+    // Where the file is: its name says whether it was made smaller.
+    val path: String = "",
 )
 
 // A download with the reasons it is kept, split out.
@@ -149,7 +151,7 @@ internal const val ALBUM_SONG_PAGE_SQL = """
 // One server's finished downloads, each with its server song, a page at a
 // time in the server's id order from just past `after`.
 internal const val DONE_FILES_PAGE_SQL = """
-    SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType
+    SELECT d.sourceId, d.serverId, d.format, d.sizeBytes, d.fileSize, s.sizeBytes AS serverSize, s.mimeType AS serverType, d.path
     FROM download d CROSS JOIN source_track s ON s.sourceId = d.sourceId AND s.nativeId = d.serverId
     WHERE +d.state = 'Done' AND d.sourceId = :sourceId AND d.serverId > :after
     ORDER BY d.sourceId, d.serverId LIMIT :limit

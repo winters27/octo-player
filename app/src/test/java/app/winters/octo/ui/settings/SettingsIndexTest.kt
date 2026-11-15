@@ -37,6 +37,20 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun downloadFormatIsFoundByItsFormats() {
+        listOf("opus", "aac", "codec", "download format").forEach { word -> assertEquals(word, "Download format", titles(word).first()) }
+        assertTrue("Download format" in titles("mp3"))
+        assertEquals(SettingsIndex.DownloadFormat, SettingsIndex.byId("download_format"))
+    }
+
+    @Test
+    fun theDownloadQualityReadsInTheFormat() {
+        assertEquals("128 kbps Opus", app.winters.octo.playback.StreamQuality.Kbps128.downloadLabel(app.winters.octo.playback.DownloadFormat.Opus))
+        assertEquals("320 kbps AAC", app.winters.octo.playback.StreamQuality.Kbps320.downloadLabel(app.winters.octo.playback.DownloadFormat.Aac))
+        assertEquals("Original", app.winters.octo.playback.StreamQuality.Original.downloadLabel(app.winters.octo.playback.DownloadFormat.Mp3))
+    }
+
+    @Test
     fun theTitleComesFirst() {
         assertEquals(listOf("Crossfade curve", "Between songs", "Length"), titles("crossfade").take(3))
         assertEquals("Crossfade curve", titles("CROSS").first())

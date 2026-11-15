@@ -112,3 +112,20 @@ fun deviceMediaFor(request: StreamRequest, listed: String?, answered: String?, a
 }
 
 const val DEVICE_MP3_KBPS = 320
+
+// How a file on the phone goes to a device: served by the phone when the
+// device plays its type, fetched from the server when it is a download the
+// device does not play (an Opus download on a speaker that takes MP3), and
+// left out otherwise.
+enum class PhoneFileCast { Serve, FromServer, Refuse }
+
+fun phoneFileCast(accepted: Boolean, isDownload: Boolean): PhoneFileCast = when {
+    accepted -> PhoneFileCast.Serve
+    isDownload -> PhoneFileCast.FromServer
+    else -> PhoneFileCast.Refuse
+}
+
+// The type a relay of a saved copy is sent as: what the copy was noted as
+// when it was saved, which is what its bytes are, else the type named for it.
+fun relayType(noted: String?, named: String): String =
+    noted?.substringBefore(';')?.trim()?.lowercase()?.takeIf { it.isNotEmpty() && it != "application/octet-stream" } ?: named

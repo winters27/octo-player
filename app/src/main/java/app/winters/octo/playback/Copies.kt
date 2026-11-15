@@ -1,6 +1,8 @@
 package app.winters.octo.playback
 
 import app.winters.octo.catalog.SourceTrackEntity
+import app.winters.octo.offline.isLosslessType
+import app.winters.octo.offline.smallerKbps
 import app.winters.octo.sound.ReplayGainInfo
 import app.winters.octo.sound.storedReplayGain
 
@@ -79,12 +81,7 @@ internal fun compareQuality(a: SourceTrackEntity, b: SourceTrackEntity): Int {
 private fun compareKnown(a: Int?, b: Int?): Int =
     if (a == null || b == null || a <= 0 || b <= 0) 0 else a.compareTo(b)
 
-private val LosslessTypes = setOf(
-    "audio/flac", "audio/x-flac", "audio/alac", "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave",
-    "audio/aiff", "audio/x-aiff", "audio/ape", "audio/x-ape", "audio/wavpack", "audio/x-wavpack",
-)
-
-fun isLossless(mimeType: String?): Boolean = mimeType?.lowercase() in LosslessTypes
+fun isLossless(mimeType: String?): Boolean = isLosslessType(mimeType)
 
 // Bits per second, as the source says, or worked out from the file's size
 // and length. Servers speak in kilobits, so a small number is read as that.
@@ -95,28 +92,45 @@ fun bitrateOf(copy: SourceTrackEntity): Int? {
     return (size * 8 / seconds).toInt()
 }
 
-// What to ask the server for: its file as it is, or an MP3 capped at
-// `maxKbps`. MP3 because every server that makes smaller streams offers it,
-// and a constant-bitrate MP3 has a length the player can seek in and blend.
-data class StreamRequest(val maxKbps: Int?) {
+// What to ask the server for: its file as it is, or a copy capped at
+// `maxKbps` in `format`. Streams are MP3, since every server that makes
+// smaller streams offers it, and a constant-bitrate MP3 has a length the
+// player can seek in and blend; they ask the server for that length up
+// front (`estimate`). A download may be another format, and never asks for
+// an estimated length: a copy of changing bitrate would be cut or padded
+// to it.
+data class StreamRequest(
+    val maxKbps: Int?,
+    val format: DownloadFormat = DownloadFormat.Mp3,
+    val estimate: Boolean = true,
+) {
     val params: Map<String, String>
-        get() = if (maxKbps == null) {
-            mapOf("format" to "raw")
-        } else {
-            mapOf("format" to "mp3", "maxBitRate" to "$maxKbps", "estimateContentLength" to "true")
+        get() = when {
+            maxKbps == null -> mapOf("format" to "raw")
+            estimate -> mapOf("format" to format.param, "maxBitRate" to "$maxKbps", "estimateContentLength" to "true")
+            else -> mapOf("format" to format.param, "maxBitRate" to "$maxKbps")
         }
 
     // What the player will receive, for the quality badge.
-    fun mimeType(original: String?): String? = if (maxKbps == null) original else "audio/mpeg"
+    fun mimeType(original: String?): String? = if (maxKbps == null) original else format.mimeType
 }
 
 // A lossy file already within the size plays as it is: making it an MP3
 // would only lose quality.
-fun streamRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality): StreamRequest {
-    val cap = quality.kbps ?: return StreamRequest(null)
-    if (!isLossless(mimeType) && bitrate != null && bitrate / 1000 <= cap) return StreamRequest(null)
-    return StreamRequest(cap)
+fun streamRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality): StreamRequest =
+    StreamRequest(smallerKbps(mimeType, bitrate, quality.kbps))
+
+// What a download asks for: the file as it is, or, when it is lossless or
+// bigger than the quality's cap, a copy in the chosen format with no
+// estimated length.
+fun downloadRequest(mimeType: String?, bitrate: Int?, quality: StreamQuality, format: DownloadFormat): StreamRequest {
+    val cap = smallerKbps(mimeType, bitrate, quality.kbps) ?: return StreamRequest(null)
+    return StreamRequest(cap, format, estimate = false)
 }
+
+// About how many bytes a download made at `maxKbps` comes to, for its
+// progress when the server sends no length.
+fun expectedBytes(durationMs: Long, maxKbps: Int?): Long = if (maxKbps == null || durationMs <= 0) 0 else durationMs * maxKbps / 8
 
 // The loudness a copy's source keeps for it, if any.
 fun SourceTrackEntity.storedLoudness(): ReplayGainInfo? = storedReplayGain(trackGain, trackPeak, albumGain, albumPeak)

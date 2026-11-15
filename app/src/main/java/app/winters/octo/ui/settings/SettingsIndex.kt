@@ -440,6 +440,10 @@ object SettingsIndex {
         "download_quality", SettingsPage.Streaming, "Download quality", "The file downloads come as",
         listOf("bitrate", "kbps", "offline"), section = "Downloads",
     )
+    val DownloadFormat = add(
+        "download_format", SettingsPage.Streaming, "Download format", "What smaller downloads are saved as",
+        listOf("opus", "aac", "mp3", "format", "codec", "offline"), section = "Downloads",
+    )
     val WifiOnly = add(
         "wifi_only", SettingsPage.Streaming, "Download on Wi-Fi only", "Downloads wait for Wi-Fi",
         listOf("mobile data", "cellular"), section = "Downloads",

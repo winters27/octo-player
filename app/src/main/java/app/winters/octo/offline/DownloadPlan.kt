@@ -21,12 +21,13 @@ object Reasons {
 // What to do with a finished download, now the server may have swapped the
 // song's file for another: see checkKeptCopy. A download is the file as it
 // is when it has the server's type, unless that type is MP3, which smaller
-// downloads are made as too.
+// downloads were made as before they were marked, or its name carries the
+// smaller mark.
 fun checkDownload(file: DownloadedFile): KeptCopyCheck = checkKeptCopy(
     keptFor = file.fileSize,
     serverSize = file.serverSize,
     copySize = file.sizeBytes,
-    asIs = file.format != null && file.format == file.serverType && file.format != "audio/mpeg",
+    asIs = file.format != null && file.format == file.serverType && file.format != "audio/mpeg" && !isMadeSmallerName(file.path),
 )
 
 // What changes to bring the downloads in step with the rules: songs to

@@ -68,4 +68,24 @@ class CastSourcesTest {
         assertEquals("flac", extensionFor("audio/x-flac"))
         assertEquals("jpg", extensionFor("image/jpeg"))
     }
+
+    // An Opus download on a speaker that takes only MP3 plays from the
+    // server; a file that is no download stays left out.
+    @Test
+    fun aDownloadTheDeviceRefusesComesFromTheServer() {
+        assertEquals(PhoneFileCast.FromServer, phoneFileCast(accepted = false, isDownload = true))
+        assertEquals(PhoneFileCast.Serve, phoneFileCast(accepted = true, isDownload = true))
+        assertEquals(PhoneFileCast.Refuse, phoneFileCast(accepted = false, isDownload = false))
+        val mp3Only = { type: String -> type == "audio/mpeg" }
+        val ref = StreamRef("server:home", "abc", "audio/flac", 900_000)
+        assertEquals(StreamRequest(DEVICE_MP3_KBPS), requestForDevice(StreamRequest(null), ref.mimeType, mp3Only))
+    }
+
+    // A saved copy relayed to a speaker is labeled as what it was saved as.
+    @Test
+    fun aRelayIsLabeledByItsSavedCopy() {
+        assertEquals("audio/mp4", relayType("audio/mp4", "audio/mpeg"))
+        assertEquals("audio/mpeg", relayType(null, "audio/mpeg"))
+        assertEquals("audio/mpeg", relayType("application/octet-stream", "audio/mpeg"))
+    }
 }

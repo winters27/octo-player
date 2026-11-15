@@ -9,11 +9,14 @@ private const val NAME_CHARS = 80
 // The file a downloaded song is saved as: "Artist - Title [a1b2c3d4].flac".
 // Characters no file system takes are replaced, and the part in brackets
 // comes from the server and the song's id there, so two songs never share
-// a name even when their titles match.
-fun downloadFileName(artist: String, title: String, sourceId: String, serverId: String, format: String?): String {
+// a name even when their titles match. A download made smaller than the
+// server's file carries the smaller mark inside its bracket
+// ("[a1b2c3d4~s]"), which a title can never reach.
+fun downloadFileName(artist: String, title: String, sourceId: String, serverId: String, format: String?, madeSmaller: Boolean = false): String {
     val readable = listOf(artist, title).map(::safePart).filter { it.isNotEmpty() }.joinToString(" - ").ifEmpty { "Song" }
     val stem = readable.take(NAME_CHARS).trimEnd(' ', '.', '-')
-    return "$stem [${shortHash("$sourceId|$serverId")}].${extensionFor(format)}"
+    val named = "$stem [${shortHash("$sourceId|$serverId")}]"
+    return "${if (madeSmaller) madeSmallerStem(named) else named}.${extensionFor(format)}"
 }
 
 // The file ending for a type of audio.

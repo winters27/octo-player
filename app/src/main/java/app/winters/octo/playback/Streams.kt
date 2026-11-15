@@ -187,13 +187,14 @@ class Streams @Inject constructor(
     fun savingSource(): CacheDataSource? =
         if (saved.enabled.value) cachedFactory(ShapeGuardDataSource.Factory(signedFactory(offlineNetworkFactory()), ::isStream, saved.shapes)).createDataSource() else null
 
-    // Reads a server song for downloading: from its saved copy when there is
-    // one, otherwise from the server, without filling the saved copies.
-    fun downloadSource(): DataSource {
-        val signed = signedFactory(offlineNetworkFactory())
-        if (!saved.enabled.value) return signed.createDataSource()
-        return cachedFactory(signed).setCacheWriteDataSinkFactory(null).createDataSource()
-    }
+    // Reads a server song for downloading or relaying: from its saved copy
+    // when there is one, otherwise from the server, without filling the
+    // saved copies. A saved copy whose server now sends another file lets
+    // go, so a part of one file is never read on with another's bytes.
+    fun downloadSource(): DataSource =
+        downloadChain(signedFactory(offlineNetworkFactory()), ::isStream, saved.shapes) {
+            if (saved.enabled.value) cachedFactory(it).setCacheWriteDataSinkFactory(null) else null
+        }.createDataSource()
 
     // The song with the request it loads with fixed in its address: see
     // chooseRequest. Unchanged when no server is known for it.
@@ -241,6 +242,10 @@ class Streams @Inject constructor(
         val source = ref.sourceId ?: currentSourceId() ?: return null
         return savedCopyKey(source, ref, ref.request(quality(current.value)), saved.copies)
     }
+
+    // The type a song's saved copy was noted as, if it has one: what a relay
+    // of the saved copy really sends, whatever was asked.
+    fun savedType(ref: StreamRef): String? = cacheKey(ref)?.let { saved.shapes.shape(it)?.type }
 
     // Lets a server song's saved copy go when it is an HTML page, a sign-in
     // page's answer saved before such answers were refused, so the song is
@@ -532,4 +537,18 @@ fun streamQualityFor(appPicks: Boolean, onMobile: Boolean, prefs: StreamPrefs): 
     !appPicks -> StreamQuality.Original
     onMobile -> prefs.mobile
     else -> prefs.wifi
+}
+
+// What a download or relay reads through: the server, checked answer by
+// answer against what its saved copy was made from, under the saved copies
+// when `cached` gives them (null while nothing is kept).
+@OptIn(UnstableApi::class)
+internal fun downloadChain(
+    signed: DataSource.Factory,
+    isStream: (Uri) -> Boolean,
+    shapes: StreamShapes?,
+    cached: (DataSource.Factory) -> DataSource.Factory?,
+): DataSource.Factory {
+    val guarded = ShapeGuardDataSource.Factory(signed, isStream, shapes)
+    return cached(guarded) ?: guarded
 }

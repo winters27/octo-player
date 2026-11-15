@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.DataSpec
 import app.winters.octo.subsonic.VIDEO_HEADER
 import java.io.IOException
@@ -69,7 +70,10 @@ class StreamChanged : IOException("the server sent another file for this song")
 // Checks every answer for a server song against the first one this reader
 // had and the one its saved copy was made from. Another file lets the saved
 // copy go and fails the load at once, so the song is opened again from its
-// start instead of carrying on with the other file's bytes.
+// start instead of carrying on with the other file's bytes. A later part
+// refused with 503 is the same: the server let go of the file the song was
+// read from (Octo does, when a kept copy is gone), and from the first byte
+// it sends the file it has now.
 @OptIn(UnstableApi::class)
 class ShapeGuardDataSource(
     private val upstream: DataSource,
@@ -79,7 +83,14 @@ class ShapeGuardDataSource(
     private var seen: StreamShape? = null
 
     override fun open(dataSpec: DataSpec): Long {
-        val length = upstream.open(dataSpec)
+        val length = try {
+            upstream.open(dataSpec)
+        } catch (e: HttpDataSource.InvalidResponseCodeException) {
+            if (e.responseCode != 503 || dataSpec.position <= 0 || !isStream(dataSpec.uri)) throw e
+            seen = null
+            dataSpec.key?.let { shapes?.drop(it) }
+            throw StreamChanged()
+        }
         if (!isStream(dataSpec.uri)) return length
         val now = streamShapeOf(upstream.responseHeaders)
         val key = dataSpec.key

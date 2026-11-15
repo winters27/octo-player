@@ -24,6 +24,7 @@ import app.winters.octo.theme.AccentChoice
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.ThemeSettings
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -155,6 +156,31 @@ class BackupTest {
             read.backup.player!!.themes(),
         )
         assertEquals(AccentChoice.Coral, read.backup.player!!.prefs.accent)
+    }
+
+    // The offline sections every app writes, and the Download format each
+    // restores: an older backup restores Opus.
+    @Test
+    fun theSharedDownloadFormatBackupsRestoreAsEveryAppRestoresThem() {
+        val file = listOf(
+            "../shared/core/src/commonTest/resources/backup/download-format-offline.json",
+            "shared/core/src/commonTest/resources/backup/download-format-offline.json",
+        ).map { java.io.File(it) }.first { it.exists() }
+        val cases = kotlinx.serialization.json.Json.parseToJsonElement(file.readText()).jsonObject.getValue("cases").jsonArray
+        for (case in cases) {
+            val case = case.jsonObject
+            val text = """{"kind": "octo-settings", "version": 1, "offline": ${case.getValue("offline")}}"""
+            val read = decodeBackup(text) as BackupRead.Read
+            assertEquals(case.getValue("name").jsonPrimitive.content, case.getValue("downloadFormat").jsonPrimitive.content, read.backup.offline!!.downloadFormat.name)
+        }
+    }
+
+    @Test
+    fun theDownloadFormatGoesThroughABackup() {
+        val prefs = app.winters.octo.offline.OfflinePrefs(downloadFormat = app.winters.octo.playback.DownloadFormat.Aac)
+        val text = encodeBackup(Backup(offline = prefs.toBackup(emptyMap())))
+        val read = decodeBackup(text) as BackupRead.Read
+        assertEquals(app.winters.octo.playback.DownloadFormat.Aac, read.backup.offline!!.toPrefs().downloadFormat)
     }
 
     @Test

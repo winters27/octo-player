@@ -16,6 +16,10 @@ import app.winters.octo.offline.StreamCache
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.START_AFTER_HELP
 import app.winters.octo.playback.StartAfter
+import app.winters.octo.playback.DOWNLOAD_FORMAT_HELP
+import app.winters.octo.playback.DownloadFormat
+import app.winters.octo.playback.detail
+import app.winters.octo.playback.downloadQualityLabel
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.StreamPrefs
@@ -86,6 +90,7 @@ class OfflineViewModel @Inject constructor(
     fun setWifiOnly(on: Boolean) = change { setWifiOnly(on) }
     fun setStreamOnWifi(on: Boolean) = change { setStreamOnWifi(on) }
     fun setKeepLiked(on: Boolean) = change { setKeepLiked(on) }
+    fun setDownloadFormat(format: DownloadFormat) = change { setDownloadFormat(format) }
 
     fun clearCache() {
         viewModelScope.launch { cache.clear() }
@@ -109,10 +114,10 @@ private fun ahead(count: Int): String = when (count) {
     else -> "$count songs"
 }
 
-private val StreamQuality.downloadLabel: String get() = kbps?.let { "$it kbps MP3" } ?: "Original"
+internal fun StreamQuality.downloadLabel(format: DownloadFormat): String = downloadQualityLabel(kbps, format)
 
-private val StreamQuality.downloadChoice: Choice
-    get() = kbps?.let { Choice(downloadLabel, "About ${Math.round(it * 0.03)} MB for a 4 minute song") } ?: Choice(ORIGINAL_LABEL)
+private fun StreamQuality.downloadChoice(format: DownloadFormat): Choice =
+    kbps?.let { Choice(downloadLabel(format), "About ${Math.round(it * 0.03)} MB for a 4 minute song") } ?: Choice(ORIGINAL_LABEL)
 
 // How music from a server plays, the cache of songs played lately, fetching
 // the next songs ahead, and downloads. Each choice opens a sheet.
@@ -170,10 +175,20 @@ fun StreamingPage(
         }
 
         SettingsGroup(title = "Downloads", icon = OctoIcons.Download) {
-            ChoiceRow(SettingsIndex.DownloadQuality, value = kept.downloadQuality.downloadLabel, answers = qualities.map { it.downloadLabel }, onClick = {
+            ChoiceRow(SettingsIndex.DownloadQuality, value = kept.downloadQuality.downloadLabel(kept.downloadFormat), answers = qualities.map { it.downloadLabel(kept.downloadFormat) }, onClick = {
                 sheet.show(
-                    ChoiceRequest(SettingsIndex.DownloadQuality.title, qualities.map { it.downloadChoice }, qualities.indexOf(kept.downloadQuality)) {
+                    ChoiceRequest(SettingsIndex.DownloadQuality.title, qualities.map { it.downloadChoice(kept.downloadFormat) }, qualities.indexOf(kept.downloadQuality)) {
                         offline.setDownloadQuality(qualities[it])
+                    },
+                )
+            })
+            // Always shown, so the page never moves when the quality changes;
+            // a quality of the file as it is makes nothing smaller.
+            val formats = DownloadFormat.entries
+            ChoiceRow(SettingsIndex.DownloadFormat, value = kept.downloadFormat.label, helper = DOWNLOAD_FORMAT_HELP, answers = formats.map { it.label }, onClick = {
+                sheet.show(
+                    ChoiceRequest(SettingsIndex.DownloadFormat.title, formats.map { Choice(it.label, it.detail) }, formats.indexOf(kept.downloadFormat)) {
+                        offline.setDownloadFormat(formats[it])
                     },
                 )
             })

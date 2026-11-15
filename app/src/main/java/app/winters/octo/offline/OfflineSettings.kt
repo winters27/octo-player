@@ -1,12 +1,14 @@
 package app.winters.octo.offline
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import app.winters.octo.playback.DownloadFormat
 import app.winters.octo.playback.StreamQuality
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -35,8 +37,10 @@ data class OfflinePrefs(
     // How many songs ahead in the queue to fetch while one plays.
     val prefetchWifi: Int = 3,
     val prefetchMobile: Int = 1,
-    // Downloads come as the server's file unless a smaller MP3 is chosen.
+    // Downloads come as the server's file unless a smaller copy is chosen.
     val downloadQuality: StreamQuality = StreamQuality.Original,
+    // The type a smaller download is made as.
+    val downloadFormat: DownloadFormat = DownloadFormat.Opus,
     val wifiOnly: Boolean = true,
     // Stream on Wi-Fi even when a downloaded copy is on the phone.
     val streamOnWifi: Boolean = false,
@@ -50,6 +54,7 @@ private val CACHE_SIZE = stringPreferencesKey("cache_size")
 private val PREFETCH_WIFI = intPreferencesKey("prefetch_wifi")
 private val PREFETCH_MOBILE = intPreferencesKey("prefetch_mobile")
 private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
+private val DOWNLOAD_FORMAT = stringPreferencesKey("download_format")
 private val WIFI_ONLY = booleanPreferencesKey("wifi_only")
 private val STREAM_ON_WIFI = booleanPreferencesKey("stream_on_wifi")
 private val KEEP_LIKED = booleanPreferencesKey("keep_liked")
@@ -60,19 +65,7 @@ private inline fun <reified T : Enum<T>> choice(name: String?, default: T): T =
 
 @Singleton
 class OfflineSettings @Inject constructor(@ApplicationContext private val context: Context) {
-    val prefs: Flow<OfflinePrefs> = context.offlinePrefs.data.map { stored ->
-        val defaults = OfflinePrefs()
-        OfflinePrefs(
-            cacheSize = choice(stored[CACHE_SIZE], defaults.cacheSize),
-            prefetchWifi = (stored[PREFETCH_WIFI] ?: defaults.prefetchWifi).coerceIn(PrefetchRange),
-            prefetchMobile = (stored[PREFETCH_MOBILE] ?: defaults.prefetchMobile).coerceIn(PrefetchRange),
-            downloadQuality = choice(stored[DOWNLOAD_QUALITY], defaults.downloadQuality),
-            wifiOnly = stored[WIFI_ONLY] ?: defaults.wifiOnly,
-            streamOnWifi = stored[STREAM_ON_WIFI] ?: defaults.streamOnWifi,
-            keepLiked = stored[KEEP_LIKED] ?: defaults.keepLiked,
-            keptPlaylists = stored[KEPT_PLAYLISTS] ?: defaults.keptPlaylists,
-        )
-    }.distinctUntilChanged()
+    val prefs: Flow<OfflinePrefs> = context.offlinePrefs.data.map(::offlinePrefsOf).distinctUntilChanged()
 
     suspend fun setCacheSize(size: CacheSize) {
         context.offlinePrefs.edit { it[CACHE_SIZE] = size.name }
@@ -88,6 +81,10 @@ class OfflineSettings @Inject constructor(@ApplicationContext private val contex
 
     suspend fun setDownloadQuality(quality: StreamQuality) {
         context.offlinePrefs.edit { it[DOWNLOAD_QUALITY] = quality.name }
+    }
+
+    suspend fun setDownloadFormat(format: DownloadFormat) {
+        context.offlinePrefs.edit { it[DOWNLOAD_FORMAT] = format.name }
     }
 
     suspend fun setWifiOnly(on: Boolean) {
@@ -125,10 +122,28 @@ class OfflineSettings @Inject constructor(@ApplicationContext private val contex
             p[PREFETCH_WIFI] = prefs.prefetchWifi.coerceIn(PrefetchRange)
             p[PREFETCH_MOBILE] = prefs.prefetchMobile.coerceIn(PrefetchRange)
             p[DOWNLOAD_QUALITY] = prefs.downloadQuality.name
+            p[DOWNLOAD_FORMAT] = prefs.downloadFormat.name
             p[WIFI_ONLY] = prefs.wifiOnly
             p[STREAM_ON_WIFI] = prefs.streamOnWifi
             p[KEEP_LIKED] = prefs.keepLiked
             p[KEPT_PLAYLISTS] = p[KEPT_PLAYLISTS].orEmpty() + prefs.keptPlaylists
         }
     }
+}
+
+// The offline settings as stored; anything not stored is its default, and a
+// Download format from before the choice existed is Opus.
+internal fun offlinePrefsOf(stored: Preferences): OfflinePrefs {
+    val defaults = OfflinePrefs()
+    return OfflinePrefs(
+        cacheSize = choice(stored[CACHE_SIZE], defaults.cacheSize),
+        prefetchWifi = (stored[PREFETCH_WIFI] ?: defaults.prefetchWifi).coerceIn(PrefetchRange),
+        prefetchMobile = (stored[PREFETCH_MOBILE] ?: defaults.prefetchMobile).coerceIn(PrefetchRange),
+        downloadQuality = choice(stored[DOWNLOAD_QUALITY], defaults.downloadQuality),
+        downloadFormat = DownloadFormat.named(stored[DOWNLOAD_FORMAT]),
+        wifiOnly = stored[WIFI_ONLY] ?: defaults.wifiOnly,
+        streamOnWifi = stored[STREAM_ON_WIFI] ?: defaults.streamOnWifi,
+        keepLiked = stored[KEEP_LIKED] ?: defaults.keepLiked,
+        keptPlaylists = stored[KEPT_PLAYLISTS] ?: defaults.keptPlaylists,
+    )
 }
