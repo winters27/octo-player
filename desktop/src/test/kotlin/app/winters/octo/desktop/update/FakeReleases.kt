@@ -23,6 +23,7 @@ class FakeReleases : AutoCloseable {
     val publicKey: ByteArray = keys.public.encoded.takeLast(32).toByteArray()
 
     val msi = ByteArray(50_000) { (it % 7).toByte() }
+    val appImage = ByteArray(40_000) { (it % 11).toByte() }
 
     init {
         server.dispatcher = object : Dispatcher() {
@@ -43,16 +44,25 @@ class FakeReleases : AutoCloseable {
         Base64.getEncoder().encodeToString(sign())
     }
 
+    fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    // The release with its MSI and its AppImage (kind appimage, as
+    // release_assets.py writes it).
     fun publish(version: String, notes: String = "- Octo updates itself.") {
         val tag = "desktop-v$version"
         val name = "Octo-$version-windows-x64.msi"
-        val sha = MessageDigest.getInstance("SHA-256").digest(msi).joinToString("") { "%02x".format(it) }
+        val image = "Octo-$version-linux-x64.AppImage"
         val quoted = notes.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-        val manifest = """{"assets":[{"arch":"x64","kind":"msi","name":"$name","os":"windows","sha256":"$sha","size":${msi.size}}],"format":1,"notes":"$quoted","product":"desktop","tag":"$tag","version":"$version"}""".toByteArray()
+        val manifest = (
+            """{"assets":[{"arch":"x64","kind":"msi","name":"$name","os":"windows","sha256":"${sha256(msi)}","size":${msi.size}},""" +
+                """{"arch":"x64","kind":"appimage","name":"$image","os":"linux","sha256":"${sha256(appImage)}","size":${appImage.size}}],""" +
+                """"format":1,"notes":"$quoted","product":"desktop","tag":"$tag","version":"$version"}"""
+            ).toByteArray()
         files[name] = msi
+        files[image] = appImage
         files["update.json"] = manifest
         files["update.json.sig"] = sign(manifest).toByteArray()
-        val assets = listOf(name, "update.json", "update.json.sig").joinToString(",") {
+        val assets = listOf(name, image, "update.json", "update.json.sig").joinToString(",") {
             """{"name":"$it","size":${files[it]!!.size},"browser_download_url":"${server.url("/dl/$it")}"}"""
         }
         releases = """[{"tag_name":"2026.09.23","assets":[]},{"tag_name":"$tag","prerelease":false,"assets":[$assets]}]"""

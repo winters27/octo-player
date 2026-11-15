@@ -3,7 +3,9 @@ package app.winters.octo.desktop.update
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.desktop.system.RunningAppImage
 import app.winters.octo.update.InstallWhen
+import app.winters.octo.update.UpdateCheck
 import app.winters.octo.update.ManifestAsset
 import app.winters.octo.update.PlayerApp
 import app.winters.octo.update.PlayerUpdater
@@ -60,7 +62,12 @@ class DesktopUpdatesTest {
         override fun destroy() {}
     }
 
-    private fun updates(os: DesktopOs = DesktopOs.Windows, program: File? = null): DesktopUpdates {
+    private fun updates(
+        os: DesktopOs = DesktopOs.Windows,
+        program: File? = null,
+        appImage: RunningAppImage? = null,
+        linuxKind: String = if (appImage != null) APPIMAGE_KIND else "deb",
+    ): DesktopUpdates {
         val client = OkHttpClient()
         val folder = File(temp.root, "updates")
         val updater = PlayerUpdater(
@@ -70,12 +77,23 @@ class DesktopUpdatesTest {
             client,
             folder,
             listOf(github.publicKey),
-            pick = { installerFor(it, os, "x64", "deb") },
+            pick = { installerFor(it, os, "x64", linuxKind) },
         )
         return DesktopUpdates(settings, UpdaterAvailability.On(PlayerVersion.parse("1.1.0")!!), os, folder, updater, start = { command ->
+            if (!launches) throw java.io.IOException("no such program")
             started += command
-            fakeProcess(if (launches) 0 else 1)
-        }, program = program)
+            fakeProcess(0)
+        }, program = program, appImage = appImage, pid = 4242)
+    }
+
+    private val onWindows = System.getProperty("os.name").lowercase().startsWith("windows")
+
+    // An AppImage of 1.1.0 in a folder of the listener's own.
+    private fun oldAppImage(unpacked: Boolean = false): RunningAppImage {
+        val file = File(temp.newFolder("My Apps"), "Octo.AppImage")
+        file.writeBytes(ByteArray(1_000) { 1 })
+        file.setExecutable(true)
+        return RunningAppImage(file, unpacked)
     }
 
     @Test
@@ -142,6 +160,132 @@ class DesktopUpdatesTest {
         // No DMG in this release: nothing for this Mac, and nothing to open.
         assertNull(updates.ready)
         assertTrue(updates.lastLine!!.contains("not yet for this computer"))
+    }
+
+    // An AppImage takes the release's AppImage, puts it where it was opened
+    // from, starts the waiter that opens it once this Octo is gone, then
+    // quits the usual way.
+    @Test
+    fun anAppImageReplacesItselfAndOpensAgain() = runBlocking {
+        publish("1.2.0")
+        val image = oldAppImage()
+        val updates = updates(DesktopOs.Linux, appImage = image)
+        updates.check()
+        assertEquals("Octo-1.2.0-linux-x64.AppImage", updates.ready!!.asset.name)
+        assertEquals("Restart to update", updates.installAction)
+        assertTrue(updates.selfInstalls)
+        assertTrue(updates.installHelp(updates.ready!!).contains("new AppImage in place of this one"))
+        var quit = 0
+        assertTrue(updates.install(quit = { quit++ }))
+        assertEquals(1, quit)
+        assertTrue("the file it was opened from is the new one", image.file.readBytes().contentEquals(github.appImage))
+        assertTrue(onWindows || image.file.canExecute())
+        assertEquals("nothing left beside it", listOf("Octo.AppImage"), image.file.parentFile.list()!!.toList())
+        val waiter = started.single()
+        assertEquals(appImageRelaunch(4242, image.file, unpacked = false), waiter)
+        assertEquals(listOf("sh", "-c"), waiter.take(2))
+        assertEquals(listOf("octo-relaunch", "4242", image.file.absolutePath, "0"), waiter.drop(3))
+        // Asked again (by quitting), nothing is done twice.
+        settings.update { it.copy(updates = it.updates.copy(install = InstallWhen.OnQuit)) }
+        updates.onQuit()
+        assertEquals(1, started.size)
+    }
+
+    @Test
+    fun anUnpackedAppImageOpensUnpackedAgain() = runBlocking {
+        publish("1.2.0")
+        val image = oldAppImage(unpacked = true)
+        val updates = updates(DesktopOs.Linux, appImage = image)
+        updates.check()
+        assertTrue(updates.install(quit = {}))
+        assertEquals("1", started.single().last())
+    }
+
+    // With When I quit, the new AppImage goes in as Octo quits, and Octo
+    // stays closed: nothing opens it again.
+    @Test
+    fun anAppImageUpdatesAsOctoQuitsWhenAskedTo() = runBlocking {
+        publish("1.2.0")
+        val image = oldAppImage()
+        val updates = updates(DesktopOs.Linux, appImage = image)
+        updates.check()
+        updates.onQuit()
+        assertFalse("Ask me waits for the button", image.file.readBytes().contentEquals(github.appImage))
+        settings.update { it.copy(updates = it.updates.copy(install = InstallWhen.OnQuit)) }
+        updates.onQuit()
+        assertTrue(image.file.readBytes().contentEquals(github.appImage))
+        assertTrue(started.isEmpty())
+    }
+
+    // A download changed after its check never goes in: the AppImage stays
+    // whole and as it was, Octo stays open, and the row says why.
+    @Test
+    fun aChangedDownloadNeverReplacesTheAppImage() = runBlocking {
+        publish("1.2.0")
+        val image = oldAppImage()
+        val before = image.file.readBytes()
+        val updates = updates(DesktopOs.Linux, appImage = image)
+        updates.check()
+        updates.ready!!.file.writeBytes(github.appImage.copyOf().also { it[7] = 99 })
+        var quit = 0
+        assertFalse(updates.install(quit = { quit++ }))
+        assertEquals(0, quit)
+        assertTrue(image.file.readBytes().contentEquals(before))
+        assertEquals(listOf("Octo.AppImage"), image.file.parentFile.list()!!.toList())
+        assertTrue(updates.lastLine!!.contains("didn't match its release"))
+        assertTrue(started.isEmpty())
+    }
+
+    // When the waiter can't start, the new version is already in place and
+    // Octo stays open, saying it starts next time.
+    @Test
+    fun anAppImageThatCannotOpenAgainStaysOpenWithTheNewOneInPlace() = runBlocking {
+        publish("1.2.0")
+        val image = oldAppImage()
+        val updates = updates(DesktopOs.Linux, appImage = image)
+        updates.check()
+        launches = false
+        var quit = 0
+        assertFalse(updates.install(quit = { quit++ }))
+        assertEquals(0, quit)
+        assertTrue(image.file.readBytes().contentEquals(github.appImage))
+        assertNull(updates.ready)
+        assertTrue(updates.lastLine!!.contains("starts the next time you open Octo"))
+    }
+
+    @Test
+    fun replacingAnAppImageKeepsItWholeAndRunnable() {
+        val folder = temp.newFolder("apps")
+        val target = File(folder, "Octo.AppImage").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val download = File(temp.newFolder("cache"), "new.AppImage").apply { writeBytes(ByteArray(5_000) { 4 }) }
+        assertEquals("a wrong checksum", "The new AppImage didn't match its release, so this one was kept.", replaceAppImage(download, target, "0".repeat(64)))
+        assertTrue(target.readBytes().contentEquals(byteArrayOf(1, 2, 3)))
+        assertEquals(listOf("Octo.AppImage"), folder.list()!!.toList())
+        assertNull(replaceAppImage(download, target, github.sha256(download.readBytes())))
+        assertTrue(target.readBytes().contentEquals(download.readBytes()))
+        assertTrue(onWindows || target.canExecute())
+        assertEquals(listOf("Octo.AppImage"), folder.list()!!.toList())
+        // A folder that isn't there: nothing is made, and it says so.
+        val gone = File(temp.root, "gone/Octo.AppImage")
+        assertTrue(replaceAppImage(download, gone, github.sha256(download.readBytes()))!!.contains("couldn't put the new AppImage"))
+        assertFalse(gone.parentFile.exists())
+    }
+
+    // The waiter itself, on a system with sh: it waits out the process,
+    // then opens the AppImage with the extract-and-run flag when asked.
+    @Test
+    fun theWaiterOpensTheAppImageOnceOctoIsGone() {
+        assumeTrue(!onWindows)
+        val marker = File(temp.root, "opened.txt")
+        val fake = File(temp.root, "Octo.AppImage").apply {
+            writeText("#!/bin/sh\necho \"${'$'}{APPIMAGE_EXTRACT_AND_RUN:-mounted}\" > '${marker.absolutePath}'\n")
+            setExecutable(true)
+        }
+        val octo = ProcessBuilder("sleep", "1").start()
+        val waiter = ProcessBuilder(appImageRelaunch(octo.pid(), fake, unpacked = true)).start()
+        assertTrue(waiter.waitFor(10, TimeUnit.SECONDS))
+        assertFalse("it waited for Octo", octo.isAlive)
+        assertEquals("1", marker.readText().trim())
     }
 
     @Test
@@ -392,14 +536,53 @@ class DesktopUpdatesTest {
         val assets = listOf(
             asset("windows", "x64", "zip"), asset("windows", "x64", "msi"), asset("macos", "arm64", "dmg"),
             asset("linux", "x64", "deb"), asset("linux", "x64", "rpm"), asset("linux", "x64", "zip"),
+            asset("linux", "x64", "flatpak"), asset("linux", "x64", APPIMAGE_KIND), asset("linux", "x64", PACMAN_KIND),
         )
         assertEquals("msi", installerFor(assets, DesktopOs.Windows, "x64", null)?.kind)
         assertEquals("dmg", installerFor(assets, DesktopOs.Mac, "arm64", null)?.kind)
         assertNull("no DMG for an Intel Mac", installerFor(assets, DesktopOs.Mac, "x64", null))
         assertEquals("rpm", installerFor(assets, DesktopOs.Linux, "x64", "rpm")?.kind)
         assertEquals("deb", installerFor(assets, DesktopOs.Linux, "x64", "deb")?.kind)
+        assertEquals("appimage", installerFor(assets, DesktopOs.Linux, "x64", APPIMAGE_KIND)?.kind)
+        assertEquals("pkg.tar.zst", installerFor(assets, DesktopOs.Linux, "x64", PACMAN_KIND)?.kind)
         assertNull(installerFor(assets, DesktopOs.Linux, "x64", null))
         assertNull(installerFor(assets, DesktopOs.Windows, "arm64", null))
+    }
+
+    // An AppImage opened from its file updates itself; one unpacked by
+    // hand, or in a folder Octo can't write to, says why it doesn't. The
+    // Flatpak and a build with no key still win.
+    @Test
+    fun anAppImageUpdatesItselfWhereItCan() {
+        val image = RunningAppImage(File(temp.root, "Octo.AppImage").apply { writeText("x") }, unpacked = false)
+        fun on(appImage: RunningAppImage? = image, unpacked: Boolean = false, writable: Boolean = true, flatpak: Boolean = false, keys: Boolean = true) =
+            updaterAvailability("1.13.0", installed = true, portable = false, forced = false, hasKeys = keys, flatpak = flatpak,
+                appImage = appImage, unpackedAppImage = unpacked, replaceable = { writable })
+        assertTrue(on() is UpdaterAvailability.On)
+        assertEquals(UpdaterAvailability.Off(UNPACKED_APPIMAGE_UPDATES), on(appImage = null, unpacked = true))
+        val locked = on(writable = false) as UpdaterAvailability.Off
+        assertEquals(lockedAppImageUpdates(image.file), locked.why)
+        assertTrue(locked.why.contains(temp.root.absolutePath) && locked.why.contains("~/Applications"))
+        assertEquals(UpdaterAvailability.Off(FLATPAK_UPDATES), on(flatpak = true))
+        assertTrue(on(keys = false) is UpdaterAvailability.Off)
+        assertTrue(canReplaceAppImage(image.file))
+        assertFalse(canReplaceAppImage(File(temp.root, "missing.AppImage")))
+        for (words in listOf(UNPACKED_APPIMAGE_UPDATES, lockedAppImageUpdates(image.file))) {
+            assertTrue(words.none { it == Char(0x2014) || it == Char(0x2013) })
+        }
+    }
+
+    // A package install keeps its own words: pacman's command on Arch, and
+    // the folder to show, with no self-install choice.
+    @Test
+    fun aPacmanInstallSaysHowToInstallIt() {
+        val name = "Octo-1.2.0-linux-x64.pkg.tar.zst"
+        val asset = ManifestAsset(name, "a".repeat(64), 1, "linux", "x64", PACMAN_KIND)
+        val ready = UpdateCheck.Ready(PlayerVersion.parse("1.2.0")!!, "desktop-v1.2.0", "", File(temp.root, name), asset)
+        val updates = updates(DesktopOs.Linux, linuxKind = PACMAN_KIND)
+        assertEquals("Install it with: sudo pacman -U ./Octo-1.2.0-linux-x64.pkg.tar.zst", updates.installHelp(ready))
+        assertEquals("Show package", updates.installAction)
+        assertFalse(updates.selfInstalls)
     }
 
     @Test
@@ -410,7 +593,11 @@ class DesktopUpdatesTest {
         assertEquals("rpm", linuxPackageKind("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n", false, false))
         assertEquals("rpm", linuxPackageKind("ID=rocky\nID_LIKE=\"rhel centos fedora\"\n", true, true))
         assertEquals("deb", linuxPackageKind(null, true, false))
-        assertNull(linuxPackageKind("ID=arch\n", false, false))
+        assertEquals(PACMAN_KIND, linuxPackageKind("ID=arch\n", false, false))
+        assertEquals(PACMAN_KIND, linuxPackageKind("ID=manjaro\nID_LIKE=arch\n", true, true))
+        assertEquals(PACMAN_KIND, linuxPackageKind("ID=endeavouros\nID_LIKE=arch\n", false, false))
+        assertEquals(PACMAN_KIND, linuxPackageKind("ID=cachyos\nID_LIKE=arch\n", false, false))
+        assertNull(linuxPackageKind("ID=alpine\n", false, false))
         assertEquals("x64", archName("amd64"))
         assertEquals("arm64", archName("aarch64"))
     }

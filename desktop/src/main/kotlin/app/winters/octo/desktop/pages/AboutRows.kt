@@ -22,7 +22,6 @@ import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.settings.AppSettings
-import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.system.LocalSystem
 import app.winters.octo.desktop.system.copyBugDetails
 import app.winters.octo.desktop.system.logFolder
@@ -59,7 +58,7 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
                 "Looks every few hours and downloads in the background.",
                 prefs.checkAutomatically,
             ) { on -> change { it.copy(checkAutomatically = on) } }
-            if (app.os == DesktopOs.Windows) {
+            if (updates.selfInstalls) {
                 ChoiceRow(
                     "Install updates",
                     installHelp(prefs.install),

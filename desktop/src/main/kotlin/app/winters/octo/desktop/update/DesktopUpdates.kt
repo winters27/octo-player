@@ -8,8 +8,11 @@ import app.winters.octo.connection.distrustingTls
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.desktop.settings.separateProfile
+import app.winters.octo.desktop.system.RunningAppImage
 import app.winters.octo.desktop.system.inFlatpak
+import app.winters.octo.desktop.system.inUnpackedAppImageFolder
 import app.winters.octo.desktop.system.installedProgram
+import app.winters.octo.desktop.system.runningAppImage
 import app.winters.octo.update.GITHUB_API
 import app.winters.octo.update.InstallWhen
 import app.winters.octo.update.ManifestAsset
@@ -50,6 +53,14 @@ const val FLATPAK_UPDATES =
     "This is the Flatpak copy, so Flatpak keeps it up to date: use your software center, or flatpak update. " +
         "A copy installed from a .flatpak file updates by installing the next one from Octo's releases page."
 
+// What an AppImage unpacked by hand says in place of the updater.
+const val UNPACKED_APPIMAGE_UPDATES =
+    "This Octo runs from an AppImage's unpacked files, so it doesn't update itself. Run the AppImage itself and it does."
+
+// What an AppImage in a folder Octo can't write to says.
+fun lockedAppImageUpdates(file: File): String =
+    "Octo can't replace its AppImage in ${file.absoluteFile.parent}. Keep it in a folder of your own, such as ~/Applications, and it updates itself."
+
 fun updaterAvailability(
     version: String? = System.getProperty("octo.version"),
     installed: Boolean = installedProgram() != null,
@@ -57,12 +68,20 @@ fun updaterAvailability(
     forced: Boolean = System.getProperty(FORCE_PROPERTY) == "true",
     hasKeys: Boolean = trustedKeys().isNotEmpty(),
     flatpak: Boolean = inFlatpak(),
+    appImage: RunningAppImage? = runningAppImage(),
+    unpackedAppImage: Boolean = inUnpackedAppImageFolder(),
+    replaceable: (File) -> Boolean = ::canReplaceAppImage,
 ): UpdaterAvailability {
     val running = PlayerVersion.parse(version) ?: return UpdaterAvailability.Off("This is a development build, so it doesn't update itself.")
     // A Flatpak can't run an installer, and Flatpak itself keeps it up to date.
     if (flatpak) return UpdaterAvailability.Off(FLATPAK_UPDATES)
     if (!hasKeys) return UpdaterAvailability.Off("This build has no key to check updates with.")
     if (forced) return UpdaterAvailability.On(running)
+    if (unpackedAppImage) return UpdaterAvailability.Off(UNPACKED_APPIMAGE_UPDATES)
+    // An AppImage updates by replacing its own file (AppImageUpdate.kt).
+    if (appImage != null) {
+        return if (replaceable(appImage.file)) UpdaterAvailability.On(running) else UpdaterAvailability.Off(lockedAppImageUpdates(appImage.file))
+    }
     if (portable) return UpdaterAvailability.Off("This is the portable copy. New versions are on Octo's releases page.")
     if (!installed) return UpdaterAvailability.Off("Only an installed Octo updates itself.")
     return UpdaterAvailability.On(running)
@@ -84,6 +103,7 @@ fun linuxPackageKind(osRelease: String?, hasDpkg: Boolean, hasRpm: Boolean): Str
         .map { it.lowercase() }
         .toSet()
     return when {
+        words.any { it in setOf("arch", "manjaro", "endeavouros", "cachyos", "garuda") } -> PACMAN_KIND
         words.any { it in setOf("debian", "ubuntu") } -> "deb"
         words.any { it in setOf("fedora", "rhel", "centos", "suse", "opensuse") || it.startsWith("opensuse") } -> "rpm"
         hasDpkg -> "deb"
@@ -91,6 +111,11 @@ fun linuxPackageKind(osRelease: String?, hasDpkg: Boolean, hasRpm: Boolean): Str
         else -> null
     }
 }
+
+// The kinds the release's update list gives an Arch Linux package and an
+// AppImage.
+const val PACMAN_KIND = "pkg.tar.zst"
+const val APPIMAGE_KIND = "appimage"
 
 // The chip, as the release names it.
 fun archName(arch: String = System.getProperty("os.arch").orEmpty()): String = when (arch.lowercase()) {
@@ -100,7 +125,8 @@ fun archName(arch: String = System.getProperty("os.arch").orEmpty()): String = w
 }
 
 // This system's installer among a release's files: the MSI on Windows,
-// the DMG on macOS, the DEB or RPM on Linux, for this chip.
+// the DMG on macOS, and on Linux the AppImage, DEB, RPM or pacman package
+// (`linuxKind`), for this chip.
 fun installerFor(assets: List<ManifestAsset>, os: DesktopOs, arch: String, linuxKind: String?): ManifestAsset? {
     val (system, kind) = when (os) {
         DesktopOs.Windows -> "windows" to "msi"
@@ -170,6 +196,10 @@ class DesktopUpdates(
     private val now: () -> Long = System::currentTimeMillis,
     // The installed program, which Windows opens again after the update.
     private val program: File? = installedProgram()?.let(::File),
+    // The AppImage this Octo runs from, which an update replaces, and this
+    // process, which the AppImage waits out before it opens again.
+    private val appImage: RunningAppImage? = runningAppImage(),
+    private val pid: Long = ProcessHandle.current().pid(),
 ) {
     val enabled: Boolean get() = availability is UpdaterAvailability.On && updater != null
 
@@ -243,48 +273,87 @@ class DesktopUpdates(
         folder.listFiles()?.filter(File::isDirectory)?.forEach { it.deleteRecursively() }
     }
 
-    // What the ready update's button does here: restart into it on
-    // Windows, open the disk image on macOS, show the package on Linux.
-    val installAction: String get() = when (os) {
-        DesktopOs.Windows -> "Restart to update"
-        DesktopOs.Mac -> "Open installer"
-        DesktopOs.Linux -> "Show package"
+    // Whether Octo puts a ready update in itself, and so can also do it as
+    // it quits (Install updates: When I quit): on Windows, and an AppImage.
+    val selfInstalls: Boolean get() = os == DesktopOs.Windows || (os == DesktopOs.Linux && appImage != null)
+
+    // What the ready update's button does here: restart into it on Windows
+    // and in an AppImage, open the disk image on macOS, show the package on
+    // Linux.
+    val installAction: String get() = when {
+        selfInstalls -> "Restart to update"
+        os == DesktopOs.Mac -> "Open installer"
+        else -> "Show package"
     }
 
     // A line on how the ready update goes in, for its row.
     fun installHelp(update: UpdateCheck.Ready): String = when (os) {
         DesktopOs.Windows -> "Octo closes, installs it, and opens again. Your queue and settings stay."
         DesktopOs.Mac -> "Opens the disk image; drag Octo into Applications to replace this one."
-        DesktopOs.Linux -> if (update.asset.kind == "deb") {
-            "Install it with your software center, or: sudo apt install ./${update.file.name}"
-        } else {
-            "Install it with your software center, or: sudo dnf install ./${update.file.name}"
+        DesktopOs.Linux -> when {
+            appImage != null -> "Octo closes, puts the new AppImage in place of this one, and opens again. Your queue and settings stay."
+            update.asset.kind == "deb" -> "Install it with your software center, or: sudo apt install ./${update.file.name}"
+            update.asset.kind == PACMAN_KIND -> "Install it with: sudo pacman -U ./${update.file.name}"
+            else -> "Install it with your software center, or: sudo dnf install ./${update.file.name}"
         }
     }
 
-    // "Restart to update": starts the installer's script, and when Windows
-    // has it running, quits Octo the usual way (saving the queue, plays and
-    // settings) so it can go in. On macOS and Linux, opens the installer or
-    // its folder and leaves Octo running. False when nothing could start.
+    // "Restart to update": on Windows, starts the installer's script and,
+    // when Windows has it running, quits Octo the usual way (saving the
+    // queue, plays and settings) so it can go in. An AppImage puts the new
+    // one in place, starts a waiter that opens it once Octo is gone, and
+    // quits the same way. On macOS and Linux otherwise, opens the installer
+    // or its folder and leaves Octo running. False when nothing could start.
     fun install(quit: () -> Unit): Boolean {
         val update = ready ?: return false
-        return when (os) {
-            DesktopOs.Windows -> {
+        val image = appImage.takeIf { os == DesktopOs.Linux }
+        return when {
+            os == DesktopOs.Windows -> {
                 if (!launchWindowsInstall(update, relaunch = true)) return false
                 quit()
                 true
             }
-            DesktopOs.Mac -> runCatching { start(listOf("open", update.file.absolutePath)) }.isSuccess
-            DesktopOs.Linux -> runCatching { start(listOf("xdg-open", update.file.parentFile.absolutePath)) }.isSuccess
+            image != null -> {
+                if (!swapAppImage(update, image, relaunch = true)) return false
+                quit()
+                true
+            }
+            os == DesktopOs.Mac -> runCatching { start(listOf("open", update.file.absolutePath)) }.isSuccess
+            else -> runCatching { start(listOf("xdg-open", update.file.parentFile.absolutePath)) }.isSuccess
         }
     }
 
     // As Octo quits: with "Automatically when I quit", a ready update goes
-    // in on Windows, and Octo stays closed afterwards.
+    // in on Windows and in an AppImage, and Octo stays closed afterwards.
     fun onQuit() {
         val update = ready ?: return
-        if (os != DesktopOs.Windows || settings.current.updates.install != InstallWhen.OnQuit) return
-        launchWindowsInstall(update, relaunch = false)
+        if (!selfInstalls || settings.current.updates.install != InstallWhen.OnQuit) return
+        val image = appImage.takeIf { os == DesktopOs.Linux }
+        if (image != null) swapAppImage(update, image, relaunch = false) else launchWindowsInstall(update, relaunch = false)
+    }
+
+    // The AppImage's update: the new file in place of the old, then, when
+    // asked, the waiter that opens it once this Octo has quit. False, with
+    // the reason in the row, when the file stayed as it was or the waiter
+    // could not start (the new version is in place then, for the next open).
+    private fun swapAppImage(update: UpdateCheck.Ready, image: RunningAppImage, relaunch: Boolean): Boolean {
+        if (launched) return true
+        if (!update.file.isFile) {
+            ready = null
+            lastLine = "The downloaded update was cleared away. Octo will fetch it again."
+            return false
+        }
+        replaceAppImage(update.file, image.file, update.asset.sha256)?.let { why ->
+            lastLine = why
+            return false
+        }
+        launched = true
+        if (relaunch && runCatching { start(appImageRelaunch(pid, image.file, image.unpacked)) }.isFailure) {
+            ready = null
+            lastLine = "Octo ${update.version} is in place. It starts the next time you open Octo."
+            return false
+        }
+        return true
     }
 
     private fun launchWindowsInstall(update: UpdateCheck.Ready, relaunch: Boolean): Boolean {
@@ -315,9 +384,11 @@ class DesktopUpdates(
         // The updater for this Octo, or one that stays off, with why.
         fun forThisApp(settings: SettingsStore, cache: File, os: DesktopOs): DesktopUpdates {
             val program = installedProgram()?.let(::File)
-            val availability = updaterAvailability(installed = program != null)
+            val appImage = if (os == DesktopOs.Linux) runningAppImage(program?.path) else null
+            val availability = updaterAvailability(installed = program != null, appImage = appImage)
             val folder = updatesFolder(cache, program, os)
-            val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null, program = program)
+            val on = availability as? UpdaterAvailability.On
+                ?: return DesktopUpdates(settings, availability, os, folder, null, program = program, appImage = appImage)
             // A client of its own: the system's certificates less the
             // distrusted ones, never a server's trusted ones or its headers.
             val client = OkHttpClient.Builder()
@@ -326,10 +397,11 @@ class DesktopUpdates(
                 .distrustingTls()
                 .build()
             val api = System.getProperty(API_PROPERTY)?.toHttpUrlOrNull() ?: GITHUB_API
-            val linuxKind = if (os == DesktopOs.Linux) {
-                linuxPackageKind(runCatching { File("/etc/os-release").readText() }.getOrNull(), File("/usr/bin/dpkg").exists(), File("/usr/bin/rpm").exists())
-            } else {
-                null
+            // An AppImage takes the next AppImage, whatever the system installs.
+            val linuxKind = when {
+                os != DesktopOs.Linux -> null
+                appImage != null -> APPIMAGE_KIND
+                else -> linuxPackageKind(runCatching { File("/etc/os-release").readText() }.getOrNull(), File("/usr/bin/dpkg").exists(), File("/usr/bin/rpm").exists())
             }
             val arch = archName()
             val updater = PlayerUpdater(
@@ -341,7 +413,7 @@ class DesktopUpdates(
                 trustedKeys(),
                 pick = { assets -> installerFor(assets, os, arch, linuxKind) },
             )
-            return DesktopUpdates(settings, availability, os, folder, updater, program = program)
+            return DesktopUpdates(settings, availability, os, folder, updater, program = program, appImage = appImage)
         }
     }
 }
