@@ -542,4 +542,22 @@ abstract class DesktopPlayerContract {
         p.restore(SavedQueue(songs, songs.indices.toList(), index = 0, sources = listOf(album, you, you, album, album)))
         assertEquals(listOf("s2" to you, "s3" to you, "s4" to album, "s5" to album), p.comingFrom())
     }
+
+    // A version picked for the song playing: the same entry plays again from
+    // its start, playing even when it was paused, the queue as it was.
+    @Test
+    fun aRestartPlaysTheSameEntryFromItsStart() {
+        val p = newPlayer()
+        p.play(songs, 1)
+        val entry = p.state.value.current!!.key
+        p.seekTo(42_000)
+        p.pause()
+        val moves = p.state.value.moves
+        p.restartCurrent()
+        assertEquals(entry, p.state.value.current?.key)
+        assertTrue(p.state.value.playing)
+        assertNear(0, p.positionMs())
+        assertTrue(p.state.value.moves > moves)
+        assertEquals(listOf("s3", "s4", "s5"), p.coming())
+    }
 }

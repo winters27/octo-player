@@ -105,6 +105,9 @@ import app.winters.octo.desktop.player.PlayerState
 import app.winters.octo.desktop.player.RepeatMode
 import app.winters.octo.desktop.player.formatLabel
 import app.winters.octo.desktop.startRadio
+import app.winters.octo.desktop.versions.listsStreamVersions
+import app.winters.octo.desktop.versions.offersStreamVersions
+import app.winters.octo.versions.StreamVersionWords
 import app.winters.octo.desktop.system.MiniPlayerButton
 import app.winters.octo.desktop.system.isOpenedFile
 import app.winters.octo.playback.SLEEP_EXTENSIONS
@@ -394,6 +397,15 @@ private fun ColumnScope.MoreMenu(app: AppState, close: () -> Unit, compact: Bool
             val song = now.current?.song
             MenuRow("Start radio", { song?.let(app::startRadio); close() }, OctoIcons.Radio, enabled = song != null && app.connection != null && !isOpenedFile(song.id))
             MenuRow("Song details", { app.showInfo(null); close() }, OctoIcons.Info, enabled = now.current != null, detail = formatLabel(now.format))
+            // Another YouTube video for a song found online, on a server that
+            // lets this person pick one; the menu closes first, so the dialog
+            // takes its place.
+            if (app.listsStreamVersions) {
+                MenuRow(StreamVersionWords.MENU_ROW, {
+                    close()
+                    now.current?.let { showStreamVersions(app, it) }
+                }, OctoIcons.LeftRight, enabled = app.offersStreamVersions(now.current))
+            }
             app.toggleMiniPlayer?.let { toggle -> MenuRow("Mini player", { toggle(); close() }, OctoIcons.Expand) }
         }
         MorePage.Output -> OutputMenu(app, back = { page = MorePage.Main }, close = close)

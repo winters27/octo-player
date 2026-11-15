@@ -185,6 +185,15 @@ interface DesktopPlayer : AutoCloseable {
     // The server's address, sign-in or headers changed: songs already
     // queued are fetched afresh with the new ones.
     fun reconnect() {}
+
+    // A version was picked for the song playing: the entry plays again from
+    // its start, playing, as a new play of it (EnginePlayer: a new address and
+    // nothing kept of the old file). A station never restarts.
+    fun restartCurrent()
+
+    // The server gave the songs with these ids another file (null: it cannot
+    // say which): what the player learned of the old files is let go.
+    fun filesChanged(ids: Set<String>?) {}
 }
 
 // The output that follows whatever the system uses.

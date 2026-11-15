@@ -7,6 +7,7 @@ import app.winters.octo.desktop.server.EngineIdentity
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.playback.TransitionProfiles
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -42,6 +43,9 @@ fun openPlayer(
     // The engine, opened beforehand off the window's thread (Startup), or
     // why it would not open.
     opened: Result<AudioEngine> = runCatching { NativeAudioEngine.open() },
+    // Runs before a song's transition profile is asked for: the server's
+    // list of songs given another version is read first (StreamVersionFeed).
+    beforeProfile: suspend (Song) -> Unit = {},
 ): OpenedPlayer {
     val playback = settings.current.playback
     return try {
@@ -51,7 +55,14 @@ fun openPlayer(
         // The certificate in use, before the player can ask for any song.
         identity?.attach(engine)
         val device = playback.outputDevice?.takeUnless { it == DEFAULT_OUTPUT }
-        val profiles = EngineProfiles(scope, ServerTransitions(client, transitions)::current, { serverSongId(it, landed) }, engine::setSongProfile)
+        val profiles = EngineProfiles(
+            scope,
+            ServerTransitions(client, transitions)::current,
+            { serverSongId(it, landed) },
+            engine::setSongProfile,
+            unsend = { engine.setSongProfile(it, null) },
+            beforeAsk = beforeProfile,
+        )
         val sources = LocalOrServer(ServerSongs(headers, landed, params, client, gatewayOrigins), kept)
         val player = EnginePlayer(engine, sources, volume = playback.volume, device = device, profiles = profiles)
         OpenedPlayer(player, null)

@@ -35,6 +35,8 @@ import app.winters.octo.desktop.library.songFacts
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.player.outputSentence
 import app.winters.octo.desktop.player.songFormatWords
+import app.winters.octo.desktop.versions.offersStreamVersions
+import app.winters.octo.versions.StreamVersionWords
 import app.winters.octo.subsonic.Song
 
 // The song's details: the one playing, or one picked with Song details,
@@ -74,6 +76,12 @@ fun InfoPanel(app: AppState, modifier: Modifier = Modifier) {
                 Column(Modifier.padding(vertical = Space.M), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
                     songFormatWords(state.format)?.let { Txt(it, DesktopType.meta, OctoColors.TextSecondary, maxLines = 2) }
                     outputSentence(state.format, state.playingOn?.name)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted, maxLines = 3) }
+                    // Another YouTube video for a song found online, as the
+                    // player bar's More menu offers it.
+                    val entry = state.current
+                    if (entry != null && app.offersStreamVersions(entry)) {
+                        TextAction(StreamVersionWords.MENU_ROW, { showStreamVersions(app, entry) }, icon = OctoIcons.LeftRight)
+                    }
                 }
                 Separator()
             }

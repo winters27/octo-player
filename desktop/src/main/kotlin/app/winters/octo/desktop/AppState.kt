@@ -68,6 +68,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import app.winters.octo.desktop.search.Fetches
 import app.winters.octo.desktop.upgrade.UpgradeModel
+import app.winters.octo.desktop.versions.StreamVersionFeed
+import app.winters.octo.desktop.versions.streamVersionsDropped
 import app.winters.octo.desktop.downloads.DownloadsModel
 import kotlinx.coroutines.delay
 import app.winters.octo.desktop.search.OmniboxState
@@ -301,6 +303,12 @@ class AppState(
     // The Library health page's report, its fixes and what the server lets
     // this user do to its files (deleting from disk too), for this sign-in.
     val health = HealthModel({ connection?.client }, scope)
+
+    // The server's list of songs given another version, read at sign-in,
+    // when the window comes back, after a pick here and before a song found
+    // online is asked about; what it lists loses what this computer kept of
+    // its old file.
+    val versions = StreamVersionFeed(scope, settings, { connection }) { plan -> streamVersionsDropped(plan) }
 
     // The Import page, on an Octo server.
     val imports = ImportModel({ connection?.client }, scope, openUrl = browse)
@@ -814,6 +822,7 @@ class AppState(
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
         offline.poke()
+        versions.refreshSoon()
     }
 
     private fun startReading(views: ServerViews) {
@@ -1072,7 +1081,11 @@ class AppState(
     // The window is in front again: playlists may have been deleted or
     // made on another device, and Octo makes its mixes and stations anew
     // now and then, so a list older than a minute is read again.
-    fun windowCameBack(now: Long = System.currentTimeMillis()) = refreshPlaylistsIfOld(now)
+    // Songs other devices gave another version meanwhile are read too.
+    fun windowCameBack(now: Long = System.currentTimeMillis()) {
+        refreshPlaylistsIfOld(now)
+        versions.refreshSoon()
+    }
 
     // Home is opened: the lists Octo makes for the listener are made on the
     // server when playlists are asked for, so a first sign-in can read them

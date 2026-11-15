@@ -116,6 +116,9 @@ data class AppSettings(
     val liveRadio: LiveRadioPrefs = LiveRadioPrefs(),
     // The newest server release the listener chose Later for, by server id.
     val serverUpdateLater: Map<String, String> = emptyMap(),
+    // Where each server's list of songs given another version was read to,
+    // by server id, as "<seq> <epoch>" (see StreamVersionFeed).
+    val versionCursors: Map<String, String> = emptyMap(),
 )
 
 // The Live radio page as the listener left it: what they typed in Where

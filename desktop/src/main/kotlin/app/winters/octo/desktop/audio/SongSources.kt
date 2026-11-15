@@ -12,6 +12,8 @@ import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.subsonic.PLAY_TOKEN_PARAM
+import app.winters.octo.subsonic.playToken
 import app.winters.octo.subsonic.gateway.GatewayNames
 import app.winters.octo.subsonic.httpsTwin
 import app.winters.octo.subsonic.origin
@@ -33,6 +35,11 @@ data class SongAddress(
 // cannot be played now (signed out, say).
 fun interface SongSources {
     fun addressOf(song: Song): SongAddress?
+
+    // The address for one play of a queue entry, which the engine is given:
+    // `restarts` counts the times a version picked for the song started the
+    // entry over. A source whose addresses name no play gives the song's own.
+    fun addressOf(entry: QueueEntry, restarts: Int): SongAddress? = addressOf(entry.song)
 }
 
 // Songs from the signed-in server, as the phone streams them: the file as
@@ -43,7 +50,11 @@ fun interface SongSources {
 // range requests and reconnects (a made MP3 it opens again at a time
 // instead), so it is signed when the song is queued. A song found online
 // that the server has since fetched into the library (`landed` names its
-// library id) plays from that file.
+// library id) plays from that file. Each play of a queue entry names itself
+// in its address (PLAY_TOKEN_PARAM: this run's `session`, the entry and its
+// restarts), so the server keeps every request of one play (reconnects and
+// seeks too) on one file, and a version picked for the song reaches the
+// restart that follows the pick.
 class ServerSongs(
     private val headers: () -> Map<String, String> = { emptyMap() },
     private val landed: (String) -> String? = { null },
@@ -53,16 +64,27 @@ class ServerSongs(
     private val client: () -> SubsonicClient?,
     // The addresses the server's sign-in page headers may go to.
     private val gatewayOrigins: () -> Set<String> = { emptySet() },
+    // Tells this run's plays apart from another run's, whose queue entries
+    // are numbered from 1 again.
+    private val session: String = newPlaySession(),
 ) : SongSources {
-    override fun addressOf(song: Song): SongAddress? {
+    override fun addressOf(song: Song): SongAddress? = address(song, emptyMap())
+
+    override fun addressOf(entry: QueueEntry, restarts: Int): SongAddress? =
+        address(entry.song, mapOf(PLAY_TOKEN_PARAM to playToken("$session-${entry.key}", restarts)))
+
+    private fun address(song: Song, play: Map<String, String>): SongAddress? {
         val server = client() ?: return null
         val id = landed(song.id) ?: song.id
-        val url = server.url("stream", mapOf("id" to id) + params())
+        val url = server.url("stream", mapOf("id" to id) + params() + play)
         val all = headers()
         val allowed = gatewayOrigins()
         return SongAddress(url.toString(), streamHeaders(all, url, allowed), secureStreamHeaders(all, url, allowed))
     }
 }
+
+// A name for one run's plays: eight random letters and digits.
+fun newPlaySession(): String = java.util.UUID.randomUUID().toString().substringBefore('-')
 
 // The headers a stream at `url` carries: the server's own, less the ones a
 // sign-in page reads unless `url` is at an address they may go to (the
@@ -98,7 +120,12 @@ class LocalOrServer(
     // A copy kept on this computer, played in place of the server's.
     private val kept: (String) -> File? = { null },
 ) : SongSources {
-    override fun addressOf(song: Song): SongAddress? =
+    override fun addressOf(song: Song): SongAddress? = pick(song) { server.addressOf(song) }
+
+    override fun addressOf(entry: QueueEntry, restarts: Int): SongAddress? = pick(entry.song) { server.addressOf(entry, restarts) }
+
+    // A song's own address, or the server's (`fromServer`) for any other.
+    private fun pick(song: Song, fromServer: () -> SongAddress?): SongAddress? =
         when {
             kept(song.id) != null -> SongAddress(kept(song.id)!!.absolutePath)
             song.id.startsWith(LOCAL_PREFIX) -> SongAddress(song.id.removePrefix(LOCAL_PREFIX))
@@ -107,7 +134,7 @@ class LocalOrServer(
             // A file opened from the system (a double click, a drop): the
             // file itself, or the address it was opened from.
             isOpenedFile(song.id) -> openedFileOf(song.id)?.let { SongAddress(it.path?.absolutePath ?: it.uri) }
-            else -> server.addressOf(song)
+            else -> fromServer()
         }
 }
 
@@ -125,10 +152,11 @@ fun albumOrder(song: Song): Int? = song.track?.let { (song.discNumber ?: 1) * 10
 // guess, which is left out, so the engine takes the length from the file
 // as the phone does. A song that cannot be reached gets an address that fails, so
 // the engine reports it and moves on, as it does for any broken file. Live
-// radio is a live stream, with no length at all.
-fun queueItem(entry: QueueEntry, sources: SongSources): QueueItem {
+// radio is a live stream, with no length at all. The address is the one for
+// this play of the entry, its `restarts` counted.
+fun queueItem(entry: QueueEntry, sources: SongSources, restarts: Int = 0): QueueItem {
     val song = entry.song
-    val address = sources.addressOf(song)
+    val address = sources.addressOf(entry, restarts)
     val live = isRadio(song.id)
     val gain = song.replayGain?.let {
         if (it.trackGain == null && it.albumGain == null) null else ReplayGainInfo(it.trackGain, it.trackPeak, it.albumGain, it.albumPeak)
