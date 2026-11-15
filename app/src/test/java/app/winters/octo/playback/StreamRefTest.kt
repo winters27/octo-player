@@ -31,6 +31,26 @@ class StreamRefTest {
     }
 
     @Test
+    fun theQueueEntryReadsBackAndIsNoPartOfTheSavedName() {
+        val played = flac.copy(entry = "e42")
+        assertEquals(played, parseStreamUri(streamUri(played)))
+        val found = played.copy(find = true)
+        assertEquals(found, parseStreamUri(streamUri(found)))
+        assertEquals(streamCacheKey("server:a", flac, StreamRequest(null)), streamCacheKey("server:a", found, StreamRequest(null)))
+        // An address from before entries were written in names none.
+        assertNull(parseStreamUri(streamUri(flac))!!.entry)
+    }
+
+    @Test
+    fun everySavedNameOfASongIsOfThatSong() {
+        assertEquals("server:a|ext-1", songOfCacheKey("server:a|ext-1|audio/webm|raw"))
+        assertEquals("server:a|ext-1", songOfCacheKey("server:a|ext-1|audio/webm|192|4000000"))
+        val sized = StreamRef("server:a", "ext-1", null, null, size = 5)
+        assertEquals(songKey("server:a", "ext-1"), songOfCacheKey(streamCacheKey("server:a", sized, StreamRequest(320))))
+        assertEquals(songKey("server:host:4533", "tr-7"), songOfCacheKey(streamCacheKey("server:host:4533", mp3, StreamRequest(null))))
+    }
+
+    @Test
     fun oddIdsAndServersSurviveTheAddress() {
         val odd = StreamRef("server:host:4533", "a/b c+d&e=f", "audio/x-flac", null)
         assertEquals(odd, parseStreamUri(streamUri(odd)))

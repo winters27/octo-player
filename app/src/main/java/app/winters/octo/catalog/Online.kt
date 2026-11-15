@@ -76,6 +76,11 @@ interface OnlineDao {
     @Query("SELECT * FROM online_song WHERE id = :id")
     fun songFlow(id: String): Flow<OnlineSongEntity?>
 
+    // The ids on the server of server `sourceId`'s finds, for letting go of
+    // every saved copy of a song found online.
+    @Query("SELECT nativeId FROM online_song WHERE sourceId = :sourceId")
+    suspend fun nativeIds(sourceId: String): List<String>
+
     // Every find with a download asked for, for showing which are on the way.
     @Query("SELECT * FROM online_song WHERE requestedAt > 0")
     fun requestedFlow(): Flow<List<OnlineSongEntity>>

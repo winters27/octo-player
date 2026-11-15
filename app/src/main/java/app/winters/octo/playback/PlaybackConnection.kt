@@ -37,6 +37,8 @@ data class Shown(val title: String?, val artist: String? = null, val artwork: St
 // What the app shows about the song that is on.
 data class NowPlaying(
     val trackId: String? = null,
+    // The queue entry playing: the same song queued twice is two entries.
+    val entryId: String? = null,
     val title: String? = null,
     val artist: String? = null,
     val artwork: String? = null,
@@ -308,6 +310,13 @@ open class PlaybackConnection @Inject constructor(
         entryOfKey(key)?.let { c.sendCustomCommand(PLAY_ENTRY, Bundle().apply { putLong(ARG_ENTRY, it) }) }
     }
 
+    // Plays the entry on (by its key) again from its start as a new play,
+    // once a version was picked for its song. Nothing happens when another
+    // entry is on by the time it arrives.
+    fun restartFresh(entryKey: String) = withController { c ->
+        c.sendCustomCommand(RESTART_FRESH, Bundle().apply { putString(ARG_ENTRY_KEY, entryKey) })
+    }
+
     // ---- Up next past the songs the player holds ----
 
     // Up to `limit` of the queue's songs after (or before) the entry
@@ -441,6 +450,7 @@ open class PlaybackConnection @Inject constructor(
         }
         _now.value = NowPlaying(
             trackId = item?.mediaId,
+            entryId = item?.entryId,
             title = meta?.title?.toString(),
             artist = meta?.artist?.toString(),
             artwork = meta?.artworkRef(),

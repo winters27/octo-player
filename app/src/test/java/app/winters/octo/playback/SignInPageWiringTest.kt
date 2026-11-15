@@ -15,6 +15,9 @@ import app.winters.octo.data.installTestKeystore
 import app.winters.octo.data.testSessions
 import app.winters.octo.family.FamilyHub
 import app.winters.octo.family.FamilyNoticeStore
+import app.winters.octo.lyrics.LyricsTiming
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import app.winters.octo.offline.OfflineSettings
 import app.winters.octo.offline.StreamCache
 import app.winters.octo.player.PlayerSettings
@@ -86,7 +89,12 @@ class SignInPageWiringTest {
         val sessions = testSessions(security = security, http = http)
         val kept = StreamCache(context, OfflineSettings(context))
         val family = FamilyHub(context, sessions, FamilyNoticeStore(context), Feedback())
-        val streams = Streams(context, sessions, PlayerSettings(context), http, security, kept, family)
+        val timing = LyricsTiming(context)
+        val drops = VersionDrops(kept, { emptyList() }, timing::reset, { emptySet() }, Dispatchers.IO, CoroutineScope(Dispatchers.IO))
+        val streams = Streams(
+            context, sessions, PlayerSettings(context), http, security, kept, family,
+            PlayRestarts(context), StreamVersionFeed(sessions, drops, context), drops,
+        )
         // Songs are kept as they play, as the app starts out.
         runBlocking { withTimeout(5_000) { kept.enabled.first { it } } }
         releases += { kept.cache.release() }

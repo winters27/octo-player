@@ -1091,6 +1091,26 @@ internal class Crossfader(
         planKey = null
     }
 
+    // An entry played again as a new play (a version picked for its song):
+    // what was scouted or read of it goes, and the plan, so its ends are
+    // read again from the new file.
+    fun forgetEntry(entryId: String) {
+        if (tail?.entryId == entryId) {
+            tail?.job?.cancel()
+            tail = null
+        }
+        if (head?.entryId == entryId) {
+            head?.job?.cancel()
+            head = null
+        }
+        if (reading?.entryId == entryId) {
+            reading?.job?.cancel()
+            reading = null
+        }
+        dropPlan()
+        schedule(0)
+    }
+
     private fun unloadSpare() {
         if (loadedFor == C.INDEX_UNSET) return
         loadedFor = C.INDEX_UNSET

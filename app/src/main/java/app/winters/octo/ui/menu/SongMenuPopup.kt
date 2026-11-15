@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import app.winters.octo.catalog.FIND_PREFIX
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.isFind
 import app.winters.octo.design.GlassPopup
@@ -66,8 +67,11 @@ import app.winters.octo.ui.playlist.refusesFinds
 import app.winters.octo.ui.playlist.takesSongs
 import app.winters.octo.ui.server.ShareLinkPage
 import app.winters.octo.ui.server.ShareRequest
+import app.winters.octo.player.StreamVersionsHost
 import app.winters.octo.ui.upgrade.FIND_HIGHER_QUALITY
 import app.winters.octo.ui.upgrade.UpgradeAsk
+import app.winters.octo.versions.StreamVersionWords
+import app.winters.octo.versions.VersionsSong
 import dev.chrisbanes.haze.HazeState
 
 // The song menu, a glass card that floats beside the row held or the button
@@ -139,6 +143,8 @@ fun SongMenuHost(
         }
     }
     CollectionMenuHost(state.collections, onOpen, backdrop)
+    // Try another version's sheet, over the player like Choose lyrics.
+    StreamVersionsHost(state, backdrop)
 }
 
 // The song at the top, then its actions in their groups.
@@ -167,6 +173,7 @@ private fun SongActionsPage(
     val radio by vm.radio.collectAsStateWithLifecycle()
     val canUpgrade by vm.canUpgrade.collectAsStateWithLifecycle()
     val canFindSongs by vm.canFindSongs.collectAsStateWithLifecycle()
+    val offersVersions by vm.streamVersions.collectAsStateWithLifecycle()
     val upgradable by produceState(emptyList<UpgradeAsk>(), trackId, canUpgrade) { value = if (canUpgrade) vm.upgradable(trackId) else emptyList() }
     val canRemove by vm.canRemove.collectAsStateWithLifecycle()
     val onDisk by produceState(false, trackId, canRemove) { value = canRemove && vm.deletable(trackId) }
@@ -189,6 +196,7 @@ private fun SongActionsPage(
         requestCopy = vm.family.outside.offersRequest,
         removeFromMine = inMine,
         owned = trackId in LocalOwnedFinds.current,
+        streamVersions = offersVersions && vm.playingEntry(trackId) != null,
         playlistAdds = vm.playlistAdds,
     )
     // A family member whose songs are saved rather than added.
@@ -316,6 +324,12 @@ private fun SongActionsPage(
                 SongAction.FindSongs -> GlassMenuAction(OctoIcons.Search, app.winters.octo.ui.downloads.FIND_SONGS, onClick = {
                     state.close()
                     vm.findSongs(trackId, song.title)
+                })
+                SongAction.TryAnotherVersion -> GlassMenuAction(OctoIcons.Sync, StreamVersionWords.MENU_ROW, opensPage = true, onClick = {
+                    state.close()
+                    vm.playingEntry(trackId)?.let { entry ->
+                        state.openVersions(VersionsSong(entry, trackId.removePrefix(FIND_PREFIX), song.title, song.artist))
+                    }
                 })
                 SongAction.Cast -> CastAction(onClick = { state.pages.open(SongPage.Cast) })
                 SongAction.Sound -> {

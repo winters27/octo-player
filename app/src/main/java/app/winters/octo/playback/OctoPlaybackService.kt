@@ -186,6 +186,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var startingPlays: StartingPlays
     @Inject lateinit var merge: app.winters.octo.catalog.CatalogMerge
     @Inject lateinit var finds: FindMap
+    @Inject lateinit var drops: VersionDrops
 
     private val scope = MainScope()
     // What each car said it can show as tabs, kept from its root call.
@@ -219,6 +220,10 @@ class OctoPlaybackService : MediaLibraryService() {
     private lateinit var window: QueueWindow
     private lateinit var casting: Casting
     private lateinit var tracker: PlayTracker
+    // The server's transition profiles of songs, kept for the Crossfader.
+    private lateinit var profiles: ServerProfiles
+    // The queue entry last opened again for another file from the server.
+    private var reopened: String? = null
     private lateinit var headsets: HeadsetResume
     private var session: MediaLibrarySession? = null
     private val currentId = MutableStateFlow<String?>(null)
@@ -265,9 +270,13 @@ class OctoPlaybackService : MediaLibraryService() {
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }
         }
         val scout = Scout(streams.scoutSourceFactory(), streams.extractors())
-        val profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
+        profiles = ServerProfiles(scope) { (sessions.state.value as? SessionState.SignedIn)?.session }
         local = OctoPlayer(this, deck(0), deck(1), sounds::get, scout, profiles, realLengths, mixer)
         relay.to = local.mixListener
+        // A blend's start and end change what plays, for the version drops.
+        local.onPlayingChanged = ::tellPlaying
+        // A song whose version changed asks the server for its profile again.
+        scope.launch { drops.dropped.collect { ids -> profiles.forget(ids) } }
         player = OutputSwitch(local) { if (::window.isInitialized) window else null }
         window = QueueWindow(
             player = player,
@@ -418,6 +427,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         switcher.detach(side)
+        drops.nowPlaying(emptySet())
         saveQueue()
         widgets.clear()
         tracker.flush()
@@ -530,7 +540,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
     private fun sessionCommands() = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
         .add(LIKE).add(DOWNLOAD).add(CLOSE).add(STOP).add(PLAY_FROM_SEARCH).add(START_RADIO).add(PLAY_NEXT_ITEM)
-        .add(PLAY_LIST).add(ADD_NEXT).add(ADD_LAST).add(PLAY_ENTRY).add(MOVE_ENTRY).add(REMOVE_ENTRIES)
+        .add(PLAY_LIST).add(ADD_NEXT).add(ADD_LAST).add(PLAY_ENTRY).add(MOVE_ENTRY).add(REMOVE_ENTRIES).add(RESTART_FRESH)
         .build()
 
     private fun updateStationOnAir() {
@@ -574,6 +584,39 @@ class OctoPlaybackService : MediaLibraryService() {
                 Log.w("Octo", "could not keep a song's length", e)
             }
         }
+    }
+
+    // Plays the entry on again from its start as a new play, once a version
+    // was picked for its song; only while that entry is the one on. Its next
+    // requests carry the next play token, the reopen mark and its kept
+    // transition profile go, and on the phone its saved copies go once more
+    // while nothing reads it (see OctoPlayer.restartFresh). On a TV or
+    // speaker it stops, moves to its start while stopped, and loads again,
+    // which signs its address anew.
+    private fun restartFresh(entryId: String): Boolean {
+        val item = player.currentMediaItem?.takeIf { it.entryId == entryId } ?: return false
+        val ref = item.localConfiguration?.uri?.toString()?.let(::parseStreamUri) ?: return false
+        streams.restarted(entryId)
+        reopened = null
+        profiles.forget(listOf(ref.serverId))
+        val remote = player.remote
+        if (remote != null) {
+            remote.stop()
+            remote.seekTo(0)
+            remote.prepare()
+            remote.play()
+            return true
+        }
+        return local.restartFresh(entryId) { streams.dropSaved(ref) }
+    }
+
+    // Tells the version drops what the phone's player plays now: the song
+    // on and the one a blend plays out.
+    private fun tellPlaying() {
+        val songs = local.playingItems().mapNotNullTo(HashSet()) { item ->
+            item.localConfiguration?.uri?.toString()?.let(::parseStreamUri)?.let(streams::songOf)
+        }
+        drops.nowPlaying(songs)
     }
 
     // Asks the server to download the song found online that is on now.
@@ -666,11 +709,9 @@ class OctoPlaybackService : MediaLibraryService() {
         private var lastId: String? = null
         private var lastIndex = C.INDEX_UNSET
 
-        // The queue entry last opened again for another file from the server.
-        private var reopened: String? = null
-
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             reopened = null
+            tellPlaying()
             val endedStation = lastId?.takeIf(::isRadio)
             val endedAt = lastIndex
             lastId = mediaItem?.mediaId
@@ -943,6 +984,15 @@ class OctoPlaybackService : MediaLibraryService() {
                 REMOVE_ENTRIES -> {
                     val list = args.getLong(ARG_LIST, 0)
                     if (list != 0L) window.removeList(list) else args.getLongArray(ARG_ENTRIES)?.let { window.removeEntries(it.toList()) }
+                }
+                // A version picked in the app: only the app itself may ask.
+                RESTART_FRESH -> {
+                    if (controller.packageName != packageName) {
+                        return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                    }
+                    val entry = args.getString(ARG_ENTRY_KEY)
+                    val done = entry != null && restartFresh(entry)
+                    return Futures.immediateFuture(SessionResult(if (done) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
                 }
                 START_RADIO -> return scope.future { startRadio(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }
                 PLAY_NEXT_ITEM -> return scope.future { playNextFromCar(args.getString(MediaConstants.EXTRA_KEY_MEDIA_ID)) }

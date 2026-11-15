@@ -74,6 +74,8 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var upgradeGuard: UpgradeGuard
     // Play counts that could not be brought up to date try again on return.
     @Inject lateinit var totals: PlayTotals
+    // Songs found online whose version changed on the server, read on return.
+    @Inject lateinit var versionFeed: app.winters.octo.playback.StreamVersionFeed
 
     // Counts up each time a home screen widget asks for the full player.
     private var openPlayer by mutableIntStateOf(0)
@@ -214,6 +216,7 @@ class MainActivity : ComponentActivity() {
         // A queue left on another device may be waiting on the server.
         queueSync.check()
         totals.foreground()
+        versionFeed.foreground()
     }
 
     // Letting go lets the service stop itself when nothing is playing.

@@ -13,6 +13,8 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
 import app.winters.octo.catalog.isFind
 import app.winters.octo.data.LibraryFiles
+import app.winters.octo.data.SessionRepository
+import app.winters.octo.data.SessionState
 import app.winters.octo.data.Upgrades
 import app.winters.octo.design.PopupPages
 import app.winters.octo.discovery.DownloadState
@@ -40,6 +42,7 @@ import app.winters.octo.sound.SoundEngine
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.SelectionBarState
 import app.winters.octo.ui.common.SongSelection
+import app.winters.octo.subsonic.STREAM_VERSIONS_EXTENSION
 import app.winters.octo.ui.upgrade.UpgradeAsk
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
@@ -111,6 +114,19 @@ class SongMenuState {
     // The bar that acts on picked songs.
     val selectionBar = SelectionBarState()
 
+    // The song Try another version was tapped for, until the versions sheet
+    // takes it (see StreamVersionsHost).
+    var versionsFor by mutableStateOf<app.winters.octo.versions.VersionsSong?>(null)
+        private set
+
+    fun openVersions(song: app.winters.octo.versions.VersionsSong) {
+        versionsFor = song
+    }
+
+    fun versionsTaken() {
+        versionsFor = null
+    }
+
     // Set by the host while it is shown.
     var quick: QuickSongActions? = null
         internal set
@@ -129,7 +145,8 @@ val LocalSongMenu = staticCompositionLocalOf<SongMenuState> { error("No song men
 // The choices in a song's menu, in the order shown.
 enum class SongAction {
     PlayNext, AddToQueue, StartRadio, Download, RequestCopy, AddToLastPlaylist, AddToPlaylist, RemoveFromPlaylist, Select, KeepOffline, FindFlac, ShareFile, Share, Like,
-    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, RemoveFromMyLibrary, DeleteFromDisk, Info, FindSongs, Cast, Sound,
+    Rate, GoToAlbum, GoToArtist, SetAsSound, DeleteFromPhone, RemoveFromMyLibrary, DeleteFromDisk, Info, FindSongs, TryAnotherVersion,
+    Cast, Sound,
 }
 
 // Where the menu was opened, as the choices care about it.
@@ -189,6 +206,10 @@ fun songActions(
     // brought in yet (OwnedFinds): nothing to download or ask for, and its
     // heart, as any library song has.
     owned: Boolean = false,
+    // The server lets this listener choose the video a song found online
+    // streams from (octoStreamVersions), and this find is the song playing,
+    // streaming from that server: Try another version, in the player.
+    streamVersions: Boolean = false,
     // The server keeps songs found online in playlists (octoPlaylistSongs).
     playlistAdds: Boolean = false,
 ): List<SongAction> = buildList {
@@ -229,6 +250,7 @@ fun songActions(
     }
     add(SongAction.Info)
     if (findSongs) add(SongAction.FindSongs)
+    if (find && !owned && place.inPlayer && streamVersions) add(SongAction.TryAnotherVersion)
     if (place.inPlayer) {
         add(SongAction.Cast)
         add(SongAction.Sound)
@@ -243,7 +265,7 @@ private val SongMenuOrder = listOf(
     listOf(SongAction.PlayNext, SongAction.AddToQueue, SongAction.StartRadio),
     listOf(SongAction.AddToLastPlaylist, SongAction.AddToPlaylist, SongAction.Like, SongAction.Rate, SongAction.Download, SongAction.RequestCopy, SongAction.KeepOffline, SongAction.FindFlac),
     listOf(SongAction.GoToAlbum, SongAction.GoToArtist),
-    listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.Select),
+    listOf(SongAction.Share, SongAction.ShareFile, SongAction.SetAsSound, SongAction.Info, SongAction.FindSongs, SongAction.TryAnotherVersion, SongAction.Select),
     listOf(SongAction.RemoveFromPlaylist, SongAction.DeleteFromPhone, SongAction.RemoveFromMyLibrary, SongAction.DeleteFromDisk),
     listOf(SongAction.Cast, SongAction.Sound),
 )
@@ -251,6 +273,12 @@ private val SongMenuOrder = listOf(
 // The actions offered, in their groups, leaving out empty groups.
 fun songMenuGroups(actions: List<SongAction>): List<List<SongAction>> =
     SongMenuOrder.map { group -> group.filter { it in actions } }.filter { it.isNotEmpty() }
+
+// Whether a signed-in server lets this listener choose the video a song
+// found online streams from: an Octo server listing octoStreamVersions (it
+// lists it for everyone but a family's Listener and Kid accounts).
+fun offersStreamVersions(isOcto: Boolean, extensions: Set<String>): Boolean =
+    isOcto && "$STREAM_VERSIONS_EXTENSION:1" in extensions
 
 // The add row's words for a song not in the library, and how its adding
 // is going. "Download" is kept for saving a library song to the phone.
@@ -309,7 +337,17 @@ class SongMenuViewModel @Inject constructor(
     playerSettings: PlayerSettings,
     // Finds a start plays before their rows are written.
     private val finds: FindMap,
+    sessions: SessionRepository,
 ) : ViewModel() {
+    // Whether the signed-in server lets this listener choose an outside
+    // song's version.
+    val streamVersions: StateFlow<Boolean> = sessions.state
+        .map { state -> (state as? SessionState.SignedIn)?.session?.let { offersStreamVersions(it.isOcto, it.extensions) } == true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // The queue entry playing `trackId` now, or null when another song is on.
+    fun playingEntry(trackId: String): String? = playback.now.value.takeIf { it.trackId == trackId }?.entryId
+
     // Whether this one song is liked, as that changes.
     fun liked(trackId: String): Flow<Boolean> = likes.likedFlow(trackId)
 

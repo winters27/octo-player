@@ -49,8 +49,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import app.winters.octo.subsonic.OctoPurpose
+import app.winters.octo.subsonic.PLAY_TOKEN_PARAM
 import app.winters.octo.subsonic.markedFor
+import app.winters.octo.subsonic.playToken
 import app.winters.octo.subsonic.purpose
+import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.FileNotFoundException
@@ -80,6 +83,12 @@ class Streams @Inject constructor(
     // A family account's device left to its account plays the file as it
     // is, and the server applies the account's quality.
     private val family: FamilyHub,
+    // Each entry's restart count, the second part of its play token.
+    private val restarts: PlayRestarts,
+    // Which outside songs' chosen version changed, asked before a play
+    // reads a saved copy of one, and the drops that follow.
+    private val feed: StreamVersionFeed,
+    private val drops: VersionDrops,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -153,16 +162,18 @@ class Streams @Inject constructor(
     // chain, and it reads from the server only when the server answers
     // requests for parts of the song.
     fun scoutSourceFactory(): DataSource.Factory =
-        StableUriDataSource.Factory(dataSourceFactory(RangeGuardDataSource.Factory(networkFactory())))
+        StableUriDataSource.Factory(dataSourceFactory(RangeGuardDataSource.Factory(scoutNetworkFactory()), scout = true))
 
     // A made-on-the-way MP3 has no seek table, so seek by its steady bitrate.
     fun extractors(): DefaultExtractorsFactory = DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true)
 
-    private fun dataSourceFactory(network: DataSource.Factory): DataSource.Factory = streamSources(
+    // `scout`: the scout's chain, whose reads never stand for a play's first
+    // read (see freshen).
+    private fun dataSourceFactory(network: DataSource.Factory, scout: Boolean = false): DataSource.Factory = streamSources(
         network = network,
         isStream = ::isStream,
-        pin = ::pin,
-        sign = ::sign,
+        pin = { pin(it, scout) },
+        sign = { sign(it, played = true) },
         cached = ::cachedFactory,
         keeping = { saved.enabled.value },
         shapes = saved.shapes,
@@ -170,8 +181,11 @@ class Streams @Inject constructor(
 
     // Fills the saved copy of a song ahead of time, for the next songs in
     // the queue. Null while nothing is kept.
+    // Marked as an offline copy (X-Octo-Purpose), like a download: an Octo
+    // server keeps it apart from the song's play, so it is never held to a
+    // video a play of the song started on.
     fun savingSource(): CacheDataSource? =
-        if (saved.enabled.value) cachedFactory(ShapeGuardDataSource.Factory(signedFactory(networkFactory()), ::isStream, saved.shapes)).createDataSource() else null
+        if (saved.enabled.value) cachedFactory(ShapeGuardDataSource.Factory(signedFactory(offlineNetworkFactory()), ::isStream, saved.shapes)).createDataSource() else null
 
     // Reads a server song for downloading: from its saved copy when there is
     // one, otherwise from the server, without filling the saved copies.
@@ -200,10 +214,12 @@ class Streams @Inject constructor(
     // A signed address for another device on the network to fetch a
     // server song from itself, at the address the phone is using now (the
     // home one while at home). Null with no server signed in.
-    suspend fun deviceAddress(ref: StreamRef, request: StreamRequest): String? {
+    suspend fun deviceAddress(ref: StreamRef, request: StreamRequest, played: Boolean = true): String? {
         val client = client() ?: return null
         if (fromAnotherServer(ref, currentSourceId())) return null
-        return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString()
+        val octo = (sessions.state.value as? SessionState.SignedIn)?.session?.isOcto == true
+        val token = if (played && octo) playTokenOf(ref, restarts::of) else null
+        return client.url("stream", streamParams(ref.serverId, request, token)).toString()
     }
 
     // The type the server sends a song as for `request`, asked with its
@@ -211,7 +227,7 @@ class Streams @Inject constructor(
     // asked for as it is can come as another file than listed. Marked like
     // an offline copy, so an Octo server does not count it as playing.
     suspend fun answeredType(ref: StreamRef, request: StreamRequest): String? {
-        val address = deviceAddress(ref, request) ?: return null
+        val address = deviceAddress(ref, request, played = false) ?: return null
         return withContext(Dispatchers.IO) {
             runCatching {
                 val probe = Request.Builder().url(address).header("Range", "bytes=0-0").purpose(OctoPurpose.Offline).build()
@@ -248,7 +264,14 @@ class Streams @Inject constructor(
 
     private val offlineHttp: OkHttpClient by lazy { bytes.markedFor(OctoPurpose.Offline) }
 
-    private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory = signedSources(upstream, ::isStream, ::sign)
+    // The scout's: every request marked as a scout read (X-Octo-Purpose), so
+    // an Octo server starts no play for it, while its play token still names
+    // the entry it analyzes.
+    private fun scoutNetworkFactory(): DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(scoutHttp))
+
+    private val scoutHttp: OkHttpClient by lazy { bytes.markedFor(OctoPurpose.Scout) }
+
+    private fun signedFactory(upstream: DataSource.Factory): DataSource.Factory = signedSources(upstream, ::isStream) { sign(it, played = false) }
 
     private fun cachedFactory(upstream: DataSource.Factory): CacheDataSource.Factory =
         CacheDataSource.Factory()
@@ -257,6 +280,8 @@ class Streams @Inject constructor(
             .setCacheKeyFactory(keys)
             // A saved copy that cannot be read is passed over for the server's.
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            // Written for the song's generation only (see FencedSink).
+            .setCacheWriteDataSinkFactory(saved.fencedSinks())
 
     // Songs are saved by server, song, type, request and file size, never by
     // address.
@@ -273,13 +298,35 @@ class Streams @Inject constructor(
     private fun fromAnotherServer(ref: StreamRef, inUse: String?): Boolean = refusedSource(ref.sourceId, inUse, sessions.servers.value)
 
     // Runs on the loading thread, before the saved copy is looked for.
-    private fun pin(uri: Uri): Uri {
+    private fun pin(uri: Uri, scout: Boolean): Uri {
         val ref = parseStreamUri(uri.toString()) ?: return uri
+        freshen(ref, scout)
         return streamUri(pinned(ref)).toUri()
     }
 
-    // Runs on the loading thread, each time a stream opens.
-    private fun sign(uri: Uri): Uri {
+    // A play of a song found online with a saved copy waits, once, before
+    // it reads, for the server's list of songs whose chosen version changed
+    // (or for that call to fail), so a saved copy of a video the server no
+    // longer plays goes first; a drop that waited for this song to stop
+    // playing goes then too, since this play has read nothing yet. A scout
+    // read checks once on its own (keyed apart), so it never uses up the
+    // play's check, and lets no waiting drop go, since the play may be
+    // reading. With no connection it goes on at once and the saved copy
+    // plays.
+    private fun freshen(ref: StreamRef, scout: Boolean) {
+        if (!ref.find) return
+        val play = playTokenOf(ref, restarts::of) ?: return
+        if (!feed.firstOpen(if (scout) "$play scout" else play)) return
+        val song = songOf(ref) ?: return
+        if (!online() || !saved.hasSong(song)) return
+        runBlocking { feed.refresh() }
+        if (!scout) drops.opening(song)
+    }
+
+    // Runs on the loading thread, each time a stream opens. A play's own
+    // reads (a deck's, the scout's) name their play to an Octo server with
+    // its token; reads for saving ahead or downloading do not, being no play.
+    private fun sign(uri: Uri, played: Boolean): Uri {
         if (!online()) throw StreamUnavailable("No connection")
         val session = (sessions.state.value as? SessionState.SignedIn)?.session
             ?: throw StreamUnavailable("No server signed in")
@@ -291,10 +338,35 @@ class Streams @Inject constructor(
         // edited, still plays.
         if (fromAnotherServer(ref, session.sourceId)) throw StreamUnavailable("Another server's song")
         val request = ref.request(quality(current.value))
-        return client.url("stream", mapOf("id" to ref.serverId) + request.params).toString().toUri()
+        val token = if (played && session.isOcto) playTokenOf(ref, restarts::of) else null
+        return client.url("stream", streamParams(ref.serverId, request, token)).toString().toUri()
+    }
+
+    // The entry plays again from its start as a new play: its next requests
+    // carry the next token.
+    fun restarted(entryId: String): Int = restarts.restarted(entryId)
+
+    // One server song, as the saved copies and the version drops name it.
+    fun songOf(ref: StreamRef): String? = (ref.sourceId ?: currentSourceId())?.let { songKey(it, ref.serverId) }
+
+    // Lets every saved copy of a server song go, its writers fenced first
+    // (see StreamCache.dropSong).
+    fun dropSaved(ref: StreamRef) {
+        songOf(ref)?.let(saved::dropSong)
     }
 
 }
+
+// The play token a server song's requests carry: its queue entry and how
+// many times that entry was played again as a new play. None for a song
+// with no entry in its address (a song added before the entry was written
+// in, a download).
+internal fun playTokenOf(ref: StreamRef, restarts: (String) -> Int): String? = ref.entry?.let { playToken(it, restarts(it)) }
+
+// What a stream request asks: the song, the request and, for a play, its
+// token.
+internal fun streamParams(serverId: String, request: StreamRequest, token: String?): Map<String, String> =
+    mapOf("id" to serverId) + request.params + listOfNotNull(token?.let { PLAY_TOKEN_PARAM to it })
 
 // A failed load is tried again as usual, except when that cannot help (see
 // finalLoadError): then the song fails at once and is skipped, not waited

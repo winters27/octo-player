@@ -82,6 +82,14 @@ class MenuGroupsTest {
     }
 
     @Test
+    fun tryAnotherVersionLooksIntoTheSongInThePlayer() {
+        assertEquals(
+            listOf(listOf(PlayNext, AddToQueue), listOf(Download), listOf(Info, SongAction.TryAnotherVersion), listOf(Cast, Sound)),
+            songMenuGroups(songActions(find = true, radio = false, place = MenuPlace(inPlayer = true), streamVersions = true)),
+        )
+    }
+
+    @Test
     fun everySongActionHasAGroupAndOnlyOne() {
         val all = SongAction.entries.toList()
         val grouped = songMenuGroups(all).flatten()

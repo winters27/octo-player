@@ -23,6 +23,13 @@ data class StreamRef(
     val bitrate: Int?,
     val pinned: StreamRequest? = null,
     val size: Long? = null,
+    // The queue entry the song plays as, written in by the player as the
+    // song goes into the queue, so each request of its play names the play
+    // (see playTokenOf). Never part of the name it is saved under.
+    val entry: String? = null,
+    // A song found online (a find in the queue), marked with its entry: one
+    // whose video the server may change. Never part of the saved name.
+    val find: Boolean = false,
 ) {
     fun pin(request: StreamRequest) = copy(pinned = request)
 
@@ -38,6 +45,8 @@ fun streamUri(ref: StreamRef): String = buildString {
         ref.bitrate?.let { "bitrate" to "$it" },
         ref.size?.let { "size" to "$it" },
         ref.pinned?.let { "max" to (it.maxKbps?.toString() ?: RAW) },
+        ref.entry?.let { "entry" to it },
+        ref.find.takeIf { it }?.let { "find" to "1" },
     )
     if (params.isNotEmpty()) append('?').append(params.joinToString("&") { (k, v) -> "$k=${encode(v)}" })
 }
@@ -64,6 +73,8 @@ fun parseStreamUri(uri: String): StreamRef? {
         bitrate = query["bitrate"]?.toIntOrNull(),
         pinned = pinned,
         size = query["size"]?.toLongOrNull()?.takeIf { it > 0 },
+        entry = query["entry"]?.ifEmpty { null },
+        find = query["find"] == "1",
     )
 }
 
@@ -82,6 +93,14 @@ fun cacheKeyWithoutSize(key: String): String {
     val before = head.substringAfterLast('|')
     return if (before == RAW || (before.isNotEmpty() && before.all(Char::isDigit))) head else key
 }
+
+// One server song, whatever type, request or size it is saved in: its
+// server and its id there. Every saved name of the song starts with it.
+fun songKey(sourceId: String, serverId: String): String = "$sourceId|$serverId"
+
+// The song a saved name is of (see streamCacheKey): the name less its size,
+// its request and its type.
+fun songOfCacheKey(key: String): String = cacheKeyWithoutSize(key).substringBeforeLast('|').substringBeforeLast('|')
 
 // What the phone has saved under a name, for picking the name a song reads
 // and writes its saved copy under.

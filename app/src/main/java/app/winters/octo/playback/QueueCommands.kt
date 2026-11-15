@@ -13,6 +13,11 @@ internal val PLAY_ENTRY = SessionCommand("app.winters.octo.PLAY_ENTRY", Bundle.E
 internal val MOVE_ENTRY = SessionCommand("app.winters.octo.MOVE_ENTRY", Bundle.EMPTY)
 internal val REMOVE_ENTRIES = SessionCommand("app.winters.octo.REMOVE_ENTRIES", Bundle.EMPTY)
 
+// Plays the entry on (ARG_ENTRY_KEY, its key as the player's item carries it)
+// again from its start as a new play, after a version was picked for its
+// song. Taken only from the app itself.
+internal val RESTART_FRESH = SessionCommand("app.winters.octo.RESTART_FRESH", Bundle.EMPTY)
+
 internal const val ARG_SPEC = "spec"
 internal const val ARG_START = "start"
 internal const val ARG_SHUFFLE = "shuffle"
@@ -25,6 +30,7 @@ internal const val ARG_TOKEN = "token"
 internal const val ARG_ENTRY = "entry"
 internal const val ARG_BEFORE = "before"
 internal const val ARG_ENTRIES = "entries"
+internal const val ARG_ENTRY_KEY = "entryKey"
 internal const val ARG_LIST = "list"
 internal const val ARG_COUNT = "count"
 internal const val ARG_STARTED = "started"

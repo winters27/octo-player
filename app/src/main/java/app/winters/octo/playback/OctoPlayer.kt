@@ -91,6 +91,10 @@ class AudioFocus(context: Context, private val onChange: (Int) -> Unit) {
 
 private const val DUCKED_VOLUME = 0.2f
 
+// A mark of this run of the app, made once per process, in the queue entry
+// ids the player gives out (see OctoPlayer.stamped).
+internal val QUEUE_RUN: String = java.util.UUID.randomUUID().toString().substring(0, 8)
+
 // Whether a replacement keeps every item (by id and queue entry) where it
 // was, so only its words change.
 internal fun wordsOnly(before: List<Pair<String, String?>>, after: List<Pair<String, String?>>): Boolean =
@@ -298,6 +302,37 @@ class OctoPlayer(
         }
     }
 
+    // Plays the entry on again from its start as a new play, for a version
+    // picked for its song. Inside one releasing edit: a blend ends, a spare
+    // holding a song is let go, the deck stops (its readers, buffer and
+    // decoder go), `fence` runs while nothing reads the song (it lets its
+    // saved copies go once more), what was scouted and planned of the entry
+    // is forgotten, and the deck opens the song again at 0; then it plays.
+    // False, changing nothing, when another entry is on.
+    fun restartFresh(entryId: String, fence: () -> Unit): Boolean {
+        if (currentMediaItem?.entryId != entryId) return false
+        val index = deck.currentMediaItemIndex
+        edit(releasing = true) {
+            mixer?.resetContinuation(slotOf(deck))
+            moving(deck) {
+                deck.stop()
+                fence()
+                fader.forgetEntry(entryId)
+                deck.seekTo(index, 0)
+                deck.prepare()
+            }
+        }
+        play()
+        return true
+    }
+
+    // The songs whose sound may be playing: the one on, and the one a blend
+    // plays out. On the player's thread.
+    fun playingItems(): List<MediaItem> = listOfNotNull(deck.currentMediaItem, outgoing?.currentMediaItem)
+
+    // Told when a blend begins or ends, which changes what plays.
+    var onPlayingChanged: () -> Unit = {}
+
     // Whether a live station is on.
     private val onStation: Boolean get() = deck.currentMediaItem?.mediaId?.let(::isRadio) == true
 
@@ -403,9 +438,14 @@ class OctoPlayer(
         edit(releasing = runs.any { current in it }) { runs.forEach { deck.removeMediaItems(it.first, it.last + 1) } }
     }
 
-    // Each song gets a queue entry id as it goes in, unless it has one.
+    // Each song gets a queue entry id as it goes in, unless it has one, and
+    // a server song carries it in its address too, so every request of its
+    // play names the play (see Streams). An id given out here carries this
+    // run's own mark: the server's record of plays and PlayRestarts both
+    // outlive the app, so a number counted again from 0 next run must never
+    // name an old play.
     private fun stamped(items: List<MediaItem>): List<MediaItem> =
-        items.map { if (it.entryId != null) it else it.withEntry("q:${nextEntry++}") }
+        items.map { (if (it.entryId != null) it else it.withEntry("q:$QUEUE_RUN:${nextEntry++}")).withPlayEntry() }
 
     // Taking out the song on screen lets the deck's output go; clearing the
     // queue also means nothing on the deck goes on by song time.
@@ -484,11 +524,13 @@ class OctoPlayer(
         deck = into
         applyVolume()
         setPlayer(into)
+        onPlayingChanged()
     }
 
     internal fun endFade() {
         outgoing = null
         applyVolume()
+        onPlayingChanged()
     }
 
     private fun duck(on: Boolean) {

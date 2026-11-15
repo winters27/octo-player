@@ -2,6 +2,7 @@ package app.winters.octo.playback
 
 import android.os.Bundle
 import androidx.media3.common.MediaItem
+import app.winters.octo.catalog.isFind
 
 // Each song in the queue carries its own entry id, given by the player as
 // it goes in. The same song queued twice is two entries, and a list can
@@ -29,6 +30,19 @@ val MediaItem.queueSource: QueueSource
 val MediaItem.requestedSource: String? get() = requestMetadata.extras?.getString(EXTRA_SOURCE)
 
 fun MediaItem.withEntry(id: String): MediaItem = withExtras { putString(EXTRA_QUEUE_ENTRY, id) }
+
+// A server song with its queue entry in its address too, so every request
+// of its play names the play, and with the app's own mark of a song found
+// online (isFind), so the stream chain knows one without the item. Phone
+// files, stations, songs with no entry and an address that already says
+// both are left as they are.
+fun MediaItem.withPlayEntry(): MediaItem {
+    val entry = entryId ?: return this
+    val ref = localConfiguration?.uri?.toString()?.let(::parseStreamUri) ?: return this
+    val find = isFind(mediaId)
+    if (ref.entry == entry && ref.find == find) return this
+    return buildUpon().setUri(streamUri(ref.copy(entry = entry, find = find))).build()
+}
 
 fun MediaItem.markedAutoplay(): MediaItem = withExtras { putBoolean(EXTRA_AUTOPLAY, true) }
 

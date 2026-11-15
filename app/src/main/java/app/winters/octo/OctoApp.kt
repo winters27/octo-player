@@ -18,6 +18,7 @@ import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.listening.PlayTotals
 import app.winters.octo.offline.OfflineDownloads
 import app.winters.octo.playback.ServerSwitch
+import app.winters.octo.playback.StreamVersionFeed
 import app.winters.octo.playlists.PlaylistSync
 import app.winters.octo.server.ServerArtworkFetcher
 import app.winters.octo.server.ServerArtworkKeyer
@@ -82,6 +83,7 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var merge: CatalogMerge
     @Inject lateinit var totals: PlayTotals
     @Inject lateinit var playlistSync: PlaylistSync
+    @Inject lateinit var versionFeed: StreamVersionFeed
     private var allStarted = false
 
     // Whether a main screen has been created in this process yet, for the
@@ -136,6 +138,9 @@ class OctoApp : Application(), SingletonImageLoader.Factory {
         serverUpdates.start()
         // Albums' animated art, asked for as songs start.
         animatedArts.start()
+        // Saved copies of songs found online whose version changed on the
+        // server go, read at each sign-in.
+        versionFeed.start()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {

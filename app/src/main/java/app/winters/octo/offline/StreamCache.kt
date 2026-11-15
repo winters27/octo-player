@@ -11,9 +11,14 @@ import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.datasource.DataSink
+import androidx.media3.datasource.cache.CacheDataSink
 import app.winters.octo.playback.SavedCopies
 import app.winters.octo.playback.StreamShape
 import app.winters.octo.playback.StreamShapes
+import app.winters.octo.playback.songKey
+import app.winters.octo.playback.songOfCacheKey
+import java.util.concurrent.ConcurrentHashMap
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,9 +41,61 @@ import javax.inject.Singleton
 class StreamCache @Inject constructor(
     @ApplicationContext private val context: Context,
     settings: OfflineSettings,
-) {
+) : SongCopies {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val evictor = ResizableEvictor()
+
+    // Each song's write generation (see FencedSink), by song.
+    private val generations = ConcurrentHashMap<String, Long>()
+
+    private val songFence = object : SongFence {
+        override fun generation(song: String): Long = generations[song] ?: 0L
+
+        override fun dropAgain(song: String) = dropCopies(song)
+    }
+
+    // The writers saved copies are filled through, each for its song's
+    // generation.
+    fun fencedSinks(): DataSink.Factory = DataSink.Factory { FencedSink(CacheDataSink.Factory().setCache(cache).createDataSink(), songFence) }
+
+    override fun fence(song: String) {
+        generations.merge(song, 1L, Long::plus)
+    }
+
+    // Lets every saved copy of the song go, whatever type, request or size
+    // it was saved in, after fencing its writers: one opened before this
+    // writes nothing more, and lets them go again when it closes.
+    override fun dropSong(song: String) {
+        fence(song)
+        dropCopies(song)
+    }
+
+    override fun dropSongs(songs: Collection<String>) {
+        if (songs.isEmpty()) return
+        songs.forEach(::fence)
+        if (!_enabled.value) return
+        val going = songs.toHashSet()
+        cache.keys.filter { songOfCacheKey(it) in going }.forEach(shapes::drop)
+    }
+
+    override fun videoSongs(sourceId: String): List<String> {
+        if (!_enabled.value) return emptyList()
+        val server = songKey(sourceId, "")
+        return cache.keys
+            .filter { it.startsWith(server) && cache.getContentMetadata(it).get(FILE_VIDEO, null as String?) != null }
+            .map(::songOfCacheKey)
+            .distinct()
+    }
+
+    // Whether any of the song is saved, under any of its names.
+    fun hasSong(song: String): Boolean = _enabled.value && cache.keys.any { songOfCacheKey(it) == song && cache.getCachedSpans(it).isNotEmpty() }
+
+    // Nothing is saved while songs are not kept (turning them off cleared
+    // the store), so there is nothing to let go then.
+    private fun dropCopies(song: String) {
+        if (!_enabled.value) return
+        cache.keys.filter { songOfCacheKey(it) == song }.forEach(shapes::drop)
+    }
 
     // Whether songs are kept at all; off until the saved setting is read.
     private val _enabled = MutableStateFlow(false)
@@ -122,14 +179,27 @@ class StreamCache @Inject constructor(
             val metadata = cache.getContentMetadata(key)
             val type = metadata.get(FILE_TYPE, null as String?)
             val total = ContentMetadata.getContentLength(metadata).takeIf { it > 0 }
-            return if (type == null && total == null) null else StreamShape(type, total)
+            val video = metadata.get(FILE_VIDEO, null as String?)
+            return if (type == null && total == null && video == null) null else StreamShape(type, total, video)
         }
 
+        // The type and the video, each once: the first answer's.
         override fun note(key: String, shape: StreamShape) {
-            val type = shape.type ?: return
-            if (!_enabled.value || cache.getContentMetadata(key).get(FILE_TYPE, null as String?) != null) return
+            if (!_enabled.value) return
+            val metadata = cache.getContentMetadata(key)
+            val changes = ContentMetadataMutations()
+            var any = false
+            if (shape.type != null && metadata.get(FILE_TYPE, null as String?) == null) {
+                changes.set(FILE_TYPE, shape.type)
+                any = true
+            }
+            if (shape.video != null && metadata.get(FILE_VIDEO, null as String?) == null) {
+                changes.set(FILE_VIDEO, shape.video)
+                any = true
+            }
+            if (!any) return
             try {
-                cache.applyContentMetadataMutations(key, ContentMetadataMutations().set(FILE_TYPE, type))
+                cache.applyContentMetadataMutations(key, changes)
             } catch (e: Cache.CacheException) {
                 // Unnoted, the next answer notes it.
             }
@@ -139,7 +209,7 @@ class StreamCache @Inject constructor(
         // another reader still holds a part of it open.
         override fun drop(key: String) {
             try {
-                cache.applyContentMetadataMutations(key, ContentMetadataMutations().remove(FILE_TYPE).remove(ContentMetadata.KEY_CONTENT_LENGTH))
+                cache.applyContentMetadataMutations(key, ContentMetadataMutations().remove(FILE_TYPE).remove(FILE_VIDEO).remove(ContentMetadata.KEY_CONTENT_LENGTH))
             } catch (e: Cache.CacheException) {
                 // The copy going below leaves nothing to describe.
             }
@@ -166,6 +236,9 @@ private const val FILE_SIZE = "octo_file_size"
 
 // The type the server answered with for the file a saved song was made from.
 private const val FILE_TYPE = "octo_file_type"
+
+// The video an outside song's saved copy was made from, as the server named it.
+private const val FILE_VIDEO = "octo_file_video"
 
 // Lets the least recently played songs go once the store is over its size,
 // and takes a new size at any time. Each size is a fresh least-recently-used

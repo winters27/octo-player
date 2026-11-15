@@ -133,6 +133,25 @@ class StreamShapesTest {
     }
 
     @Test
+    fun anotherVideoIsAnotherFile() {
+        val first = mapOf("Content-Type" to listOf("audio/webm"), "Content-Range" to listOf("bytes 0-99/4000"), "X-Octo-Video" to listOf("v1"))
+        assertEquals(StreamShape("audio/webm", 4_000, "v1"), streamShapeOf(first))
+        assertTrue(StreamShape("audio/webm", 4_000, "v1").differsFrom(StreamShape("audio/webm", 4_000, "v2")))
+        // A side that names no video is no difference.
+        assertFalse(StreamShape("audio/webm", 4_000, "v1").differsFrom(StreamShape("audio/webm", 4_000)))
+        // A saved head of one video never meets another video's bytes, even
+        // of the same type and length.
+        val store = Store().apply { kept["k"] = StreamShape("audio/webm", 4_000, "v1") }
+        val other = mapOf("Content-Type" to listOf("audio/webm"), "Content-Range" to listOf("bytes 100-3999/4000"), "x-octo-video" to listOf("v2"))
+        try {
+            ShapeGuardDataSource(Server(other), { it.scheme == STREAM_SCHEME }, store).open(spec(position = 100, key = "k"))
+            fail("another video must not be read on")
+        } catch (e: StreamChanged) {
+            assertEquals(listOf("k"), store.dropped)
+        }
+    }
+
+    @Test
     fun aFindsPlayerItemGoesByTheBytes() {
         assertNull(playerMimeType("audio/mp4", sniffed = true))
         assertEquals("audio/flac", playerMimeType("audio/flac", sniffed = false))

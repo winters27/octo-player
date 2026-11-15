@@ -30,6 +30,7 @@ import app.winters.octo.ui.menu.SongAction.StartRadio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SongActionsTest {
@@ -228,5 +229,36 @@ class SongActionsTest {
         val groups = songMenuGroups(songActions(find = false, radio = false, removeFromMine = true, disk = true))
         assertEquals(listOf(SongAction.RemoveFromMyLibrary, DeleteFromDisk), groups.last())
         assertEquals(false, SongAction.RemoveFromMyLibrary in songActions(find = true, radio = false, removeFromMine = true))
+    }
+
+    // Try another version: for a song found online, in the player, on a
+    // server that lets this listener choose, never for a find that is the
+    // server's own song; after Find songs, among the ways to look into it.
+    @Test
+    fun tryAnotherVersionIsOnlyForAFindPlayingFromAServerThatLetsTheListenerChoose() {
+        val player = MenuPlace(inPlayer = true)
+        val all = songActions(find = true, radio = true, place = player, findSongs = true, streamVersions = true)
+        assertEquals(listOf(PlayNext, AddToQueue, StartRadio, Download, Info, FindSongs, SongAction.TryAnotherVersion, Cast, Sound), all)
+        assertEquals(listOf(Info, FindSongs, SongAction.TryAnotherVersion), songMenuGroups(all)[2])
+        // Each condition alone keeps it away.
+        assertFalse(SongAction.TryAnotherVersion in songMenuGroups(songActions(find = false, radio = true, place = player, streamVersions = true)).flatten())
+        assertFalse(SongAction.TryAnotherVersion in songMenuGroups(songActions(find = true, radio = true, streamVersions = true)).flatten())
+        assertFalse(SongAction.TryAnotherVersion in songMenuGroups(songActions(find = true, radio = true, place = player)).flatten())
+        assertFalse(
+            SongAction.TryAnotherVersion in songMenuGroups(songActions(find = true, radio = true, place = player, streamVersions = true, owned = true)).flatten(),
+        )
+        // Without Find songs it comes right after the info.
+        assertEquals(
+            listOf(Info, SongAction.TryAnotherVersion),
+            songMenuGroups(songActions(find = true, radio = false, place = player, streamVersions = true))[2],
+        )
+    }
+
+    @Test
+    fun theGateNeedsAnOctoServerListingStreamVersions() {
+        assertTrue(offersStreamVersions(isOcto = true, extensions = setOf("octoStreamVersions:1", "octoStreamVersionChanges:1")))
+        // A family's Listener or Kid gets only the changes.
+        assertFalse(offersStreamVersions(isOcto = true, extensions = setOf("octoStreamVersionChanges:1")))
+        assertFalse(offersStreamVersions(isOcto = false, extensions = setOf("octoStreamVersions:1")))
     }
 }

@@ -58,6 +58,14 @@ class ServerProfiles(
         if (yes == true) session.client.transitionProfile(id) else null
     }
 
+    // Forgets the kept profiles of these songs, by their ids on the server
+    // (null: every song's), as when the video an outside song streams from
+    // changed: its next blend asks the server again.
+    fun forget(ids: Collection<String>?) {
+        val kept = synchronized(this) { profiles } ?: return
+        if (ids == null) kept.clear() else kept.forget(ids)
+    }
+
     override fun cached(uri: String?): TransitionProfile? {
         val session = session()?.takeIf { it.isOcto } ?: return null
         val id = serverSongOf(uri, session.sourceId) ?: return null
