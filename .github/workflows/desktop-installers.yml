@@ -10,8 +10,11 @@
 # apps find them (publish-player-release.yml). A release goes out with
 # every system's files or not at all.
 #
-# Both Mac builds need five secrets in this repository, and stop without
-# any of them (it never makes an unsigned DMG):
+# The Mac DMGs are built only while MACOS_DMG (below) is "on", or when a run
+# by hand asks for them (its macos box). While it is "off", a tag's release
+# is Windows and Linux only and needs no Mac secret; the Linux packages are
+# still each required. Both Mac builds need five secrets in this
+# repository, and stop without any of them (it never makes an unsigned DMG):
 #   MACOS_SIGNING_CERTIFICATE           the Developer ID Application certificate
 #                                       and its private key, exported as a .p12, in base64
 #   MACOS_SIGNING_CERTIFICATE_PASSWORD  the password the .p12 was exported with
@@ -22,17 +25,30 @@ name: desktop-installers
 
 on:
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Build the signed and notarized Mac DMGs too (needs the five MACOS_* secrets)
+        type: boolean
+        default: false
   push:
     tags: ["desktop-v*"]
 
 permissions:
   contents: read
 
+env:
+  # "on" builds both Mac DMGs on a tag and makes the release wait for them;
+  # "off" leaves them out. Set it to "on" once the five MACOS_* secrets
+  # above are in the repository.
+  MACOS_DMG: "off"
+
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      matrix: ${{ steps.systems.outputs.matrix }}
+      platforms: ${{ steps.systems.outputs.platforms }}
     steps:
       - name: Version from the tag
         id: tag
@@ -46,31 +62,50 @@ jobs:
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Systems to build
+        # The build matrix and the systems the release can't go out
+        # without. Windows and Linux always; the two Macs (Apple silicon
+        # and Intel, each built on its own chip, as jpackage packs only for
+        # the machine it runs on) when MACOS_DMG is "on", or a run by hand
+        # asks for them. Linux is a fixed Ubuntu, so the oldest Linux the
+        # packages run on (its glibc, which the audio engine is built
+        # against) never moves by itself; each of its packages is built
+        # once more if it fails, and a second failure stops the release.
+        id: systems
+        env:
+          ASKED: ${{ inputs.macos }}
+        run: |
+          mac="$MACOS_DMG"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$ASKED" = true ]; then mac=on; else mac=off; fi
+          fi
+          windows='{"os":"windows-latest","tasks":":desktop:packageMsi :desktop:packagePortableZip","tries":1}'
+          linux='{"os":"ubuntu-24.04","tasks":":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageFlatpak :desktop:packageAppImage :desktop:packagePacman","tries":2}'
+          macs='{"os":"macos-15","tasks":":desktop:packageDmg","tries":1},{"os":"macos-15-intel","tasks":":desktop:packageDmg","tries":1}'
+          case "$mac" in
+            on)
+              include="[$windows,$macs,$linux]"
+              platforms="windows-x64 macos-arm64 macos-x64 linux-x64"
+              ;;
+            off)
+              include="[$windows,$linux]"
+              platforms="windows-x64 linux-x64"
+              echo "::notice::The Mac DMGs are left out of this run (MACOS_DMG is off)."
+              ;;
+            *)
+              echo "::error::MACOS_DMG must be on or off, not '$mac'."
+              exit 1
+              ;;
+          esac
+          echo "matrix={\"include\":$include}" >> "$GITHUB_OUTPUT"
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+          echo "Building for: $platforms"
+
   package:
     needs: version
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            tasks: ":desktop:packageMsi :desktop:packagePortableZip"
-            tries: 1
-          # Apple silicon and Intel, each built on its own chip (jpackage
-          # packs only for the machine it runs on), signed and notarized the
-          # same way.
-          - os: macos-15
-            tasks: ":desktop:packageDmg"
-            tries: 1
-          - os: macos-15-intel
-            tasks: ":desktop:packageDmg"
-            tries: 1
-          # A fixed Ubuntu, so the oldest Linux the packages run on (its
-          # glibc, which the audio engine is built against) never moves
-          # by itself. Each package is built once more if it fails, and a
-          # second failure stops the release.
-          - os: ubuntu-24.04
-            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageFlatpak :desktop:packageAppImage :desktop:packagePacman"
-            tries: 2
+      matrix: ${{ fromJSON(needs.version.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -276,6 +311,7 @@ jobs:
       app: desktop
       tag: ${{ github.ref_name }}
       artifacts: octo-desktop-*
+      platforms: ${{ needs.version.outputs.platforms }}
     secrets:
       OCTO_RELEASES_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
       OCTO_UPDATE_SIGNING_KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}

@@ -34,6 +34,11 @@ on:
         description: The names of the build's uploaded files, as a pattern
         required: true
         type: string
+      platforms:
+        description: The desktop systems the release can't go out without (Windows and Linux always)
+        required: false
+        type: string
+        default: windows-x64 macos-arm64 macos-x64 linux-x64
     secrets:
       OCTO_RELEASES_TOKEN:
         required: true
@@ -52,6 +57,7 @@ jobs:
     env:
       APP: ${{ inputs.app }}
       TAG: ${{ inputs.tag }}
+      PLATFORMS: ${{ inputs.platforms }}
       REPO: winters27/octo
       KEYS: shared/core/src/commonMain/resources/app/winters/octo/update/trusted-keys.txt
     steps:
@@ -82,9 +88,19 @@ jobs:
         run: |
           version="${TAG#"${APP}-v"}"
           if [ "$APP" = desktop ]; then
-            # Every system's build, each with all its files, or no release.
-            python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release \
-              --require-platform windows-x64 --require-platform macos-arm64 --require-platform macos-x64 --require-platform linux-x64
+            # Every system's build this release is for, each with all its
+            # files, or no release. Windows and Linux are never left out.
+            required=()
+            for platform in $PLATFORMS; do
+              case "$platform" in
+                windows-x64|macos-arm64|macos-x64|linux-x64) required+=(--require-platform "$platform") ;;
+                *) echo "::error::Unknown desktop system $platform."; exit 1 ;;
+              esac
+            done
+            for platform in windows-x64 linux-x64; do
+              case " $PLATFORMS " in *" $platform "*) ;; *) echo "::error::A desktop release always needs $platform."; exit 1 ;; esac
+            done
+            python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release "${required[@]}"
           elif [ "$APP" = android ]; then
             mapfile -t apks < <(find artifacts -name '*.apk')
             if [ "${#apks[@]}" -ne 1 ]; then echo "::error::Expected one APK, found ${#apks[@]}."; exit 1; fi
@@ -134,7 +150,12 @@ jobs:
         run: |
           version="${TAG#"${APP}-v"}"
           case "$APP" in
-            desktop) title="Octo for Windows, macOS and Linux $version" ;;
+            desktop)
+              case " $PLATFORMS " in
+                *" macos-"*) title="Octo for Windows, macOS and Linux $version" ;;
+                *) title="Octo for Windows and Linux $version" ;;
+              esac
+              ;;
             android) title="Octo for Android $version" ;;
             ios) title="Octo for iPhone $version" ;;
             *) echo "::error::Unknown app $APP."; exit 1 ;;
