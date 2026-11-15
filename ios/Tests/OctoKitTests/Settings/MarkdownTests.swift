@@ -177,8 +177,8 @@ import Testing
             #expect(items.allSatisfy { $0.children.isEmpty })
             counts.append(items.count)
         }
-        #expect(counts == [5, 8, 4, 2, 2, 2, 4])
-        #expect(counts.reduce(0, +) == 27)
+        #expect(counts == [6, 9, 5, 2, 2, 2, 4])
+        #expect(counts.reduce(0, +) == 30)
     }
 
     @Test func theHomeCardLineIsShort() {

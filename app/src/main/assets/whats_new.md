@@ -1,4 +1,4 @@
-**Automix**, **themes**, **big libraries that fit on your phone**, **hearts get the version you heard**, and **Android Auto gets the whole app**.
+**Automix**, **themes**, **big libraries that fit on your phone**, **playlist folders**, **songs found online in your playlists**, **Try another version**, **your own Download format**, **hearts get the version you heard**, and **Android Auto gets the whole app**.
 
 ## Sound
 
@@ -28,7 +28,7 @@
 
 ## Playback
 
-- **Try another version.** When a song found online plays the wrong take, like a live one, a remix or a sped-up edit, pick another from Try another version in the player's menu. It plays at once from the start, your server keeps it for everyone on every device, and a heart downloads the version you picked. Go back to Octo's pick undoes it. Needs an Octo server from this update.
+- **Try another version.** When a song found online plays the wrong take, like a live one, a remix or a sped-up edit, pick another from Try another version in the player's menu. It plays at once from the start, your server keeps it for everyone on every device, and a heart downloads the version you picked. Go back to Octo's pick undoes it. Needs Octo server 2026.11.15.
 - **Automix is now its own choice next to Crossfade and is on by default:** songs blend where they meet best, and a quiet intro plays under the end of the song before it. If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on. Gapless is under Between songs. A Crossfade setup you chose stays as it was. Automix now picks its own blend lengths. Match tempo is now on for Automix; turn it off under Between songs if you prefer.
 - **Android Auto gets the whole app:** Home, Radio, Playlists and Library tabs, as on your phone, with Made for you, your server's stations, charts and stations near you.
 - Android Auto's Playlists tab shows your playlist folders, each opening to its folders and playlists.
@@ -36,6 +36,7 @@
 - Lists and albums open to their songs, every album of a big library sits under its letter, and playlist covers look as they do on your phone.
 - Start radio and Play next on songs, in cars with Android built in.
 - **Android 13 no longer closes the app** when you open the player.
+- A stream that breaks off, or whose server lets go of the file part way, picks up where it was instead of skipping the song.
 
 ## Server
 
@@ -45,9 +46,9 @@
 - **Certificates from eMudhra's compromised keys are refused**, so no one can pose as your server with one. Octo says so when a server uses one.
 - **Servers with their own certificate authority work.** If you installed your authority's certificate on the phone (step-ca, say), Octo trusts your server's certificates like any other, so short ones renewed every day keep playing.
 - **A changed certificate is asked about again.** When a server whose certificate you trusted shows a new one, Octo asks with the new fingerprint instead of failing every song until you sign in again, and the song plays once you trust it. A renewal that keeps the same key needs no question.
-- **Music goes to the shared library:** when your family's owner sends your songs there, your plan on the Family page says so instead of showing your own library's size.
-- Hearts that get the version you heard need an Octo server from this update.
-- Playlist folders kept by your server, and songs found online in playlists, need an Octo server from this update.
+- **Music goes to the shared library:** when your family's owner sends your songs there, your plan on the Family page says so instead of showing your own library's size. Needs Octo server 2026.11.15.
+- Hearts that get the version you heard need Octo server 2026.11.13 or newer.
+- Playlist folders kept by your server, songs found online in playlists and Try another version need Octo server 2026.11.15.
 - Imports waiting for Mornye's check say so, and say when they will go on. Health names Mornye and octo-sonic, and Mornye's row offers Pass on the dashboard while its check is paused.
 - A higher quality copy that waits says the server's own words for why.
 - On the Octo admin screen, recent downloads show their covers, served by your Octo server, and the server's music catalog check shows by name.
@@ -67,6 +68,7 @@
 
 - A refused download's reason wraps with the row's words instead of being cut off.
 - An album's download log no longer offers Find songs, since an album is no one song.
+- Fetching songs ahead stops cleanly, and the memory of songs already taken in no longer grows with every song shown.
 
 ## Settings
 

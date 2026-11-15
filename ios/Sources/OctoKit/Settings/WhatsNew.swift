@@ -35,6 +35,7 @@ public enum WhatsNew {
     - **Lock screen** controls, and music that keeps playing in the background.
     - Play next and Add to queue on every song, and a swipe to the right plays it next.
     - A **sleep timer**, and speed and pitch.
+    - **Try another version** when a song found online plays the wrong take: your Octo server keeps the one you pick for everyone, and a heart downloads it.
 
     ## Your server
 
@@ -44,6 +45,7 @@ public enum WhatsNew {
     - **A heart gets the version you heard:** an Octo server from this update downloads the same recording, checked by its sound, and a download that needs you says why.
     - Stations, **Made for you**, mixes, and **charts** from any country.
     - Playlists stay the same on your phone and your server, both ways.
+    - **Playlist folders** up to 4 deep, kept by your Octo server so every Octo app shows the same ones, and songs found online keep their place in your playlists.
     - **Family**: join by link or QR code, and add to family playlists.
     - Pick up the queue where another device left off.
 
@@ -51,6 +53,7 @@ public enum WhatsNew {
 
     - Songs from the **Music app** and the Files app play beside your server's.
     - **Download** songs, albums and playlists to play with no connection.
+    - A **Download format** of your own: Opus, AAC or MP3 for songs saved at a smaller quality.
     - Songs you stream are kept for a while, so they play again offline.
     - **Copying your server's library** shows how far it is, and a long copy keeps going after you leave the app.
 
