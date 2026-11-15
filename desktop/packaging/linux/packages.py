@@ -2,10 +2,11 @@
 the same app image as the DEB, RPM and Flatpak (createDistributable's Octo
 folder, with its own Java runtime and the audio engine).
 
-  packages.py appimage --image DIR --version 1.13.0 --out DIR
+  packages.py appimage --image DIR --version 1.13.0 --out DIR [--appimagetool FILE]
       Builds Octo-<version>-linux-x64.AppImage (run through
       ./gradlew :desktop:packageAppImage). Needs curl and Linux x64: it
-      fetches appimagetool at a pinned version, checks its SHA-256, and
+      fetches appimagetool at a pinned version (or takes FILE, fetched
+      beforehand), checks its SHA-256, and
       runs it unpacked, so the build needs no FUSE. The AppImage's runtime
       is the one inside that same appimagetool, so nothing else is fetched.
 
@@ -117,7 +118,15 @@ def appdir(image: Path, work: Path, version: str) -> Path:
     return folder
 
 
-def appimagetool() -> Path:
+# The pinned appimagetool: `given` (one fetched beforehand, checked all the
+# same), or else fetched into desktop/build/linux-tools.
+def appimagetool(given: Path | None = None) -> Path:
+    if given is not None:
+        if not given.is_file() or sha256(given) != APPIMAGETOOL_SHA256:
+            fail(f"{given} is not appimagetool {APPIMAGETOOL_VERSION} (SHA-256 differs), so it was not run")
+        # A download keeps no execute bit.
+        given.chmod(0o755)
+        return given
     TOOLS.mkdir(parents=True, exist_ok=True)
     tool = TOOLS / f"appimagetool-{APPIMAGETOOL_VERSION}.AppImage"
     if not tool.is_file() or sha256(tool) != APPIMAGETOOL_SHA256:
@@ -129,11 +138,11 @@ def appimagetool() -> Path:
     return tool
 
 
-def appimage(image: Path, version: str, out: Path) -> Path:
+def appimage(image: Path, version: str, out: Path, tool: Path | None = None) -> Path:
     check_image(image, version)
     out.mkdir(parents=True, exist_ok=True)
     target = out / f"Octo-{version}-linux-x64.AppImage"
-    tool = appimagetool()
+    tool = appimagetool(tool)
     with tempfile.TemporaryDirectory(prefix="appimage-", dir=out.parent) as temp:
         work = Path(temp)
         folder = appdir(image, work, version)
@@ -239,6 +248,9 @@ def self_test() -> None:
         check_image(image, "1.13.0")
         assert refuses(lambda: check_image(image, "1.13.1")), "an image of another version"
         assert refuses(lambda: check_image(root / "nothing", "1.13.0"))
+        impostor = root / "appimagetool.AppImage"
+        impostor.write_bytes(b"not the tool")
+        assert refuses(lambda: appimagetool(impostor)), "a tool that isn't the pinned one never runs"
         (root / "work-appimage").mkdir()
         folder = appdir(image, root / "work-appimage", "1.13.0")
         for name in ["AppRun", ENTRY, "octo.png", ".DirIcon", "usr/bin/Octo", "usr/lib/Octo.png"]:
@@ -265,6 +277,8 @@ def main() -> None:
         make.add_argument("--image", type=Path, required=True)
         make.add_argument("--version", required=True)
         make.add_argument("--out", type=Path, required=True)
+        if kind == "appimage":
+            make.add_argument("--appimagetool", type=Path, help="appimagetool fetched beforehand (its SHA-256 is still checked)")
     commands.add_parser("self-test")
     args = parser.parse_args()
     if args.command == "self-test":
@@ -274,8 +288,11 @@ def main() -> None:
         fail(f"{args.version!r} is not a version like 1.13.0 or 1.14.0-beta.1")
     if platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"):
         fail("the AppImage and the pacman package are built on Linux x64")
-    build = appimage if args.command == "appimage" else pacman
-    print(build(args.image.resolve(), args.version, args.out.resolve()))
+    if args.command == "appimage":
+        tool = args.appimagetool.resolve() if args.appimagetool else None
+        print(appimage(args.image.resolve(), args.version, args.out.resolve(), tool))
+    else:
+        print(pacman(args.image.resolve(), args.version, args.out.resolve()))
 
 
 if __name__ == "__main__":
