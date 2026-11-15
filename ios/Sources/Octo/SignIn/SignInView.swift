@@ -141,8 +141,7 @@ struct SignInView: View {
                 #if DEBUG
                 if Self.scanOnOpen {
                     Self.scanOnOpen = false
-                    model.startJoin()
-                    model.scanning = true
+                    model.scanFamilyCode()
                 }
                 if let sample = Self.sampleOnOpen {
                     Self.sampleOnOpen = nil
@@ -205,13 +204,15 @@ struct SignInView: View {
     var body: some View {
         reacting
             .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { certificatePicked($0) }
+            // Asked only once the file did not open with an empty password (`certificatePicked`), so it
+            // also says what to do with a file saved with none.
             .alert(SignInWords.certPasswordTitle, isPresented: Binding(get: { pendingCertificate != nil }, set: { if !$0 { pendingCertificate = nil } })) {
                 SecureField(SignInWords.certPasswordField, text: $certificatePassword)
                 // Off until the password is typed in.
                 Button(SignInWords.certPasswordUse) { takeCertificate() }.disabled(certificatePassword.isEmpty)
                 Button("Cancel", role: .cancel) { pendingCertificate = nil }
             } message: {
-                Text(SignInWords.certPasswordHint)
+                Text(SignInWords.certPasswordHint + " " + SignInWords.certNoPasswordOnPhone)
             }
     }
 
@@ -414,12 +415,10 @@ struct SignInView: View {
                 .padding(.top, 20)
                 failureLine
                 if model.offersScan {
-                    GlazeButton("Scan a family QR code", icon: .camera, size: .small) {
-                        model.startJoin()
-                        model.scanning = true
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 12)
+                    // Off while a sign-in runs.
+                    GlazeButton("Scan a family QR code", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.top, 12)
                 }
             }
             // Advanced shows while joining too: a family link's server may stand behind a sign-in

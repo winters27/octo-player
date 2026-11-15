@@ -614,18 +614,27 @@ final class SignInModel {
 
     // MARK: Join
 
-    /// Turns the join part on. A link goes to the form's link state first: a link the form takes
-    /// types its server in, takes its home address, and shows the sign-up for an invite, receives a
-    /// hand-over at once, or fills in the ordinary form for a sign-in to fill in; a link to another
-    /// server first forgets everything typed or saved for the last one. While a finished sign-up or a
-    /// received sign-in is held, each of which works once, only its own invite or hand-over for the
-    /// same server is taken, and any other link is refused with the held step left as it is. A
-    /// refused link changes nothing but the link note; the camera closes either way. Answers whether
-    /// it was taken.
+    /// Scan a family QR code, from the plain page: the join part with the camera over it. Never
+    /// while a sign-in runs or its certificate question waits, which is never switched halfway: the
+    /// join part stays off and the camera closed.
+    func scanFamilyCode() {
+        guard startJoin() else { return }
+        scanning = true
+    }
+
+    /// Turns the join part on; with no link, never while a request runs or its certificate question
+    /// waits. A link goes to the form's link state first: a link the form takes types its server in,
+    /// takes its home address, and shows the sign-up for an invite, receives a hand-over at once, or
+    /// fills in the ordinary form for a sign-in to fill in; a link to another server first forgets
+    /// everything typed or saved for the last one. While a finished sign-up or a received sign-in is
+    /// held, each of which works once, only its own invite or hand-over for the same server is taken,
+    /// and any other link is refused with the held step left as it is. A refused link changes nothing
+    /// but the link note; the camera closes either way. Answers whether it was taken.
     @discardableResult
     func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) -> Bool {
         scanning = false
         guard let link else {
+            guard !busy, question == nil else { return false }
             error = nil
             joining = true
             return true

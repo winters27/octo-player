@@ -135,6 +135,8 @@ struct SheetHeader: View {
     /// The line under the title; nil takes the theme's muted words.
     var subtitleColor: Color?
     var clock = true
+    /// Whether Close can be pressed: a sheet turns it off while a request of its own runs.
+    var closeEnabled = true
     let close: () -> Void
 
     private var subtitleStyle: AnyShapeStyle {
@@ -166,6 +168,8 @@ struct SheetHeader: View {
                 Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)).foregroundStyle(OctoColor.textMuted).frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .opacity(closeEnabled ? 1 : OctoInkColor.disabled)
+            .disabled(!closeEnabled)
             .accessibilityLabel("Close")
         }
         .padding(.leading, 20)

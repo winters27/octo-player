@@ -110,6 +110,11 @@ public enum SignInWords {
     public static let certPasswordHint = "The password the certificate file was saved with."
     public static let certPasswordField = "Password"
     public static let certPasswordUse = "Use it"
+    /// The iPhone's password question says this after its hint: the question opens only once the
+    /// file did not open with an empty password, so a file saved with none has to be exported again
+    /// with one. The iPhone's alone, so not among the shared words.
+    public static let certNoPasswordOnPhone =
+        "If this file has no password, export it again with one: iPhone can't open certificates without a password."
 
     public static func certificateLine(_ name: String, date: String) -> String { "\(name), expires \(date)" }
 

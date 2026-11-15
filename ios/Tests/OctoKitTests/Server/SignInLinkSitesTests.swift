@@ -57,6 +57,23 @@ import Testing
         #expect(model.contains("if !startJoin(link, session: session) { addressResets += 1 }"))
     }
 
+    /// Red when Scan a family QR code is live while a sign-in commits, or the model opens the join
+    /// part or the camera while a request runs or its certificate question waits: a tap that lands
+    /// before the button is drawn off switches nothing halfway.
+    @Test func scanningAFamilyCodeWaitsForASignInThatCommits() throws {
+        let raw = try SourceText.read(Self.view)
+        let view = SourceText.squashed(raw)
+        #expect(view.contains(
+            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() }"))
+        // The page never opens the join part and the camera by itself.
+        #expect(!view.contains("model.startJoin() model.scanning = true"))
+        #expect(SourceText.count("model.scanFamilyCode()", in: raw) == 2)
+        let model = SourceText.squashed(try SourceText.read(Self.model))
+        #expect(model.contains(
+            "func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) -> Bool { scanning = false guard let link else { guard !busy, question == nil else { return false } error = nil joining = true return true }"))
+        #expect(model.contains("func scanFamilyCode() { guard startJoin() else { return } scanning = true }"))
+    }
+
     /// Red when a failure of a received sign-in's request leaves the hand-over's row on its last step
     /// ("Allowed, signing in"): every `catch` of that request clears it, the certificate question's
     /// too.

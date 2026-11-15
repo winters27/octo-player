@@ -452,6 +452,10 @@ final class Session {
 
     // MARK: The server in use
 
+    /// The signed-in account's change of password, one at a time from every form that sends one
+    /// (Settings' Server page, Family's sheet): it outlives the form it came from.
+    @ObservationIgnored let passwordChanges = PasswordChanges()
+
     /// Changes the signed-in user's password on the server. The current one is checked first; on
     /// success the new one is kept in place of the old, and the client signs in with it.
     func changePassword(current: String, new: String, family: Bool = false) async -> PasswordChange {

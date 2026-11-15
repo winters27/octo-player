@@ -88,6 +88,7 @@ import Testing
     private static let style = "Octo/Design/OctoStyle.swift"
     private static let buttons = "Octo/Design/Buttons.swift"
     private static let changePassword = "Octo/Settings/Server/ChangePassword.swift"
+    private static let words = "OctoKit/Server/SignInWords.swift"
 
     /// Red when the ring round a called-out group is the accent again instead of the error red.
     @Test func theCalloutRingIsTheErrorRed() throws {
@@ -141,7 +142,7 @@ import Testing
         let view = SourceText.squashed(try SourceText.read(Self.view))
         for anchor in [
             "AccentButton(model.buttonTitle, enabled: model.ready, loading: model.busy, fillWidth: true)",
-            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small) { model.startJoin() model.scanning = true } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
+            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
             "GlazeButton(\"Scan the QR code\", icon: .camera, size: .small) { model.scanning = true } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
             "GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing) { model.stopJoin() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
         ] {
@@ -199,12 +200,14 @@ import Testing
             "async { guard model.advancedOpen, revealsAdvanced else { return } revealsAdvanced = false guard !model.calloutPending, !model.keyPending else { return } let run = wait.begin()"))
     }
 
-    /// Red when Done on Change password's last field can send a second change while one runs.
+    /// Red when Done on Change password's last field can send a second change while one runs, from
+    /// this form or another: the flag it checks is the app's one (`PasswordChangeSitesTests`).
     @Test func changePasswordSendsOneChangeAtATime() throws {
         let change = try SourceText.read(Self.changePassword)
         let body = try SourceText.slice(change, from: "    private func change() {", to: "\n    }\n")
         #expect(body.hasPrefix("    private func change() {\n        guard !busy else { return }\n"))
-        #expect(SourceText.count("busy = true", in: body) == 1)
+        #expect(change.contains("    private var busy: Bool { session.passwordChanges.running }\n"))
+        #expect(SourceText.count("passwordChanges.change {", in: body) == 1)
         #expect(change.contains("default: change()"))
     }
 
@@ -225,6 +228,22 @@ import Testing
         #expect(SourceText.count("pendingCertificate = (", in: raw) == 1)
     }
 
+    /// Red when the password question, which opens only once the file did not open with an empty
+    /// password, leaves a file saved with none at a Use it that stays off: its message must say to
+    /// export the file again with a password, since iPhone's own import may refuse an empty one.
+    @Test func thePasswordQuestionSaysWhatToDoWithAFileSavedWithNone() throws {
+        let raw = try SourceText.read(Self.view)
+        let view = SourceText.squashed(raw)
+        #expect(view.contains(
+            "} message: { Text(SignInWords.certPasswordHint + \" \" + SignInWords.certNoPasswordOnPhone) }"))
+        let words = SourceText.squashed(try SourceText.read(Self.words))
+        #expect(words.contains(
+            "public static let certNoPasswordOnPhone = \"If this file has no password, export it again with one: iPhone can't open certificates without a password.\""))
+        // Its words follow the alert's hint, whose own words stay the shared ones.
+        #expect(words.contains("public static let certPasswordHint = \"The password the certificate file was saved with.\""))
+        #expect(SourceText.count("certNoPasswordOnPhone", in: raw) == 1)
+    }
+
     /// Red when a sign-in question's answers sit in a plain row again, where a short main answer can
     /// be narrower than Cancel and large text squeezes both, or the row stops following the shared
     /// placement.
@@ -236,7 +255,7 @@ import Testing
         #expect(!trust.contains("HStack("))
         let change = try SourceText.read(Self.changePassword)
         #expect(SourceText.squashed(change).contains(
-            "AnswerRow(gap: 12) { AccentButton(\"Change password\", size: .medium, enabled: draft.filled, loading: busy, fillWidth: true, action: change) GlazeButton(\"Cancel\", size: .medium, enabled: !busy, fillWidth: true, action: close) }"))
+            "AnswerRow(gap: 12) { AccentButton(\"Change password\", size: .medium, enabled: draft.filled, loading: busy, fillWidth: true, action: change) GlazeButton(\"Cancel\", size: .medium, enabled: !busy, fillWidth: true, action: leave) }"))
         #expect(!change.contains("HStack("))
         let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
         for anchor in [
@@ -265,7 +284,8 @@ import Testing
         let raw = try SourceText.read(Self.view)
         let setups = SourceText.squashed(try SourceText.slice(raw, from: "    private var specialSetups: some View {", to: "\n    }\n"))
         #expect(setups.contains("certificateRow } notes: { if let certificateError { FormNote(.error, certificateError) } }"))
-        #expect(SourceText.squashed(raw).contains("} message: { Text(SignInWords.certPasswordHint) }"))
+        #expect(SourceText.squashed(raw).contains(
+            "} message: { Text(SignInWords.certPasswordHint + \" \" + SignInWords.certNoPasswordOnPhone) }"))
         #expect(!raw.contains("certificateError ?? SignInWords.certPasswordHint"))
         // A new pick starts with no note; a failed one sets it and keeps the file's question closed.
         #expect(SourceText.squashed(raw).contains("certificateError = nil choosingCertificate = true"))
