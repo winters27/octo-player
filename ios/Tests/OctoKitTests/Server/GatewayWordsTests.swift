@@ -57,12 +57,14 @@ import Testing
         for (key, text) in fixture { #expect(words[key] == text, "\(key)") }
     }
 
-    /// Plain ASCII with no dashes. The one exception is a no-break space in the words `glued` lists,
-    /// which keeps a wrapped line's last two words together.
+    /// Plain ASCII with no dashes. The one exception is in the words `glued` lists: a no-break
+    /// space, which keeps a wrapped line's last two words together, or a word joiner, which keeps
+    /// "Wi-Fi" and "/rest/" whole.
     @Test func wordsArePlainAsciiWithNoDashes() {
-        let glued: Set<String> = ["pointer"]
+        let glued: Set<String> = ["pointer", "failure.SignInPage.false", "hint.Authentik", "hint.CloudflareAccess", "hint.SignInPage",
+                                  "tip.CloudflareToken"]
         for (key, text) in Self.swiftWords() {
-            #expect(text.unicodeScalars.allSatisfy { $0.isASCII || (glued.contains(key) && $0.value == 0xA0) }, "\(key)")
+            #expect(text.unicodeScalars.allSatisfy { $0.isASCII || (glued.contains(key) && [0xA0, 0x2060].contains($0.value)) }, "\(key)")
             #expect(!text.contains("\u{2014}") && !text.contains("\u{2013}"), "\(key)")
         }
     }

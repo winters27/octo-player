@@ -25,7 +25,7 @@
   "placeholder.name": "Like Home or Work",
   "tag.optional": "Optional",
   "tag.optional.name": "{name}, optional",
-  "note.home": "On Wi-Fi, Octo uses it when it answers, and the main address otherwise.",
+  "note.home": "On Wi-⁠Fi, Octo uses it when it answers, and the main address otherwise.",
   "description.headers": "Sent with every request to this server, such as an access token for a proxy in front of it.",
   "note.apiKeyInTheOpen": "Not encrypted, and your API key travels as it is. Anyone on the way can read it.",
   "method.Token": "Normal",
@@ -91,6 +91,6 @@
   "inGroup.CloudflareAccess.true": "Cloudflare Access didn't accept the service token. Check that a Service Auth rule allows it.",
   "inGroup.PasswordPrompt.false": "This server asks for a username and password before Octo can reach it. Fill in the fields above.",
   "inGroup.PasswordPrompt.true": "The server's password prompt didn't accept that username and password.",
-  "inGroup.SignInPage.false": "A sign-in page answered instead of the server. On public Wi-Fi, sign in to the Wi-Fi first. Otherwise fill in the fields above.",
+  "inGroup.SignInPage.false": "A sign-in page answered instead of the server. On public Wi-⁠Fi, sign in to the Wi-⁠Fi first. Otherwise fill in the fields above.",
   "inGroup.SignInPage.true": "The sign-in page in front of the server didn't accept those details."
 }

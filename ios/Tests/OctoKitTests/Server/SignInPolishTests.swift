@@ -88,6 +88,8 @@ import Testing
     private static let style = "Octo/Design/OctoStyle.swift"
     private static let buttons = "Octo/Design/Buttons.swift"
     private static let changePassword = "Octo/Settings/Server/ChangePassword.swift"
+    private static let familySheets = "Octo/Family/FamilySheets.swift"
+    private static let familyParts = "Octo/Family/FamilySheetParts.swift"
     private static let words = "OctoKit/Server/SignInWords.swift"
 
     /// Red when the ring round a called-out group is the accent again instead of the error red.
@@ -143,8 +145,7 @@ import Testing
         for anchor in [
             "AccentButton(model.buttonTitle, enabled: model.ready, loading: model.busy, fillWidth: true)",
             "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
-            "GlazeButton(\"Scan the QR code\", icon: .camera, size: .small) { model.scanning = true } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
-            "GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing) { model.stopJoin() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
+            "TrailingColumn(gap: 12) { if model.handOver == nil { GlazeButton(\"Scan the QR code\", icon: .camera, size: .small, fillWidth: true) { model.scanning = true } } GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() } } .padding(.top, 12)",
         ] {
             #expect(view.contains(anchor), "\(anchor)")
         }
@@ -290,5 +291,92 @@ import Testing
         // A new pick starts with no note; a failed one sets it and keeps the file's question closed.
         #expect(SourceText.squashed(raw).contains("certificateError = nil choosingCertificate = true"))
         #expect(SourceText.squashed(raw).contains("} catch { certificateError = error.localizedDescription }"))
+    }
+
+    /// Red when a choice row's words column takes the whole row again, so the answer gets no width:
+    /// no "Normal" beside Method, and above Large an empty row one letter wide per line.
+    @Test func aChoiceRowShowsItsAnswerBesideOrUnderItsName() throws {
+        let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        #expect(groups.contains(
+            "ViewThatFits(in: .horizontal) { HStack(alignment: .firstTextBaseline, spacing: 8) { RowTitle(title: title, optional: false) Spacer(minLength: 0) answer(.trailing) } VStack(alignment: .leading, spacing: 2) { RowTitle(title: title, optional: false) answer(.leading) } }"))
+        #expect(!groups.contains(".layoutPriority(1) answer(.trailing)"))
+    }
+
+    /// Red when Change password's title is body text again, or a field's name lives only in its
+    /// placeholder (three typed fields would be three rows of dots), in Settings or Family.
+    @Test func changePasswordLeadsWithAHeadingAndNamesItsFields() throws {
+        let change = SourceText.squashed(try SourceText.read(Self.changePassword))
+        #expect(change.contains(
+            "Text(\"Change password\") .font(.octoHeadline) .foregroundStyle(OctoColor.textPrimary) .accessibilityAddTraits(.isHeader)"))
+        #expect(change.contains(".font(.octoBodySmall) .foregroundStyle(OctoColor.textSecondary)"))
+        #expect(!change.contains("Text(\"Change password\").font(.octoBody)"))
+        let family = SourceText.squashed(try SourceText.read(Self.familySheets))
+        for code in [change, family] {
+            #expect(code.contains("VStack(alignment: .leading, spacing: 6) { Text(name).font(.octoFormName).foregroundStyle(OctoColor.textPrimary).accessibilityHidden(true)"))
+            #expect(code.contains(".accessibilityLabel(name)"))
+        }
+        #expect(change.contains("GlassInput(SignInWords.required,"))
+        #expect(family.contains("GlassInput(index == 1 ? \"At least \\(minPassword) characters\" : SignInWords.required,"))
+        // Family's footer puts the main answer first, as every question does.
+        #expect(family.contains(
+            "HStack(spacing: 10) { AccentButton(FamilyText.changePassword, size: .medium, bright: true, loading: busy, fillWidth: true, action: go) GlazeButton(\"Cancel\","))
+    }
+
+    /// Red when the page's words are cut by the screen's bottom edge again instead of melting.
+    @Test func wordsMeltAtTheBottomEdge() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(
+            "LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black.opacity(0.35), location: 0.6), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom) .frame(height: 24) } .ignoresSafeArea()"))
+    }
+
+    /// Red when a family sheet's avatar or Close centers on the title and its line together
+    /// instead of on the title's first line.
+    @Test func aFamilySheetsHeaderCentersOnItsTitlesFirstLine() throws {
+        let parts = SourceText.squashed(try SourceText.read(Self.familyParts))
+        #expect(parts.contains("private let capMiddle: CGFloat = 7.75"))
+        #expect(parts.contains("HStack(alignment: .firstTextBaseline, spacing: 12) { if let name {"))
+        #expect(SourceText.count(".alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + capMiddle }", in: parts) == 2)
+    }
+
+    /// Red when a note's words start where its glyph happens to end, so notes do not share a column
+    /// and switching http and https moves the words.
+    @Test func everyNotesWordsStartOnOneColumn() throws {
+        let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        #expect(groups.contains(".font(.system(size: glyph, weight: .regular)) .foregroundStyle(glyphStyle) .frame(width: glyph) .accessibilityHidden(true)"))
+    }
+
+    /// Red when the join page's connection line drifts under the join note again, or its two ways
+    /// stack with ragged left edges.
+    @Test func theJoinPagesLinesAndWaysHangTogether() throws {
+        let raw = try SourceText.read(Self.view)
+        let notes = try SourceText.slice(raw, from: "    private var cardNotes: some View {", to: "\n    }\n")
+        let connection = try SourceText.at("if let note = model.note { connectionNote(note) }", in: notes)
+        let first = try SourceText.at("if model.handOver != nil {", in: notes)
+        #expect(connection < first)
+        #expect(SourceText.count("connectionNote(note)", in: notes) == 1)
+        let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
+        #expect(buttons.contains("struct TrailingColumn: Layout {"))
+        #expect(buttons.contains(
+            "let widest = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0 guard let room = proposal.width else { return widest } return min(widest, room)"))
+        #expect(buttons.contains("subview.place(at: CGPoint(x: bounds.maxX - width, y: y), proposal: offer)"))
+    }
+
+    /// Red when the address field's lock or a button's icon stays one size while the words beside
+    /// it grow or shrink with the text size.
+    @Test func iconsGrowWithTheWordsBesideThem() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains("@ScaledMetric(relativeTo: .subheadline) private var lockSize: CGFloat = 13"))
+        #expect(view.contains(".font(.system(size: lockSize, weight: .semibold))"))
+        let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
+        #expect(buttons.contains("@ScaledMetric(relativeTo: .footnote) private var iconScale: CGFloat = 1"))
+        #expect(buttons.contains("IconView(icon, size: CGFloat(size.iconSize) * iconScale, color: ink)"))
+    }
+
+    /// Red when Advanced's turned chevron is left low on its title's line.
+    @Test func advancedsOpenChevronSitsOnItsTitle() throws {
+        let head = try SourceText.slice(SourceText.read(Self.groups), from: "struct FormSectionHead: View {", to: "\n}\n")
+        let turn = try SourceText.at(".rotationEffect(.degrees(open ? 90 : 0))", in: head)
+        let lift = try SourceText.at(".offset(y: open ? -chevronSize * 0.1 : 0)", in: head)
+        #expect(turn < lift)
     }
 }

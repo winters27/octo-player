@@ -257,9 +257,9 @@ struct FamilyPasswordSheet: View {
             SheetHeader(title: FamilyText.changePassword, subtitle: FamilyText.signOutEverywhereLine, clock: false, closeEnabled: !busy,
                         close: leave)
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     field("Current password", $draft.current, 0)
-                    field("New password, at least \(minPassword) characters", $draft.new, 1)
+                    field("New password", $draft.new, 1)
                     if let strength = passwordStrength(draft.new) { Text(strength).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
                     field("New password again", $draft.confirm, 2)
                     if let problem { Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error) }
@@ -268,9 +268,10 @@ struct FamilyPasswordSheet: View {
                 .padding(.vertical, 6)
             }
             SoftHairline()
+            // The main answer first and Cancel second, as every question in the app sets them.
             HStack(spacing: 10) {
-                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: leave)
                 AccentButton(FamilyText.changePassword, size: .medium, bright: true, loading: busy, fillWidth: true, action: go)
+                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: leave)
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
@@ -282,14 +283,20 @@ struct FamilyPasswordSheet: View {
         .onDisappear { onScreen.shown = false }
     }
 
-    /// One password field; Next hands the focus to the field after it, Done on the last sends.
-    private func field(_ placeholder: String, _ text: Binding<String>, _ index: Int) -> some View {
-        GlassInput(placeholder, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }), secure: true,
-                   submitLabel: index == 2 ? .done : .next,
-                   focus: Binding(get: { typing == index }, set: { now in if now { typing = index } else if typing == index { typing = nil } })) {
-            if index == 2 { go() } else { typing = index + 1 }
+    /// One password field with its name over it; Next hands the focus to the field after it, Done
+    /// on the last sends.
+    private func field(_ name: String, _ text: Binding<String>, _ index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(name).font(.octoFormName).foregroundStyle(OctoColor.textPrimary).accessibilityHidden(true)
+            GlassInput(index == 1 ? "At least \(minPassword) characters" : SignInWords.required,
+                       text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }),
+                       secure: true, submitLabel: index == 2 ? .done : .next,
+                       focus: Binding(get: { typing == index }, set: { now in if now { typing = index } else if typing == index { typing = nil } })) {
+                if index == 2 { go() } else { typing = index + 1 }
+            }
+            .textContentType(index == 0 ? .password : .newPassword)
+            .accessibilityLabel(name)
         }
-        .textContentType(index == 0 ? .password : .newPassword)
     }
 
     /// Closes the sheet, unless a change is on its way: it stays until that answers.

@@ -65,6 +65,7 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.serverupdate.upToDateLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.ui.common.AnswerRow
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
@@ -357,7 +358,7 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(SettingsIndex.ChangePassword.title, style = OctoType.formGroup, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
-        Text("Your other apps will ask for the new password the next time they sign in.", style = OctoType.caption, color = OctoColors.TextMuted)
+        Text("Your other apps will ask for the new password the next time they sign in.", style = OctoType.formNote, color = OctoColors.TextSecondary)
         PasswordInput(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
         PasswordInput(draft.new, "New password") { draft = draft.copy(new = it); problem = null }
         PasswordInput(draft.confirm, "New password again", last = true, onDone = ::change) { draft = draft.copy(confirm = it); problem = null }
@@ -370,16 +371,20 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
     }
 }
 
+// A password field with its name over it, so a typed field keeps its name.
 @Composable
-private fun PasswordInput(value: String, placeholder: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
-    GlassInput(
-        value = value,
-        onValueChange = onChange,
-        placeholder = placeholder,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
-        keyboardActions = KeyboardActions(onDone = { onDone() }),
-        visualTransformation = PasswordVisualTransformation(),
-    )
+private fun PasswordInput(value: String, name: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(name, style = OctoType.formName, color = OctoColors.TextPrimary)
+        GlassInput(
+            value = value,
+            onValueChange = onChange,
+            placeholder = SignInWords.REQUIRED,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+    }
 }
 
 // Whether the question before disconnecting is showing. The shell draws

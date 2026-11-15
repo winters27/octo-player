@@ -218,7 +218,7 @@ import Testing
         let view = SourceText.squashed(try SourceText.read(Self.view))
         #expect(view.contains("guard !model.committing else { return } if model.holdsSignUp { model.stopJoin() } else { dismiss() }"))
         #expect(view.contains(".buttonBorderShape(.circle) .disabled(model.committing)"))
-        #expect(view.contains("GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing) { model.stopJoin() }"))
+        #expect(view.contains("GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() }"))
     }
 
     /// Red when a link from outside can replace an open sign-in, an ask buries a link's form or opens

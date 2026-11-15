@@ -114,12 +114,15 @@ class SignInWordsTest {
     }
 
     // Shared words are plain ASCII, so no dash or curly quote slips in. The
-    // one exception is a no-break space in the words `glued` lists, which
-    // keeps a wrapped line's last two words together.
+    // one exception is in the words `glued` lists: a no-break space, which
+    // keeps a wrapped line's last two words together, or a word joiner, which
+    // keeps "Wi-Fi" whole.
     @Test
     fun everyWordIsPlainAscii() {
-        val glued = setOf("advanced.line")
-        kotlinWords().forEach { (key, words) -> assertTrue(key, words.all { it.code in 0x20..0x7E || (key in glued && it == ' ') }) }
+        val glued = setOf("advanced.line", "note.home", "inGroup.SignInPage.false")
+        kotlinWords().forEach { (key, words) ->
+            assertTrue(key, words.all { it.code in 0x20..0x7E || (key in glued && (it.code == 0xA0 || it.code == 0x2060)) })
+        }
     }
 
     // Red when a line that wraps on the phones loses the no-break space that
@@ -127,9 +130,10 @@ class SignInWordsTest {
     // carries one anywhere but there.
     @Test
     fun theWrappingLinesKeepTheirLastTwoWordsTogether() {
+        val glue = Char(0xA0)
         for (line in listOf(SignInWords.ADVANCED_LINE, GatewayWords.POINTER)) {
-            assertEquals(line, 1, line.count { it == ' ' })
-            assertTrue(line, line.lastIndexOf(' ') < line.indexOf(' '))
+            assertEquals(line, 1, line.count { it == glue })
+            assertTrue(line, line.lastIndexOf(' ') < line.indexOf(glue))
         }
     }
 

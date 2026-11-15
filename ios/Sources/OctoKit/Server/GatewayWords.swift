@@ -59,7 +59,7 @@ public enum GatewayWords {
         case .passwordPrompt:
             return "This server asks for a username and password before Octo can reach it. Fill in the sign-in page fields under Advanced."
         case .signInPage:
-            return "A sign-in page answered instead of the server. On public Wi-Fi, sign in to the Wi-Fi first. Otherwise fill in the sign-in page fields under Advanced."
+            return "A sign-in page answered instead of the server. On public Wi-\u{2060}Fi, sign in to the Wi-\u{2060}Fi first. Otherwise fill in the sign-in page fields under Advanced."
         }
     }
 
@@ -74,15 +74,15 @@ public enum GatewayWords {
     public static func hint(_ gateway: Gateway) -> String {
         switch gateway {
         case .authentik:
-            "Use your Authentik username and an app password. Make one in Authentik under your user settings, Tokens and App passwords."
+            "Use your Authentik username and an app password. Make one in Authentik under your user settings, Tokens and App\u{00A0}passwords."
         case .authelia:
             "Use your Authelia username and password. Authelia lets apps in only where its rule for this address is one factor."
         case .cloudflareAccess:
-            "Use a service token from Cloudflare Zero Trust, and add a Service Auth rule for it to this app's Access policy."
+            "Use a service token from Cloudflare Zero Trust, and add a Service Auth rule for it to this app's Access\u{00A0}policy."
         case .passwordPrompt:
             "Use the username and password the server's proxy asks for."
         case .signInPage:
-            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /rest/ through."
+            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /\u{2060}rest/ through."
         }
     }
 

@@ -34,6 +34,8 @@ struct SignInView: View {
     @State private var gatewayHeight: CGFloat?
     /// The scroll's height between the status bar and the home indicator.
     @State private var visibleHeight: CGFloat?
+    /// The address field's lock grows with the text size, as "https://" beside it does.
+    @ScaledMetric(relativeTo: .subheadline) private var lockSize: CGFloat = 13
     /// A field took focus while the group waited to come into view: the callout then leaves the
     /// page where the person is.
     @State private var focusedWhilePending = false
@@ -84,6 +86,13 @@ struct SignInView: View {
                                        startPoint: .top, endPoint: .bottom)
                             .frame(height: top + 56)
                         Color.black
+                        // Words leaving the bottom melt over its last 24 points instead of being cut
+                        // by the screen's edge.
+                        LinearGradient(stops: [.init(color: .black, location: 0),
+                                               .init(color: .black.opacity(0.35), location: 0.6),
+                                               .init(color: .clear, location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(height: 24)
                     }
                     .ignoresSafeArea()
                 }
@@ -300,13 +309,16 @@ struct SignInView: View {
                          shown: { model.keyShown() })
     }
 
-    /// Brings a callout's target into view; at once under reduced motion.
+    /// Brings a callout's target into view; at once under reduced motion. A group's title or the
+    /// key row lands 68 points under the scroll's top (the 56 of the top fade and 12 more), clear
+    /// of the fade and of the Back button, whose foot is 59 under the top.
     private func scrollCallout(_ proxy: ScrollViewProxy, to target: CalloutTarget) {
+        let landing = UnitPoint(x: 0, y: 68 / max(visibleHeight ?? 728, 1))
         let move = {
             switch target {
-            case .marker: proxy.scrollTo("gatewayMarker", anchor: .top)
+            case .marker: proxy.scrollTo("gatewayMarker", anchor: landing)
             case .end: proxy.scrollTo("gatewayEnd", anchor: .bottom)
-            case .key: proxy.scrollTo("keyMarker", anchor: .top)
+            case .key: proxy.scrollTo("keyMarker", anchor: landing)
             }
         }
         if still { move() } else { withAnimation(.snappy) { move() } }
@@ -472,7 +484,7 @@ struct SignInView: View {
         Button(action: model.toggleScheme) {
             HStack(spacing: 4) {
                 Image(systemName: model.scheme == .https ? "lock.fill" : "lock.open.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: lockSize, weight: .semibold))
                     .foregroundStyle(model.scheme == .https ? OctoColor.accent : OctoColor.textMuted)
                 Text(model.scheme.prefix).font(.octoFormValue).foregroundStyle(OctoColor.textMuted)
             }
@@ -569,14 +581,16 @@ struct SignInView: View {
     /// then how the connection travels.
     private var cardNotes: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // How the connection travels, first under the card on every state, beside the address
+            // it describes.
+            if let note = model.note { connectionNote(note) }
             if model.handOver != nil {
                 FormNote(.info, "On your other device, tap Allow when it asks about this phone.")
             } else if let invite = model.invite {
                 FormNote(.info, "You're invited to \(shownServer(invite.server)). Choose your name and a password. Your login then works in Octo and any other music app.")
             } else if model.joining {
-                FormNote(.info, "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.")
+                FormNote(.info, "Your invite shows a QR code, and so does Sign in on another device in Octo on your other phone or computer. Scan it, or open its link on this\u{00A0}phone.")
             }
-            if let note = model.note { connectionNote(note) }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -624,14 +638,14 @@ struct SignInView: View {
                 .padding(.top, 20)
         }
         failureLine
-        if model.handOver == nil {
-            GlazeButton("Scan the QR code", icon: .camera, size: .small) { model.scanning = true }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.top, 12)
+        // One block on the trailing edge, both ways as wide as the wider.
+        TrailingColumn(gap: 12) {
+            if model.handOver == nil {
+                GlazeButton("Scan the QR code", icon: .camera, size: .small, fillWidth: true) { model.scanning = true }
+            }
+            GlazeButton("Sign in with a password", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() }
         }
-        GlazeButton("Sign in with a password", size: .small, enabled: !model.committing) { model.stopJoin() }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, 12)
+        .padding(.top, 12)
     }
 
     /// Advanced's groups, in the order every app draws them.

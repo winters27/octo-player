@@ -262,9 +262,10 @@ import Testing
             ".onChange(of: model.keyPending) { _, pending in if pending { focusedWhileKeyPending = false } }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false wait.send(.hidden) }",
-            "proxy.scrollTo(\"gatewayMarker\", anchor: .top)",
+            "let landing = UnitPoint(x: 0, y: 68 / max(visibleHeight ?? 728, 1))",
+            "proxy.scrollTo(\"gatewayMarker\", anchor: landing)",
             "proxy.scrollTo(\"gatewayEnd\", anchor: .bottom)",
-            "proxy.scrollTo(\"keyMarker\", anchor: .top)",
+            "proxy.scrollTo(\"keyMarker\", anchor: landing)",
             "FormGroup(title: AdvancedGroup.gettingThere.title, marker: \"gatewayMarker\", outlined: model.calloutShowing) {",
             ".onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in gatewayHeight = height wait.send(.measured) } .calloutEnd(\"gatewayEnd\")",
             ".calloutMarker(\"keyMarker\")",
@@ -278,8 +279,11 @@ import Testing
         #expect(!raw.contains("scrollPosition"))
         #expect(!raw.contains("ScrollPosition("))
         let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        // The top mark is part of the layout: the scroll reads an overlay's place without its shift,
+        // so a 68 point overlay above the title landed the title itself under the Back button.
         #expect(groups.contains(
-            "overlay(alignment: .top) { Color.clear.frame(height: 68).alignmentGuide(.top) { $0[.bottom] } .allowsHitTesting(false).accessibilityHidden(true).id(id) }"))
+            "func calloutMarker(_ id: String) -> some View { VStack(alignment: .leading, spacing: 0) { Color.clear.frame(height: 0).allowsHitTesting(false).accessibilityHidden(true).id(id) self } }"))
+        #expect(!groups.contains("Color.clear.frame(height: 68)"))
         #expect(groups.contains(
             "overlay(alignment: .bottom) { Color.clear.frame(height: 8).alignmentGuide(.bottom) { $0[.top] } .allowsHitTesting(false).accessibilityHidden(true).id(id) }"))
     }

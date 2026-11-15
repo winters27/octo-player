@@ -35,12 +35,14 @@ struct ButtonLabel: View {
     /// The words and icon; nil takes the theme's words.
     var color: Color?
     @Environment(\.octoPalette) private var palette
+    /// The icon grows and shrinks with the text size, as the words beside it do.
+    @ScaledMetric(relativeTo: .footnote) private var iconScale: CGFloat = 1
 
     var body: some View {
         let ink = color ?? palette.color(.textPrimary)
         ZStack {
             HStack(spacing: 8) {
-                if let icon { IconView(icon, size: CGFloat(size.iconSize), color: ink) }
+                if let icon { IconView(icon, size: CGFloat(size.iconSize) * iconScale, color: ink) }
                 Text(text)
                     .font(.octo(CGFloat(size.fontSize), .semibold, .footnote))
                     .foregroundStyle(ink)
@@ -181,6 +183,36 @@ struct AnswerRow: Layout {
                                      other: Double(subviews[1].sizeThatFits(.unspecified).width),
                                      gap: Double(gap), room: room)
         return (placed.stacked, CGFloat(placed.main), CGFloat(placed.other))
+    }
+}
+
+/// Lesser ways stacked on the row's trailing edge as one block: each as wide as the widest, never
+/// wider than the row, so their left edges line up too. Each is drawn to the width it is given
+/// (`fillWidth`).
+struct TrailingColumn: Layout {
+    var gap: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = columnWidth(proposal, subviews)
+        let heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        let height = heights.reduce(0, +) + gap * CGFloat(max(subviews.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = columnWidth(proposal, subviews)
+        let offer = ProposedViewSize(width: width, height: nil)
+        var y = bounds.minY
+        for subview in subviews {
+            subview.place(at: CGPoint(x: bounds.maxX - width, y: y), proposal: offer)
+            y += subview.sizeThatFits(offer).height + gap
+        }
+    }
+
+    private func columnWidth(_ proposal: ProposedViewSize, _ subviews: Subviews) -> CGFloat {
+        let widest = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        guard let room = proposal.width else { return widest }
+        return min(widest, room)
     }
 }
 

@@ -129,9 +129,12 @@ struct FormNote: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // Every glyph in one slot, so every note's words start on one column whichever mark
+            // leads, and switching http and https moves only the lock.
             Image(systemName: symbol)
                 .font(.system(size: glyph, weight: .regular))
                 .foregroundStyle(glyphStyle)
+                .frame(width: glyph)
                 .accessibilityHidden(true)
             Text(text)
                 .font(.octoFormNote)
@@ -518,9 +521,9 @@ struct FormTrailingRow<Trailing: View>: View {
 
 /// A choice on the form (the sign-in page's kind, the Method): its name and the line under it, the
 /// current answer at the right edge, and a chevron, the answer and the chevron on the name's first
-/// line however many lines follow it. Tapping it opens the answers as the Settings questions do,
-/// each with its own line. At the accessibility sizes the answer goes under the name. The chevron
-/// grows with the text size, as the name does.
+/// line however many lines follow it. An answer that does not fit beside the name goes under it,
+/// as it always does at the accessibility sizes. Tapping it opens the answers as the Settings
+/// questions do, each with its own line. The chevron grows with the text size, as the name does.
 struct FormChoiceRow: View {
     let title: String
     var description: String?
@@ -553,12 +556,21 @@ struct FormChoiceRow: View {
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            RowTitle(title: title, optional: false)
+                            // The answer on the name's line while both fit on one, else under the name.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    RowTitle(title: title, optional: false)
+                                    Spacer(minLength: 0)
+                                    answer(.trailing)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    RowTitle(title: title, optional: false)
+                                    answer(.leading)
+                                }
+                            }
                             if let description { RowDescription(text: description) }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
-                        answer(.trailing)
                         chevron
                     }
                 }
@@ -626,6 +638,9 @@ struct FormSectionHead: View {
                     .font(.system(size: chevronSize, weight: .semibold))
                     .foregroundStyle(OctoColor.textSecondary)
                     .rotationEffect(.degrees(open ? 90 : 0))
+                    // Turned, the glyph's ink sits lower on the line: lifted back onto the title's
+                    // cap middle.
+                    .offset(y: open ? -chevronSize * 0.1 : 0)
             }
             .padding(.horizontal, 16)
             .contentShape(Rectangle())
@@ -640,12 +655,12 @@ struct FormSectionHead: View {
 }
 
 extension View {
-    /// The mark a callout scrolls to the view's top: 68 points tall above this view (the 56 of the
-    /// top fade and 12 more), so this view lands just under the fade and the back button.
+    /// The mark a callout scrolls to: a zero-height view on this view's top edge, in the layout
+    /// itself, so the scroll reads its real place. `scrollCallout` lands it under the top fade.
     func calloutMarker(_ id: String) -> some View {
-        overlay(alignment: .top) {
-            Color.clear.frame(height: 68).alignmentGuide(.top) { $0[.bottom] }
-                .allowsHitTesting(false).accessibilityHidden(true).id(id)
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 0).allowsHitTesting(false).accessibilityHidden(true).id(id)
+            self
         }
     }
 

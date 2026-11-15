@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import app.winters.octo.design.GlassInput
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.server.passwordDraftProblem
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.ui.common.rememberStillDrawn
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.StateFlow
@@ -403,35 +404,47 @@ fun ColumnScope.PasswordSheetContent(
         }
     }
     Header("", CHANGE_PASSWORD, SIGN_OUT_EVERYWHERE_LINE, OctoColors.TextMuted, clock = false, close = leave, avatar = false)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PasswordField(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
-        PasswordField(draft.new, "New password, at least $MIN_PASSWORD characters") { draft = draft.copy(new = it); problem = null }
+        PasswordField(draft.new, "New password", placeholder = "At least $MIN_PASSWORD characters") { draft = draft.copy(new = it); problem = null }
         passwordStrength(draft.new)?.let { Text(it, style = OctoType.caption, color = OctoColors.TextMuted) }
         PasswordField(draft.confirm, "New password again", last = true, onDone = ::go) { draft = draft.copy(confirm = it); problem = null }
         problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
     }
     Hairline()
+    // The main answer first and Cancel second, as every question in the app sets them.
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        GlazeButton("Cancel", leave, size = ButtonSize.Medium, enabled = !busy, modifier = Modifier.weight(1f))
         AccentButton(CHANGE_PASSWORD, onClick = ::go, size = ButtonSize.Medium, fill = OctoColors.Accent, loading = busy, modifier = Modifier.weight(1f))
+        GlazeButton("Cancel", leave, size = ButtonSize.Medium, enabled = !busy, modifier = Modifier.weight(1f))
     }
 }
 
+// A password field with its name over it, so a typed field keeps its name.
 @Composable
-private fun PasswordField(value: String, placeholder: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
-    GlassInput(
-        value = value,
-        onValueChange = onChange,
-        placeholder = placeholder,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
-        keyboardActions = KeyboardActions(onDone = { onDone() }),
-        visualTransformation = PasswordVisualTransformation(),
-        contentType = ContentType.NewPassword,
-    )
+private fun PasswordField(
+    value: String,
+    name: String,
+    placeholder: String = SignInWords.REQUIRED,
+    last: Boolean = false,
+    onDone: () -> Unit = {},
+    onChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(name, style = OctoType.formName, color = OctoColors.TextPrimary)
+        GlassInput(
+            value = value,
+            onValueChange = onChange,
+            placeholder = placeholder,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            visualTransformation = PasswordVisualTransformation(),
+            contentType = ContentType.NewPassword,
+        )
+    }
 }
 
 // Your login: the server's addresses (the outside one and, when it differs,

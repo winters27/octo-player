@@ -47,7 +47,7 @@ public enum SignInWords {
 
     /// What the home address and the custom headers are for, and the danger note for an API key
     /// over plain http across the internet.
-    public static let homeNote = "On Wi-Fi, Octo uses it when it answers, and the main address otherwise."
+    public static let homeNote = "On Wi-\u{2060}Fi, Octo uses it when it answers, and the main address\u{00A0}otherwise."
     public static let headersDescription = "Sent with every request to this server, such as an access token for a proxy in front of it."
     public static let apiKeyInTheOpen = "Not encrypted, and your API key travels as it is. Anyone on the way can read it."
 
