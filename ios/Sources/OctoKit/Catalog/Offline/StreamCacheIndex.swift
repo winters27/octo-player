@@ -9,14 +9,18 @@ public struct StreamCacheEntry: Codable, Sendable, Equatable {
     public var pieces: [[Int64]]
     public var lastTouchedMs: Int64
     public var fileSize: Int64?
+    /// The YouTube video a song found online was saved from, as its stream named it. Lists written
+    /// before it was kept read back without it.
+    public var video: String?
 
     public init(contentLength: Int64? = nil, mimeType: String? = nil, pieces: [[Int64]] = [], lastTouchedMs: Int64,
-                fileSize: Int64? = nil) {
+                fileSize: Int64? = nil, video: String? = nil) {
         self.contentLength = contentLength
         self.mimeType = mimeType
         self.pieces = pieces
         self.lastTouchedMs = lastTouchedMs
         self.fileSize = fileSize
+        self.video = video
     }
 }
 
@@ -74,21 +78,23 @@ public struct StreamCacheIndex: Sendable, Equatable {
     /// with the new file's. True when it went.
     @discardableResult
     public mutating func answered(_ key: String, _ shape: StreamShape) -> Bool {
-        guard let entry = entries[key], StreamShape(type: entry.mimeType, total: entry.contentLength).differs(from: shape) else {
+        guard let entry = entries[key],
+              StreamShape(type: entry.mimeType, total: entry.contentLength, video: entry.video).differs(from: shape) else {
             return false
         }
         drop(key)
         return true
     }
 
-    /// Notes the whole length and type of a song as the server gave them. A song may be described
-    /// before any of it is saved, and a stream that ended short of what it said is described again
-    /// with the length it really had.
-    public mutating func describe(_ key: String, contentLength: Int64?, mimeType: String?, nowMs: Int64) {
+    /// Notes the whole length, type and video of a song as the server gave them. A song may be
+    /// described before any of it is saved, and a stream that ended short of what it said is
+    /// described again with the length it really had.
+    public mutating func describe(_ key: String, contentLength: Int64?, mimeType: String?, video: String? = nil, nowMs: Int64) {
         guard enabled else { return }
         var entry = entries[key] ?? StreamCacheEntry(lastTouchedMs: nowMs)
         if let contentLength, contentLength > 0 { entry.contentLength = contentLength }
         if let mimeType { entry.mimeType = mimeType }
+        if let video, !video.isEmpty { entry.video = video }
         entries[key] = entry
     }
 

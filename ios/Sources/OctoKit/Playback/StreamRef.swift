@@ -18,15 +18,28 @@ public struct StreamRef: Sendable, Hashable {
     public var bitrate: Int?
     public var pinned: StreamRequest?
     public var size: Int64?
+    /// How many times a version picked for the song started its queue entry over. The play token
+    /// names it, so each restart is a new play to the server.
+    public var restarts: Int
 
     public init(sourceId: String?, serverId: String, mimeType: String?, bitrate: Int?, pinned: StreamRequest? = nil,
-                size: Int64? = nil) {
+                size: Int64? = nil, restarts: Int = 0) {
         self.sourceId = sourceId
         self.serverId = serverId
         self.mimeType = mimeType
         self.bitrate = bitrate
         self.pinned = pinned
         self.size = size.flatMap { $0 > 0 ? $0 : nil }
+        self.restarts = max(0, restarts)
+    }
+
+    /// The song as its next play opens it after a version was picked for it: the next restart, and
+    /// no file size, since the file the server sends now is another.
+    public func restarted() -> StreamRef {
+        var copy = self
+        copy.size = nil
+        copy.restarts += 1
+        return copy
     }
 
     public func pin(_ request: StreamRequest) -> StreamRef {
@@ -47,6 +60,7 @@ public func streamUri(_ ref: StreamRef) -> String {
     if let bitrate = ref.bitrate { params.append(("bitrate", "\(bitrate)")) }
     if let size = ref.size { params.append(("size", "\(size)")) }
     if let pinned = ref.pinned { params.append(("max", pinned.maxKbps.map(String.init) ?? rawRequest)) }
+    if ref.restarts > 0 { params.append(("restart", "\(ref.restarts)")) }
     if !params.isEmpty { out += "?" + params.map { "\($0.0)=\(formEncode($0.1))" }.joined(separator: "&") }
     return out
 }
@@ -74,7 +88,7 @@ public func parseStreamUri(_ uri: String) -> StreamRef? {
     }
     return StreamRef(sourceId: query["source"].flatMap { $0.isEmpty ? nil : $0 }, serverId: serverId,
                      mimeType: query["mime"].flatMap { $0.isEmpty ? nil : $0 }, bitrate: query["bitrate"].flatMap { Int($0) },
-                     pinned: pinned, size: query["size"].flatMap { Int64($0) })
+                     pinned: pinned, size: query["size"].flatMap { Int64($0) }, restarts: query["restart"].flatMap { Int($0) } ?? 0)
 }
 
 /// The name a server song is saved under on the phone: the server, the song, its file type, what

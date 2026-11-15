@@ -119,6 +119,13 @@ public final class ServerProfiles: @unchecked Sendable {
         return forSession(session).cached(id)
     }
 
+    /// The server gave these songs (by their id there) another file: their kept profiles go. Nil:
+    /// every song's.
+    public func forget(_ ids: Set<String>?) {
+        let kept = lock.withLock { profiles }
+        if let ids { kept?.forget(ids) } else { kept?.clear() }
+    }
+
     /// Asks for the profile of the song at `uri` and hands it, or nil when the server has none,
     /// to `done` on the main thread. False when there is nothing to ask: not a song from the server
     /// in use, or a server that makes no profiles.

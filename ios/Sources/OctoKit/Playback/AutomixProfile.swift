@@ -226,6 +226,9 @@ public final class TransitionProfiles: @unchecked Sendable {
     private var order: [String] = []
     /// When each song was last found to have no profile yet.
     private var missing: [String: Int] = [:]
+    /// Moves on with every `clear` and `forget`: an answer to an ask begun before is of a file let
+    /// go, and is not kept.
+    private var generation = 0
 
     public init(fetch: @escaping @Sendable (String) async throws -> TransitionProfileAnswer?,
                 now: @escaping @Sendable () -> Int = { Int(Date().timeIntervalSince1970 * 1000) }) {
@@ -247,6 +250,7 @@ public final class TransitionProfiles: @unchecked Sendable {
             return nil
         }
         if let known { return known }
+        let began = lock.withLock { generation }
         let answer: TransitionProfileAnswer?
         do {
             answer = try await fetch(id)
@@ -255,7 +259,9 @@ public final class TransitionProfiles: @unchecked Sendable {
         }
         if Task.isCancelled { return nil }
         let profile = answer.flatMap(TransitionProfile.of)
-        lock.withLock {
+        let kept = lock.withLock { () -> Bool in
+            // Forgotten while it was asked: the answer is of the file let go.
+            guard generation == began else { return false }
             if let profile {
                 ready[id] = profile
                 order.removeAll { $0 == id }
@@ -266,16 +272,32 @@ public final class TransitionProfiles: @unchecked Sendable {
                 missing[id] = now()
                 if missing.count > profilesKept * 4 { missing.removeAll() }
             }
+            return true
         }
-        return profile
+        return kept ? profile : nil
     }
 
     /// Forgets everything, as when the server changes.
     public func clear() {
         lock.withLock {
+            generation += 1
             ready.removeAll()
             order.removeAll()
             missing.removeAll()
+        }
+    }
+
+    /// Forgets these songs' profiles (by their id on the server), as when the server gives them
+    /// another file; they are asked for again the next time.
+    public func forget(_ ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        lock.withLock {
+            generation += 1
+            for id in ids {
+                ready[id] = nil
+                missing[id] = nil
+            }
+            order.removeAll { ids.contains($0) }
         }
     }
 
