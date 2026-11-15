@@ -342,11 +342,26 @@ impl PinnedTls {
 
     // Made again after the pins or the identity change, which also forgets
     // the sessions made before, so none can be picked up again. The
-    // generation is read before the identity, so a set kept for a
-    // generation never holds an identity older than it.
+    // generation is read under the lock, so no caller comes to the sets with
+    // a generation older than one already kept there, and before the
+    // identity, so a set kept for a generation never holds an identity older
+    // than it.
     fn made(&self, sni: bool) -> Result<Arc<Made>, rustls::Error> {
-        let generation = self.trust.generation();
         let mut sets = self.sets.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = self.trust.generation();
+        self.made_for(&mut sets, generation, sni)
+    }
+
+    // The settings for `generation` from `sets`, or made now and kept there.
+    // Sets for an older generation go; a set for a newer one stays, so a
+    // caller that read the generation before it moved never takes away the
+    // settings, and the sessions they resume, of the generation in use.
+    fn made_for(
+        &self,
+        sets: &mut Vec<Arc<Made>>,
+        generation: u64,
+        sni: bool,
+    ) -> Result<Arc<Made>, rustls::Error> {
         if let Some(found) = sets.iter().find(|set| set.generation == generation && set.sni == sni) {
             return Ok(found.clone());
         }
@@ -362,7 +377,7 @@ impl PinnedTls {
             None => None,
         };
         let made = Arc::new(Made { generation, sni, plain, identified });
-        sets.retain(|set| set.generation == generation);
+        sets.retain(|set| set.generation >= generation);
         sets.push(made.clone());
         Ok(made)
     }
@@ -638,5 +653,27 @@ mod tests {
         trust.replace([]);
         let again = tls.made(true).unwrap();
         assert!(!Arc::ptr_eq(&named, &again) && again.generation > named.generation);
+    }
+
+    // Red when: a caller that read the generation before it moved takes
+    // away the settings already made for the newer one, so the next
+    // connection makes them again and resumes none of their sessions.
+    #[test]
+    fn a_caller_with_an_older_generation_keeps_the_newer_settings() {
+        let trust = Arc::new(Trust::default());
+        let tls = PinnedTls::new(trust.clone());
+        let stale = trust.generation();
+        trust.replace([]);
+        let newest = tls.made(true).unwrap();
+        assert!(newest.generation > stale);
+        {
+            let mut sets = tls.sets.lock().unwrap();
+            let old = tls.made_for(&mut sets, stale, true).unwrap();
+            assert_eq!(old.generation, stale);
+        }
+        assert!(
+            Arc::ptr_eq(&newest, &tls.made(true).unwrap()),
+            "made again after a caller with an older generation"
+        );
     }
 }
