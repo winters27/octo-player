@@ -4,7 +4,7 @@
 //! with whatever decoder GStreamer has, converts to BGRA and hands frames
 //! to an app sink the loop's thread pulls from.
 
-use std::ffi::{CString, c_char, c_int, c_uint, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::ptr;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -55,6 +55,14 @@ struct Buffer {
     duration: GstClockTime,
 }
 
+/// GLib's GError: where it came from, its code and its message.
+#[repr(C)]
+struct GError {
+    domain: u32,
+    code: c_int,
+    message: *mut c_char,
+}
+
 #[repr(C)]
 struct MapInfo {
     memory: *mut c_void,
@@ -68,7 +76,8 @@ struct MapInfo {
 
 /// The GStreamer calls used, from its libraries loaded at run time.
 struct Api {
-    parse_launch: unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> *mut c_void,
+    parse_launch: unsafe extern "C" fn(*const c_char, *mut *mut GError) -> *mut c_void,
+    error_free: unsafe extern "C" fn(*mut GError),
     bin_get_by_name: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
     set_object_arg: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char),
     set_state: unsafe extern "C" fn(*mut c_void, c_int) -> c_int,
@@ -88,6 +97,7 @@ struct Api {
     is_eos: unsafe extern "C" fn(*mut c_void) -> Gboolean,
     _core: Library,
     _app: Library,
+    _glib: Library,
 }
 
 impl Api {
@@ -98,6 +108,7 @@ impl Api {
         unsafe {
             let core = Library::new("libgstreamer-1.0.so.0").ok()?;
             let app = Library::new("libgstapp-1.0.so.0").ok()?;
+            let glib = Library::new("libglib-2.0.so.0").ok()?;
             let init: unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char, *mut *mut c_void) -> Gboolean =
                 *core.get(b"gst_init_check\0").ok()?;
             if init(ptr::null_mut(), ptr::null_mut(), ptr::null_mut()) == 0 {
@@ -105,6 +116,7 @@ impl Api {
             }
             Some(Self {
                 parse_launch: *core.get(b"gst_parse_launch\0").ok()?,
+                error_free: *glib.get(b"g_error_free\0").ok()?,
                 bin_get_by_name: *core.get(b"gst_bin_get_by_name\0").ok()?,
                 set_object_arg: *core.get(b"gst_util_set_object_arg\0").ok()?,
                 set_state: *core.get(b"gst_element_set_state\0").ok()?,
@@ -124,6 +136,7 @@ impl Api {
                 is_eos: *app.get(b"gst_app_sink_is_eos\0").ok()?,
                 _core: core,
                 _app: app,
+                _glib: glib,
             })
         }
     }
@@ -166,6 +179,46 @@ pub(crate) fn available() -> bool {
 
 fn failure(message: impl Into<String>) -> Failure {
     Failure::new(ErrorKind::Unsupported, message)
+}
+
+/// Why no pipeline was made, with GStreamer's own words when it gave any.
+fn pipeline_failure(message: Option<&str>) -> String {
+    match message {
+        Some(message) => format!("GStreamer could not make the video pipeline: {message}"),
+        None => "GStreamer could not make the video pipeline".to_owned(),
+    }
+}
+
+/// The message a GError carries, trimmed; None when it has none.
+///
+/// # Safety
+/// `error` points at a live GError whose message, when not null, is a C string.
+unsafe fn error_message(error: *const GError) -> Option<String> {
+    // SAFETY: as the caller promises.
+    let text = unsafe { (*error).message };
+    if text.is_null() {
+        return None;
+    }
+    // SAFETY: a non-null message is a C string, as the caller promises.
+    let message = unsafe { CStr::from_ptr(text) }.to_string_lossy().trim().to_owned();
+    (!message.is_empty()).then_some(message)
+}
+
+/// The message of a GError GStreamer handed over (null for none), which is
+/// given back to GLib here.
+///
+/// # Safety
+/// `error` is null or a GError GStreamer made and nothing else frees.
+unsafe fn take_error(api: &Api, error: *mut GError) -> Option<String> {
+    if error.is_null() {
+        return None;
+    }
+    // SAFETY: as the caller promises; freed once, after its message is read.
+    unsafe {
+        let message = error_message(error);
+        (api.error_free)(error);
+        message
+    }
 }
 
 pub(crate) struct GstSource {
@@ -218,10 +271,16 @@ impl GstSource {
         .map_err(|_| failure("the caps have a nul"))?;
         // SAFETY: as in `open`.
         unsafe {
-            let mut error = ptr::null_mut();
+            let mut error: *mut GError = ptr::null_mut();
             let pipeline = (api.parse_launch)(description.as_ptr(), &mut error);
+            // A pipeline can come with an error too (a part it could not
+            // make); either way the error is GStreamer's to give back.
+            let message = take_error(api, error);
             if pipeline.is_null() {
-                return Err(failure("GStreamer could not make the video pipeline"));
+                return Err(failure(pipeline_failure(message.as_deref())));
+            }
+            if let Some(message) = message {
+                log::info!("GStreamer made the video pipeline, saying: {message}");
             }
             let mut source = Self { api, pipeline, sink: ptr::null_mut(), size: (0, 0), count: 0 };
             source.sink = (api.bin_get_by_name)(pipeline, c"sink".as_ptr());
@@ -350,5 +409,38 @@ impl Drop for GstSource {
             }
             (self.api.object_unref)(self.pipeline);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn error_with(message: *mut c_char) -> GError {
+        GError { domain: 1, code: 2, message }
+    }
+
+    #[test]
+    fn a_parse_error_keeps_gstreamers_words() {
+        let text = CString::new("  no element \"qtdemux\"\n").unwrap();
+        let error = error_with(text.as_ptr().cast_mut());
+        // SAFETY: the error and its message live through the call.
+        let message = unsafe { error_message(&error) };
+        assert_eq!(message.as_deref(), Some("no element \"qtdemux\""));
+        assert_eq!(
+            pipeline_failure(message.as_deref()),
+            "GStreamer could not make the video pipeline: no element \"qtdemux\""
+        );
+    }
+
+    #[test]
+    fn an_error_with_no_words_says_the_plain_failure() {
+        let blank = CString::new("   ").unwrap();
+        // SAFETY: the errors and their messages live through the calls.
+        unsafe {
+            assert_eq!(error_message(&error_with(ptr::null_mut())), None);
+            assert_eq!(error_message(&error_with(blank.as_ptr().cast_mut())), None);
+        }
+        assert_eq!(pipeline_failure(None), "GStreamer could not make the video pipeline");
     }
 }
