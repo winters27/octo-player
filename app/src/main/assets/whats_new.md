@@ -56,7 +56,10 @@
 
 ## Offline
 
-- Offline listening works as before. Nothing changed here in this update.
+- **Choose your Download format.** At a smaller Download quality, songs are saved as Opus (best sound for its size, the new default for everyone), AAC or MP3. Settings > Streaming and downloads > Download format.
+- A song that's already small enough downloads as it is, so it's never made worse.
+- Downloads are named and labeled by what really arrived, and AAC is saved as an M4A that knows its own length.
+- Songs you downloaded before stay downloaded and keep playing. Nothing is downloaded again.
 
 ## Everyday touches
 
