@@ -282,6 +282,14 @@ import Testing
         #expect(app.contains("        let router = Router()\n        router.session = session\n"))
     }
 
+    /// Red when the sign-in cover's page is not keyed by its form, so a link or an ask that replaces the
+    /// form showing keeps the last page and its model.
+    @Test func aReplacedFormGetsAPageOfItsOwn() throws {
+        let shell = SourceText.squashed(try SourceText.read("Octo/Shell/MainShell.swift"))
+        #expect(shell.contains(
+            ".fullScreenCover(item: Bindable(router).signIn) { form in SignInView(form: form, session: session) { notice in if let notice { router.done(notice) } } .id(form.id) .environment(drift) }"))
+    }
+
     /// Red when a call a commit makes can wait without a total limit, so a held way out never ends.
     @Test func everyCommittingCallHasATimeLimit() throws {
         let session = SourceText.squashed(try SourceText.read("Octo/App/Session.swift"))
