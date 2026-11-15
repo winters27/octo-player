@@ -159,6 +159,9 @@ class PopupRequest(
     val noteLink: (String) -> Unit = {},
     // A family link opened it.
     val link: Boolean = false,
+    // A centered card whose height changes with what it shows keeps its top
+    // where its tallest self would start, and grows downward from there.
+    val holdTop: Boolean = false,
 )
 
 // How dark the shade over the part of the window a question is about.
@@ -213,7 +216,8 @@ class PopupHost {
     // sign-in form says when it is committing (`busy`, then nothing closes
     // it but its own buttons) and when a sign-in is open in it (`open`,
     // then a link must not replace it), where a refused link's words go
-    // (`noteLink`), and whether a family link opened it (`link`).
+    // (`noteLink`), and whether a family link opened it (`link`). A card
+    // that changes height as it loads can hold its top (`holdTop`).
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
@@ -225,10 +229,11 @@ class PopupHost {
         open: () -> Boolean = { false },
         noteLink: (String) -> Unit = {},
         link: Boolean = false,
+        holdTop: Boolean = false,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
         if (this.busy) return
-        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link)
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link, holdTop)
     }
 
     fun close() {
@@ -429,7 +434,15 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
             Constraints(maxWidth = (window.width - margin * 2).coerceAtLeast(0), maxHeight = (window.height - margin * 2).coerceAtLeast(0)),
         )
         val size = IntSize(card.width, card.height)
-        val spot = placePopupAt(request.point, request.anchor, size, window, margin, gap = 6.dp.roundToPx(), within = request.over)
+        val placed = placePopupAt(request.point, request.anchor, size, window, margin, gap = 6.dp.roundToPx(), within = request.over)
+        val spot = if (request.holdTop && request.point == null && request.anchor == null && request.over == null) {
+            // Where the card's tallest self would start (its full room, or
+            // the window less its margins), so a taller state grows down.
+            val tallest = minOf(request.maxHeight.roundToPx(), window.height - margin * 2)
+            IntOffset(placed.x, ((window.height - tallest) / 2).coerceAtLeast(margin))
+        } else {
+            placed
+        }
         val point = request.point
         origin = when {
             point != null -> TransformOrigin(if (spot.x < point.x) 1f else 0f, if (spot.y < point.y) 1f else 0f)

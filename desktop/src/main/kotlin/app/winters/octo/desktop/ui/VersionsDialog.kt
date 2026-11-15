@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -30,8 +31,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -44,17 +47,24 @@ import app.winters.octo.design.IconSize
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.OctoIcons
+import app.winters.octo.design.OctoType
 import app.winters.octo.design.RowHeight
 import app.winters.octo.design.Space
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
+import app.winters.octo.design.WholeTxt
 import app.winters.octo.design.hoverLift
 import app.winters.octo.design.motionScale
 import app.winters.octo.design.octoTween
+import app.winters.octo.design.scrollFades
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.pages.FormType
+import app.winters.octo.desktop.pages.RowAction
+import app.winters.octo.desktop.pages.capsMiddle
 import app.winters.octo.desktop.player.QueueEntry
 import app.winters.octo.desktop.versions.streamVersionTaken
+import app.winters.octo.subsonic.PLAYS_FROM_STREAM
 import app.winters.octo.subsonic.STREAM_VERSION_AUTO
 import app.winters.octo.subsonic.StreamVersion
 import app.winters.octo.subsonic.StreamVersionPlaying
@@ -70,8 +80,13 @@ import kotlinx.coroutines.launch
 // Opens "Choose the version" for the entry playing: the YouTube videos the
 // server offers for a song found online, the one playing marked, a pick
 // playing at once from its start. It closes once another entry plays.
+// Its top holds while it loads and picks, and Done takes the keyboard
+// first, so no row looks chosen beside the one playing.
 fun showStreamVersions(app: AppState, entry: QueueEntry) {
-    app.popups.showCentred(width = 480.dp, scrim = true, scrollsItself = true) { close -> StreamVersionsDialog(app, entry, close) }
+    val done = FocusRequester()
+    app.popups.showCentred(width = 480.dp, scrim = true, scrollsItself = true, first = done, holdTop = true) { close ->
+        StreamVersionsDialog(app, entry, close, done)
+    }
 }
 
 // The dialog: the title with the song and Done; the version playing (accent
@@ -81,7 +96,7 @@ fun showStreamVersions(app: AppState, entry: QueueEntry) {
 // states are the shared ones (StreamVersionsSheetState), so it behaves and
 // speaks as the phones do.
 @Composable
-private fun ColumnScope.StreamVersionsDialog(app: AppState, entry: QueueEntry, close: () -> Unit) {
+private fun ColumnScope.StreamVersionsDialog(app: AppState, entry: QueueEntry, close: () -> Unit, doneFocus: FocusRequester) {
     val now by app.player.state.collectAsState()
     val song = entry.song
     val opened = remember(entry.key) { VersionsSong(entry.key.toString(), song.id, song.title, song.artist.orEmpty()) }
@@ -156,29 +171,57 @@ private fun ColumnScope.StreamVersionsDialog(app: AppState, entry: QueueEntry, c
         }
     }
 
-    val view = viewOf(state)
-    Header(StreamVersionWords.TITLE, StreamVersionWords.songLine(song.title, song.artist.orEmpty()), close)
+    VersionsContent(
+        viewOf(state),
+        StreamVersionWords.songLine(song.title, song.artist.orEmpty()),
+        done = close,
+        retry = {
+            val next = state.on(StreamVersionsEvent.Retry)
+            if (next !== state) {
+                state = next
+                asks++
+            }
+        },
+        pick = { choose(it) },
+        undo = { choose(null) },
+        doneFocus = doneFocus,
+    )
+}
+
+// The dialog as its view draws it, with what each control does.
+@Composable
+internal fun ColumnScope.VersionsContent(
+    view: VersionsView,
+    songLine: String,
+    done: () -> Unit,
+    retry: () -> Unit,
+    pick: (String) -> Unit,
+    undo: () -> Unit,
+    doneFocus: FocusRequester? = null,
+) {
+    Header(StreamVersionWords.TITLE, songLine, done, doneFocus)
     val scroll = rememberScrollState()
     Box(Modifier.weight(1f, fill = false)) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(scroll).padding(horizontal = Space.S, vertical = Space.Xs),
+            Modifier
+                .fillMaxWidth()
+                .scrollFades(scroll, 24.dp, eased = true)
+                .verticalScroll(scroll)
+                .padding(horizontal = Space.Xs, vertical = Space.Xs),
             verticalArrangement = Arrangement.spacedBy(Space.Xxs),
         ) {
             view.playing?.let { playing ->
                 SectionName(StreamVersionWords.PLAYING_NOW)
                 PlayingRow(playing, view.playingNote.orEmpty())
             }
-            view.line?.let { Quiet(it, spinning = view.busy) }
-            if (view.retry) {
-                TextAction(StreamVersionWords.TRY_AGAIN, {
-                    val next = state.on(StreamVersionsEvent.Retry)
-                    if (next !== state) {
-                        state = next
-                        asks++
-                    }
-                }, Modifier.padding(start = Space.Xs))
+            // The notice over the list goes under its name; any other line
+            // (looking, could not reach, the server's words) stands alone.
+            if (!view.listed) view.line?.let { Quiet(it, spinning = view.busy, error = view.error) }
+            if (view.retry) TextAction(StreamVersionWords.TRY_AGAIN, retry, Modifier.padding(start = Space.Xs))
+            if (view.listed) {
+                SectionName(StreamVersionWords.OTHER_VERSIONS)
+                view.line?.let { Quiet(it) }
             }
-            if (view.listed) SectionName(StreamVersionWords.OTHER_VERSIONS)
             view.empty?.let { Quiet(it) }
             view.versions.forEach { version ->
                 VersionRow(
@@ -186,17 +229,20 @@ private fun ColumnScope.StreamVersionsDialog(app: AppState, entry: QueueEntry, c
                     checking = view.checking == version.videoId,
                     refused = view.refusal.takeIf { view.refused == version.videoId },
                     enabled = view.checking == null,
-                ) { choose(version.videoId) }
+                ) { pick(version.videoId) }
             }
         }
         MoreBelow(scroll, Modifier.align(Alignment.BottomCenter))
     }
-    Footer(
-        undo = view.undo,
-        enabled = view.checking == null,
-        undoing = view.checking == STREAM_VERSION_AUTO,
-        refused = view.refusal.takeIf { view.refused == STREAM_VERSION_AUTO },
-    ) { choose(null) }
+    if (view.footer) {
+        Footer(
+            undo = view.undo,
+            enabled = view.checking == null,
+            undoing = view.checking == STREAM_VERSION_AUTO,
+            refused = view.refusal.takeIf { view.refused == STREAM_VERSION_AUTO },
+            onUndo = undo,
+        )
+    }
 }
 
 // The dialog as drawn from its state: its line (looking, could not reach,
@@ -207,6 +253,8 @@ private fun ColumnScope.StreamVersionsDialog(app: AppState, entry: QueueEntry, c
 internal data class VersionsView(
     val line: String? = null,
     val busy: Boolean = false,
+    // The line says something failed (could not reach, or refused).
+    val error: Boolean = false,
     val retry: Boolean = false,
     val listed: Boolean = false,
     val playing: StreamVersionPlaying? = null,
@@ -217,13 +265,15 @@ internal data class VersionsView(
     val refused: String? = null,
     val refusal: String? = null,
     val undo: Boolean = false,
+    // The footer shows: the song streams, so there is a version to choose.
+    val footer: Boolean = false,
 )
 
 internal fun viewOf(state: StreamVersionsSheetState): VersionsView = when (state) {
     StreamVersionsSheetState.Closed -> VersionsView()
     is StreamVersionsSheetState.Looking -> VersionsView(line = StreamVersionWords.stateLine(state), busy = true)
-    is StreamVersionsSheetState.CouldNotReach -> VersionsView(line = StreamVersionWords.stateLine(state), retry = true)
-    is StreamVersionsSheetState.Unavailable -> VersionsView(line = StreamVersionWords.stateLine(state))
+    is StreamVersionsSheetState.CouldNotReach -> VersionsView(line = StreamVersionWords.stateLine(state), error = true, retry = true)
+    is StreamVersionsSheetState.Unavailable -> VersionsView(line = StreamVersionWords.stateLine(state), error = true)
     is StreamVersionsSheetState.Shown -> VersionsView(
         line = state.notice,
         listed = state.picksOpen,
@@ -235,40 +285,72 @@ internal fun viewOf(state: StreamVersionsSheetState): VersionsView = when (state
         refused = state.refused,
         refusal = state.refusal,
         undo = state.canUndo,
+        footer = state.answer.playsFrom == PLAYS_FROM_STREAM,
     )
 }
 
-// The title, the song under it in muted words, and Done.
+// The title, whole and as loud as a form sheet's, with Done on the middle
+// of its capitals, and the song under it in muted words.
 @Composable
-private fun Header(title: String, song: String, done: () -> Unit) {
-    Row(
+private fun Header(title: String, song: String, done: () -> Unit, doneFocus: FocusRequester?) {
+    val titleCaps = capsMiddle(DesktopType.pageTitle)
+    val doneCaps = capsMiddle(OctoType.label)
+    Column(
         Modifier.fillMaxWidth().padding(start = Space.L, end = Space.S, top = Space.M, bottom = Space.S),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(Space.M),
+        verticalArrangement = Arrangement.spacedBy(Space.Xxs),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Txt(title, DesktopType.emphasis, OctoColors.TextPrimary, Modifier.semantics { heading() }, maxLines = Int.MAX_VALUE)
-            Txt(song, DesktopType.body, OctoColors.TextMuted, maxLines = 2)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.M)) {
+            WholeTxt(
+                title,
+                DesktopType.pageTitle,
+                OctoColors.TextPrimary,
+                Modifier.weight(1f).alignBy { it[FirstBaseline] - titleCaps }.semantics { heading() },
+            )
+            TextAction(
+                StreamVersionWords.DONE,
+                done,
+                Modifier.alignBy { it[FirstBaseline] - doneCaps }.then(if (doneFocus != null) Modifier.focusRequester(doneFocus) else Modifier),
+            )
         }
-        TextAction(StreamVersionWords.DONE, done)
+        Txt(song, DesktopType.body, OctoColors.TextMuted, maxLines = 2)
     }
 }
 
+// A group's name, set as the form groups' titles are.
 @Composable
 private fun SectionName(text: String) {
-    Txt(text, DesktopType.label, OctoColors.TextSecondary, Modifier.padding(start = Space.M, top = Space.S, bottom = Space.Xxs).semantics { heading() })
+    Txt(text, FormType.group, OctoColors.TextPrimary, Modifier.padding(start = Space.M, top = Space.L, bottom = Space.Xs).semantics { heading() }, maxLines = 2)
 }
 
-// A line in place of rows, with a spinner while it waits.
+// A line in place of rows: a spinner and words while it waits, else a note
+// with its mark (an error's in the error words), the mark on the middle of
+// the first line's capitals.
 @Composable
-private fun Quiet(text: String, spinning: Boolean = false) {
+private fun Quiet(text: String, spinning: Boolean = false, error: Boolean = false) {
+    if (spinning) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = Space.M, vertical = Space.S),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.S),
+        ) {
+            Spinner()
+            Txt(text, FormType.note, OctoColors.TextSecondary, maxLines = 4)
+        }
+        return
+    }
+    val caps = capsMiddle(FormType.note)
+    val ink = if (error) OctoColors.ErrorWords else OctoColors.TextSecondary
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Space.M, vertical = Space.S),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.S),
+        horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        if (spinning) Spinner()
-        Txt(text, DesktopType.body, OctoColors.TextMuted, maxLines = 4)
+        Glyph(
+            if (error) OctoIcons.Error else OctoIcons.Info,
+            Modifier.alignBy { it.measuredHeight / 2 + caps },
+            size = IconSize.Table,
+            tint = if (error) ink else OctoColors.Accent,
+        )
+        Txt(text, FormType.note, ink, Modifier.weight(1f).alignBy(FirstBaseline), maxLines = Int.MAX_VALUE)
     }
 }
 
@@ -277,6 +359,7 @@ private fun Quiet(text: String, spinning: Boolean = false) {
 // play they hear is another (`note`, StreamVersionWords.playingNote).
 @Composable
 private fun PlayingRow(playing: StreamVersionPlaying, note: String) {
+    val caps = capsMiddle(DesktopType.tableTitle)
     Row(
         Modifier
             .fillMaxWidth()
@@ -284,77 +367,97 @@ private fun PlayingRow(playing: StreamVersionPlaying, note: String) {
             .background(OctoColors.AccentSelected, Corner.RowShape)
             .semantics(mergeDescendants = true) { selected = true }
             .padding(horizontal = Space.M, vertical = Space.S),
-        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
-            Txt(playing.title ?: playing.videoId, DesktopType.tableTitle, OctoColors.TextPrimary, maxLines = 2)
-            Txt(StreamVersionWords.rowDetail(playing.channel, playing.duration, playing.kind), DesktopType.meta, OctoColors.TextSecondary)
-            Txt(note, DesktopType.meta, OctoColors.AccentWords, maxLines = 2)
+        Column(Modifier.weight(1f).alignBy(FirstBaseline), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+            Txt(playing.title ?: playing.videoId, DesktopType.tableTitle, OctoColors.SelectedWords, maxLines = 2)
+            Txt(StreamVersionWords.rowDetail(playing.channel, playing.duration, playing.kind), DesktopType.meta, OctoColors.SelectedWords)
+            Txt(note, DesktopType.label, OctoColors.SelectedWords, maxLines = 2)
         }
-        Glyph(OctoIcons.Check, size = IconSize.Toolbar, tint = OctoColors.TextPrimary)
+        Box(Modifier.size(MarkSlot).alignBy { it.measuredHeight / 2 + caps }, contentAlignment = Alignment.Center) {
+            Glyph(OctoIcons.Check, size = IconSize.Table, tint = OctoColors.SelectedWords)
+        }
     }
 }
 
 // Another version: its title (two lines at most) and "channel · length ·
-// kind"; while it is checked, a spinner; refused, the server's words under it.
+// kind", or "Checking" in that line's place while it is checked, with a
+// spinner in the slot the playing row's check takes, so nothing moves;
+// refused, the server's words under it as an error. While another pick is
+// checked it waits, dimmed.
 @Composable
 private fun VersionRow(version: StreamVersion, checking: Boolean, refused: String?, enabled: Boolean, onClick: () -> Unit) {
+    val caps = capsMiddle(DesktopType.tableTitle)
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = RowHeight.Roomy)
+            .alpha(if (enabled || checking) 1f else WaitingAlpha)
             .hoverLift(Corner.RowShape, clickable = enabled)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = Space.M, vertical = Space.S),
-        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
+        Column(Modifier.weight(1f).alignBy(FirstBaseline), verticalArrangement = Arrangement.spacedBy(Space.Xxs)) {
             Txt(version.title, DesktopType.tableTitle, OctoColors.TextPrimary, maxLines = 2)
-            Txt(StreamVersionWords.rowDetail(version.channel, version.duration, version.kind), DesktopType.meta, OctoColors.TextSecondary)
-            if (refused != null) Txt(refused, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
-        }
-        if (checking) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xs)) {
-                Spinner()
-                Txt(StreamVersionWords.CHECKING, DesktopType.meta, OctoColors.TextMuted)
+            if (checking) {
+                Txt(StreamVersionWords.CHECKING, DesktopType.meta, OctoColors.TextSecondary)
+            } else {
+                Txt(StreamVersionWords.rowDetail(version.channel, version.duration, version.kind), DesktopType.meta, OctoColors.TextSecondary)
             }
+            if (refused != null) Txt(refused, DesktopType.meta, OctoColors.ErrorWords, maxLines = 3)
+        }
+        Box(Modifier.size(MarkSlot).alignBy { it.measuredHeight / 2 + caps }, contentAlignment = Alignment.Center) {
+            if (checking) Spinner()
         }
     }
 }
 
-// The sticky footer: whose the pick is for (everyone on the server), and
-// the quiet way back to Octo's pick while a person's pick stands.
+// The sticky footer, a layer of its own under a line: whose the pick is for
+// (everyone on the server), and the way back to Octo's pick while a
+// person's pick stands, its pill's edge on the note's edge.
 @Composable
 private fun Footer(undo: Boolean, enabled: Boolean, undoing: Boolean, refused: String?, onUndo: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().padding(start = Space.L, end = Space.L, top = Space.S, bottom = Space.M),
-        verticalArrangement = Arrangement.spacedBy(Space.Xs),
-    ) {
-        Txt(StreamVersionWords.NOTE, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
-        if (undo) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
-                TextAction(StreamVersionWords.GO_BACK, onUndo, enabled = enabled)
-                if (undoing) {
-                    Spinner()
-                    Txt(StreamVersionWords.CHECKING, DesktopType.meta, OctoColors.TextMuted)
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(OctoColors.TextPrimary.copy(alpha = 0.12f)))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(OctoColors.TextPrimary.copy(alpha = 0.04f))
+                .padding(start = Space.L, end = Space.L, top = Space.M, bottom = Space.M),
+            verticalArrangement = Arrangement.spacedBy(Space.S),
+        ) {
+            Txt(StreamVersionWords.NOTE, DesktopType.meta, OctoColors.TextSecondary, maxLines = 3)
+            if (undo) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
+                    RowAction(StreamVersionWords.GO_BACK, onUndo, enabled = enabled)
+                    if (undoing) {
+                        Spinner()
+                        Txt(StreamVersionWords.CHECKING, DesktopType.meta, OctoColors.TextSecondary)
+                    }
                 }
             }
+            if (refused != null) Txt(refused, DesktopType.meta, OctoColors.ErrorWords, maxLines = 3)
         }
-        if (refused != null) Txt(refused, DesktopType.meta, OctoColors.TextMuted, maxLines = 3)
     }
 }
 
-// A soft fade at the bottom of rows that scroll, with a "More below" button
-// that scrolls to their end; gone once the end shows.
+// The slot at a row's end the playing row's check and a checked row's
+// spinner share, so their right edges and middles meet.
+private val MarkSlot = 18.dp
+
+// How far a row waiting for another pick's answer dims.
+private const val WaitingAlpha = 0.5f
+
+// A "More below" button over the end of rows that scroll (which fade at
+// their edges), scrolling to their end; gone once the end shows.
 @Composable
 private fun MoreBelow(scroll: ScrollState, modifier: Modifier) {
     val scope = rememberCoroutineScope()
     val motion = motionScale()
     AnimatedVisibility(scroll.canScrollForward, modifier, enter = fadeIn(octoTween(motion, OctoDuration.Card)), exit = fadeOut(octoTween(motion, OctoDuration.Card))) {
         Box(
-            Modifier.fillMaxWidth().height(48.dp).background(Brush.verticalGradient(listOf(Color.Transparent, OctoColors.Background.copy(alpha = 0.94f)))),
+            Modifier.fillMaxWidth(),
             contentAlignment = Alignment.BottomCenter,
         ) {
             Row(
