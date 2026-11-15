@@ -186,14 +186,18 @@ const KEY_PIN_MARK: &str = "spki:";
 fn parse_pin(text: &str) -> Option<Pin> {
     let text = text.trim();
     match text.get(..KEY_PIN_MARK.len()) {
-        Some(mark) if mark.eq_ignore_ascii_case(KEY_PIN_MARK) => parse_fingerprint(&text[KEY_PIN_MARK.len()..]).map(Pin::Key),
+        Some(mark) if mark.eq_ignore_ascii_case(KEY_PIN_MARK) => {
+            parse_fingerprint(&text[KEY_PIN_MARK.len()..]).map(Pin::Key)
+        }
         _ => parse_fingerprint(text).map(Pin::Certificate),
     }
 }
 
-// One DER element at the start of `input`: its tag, the element whole, its
-// contents, and what follows it. None when it runs past the input.
-fn der_next(input: &[u8]) -> Option<(u8, &[u8], &[u8], &[u8])> {
+// A DER element's tag, the element whole, its contents, and what follows it.
+type DerElement<'a> = (u8, &'a [u8], &'a [u8], &'a [u8]);
+
+// One DER element at the start of `input`. None when it runs past the input.
+fn der_next(input: &[u8]) -> Option<DerElement<'_>> {
     let tag = *input.first()?;
     let first = *input.get(1)? as usize;
     let (length, header) = if first < 0x80 {
@@ -541,7 +545,10 @@ mod tests {
         let renewed = made(&key, 2);
         let other = made(&rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap(), 3);
         assert_ne!(first, renewed);
-        let key_pin = format!("spki:{}", hex(ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info()).as_ref()));
+        let key_pin = format!(
+            "spki:{}",
+            hex(ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info()).as_ref())
+        );
         let trust = Trust::default();
         trust.replace([("music.example.com".to_string(), key_pin)]);
         assert!(trust.allows("music.example.com", &first));
