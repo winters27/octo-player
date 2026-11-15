@@ -12,6 +12,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -1038,6 +1039,47 @@ class StageTests(Home):
         manifest = plistlib.loads((app / "PlugIns/OctoShare.appex/PrivacyInfo.xcprivacy").read_bytes())
         self.assertIn("NSPrivacyAccessedAPICategoryDiskSpace", {t["NSPrivacyAccessedAPIType"] for t in manifest["NSPrivacyAccessedAPITypes"]})
         self.assertEqual(plistlib.loads((side / "Info.plist").read_bytes())[asc.SOURCE_KEY], "sideload")
+
+    def sideload_only(self, build, built_from):
+        """cmd_sideload with a build number and no reservation; the signer copies what it is given."""
+        (asc.WORK / "unsigned.from").write_text(f"{built_from} tree1234\n")
+        out = Path(self.temp.name) / "Octo-1.11.0-iPhone.ipa"
+        signed = []
+
+        def fake_zsign(args, work):
+            signed.append(args)
+            shutil.copy(args[-1], args[args.index("-o") + 1])
+
+        real = (asc.sdk_dt_keys, asc.scanned_categories, asc.zsign)
+        asc.sdk_dt_keys, asc.scanned_categories, asc.zsign = (lambda: dict(DT)), (lambda p: set()), fake_zsign
+        try:
+            asc.cmd_sideload(self.tree, self.unsigned(), out, build)
+        finally:
+            asc.sdk_dt_keys, asc.scanned_categories, asc.zsign = real
+        return out, signed
+
+    def test_a_sideload_only_build_needs_no_reservation(self):
+        self.assertFalse((asc.HOME / "reserved.json").exists())
+        out, signed = self.sideload_only(1234, self.tree.name)
+        with zipfile.ZipFile(out) as z:
+            info = plistlib.loads(z.read("Payload/Octo.app/Info.plist"))
+            widget = plistlib.loads(z.read("Payload/Octo.app/PlugIns/OctoWidgets.appex/Info.plist"))
+        self.assertEqual((info["CFBundleVersion"], info[asc.SOURCE_KEY]), ("1234", "sideload"))
+        self.assertEqual(widget["CFBundleVersion"], "1234")
+        self.assertEqual(len(signed), 1)
+        self.assertEqual(signed[0][0], "-a")
+
+    def test_a_sideload_only_build_of_another_commit_is_refused(self):
+        with self.assertRaises(asc.Refused):
+            self.sideload_only(1234, "c" * 40)
+
+    def test_a_sideload_only_build_number_is_positive(self):
+        with self.assertRaises(asc.Refused):
+            self.sideload_only(0, self.tree.name)
+
+    def test_a_sideload_without_a_build_still_needs_the_reservation(self):
+        with self.assertRaises(asc.Refused):
+            self.sideload_only(None, self.tree.name)
 
 
 class RedactTests(unittest.TestCase):
