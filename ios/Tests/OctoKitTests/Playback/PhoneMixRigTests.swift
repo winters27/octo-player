@@ -84,7 +84,9 @@ final class RigStage {
     /// Main holds the deck's orders, from another thread, through the deck's renders.
     var ordersBusy = false
 
-    init(_ deck: DeckRender, latency: Double, rate: Double, seed: UInt64) {
+    /// The deck is told the stage delays its sound by `told` (by `latency`, what it really does,
+    /// when nil), as the app tells it from the unit's setting.
+    init(_ deck: DeckRender, latency: Double, rate: Double, seed: UInt64, told: Double? = nil) {
         self.deck = deck
         level = DeckLevel(deck)
         self.latency = latency
@@ -93,7 +95,7 @@ final class RigStage {
         left = .allocate(capacity: 8_192)
         right = .allocate(capacity: 8_192)
         deck.orders.withLock {
-            $0.latencyFrames = latency
+            $0.latencyFrames = told ?? latency
             $0.speed = Float(rate)
         }
     }
@@ -308,7 +310,8 @@ final class MixRig {
          stageB.levelAllocations]
     }
 
-    init(a la: Double, _ ra: Double, b lb: Double, _ rb: Double, seed: UInt64 = 1, songA: RigSong? = nil, shaped: Bool = false) {
+    init(a la: Double, _ ra: Double, b lb: Double, _ rb: Double, seed: UInt64 = 1, songA: RigSong? = nil, shaped: Bool = false,
+         toldA: Double? = nil, toldB: Double? = nil) {
         let box = SoundSettingsBox(shaped ? Self.shapedSettings : SoundSettings())
         sound = box
         let stages = shaped ? [RigSoundStage(box), RigSoundStage(box)] : []
@@ -326,8 +329,8 @@ final class MixRig {
         mix = PhoneMix(decks: [a, b])
         mix.prepare(sampleRate: blendBusRate, channels: 2)
         main = PhoneBlendMain(mix: mix)
-        stageA = RigStage(a, latency: la, rate: ra, seed: seed)
-        stageB = RigStage(b, latency: lb, rate: rb, seed: seed &+ 99)
+        stageA = RigStage(a, latency: la, rate: ra, seed: seed, told: toldA)
+        stageB = RigStage(b, latency: lb, rate: rb, seed: seed &+ 99, told: toldB)
         let first = songA ?? RigSong(serial: 1, entryId: "a", fromFrame: 400_000)
         let second = RigSong(serial: 2, entryId: "b", fromFrame: 91_200)
         self.songA = first
@@ -540,10 +543,30 @@ func rigPlan(kind: TransitionKind = .blend, startMs: Int = 10_000, entryMs: Int 
     static let setups: [(la: Double, ra: Double, lb: Double, rb: Double)] = [(2_400, 1, 4_320, 0.94), (4_320, 0.94, 2_400, 1)]
 
     @Test func theIncomingSongStartsOnItsFrameThroughALatencyMainHasNotPublished() throws {
-        // A plays through a bypassed stage; B is tempo-matched, its stage 90 ms late, and main's
-        // own estimate of the larger latency still says 0.
+        // A plays through a stage that delays nothing; B is tempo-matched, its stage 90 ms late,
+        // and main's own estimate of the larger latency still says 0.
         let rig = MixRig(a: 0, 1, b: 4_320, 0.94)
         rig.mix.latencyFrames.store(0, ordering: .relaxed)
+        rig.arm()
+        rig.run(until: { rig.stageB.firstHeard.map { $0 + 4_800 < rig.nextBus } ?? false })
+        #expect(rig.handedOver)
+        #expect(!rig.cancelled)
+        let bStart = try #require(rig.stageB.firstSound())
+        let s = try #require(rig.stageA.bus(of: 480_000))
+        #expect(abs(bStart - s) <= 1, "B first heard at \(bStart), A's start at \(s)")
+        let entry = try #require(rig.stageB.frame(at: bStart))
+        #expect(abs(entry - 96_000) <= 1)
+    }
+
+    @Test func aTempoMatchedStartLandsOnTheOutgoingFrameWhenTheOutgoingStageIsBypassed() throws {
+        // Apple's time-pitch unit delays its sound by its latency (4,096 frames at 48 kHz) whether
+        // or not it is bypassed: A at its own pace (bypassed), B tempo-matched, both a block late,
+        // each deck told what the unit's setting says.
+        let unit = 4_096.0
+        let a = timePitchSetting(speed: 1, pitch: 1, latencySeconds: unit / blendBusRate, deckRate: blendBusRate)
+        let b = timePitchSetting(speed: 0.94, pitch: 1, latencySeconds: unit / blendBusRate, deckRate: blendBusRate)
+        #expect(a.bypass && !b.bypass)
+        let rig = MixRig(a: unit, 1, b: unit, 0.94, toldA: a.latencyFrames, toldB: b.latencyFrames)
         rig.arm()
         rig.run(until: { rig.stageB.firstHeard.map { $0 + 4_800 < rig.nextBus } ?? false })
         #expect(rig.handedOver)

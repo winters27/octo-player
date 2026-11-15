@@ -28,7 +28,7 @@ public struct DeckOrders: Sendable {
     /// Real time of sound waiting before a stream starts, and the pace it plays at.
     public var startAfterMs = 1_000
     public var speed: Float = 1
-    /// The time-pitch stage's latency, in bus frames (0 while it is bypassed).
+    /// How far the time-pitch stage delays this deck's sound, in bus frames, bypassed or not.
     public var latencyFrames = 0.0
     /// A spare loaded for a blend: silent and consuming nothing until the blend starts it.
     public var parked = false

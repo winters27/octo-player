@@ -136,6 +136,14 @@ public final class DeckClock: @unchecked Sendable {
     }
 }
 
+/// How a deck's time-pitch unit is set for a pace: bypassed at the song's own speed and pitch,
+/// and delaying its sound by its reported latency (in bus frames) either way. A bypassed unit only
+/// stops stretching; its sound still comes out that much later, so a deck at its own pace and a
+/// tempo-matched one line up only when both count it.
+public func timePitchSetting(speed: Float, pitch: Float, latencySeconds: Double, deckRate: Double) -> (bypass: Bool, latencyFrames: Double) {
+    (speed == 1 && pitch == 1, max(0, latencySeconds) * deckRate)
+}
+
 /// The numbers a phone's session runs on, from what the render measures: the larger time-pitch
 /// latency and one render cycle place every action that lands on a later frame; the start commits
 /// (or is cancelled without an acknowledgement) one placement horizon plus one render cycle before
