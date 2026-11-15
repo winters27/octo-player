@@ -713,6 +713,15 @@ mod tests {
     // to a reopen a 503.
     fn made_on_the_way(rate: u32, secs: usize, busy: bool) -> crate::testing::http_server::ScriptServer {
         use std::io::Write;
+        // Each whole second's answer is made before the server starts, so an
+        // answer never waits on its encoding (slow in a debug build under load)
+        // and the deck's wait for its first answer measures the deck alone.
+        let bodies: Vec<Vec<u8>> = (0..=secs)
+            .map(|from| {
+                let frames = rate as usize * secs - rate as usize * from;
+                flac_bytes(rate, 2, &sine(440.0, rate, 2, rate as usize * from, frames, 0.5), &[])
+            })
+            .collect();
         crate::testing::http_server::ScriptServer::start(move |asked, conn, _| {
             let offset = asked
                 .target
@@ -725,10 +734,7 @@ mod tests {
                 );
                 return;
             }
-            let from = offset.unwrap_or(0);
-            let frames = rate as usize * secs - rate as usize * from;
-            let samples = sine(440.0, rate, 2, rate as usize * from, frames, 0.5);
-            let body = flac_bytes(rate, 2, &samples, &[]);
+            let body = &bodies[offset.unwrap_or(0).min(secs)];
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
