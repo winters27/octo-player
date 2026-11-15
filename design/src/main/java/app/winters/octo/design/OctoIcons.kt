@@ -139,6 +139,9 @@ object OctoIcons {
     val SpeakerGroup = R.drawable.sym_speaker_group
     val Headphones = R.drawable.sym_headphones
 
+    // Another version of a song found online, as desktop and iPhone draw it.
+    val LeftRight = R.drawable.sym_arrows_left_right
+
     // Signing in: the address, whether it is encrypted, and an API key.
     val Globe = R.drawable.sym_globe
     val Lock = R.drawable.sym_lock

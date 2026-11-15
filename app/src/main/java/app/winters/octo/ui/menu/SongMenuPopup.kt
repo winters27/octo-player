@@ -325,7 +325,7 @@ private fun SongActionsPage(
                     state.close()
                     vm.findSongs(trackId, song.title)
                 })
-                SongAction.TryAnotherVersion -> GlassMenuAction(OctoIcons.Sync, StreamVersionWords.MENU_ROW, opensPage = true, onClick = {
+                SongAction.TryAnotherVersion -> GlassMenuAction(OctoIcons.LeftRight, StreamVersionWords.MENU_ROW, opensPage = true, onClick = {
                     state.close()
                     vm.playingEntry(trackId)?.let { entry ->
                         state.openVersions(VersionsSong(entry, trackId.removePrefix(FIND_PREFIX), song.title, song.artist))
