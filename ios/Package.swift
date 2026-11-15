@@ -45,7 +45,8 @@ let package = Package(
         .testTarget(name: "OctoKitTests", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "AllocCount"]),
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.
-        .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "OctoIntents"], resources: [.copy("CoverArt")]),
+        .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "OctoIntents"],
+                resources: [.copy("CoverArt"), .copy("Probe")]),
         // The App Intents that Siri, Shortcuts and the widgets' buttons use. Linked into the app
         // and the widgets, so both know the same intents.
         .target(name: "OctoIntents", dependencies: ["OctoSystem"]),
