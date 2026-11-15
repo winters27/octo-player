@@ -338,6 +338,7 @@ def self_test() -> None:
         for folder, names in {
             "octo-desktop-Windows-X64": ["msi/Octo-1.0.0.msi", "zip/Octo-1.0.0-win32-x86-64.zip"],
             "octo-desktop-macOS-ARM64": ["dmg/Octo-1.0.0.dmg"],
+            "octo-desktop-macOS-X64": ["dmg/Octo-1.0.0.dmg"],
             "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "flatpak/Octo-1.0.0-linux-x64.flatpak",
                                        "appimage/Octo-1.0.0-linux-x64.AppImage", "pacman/Octo-1.0.0-linux-x64.pkg.tar.zst",
                                        "zip/Octo-1.0.0-linux-x86-64.zip"],
@@ -347,27 +348,27 @@ def self_test() -> None:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(name.encode())
         out = root / "out"
-        every = ["windows-x64", "macos-arm64", "linux-x64"]
+        every = ["windows-x64", "macos-arm64", "macos-x64", "linux-x64"]
         staged = stage_desktop("1.2.0", artifacts, out, every)
         assert sorted(p.name for p in staged) == sorted([
-            "Octo-1.2.0-windows-x64.msi", "Octo-1.2.0-windows-x64-portable.zip", "Octo-1.2.0-macos-arm64.dmg",
+            "Octo-1.2.0-windows-x64.msi", "Octo-1.2.0-windows-x64-portable.zip", "Octo-1.2.0-macos-arm64.dmg", "Octo-1.2.0-macos-x64.dmg",
             "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64.flatpak",
             "Octo-1.2.0-linux-x64.AppImage", "Octo-1.2.0-linux-x64.pkg.tar.zst", "Octo-1.2.0-linux-x64-portable.zip",
         ]), staged
         manifest = json.loads(write_manifest("desktop", "desktop-v1.2.0", "- Hello.", out).read_bytes())
-        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 9
+        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 10
         flatpak = next(a for a in manifest["assets"] if a["kind"] == "flatpak")
         assert (flatpak["os"], flatpak["arch"], flatpak["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.flatpak")
         appimage = next(a for a in manifest["assets"] if a["kind"] == "appimage")
         assert (appimage["os"], appimage["arch"], appimage["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.AppImage")
         pacman = next(a for a in manifest["assets"] if a["kind"] == "pkg.tar.zst")
         assert (pacman["os"], pacman["arch"], pacman["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.pkg.tar.zst")
-        dmg = next(a for a in manifest["assets"] if a["kind"] == "dmg")
-        assert (dmg["os"], dmg["arch"], dmg["name"]) == ("macos", "arm64", "Octo-1.2.0-macos-arm64.dmg")
+        dmgs = sorted((a["os"], a["arch"], a["name"]) for a in manifest["assets"] if a["kind"] == "dmg")
+        assert dmgs == [("macos", "arm64", "Octo-1.2.0-macos-arm64.dmg"), ("macos", "x64", "Octo-1.2.0-macos-x64.dmg")], dmgs
         msi = next(a for a in manifest["assets"] if a["kind"] == "msi")
         assert msi == {"name": "Octo-1.2.0-windows-x64.msi", "sha256": hashlib.sha256(b"msi/Octo-1.0.0.msi").hexdigest(), "size": 18, "os": "windows", "arch": "x64", "kind": "msi"}
         sums = (out / SUMS).read_text()
-        assert sums.count("\n") == 9 and "Octo-1.2.0-macos-arm64.dmg" in sums and "Octo-1.2.0-linux-x64.AppImage" in sums
+        assert sums.count("\n") == 10 and "Octo-1.2.0-macos-x64.dmg" in sums and "Octo-1.2.0-linux-x64.AppImage" in sums
         # A file of the wrong system, or a portable one that isn't the zip, is never described.
         assert refuses(lambda: describe("Octo-1.2.0-windows-x64.AppImage", "desktop", "1.2.0"))
         assert refuses(lambda: describe("Octo-1.2.0-macos-arm64.msi", "desktop", "1.2.0"))
@@ -375,11 +376,12 @@ def self_test() -> None:
         assert refuses(lambda: describe("Octo-1.2.0-linux-x64.appimage", "desktop", "1.2.0"))
         # A release missing a system's build, or a Linux build missing one
         # of its files or holding two, stops before anything is named.
-        mac = artifacts / "octo-desktop-macOS-ARM64"
-        shutil.move(mac, root / "mac-aside")
-        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "no-mac", every))
-        assert len(stage_desktop("1.2.0", artifacts, root / "by-hand")) == 8, "a build by hand needs no system"
-        shutil.move(root / "mac-aside", mac)
+        for chip in ["ARM64", "X64"]:
+            mac = artifacts / f"octo-desktop-macOS-{chip}"
+            shutil.move(mac, root / "mac-aside")
+            assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / f"no-mac-{chip}", every)), chip
+            assert len(stage_desktop("1.2.0", artifacts, root / f"by-hand-{chip}")) == 9, "a build by hand needs no system"
+            shutil.move(root / "mac-aside", mac)
         linux = artifacts / "octo-desktop-Linux-X64"
         image = linux / "appimage/Octo-1.0.0-linux-x64.AppImage"
         image.rename(root / "aside.AppImage")

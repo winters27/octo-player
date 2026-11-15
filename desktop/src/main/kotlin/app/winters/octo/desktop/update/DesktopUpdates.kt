@@ -124,6 +124,28 @@ fun archName(arch: String = System.getProperty("os.arch").orEmpty()): String = w
     else -> arch.lowercase()
 }
 
+// The chip a Mac really has, as the release names it. An Intel copy of
+// Octo runs on Apple silicon through Rosetta, where Java says x86_64 but the
+// system still says arm64 (hw.optional.arm64), so the next version is the
+// one made for the chip: an Intel copy moves to Apple silicon's DMG.
+fun macArch(jvmArch: String = System.getProperty("os.arch").orEmpty(), appleSilicon: () -> Boolean? = ::readAppleSilicon): String {
+    val arch = archName(jvmArch)
+    return if (arch == "x64" && appleSilicon() == true) "arm64" else arch
+}
+
+// Whether this Mac is Apple silicon, or null when the system can't say.
+private fun readAppleSilicon(): Boolean? = runCatching {
+    val process = ProcessBuilder("sysctl", "-n", "hw.optional.arm64").redirectErrorStream(true).start()
+    val said = process.inputStream.bufferedReader().readText().trim()
+    if (!process.waitFor(5, TimeUnit.SECONDS)) {
+        process.destroy()
+        null
+    } else {
+        // An Intel Mac has no such value and says so.
+        said == "1"
+    }
+}.getOrNull()
+
 // This system's installer among a release's files: the MSI on Windows,
 // the DMG on macOS, and on Linux the AppImage, DEB, RPM or pacman package
 // (`linuxKind`), for this chip.
@@ -403,7 +425,7 @@ class DesktopUpdates(
                 appImage != null -> APPIMAGE_KIND
                 else -> linuxPackageKind(runCatching { File("/etc/os-release").readText() }.getOrNull(), File("/usr/bin/dpkg").exists(), File("/usr/bin/rpm").exists())
             }
-            val arch = archName()
+            val arch = if (os == DesktopOs.Mac) macArch() else archName()
             val updater = PlayerUpdater(
                 PlayerApp.Desktop,
                 on.running,

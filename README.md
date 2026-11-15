@@ -60,7 +60,7 @@ For Android 10 and newer. Your phone's music and your server's make one library.
 
 Download the latest release:
 
-- [Octo for Windows, macOS and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, a `.dmg` for Macs with Apple silicon, and a `.deb`, `.rpm`, `.flatpak`, `.AppImage`, Arch Linux package (`.pkg.tar.zst`) or portable zip for Linux.
+- [Octo for Windows, macOS and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, a `.dmg` for Macs (`arm64` for Apple silicon, `x64` for Intel), and a `.deb`, `.rpm`, `.flatpak`, `.AppImage`, Arch Linux package (`.pkg.tar.zst`) or portable zip for Linux.
   - Windows: the installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
   - macOS: open the `.dmg` and drag Octo into Applications. It is signed and notarized by Apple.
   - Flatpak: `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub.

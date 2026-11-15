@@ -1,6 +1,7 @@
 # Builds the desktop installers on each system, since each is only made on
-# its own: the MSI and a portable zip on Windows; the DMG on macOS (Apple
-# silicon), signed with the Developer ID and notarized by Apple; and the
+# its own: the MSI and a portable zip on Windows; a DMG for Apple silicon
+# and one for Intel Macs, signed with the Developer ID and notarized by
+# Apple; and the
 # DEB, RPM, Flatpak bundle, AppImage, pacman package and a portable zip on
 # Linux. Run by hand from the Actions tab, the installers are kept as the
 # run's artifacts. On a desktop-v<version> tag (desktop-v1.2.0, or
@@ -9,7 +10,7 @@
 # apps find them (publish-player-release.yml). A release goes out with
 # every system's files or not at all.
 #
-# The Mac build needs five secrets in this repository, and stops without
+# Both Mac builds need five secrets in this repository, and stop without
 # any of them (it never makes an unsigned DMG):
 #   MACOS_SIGNING_CERTIFICATE           the Developer ID Application certificate
 #                                       and its private key, exported as a .p12, in base64
@@ -54,9 +55,13 @@ jobs:
           - os: windows-latest
             tasks: ":desktop:packageMsi :desktop:packagePortableZip"
             tries: 1
-          # Apple silicon. Intel Macs are left out until the engine and the
-          # system library are known to build for x86_64-apple-darwin.
+          # Apple silicon and Intel, each built on its own chip (jpackage
+          # packs only for the machine it runs on), signed and notarized the
+          # same way.
           - os: macos-15
+            tasks: ":desktop:packageDmg"
+            tries: 1
+          - os: macos-15-intel
             tasks: ":desktop:packageDmg"
             tries: 1
           # A fixed Ubuntu, so the oldest Linux the packages run on (its

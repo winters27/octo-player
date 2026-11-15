@@ -549,6 +549,20 @@ class DesktopUpdatesTest {
         assertNull(installerFor(assets, DesktopOs.Windows, "arm64", null))
     }
 
+    // Each Mac takes the DMG made for its chip, and an Intel copy running on
+    // Apple silicon (through Rosetta) moves to the Apple silicon one.
+    @Test
+    fun eachMacTakesTheDiskImageForItsChip() {
+        fun dmg(arch: String) = ManifestAsset("Octo-1.13.0-macos-$arch.dmg", "a".repeat(64), 1, "macos", arch, "dmg")
+        val assets = listOf(dmg("arm64"), dmg("x64"), ManifestAsset("Octo-1.13.0-windows-x64.msi", "a".repeat(64), 1, "windows", "x64", "msi"))
+        fun picked(jvmArch: String, appleSilicon: Boolean?) = installerFor(assets, DesktopOs.Mac, macArch(jvmArch) { appleSilicon }, null)?.name
+        assertEquals("Octo-1.13.0-macos-arm64.dmg", picked("aarch64", true))
+        assertEquals("Octo-1.13.0-macos-x64.dmg", picked("x86_64", false))
+        assertEquals("Octo-1.13.0-macos-arm64.dmg", picked("x86_64", true))
+        assertEquals("the system can't say: Java's word stands", "Octo-1.13.0-macos-x64.dmg", picked("x86_64", null))
+        assertEquals("arm64", macArch("arm64") { null })
+    }
+
     // An AppImage opened from its file updates itself; one unpacked by
     // hand, or in a folder Octo can't write to, says why it doesn't. The
     // Flatpak and a build with no key still win.
