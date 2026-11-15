@@ -75,8 +75,12 @@ fun songMenuActions(
     canRemoveFromMine: Boolean = false,
     // Library songs can be kept on this computer to play offline.
     canKeep: Boolean = false,
+    // Whether any of the songs can go in a playlist: all but songs found
+    // online on a server without octoPlaylistSongs, which would drop them.
+    outsideToPlaylists: Boolean = true,
 ): List<List<SongAction>> {
     val one = count == 1
+    val toPlaylists = !outside || outsideToPlaylists
     val removable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
     val movable = removable && movesInPlaylist
     val groups = listOf(
@@ -88,8 +92,8 @@ fun songMenuActions(
         listOfNotNull(
             SongAction.AddToLibrary.takeIf { outside && canAdd },
             SongAction.RequestCopy.takeIf { one && outside && canRequest },
-            SongAction.AddToLastPlaylist.takeIf { lastPlaylist },
-            SongAction.AddToPlaylist,
+            SongAction.AddToLastPlaylist.takeIf { lastPlaylist && toPlaylists },
+            SongAction.AddToPlaylist.takeIf { toPlaylists },
             SongAction.Favourite.takeIf { !outside },
             SongAction.Rate.takeIf { !outside },
             SongAction.KeepOffline.takeIf { canKeep && !outside },
@@ -154,7 +158,7 @@ fun sharedRating(ratings: List<Int>): Int? = ratings.distinct().singleOrNull()
 enum class CollectionAction {
     Play, Shuffle, PlayNext, AddToQueue, StartRadio,
     AddToPlaylist, FindFlac, Favourite,
-    Pin, JumpList,
+    Pin, JumpList, MoveToFolder,
     GoToArtist,
     Rename, Duplicate, Export, Public,
     Delete,
@@ -189,20 +193,26 @@ fun artistMenuActions(outside: Boolean = false): List<List<CollectionAction>> = 
 // (`renames`, `visibility`, `deletes`; a family playlist: rename for a
 // manager or its maker, delete for a manager, never public or private).
 // Anyone's can be copied into a new one of their own.
+// An imported playlist's copy (`imported`) is never renamed, made public or
+// private, or deleted here: the server keeps it as the import made it. Move
+// to folder (`files`) is for a server that keeps folders and a playlist that
+// can be filed (not one of Octo's own lists or its library upkeep lists).
 fun playlistMenuActions(
     empty: Boolean = false,
     owns: Boolean = false,
     renames: Boolean = owns,
     visibility: Boolean = owns,
     deletes: Boolean = owns,
+    imported: Boolean = false,
+    files: Boolean = false,
 ): List<List<CollectionAction>> = listOf(
     if (empty) emptyList() else Playing,
-    listOf(CollectionAction.Pin),
+    listOfNotNull(CollectionAction.Pin, CollectionAction.MoveToFolder.takeIf { files }),
     listOfNotNull(
-        CollectionAction.Rename.takeIf { renames },
+        CollectionAction.Rename.takeIf { renames && !imported },
         CollectionAction.Duplicate,
         CollectionAction.Export.takeIf { !empty },
-        CollectionAction.Public.takeIf { visibility },
+        CollectionAction.Public.takeIf { visibility && !imported },
     ),
-    listOfNotNull(CollectionAction.Delete.takeIf { deletes }),
+    listOfNotNull(CollectionAction.Delete.takeIf { deletes && !imported }),
 ).filter { it.isNotEmpty() }

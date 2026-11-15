@@ -39,14 +39,31 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.library.TableRow
+import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.Song
 import kotlin.math.roundToInt
 
-// A place songs can be dropped: where it is in the window, what it says it
-// will do ("Add to Late night"), and what it does with them. Where targets
-// overlap, the higher `layer` wins (the floating player over the page),
-// then the smaller (a queue row over the queue panel).
-class DropTarget(val bounds: Rect, val action: String, val layer: Int = 0, val onDrop: (List<Song>) -> Unit)
+// A place songs or playlists can be dropped: where it is in the window,
+// what it says it will do ("Add to Late night"), and what it does with them.
+// A target for playlists (a folder row, the Playlists heading) takes no
+// songs (`takesSongs`) and hands the playlists to `onPlaylists`. Where
+// targets overlap, the higher `layer` wins (the floating player over the
+// page), then the smaller (a queue row over the queue panel).
+class DropTarget(
+    val bounds: Rect,
+    val action: String,
+    val layer: Int = 0,
+    val takesSongs: Boolean = true,
+    val onPlaylists: ((List<Playlist>) -> Unit)? = null,
+    val onDrop: (List<Song>) -> Unit,
+)
+
+// What is being dragged: songs, with where they came from, or playlists
+// from the sidebar, to file them in a folder.
+sealed interface DragPayload {
+    data class Songs(val songs: List<Song>, val from: SongPlace?) : DragPayload
+    data class Playlists(val playlists: List<Playlist>) : DragPayload
+}
 
 // What a table's rows do with songs dropped on one: `action` is what the
 // label says, `takes` whether a drag from there can land here at all, and
@@ -76,17 +93,33 @@ class DragState {
     var from by mutableStateOf<SongPlace?>(null)
         private set
 
+    // Playlists being dragged from the sidebar, in the sidebar's order.
+    var playlists by mutableStateOf<List<Playlist>>(emptyList())
+        private set
+
     private val targets = mutableStateMapOf<String, DropTarget>()
 
+    // Songs are being dragged.
     val active: Boolean get() = songs.isNotEmpty()
 
-    // The target under the pointer, if any.
+    // Playlists are being dragged.
+    val movingPlaylists: Boolean get() = playlists.isNotEmpty()
+
+    // What the drag carries, if anything.
+    val payload: DragPayload?
+        get() = when {
+            active -> DragPayload.Songs(songs, from)
+            movingPlaylists -> DragPayload.Playlists(playlists)
+            else -> null
+        }
+
+    // The target under the pointer that takes what is dragged, if any.
     val over: Pair<String, DropTarget>?
-        get() = if (!active) {
+        get() = if (!active && !movingPlaylists) {
             null
         } else {
             targets.entries
-                .filter { it.value.bounds.contains(at) }
+                .filter { it.value.bounds.contains(at) && (if (active) it.value.takesSongs else it.value.onPlaylists != null) }
                 .maxWithOrNull(compareBy<Map.Entry<String, DropTarget>> { it.value.layer }.thenByDescending { it.value.bounds.width * it.value.bounds.height })
                 ?.toPair()
         }
@@ -102,22 +135,32 @@ class DragState {
         this.from = from
     }
 
-    fun move(to: Offset) {
-        if (active) at = to
+    // Starts dragging playlists from the sidebar.
+    fun startPlaylists(playlists: List<Playlist>, at: Offset) {
+        if (playlists.isEmpty()) return
+        songs = emptyList()
+        from = null
+        this.playlists = playlists
+        this.at = at
     }
 
-    // Lets go: the songs go to the target under the pointer. Answers whether
-    // they were dropped somewhere.
+    fun move(to: Offset) {
+        if (active || movingPlaylists) at = to
+    }
+
+    // Lets go: the songs or playlists go to the target under the pointer.
+    // Answers whether they were dropped somewhere.
     fun drop(): Boolean {
         val target = over?.second
-        // The target still sees the drag while it takes the songs.
-        target?.onDrop(songs)
+        // The target still sees the drag while it takes them.
+        if (movingPlaylists) target?.onPlaylists?.invoke(playlists) else target?.onDrop(songs)
         cancel()
         return target != null
     }
 
     fun cancel() {
         songs = emptyList()
+        playlists = emptyList()
         from = null
     }
 
@@ -140,10 +183,18 @@ val LocalDrag = staticCompositionLocalOf { DragState() }
 fun Modifier.dropTarget(id: String, action: String, layer: Int = 0, onDrop: (List<Song>) -> Unit): Modifier = composed {
     val drag = LocalDrag.current
     DisposableEffect(id) { onDispose { drag.forget(id) } }
-    onGloballyPositioned { drag.place(id, DropTarget(it.boundsInWindow(), action, layer, onDrop)) }
+    onGloballyPositioned { drag.place(id, DropTarget(it.boundsInWindow(), action, layer, onDrop = onDrop)) }
 }
 
-// Whether songs are being held over the target named `id`.
+// Makes this a place playlists dragged from the sidebar can be dropped,
+// taking no songs.
+fun Modifier.playlistDropTarget(id: String, action: String, onDrop: (List<Playlist>) -> Unit): Modifier = composed {
+    val drag = LocalDrag.current
+    DisposableEffect(id) { onDispose { drag.forget(id) } }
+    onGloballyPositioned { drag.place(id, DropTarget(it.boundsInWindow(), action, takesSongs = false, onPlaylists = onDrop) {}) }
+}
+
+// Whether what is dragged is being held over the target named `id`.
 @Composable
 fun isDropOver(id: String): Boolean = LocalDrag.current.over?.first == id
 
@@ -151,14 +202,24 @@ fun isDropOver(id: String): Boolean = LocalDrag.current.over?.first == id
 // song's title, and what letting go here would do.
 @Composable
 fun DragLabel(drag: DragState) {
-    if (!drag.active) return
+    if (!drag.active && !drag.movingPlaylists) return
     val songs = drag.songs
+    val playlists = drag.playlists
     val over = drag.over?.second
-    val what = if (songs.size == 1) songs.single().title else "${songs.size} songs"
+    val what = when {
+        drag.movingPlaylists -> if (playlists.size == 1) playlists.single().name else "${playlists.size} playlists"
+        songs.size == 1 -> songs.single().title
+        else -> "${songs.size} songs"
+    }
+    val icon = when {
+        drag.movingPlaylists -> if (over != null) OctoIcons.PlaylistFolder else OctoIcons.Playlists
+        over != null -> OctoIcons.AddToPlaylist
+        else -> OctoIcons.Songs
+    }
     Box(Modifier.offset { IntOffset(drag.at.x.roundToInt() + LabelOffset, drag.at.y.roundToInt() + LabelOffset) }) {
         Glaze(shape = Corner.ControlShape, light = GlazeLight.Lifted) {
             Row(Modifier.padding(horizontal = Space.L, vertical = Space.S), verticalAlignment = Alignment.CenterVertically) {
-                Glyph(if (over != null) OctoIcons.AddToPlaylist else OctoIcons.Songs, Modifier.padding(end = Space.M), size = IconSize.Table, tint = if (over != null) OctoColors.TextPrimary else OctoColors.TextSecondary)
+                Glyph(icon, Modifier.padding(end = Space.M), size = IconSize.Table, tint = if (over != null) OctoColors.TextPrimary else OctoColors.TextSecondary)
                 Txt(if (over != null) "${over.action}: $what" else what, DesktopType.emphasis)
             }
         }

@@ -45,3 +45,33 @@ fun movedBy(move: PlaylistMove, count: Int, picked: Collection<Int>): List<Int> 
 // Whether a move would change anything, for dimming the rows that would not.
 fun movesAnything(move: PlaylistMove, count: Int, picked: Collection<Int>): Boolean =
     movedBy(move, count, picked) != List(count) { it }
+
+// A move of picked songs, by their ids in the playlist's order, to land
+// before the song `anchor` (null: at the end), so it can be made again over
+// the playlist after another device changed it.
+data class SongMove(val picked: List<String>, val anchor: String?)
+
+// The move that takes the picked places of `ids` to `to`, as movedPositions
+// takes them: the anchor is the first song at or after `to` not picked.
+fun songMoveOf(ids: List<String>, picked: Collection<Int>, to: Int): SongMove {
+    val moving = picked.toHashSet()
+    val at = to.coerceIn(0, ids.size)
+    val anchor = (at until ids.size).firstOrNull { it !in moving }?.let(ids::get)
+    return SongMove(ids.indices.filter { it in moving }.map(ids::get), anchor)
+}
+
+// The move made over `ids`: each picked song taken by its id (a song picked
+// twice takes its first two copies), landing before the first copy of the
+// anchor not picked, or at the end when the anchor is gone. Null when a
+// picked song is no longer there.
+fun reapplied(move: SongMove, ids: List<String>): List<Int>? {
+    val used = BooleanArray(ids.size)
+    val places = ArrayList<Int>()
+    for (id in move.picked) {
+        val at = ids.indices.firstOrNull { !used[it] && ids[it] == id } ?: return null
+        used[at] = true
+        places += at
+    }
+    val to = move.anchor?.let { anchor -> ids.indices.firstOrNull { !used[it] && ids[it] == anchor } } ?: ids.size
+    return movedPositions(ids.indices.toList(), places, to)
+}

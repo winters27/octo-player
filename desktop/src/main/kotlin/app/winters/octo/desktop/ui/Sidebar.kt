@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.pages.capsMiddle
 import app.winters.octo.desktop.pages.serverUpdateWaits
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntRect
@@ -94,6 +96,24 @@ import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 import app.winters.octo.desktop.home.octoLists
 import app.winters.octo.desktop.liveradio.LIVE_RADIO
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.input.pointer.onPointerEvent
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import app.winters.octo.desktop.placePlaylists
+import app.winters.octo.desktop.playlists.SidebarPicks
+import app.winters.octo.desktop.playlists.SidebarPlaylistRow
+import app.winters.octo.desktop.playlists.sidebarPlaylistRows
+import app.winters.octo.desktop.playlists.songsFor
+import app.winters.octo.playlists.PlaylistFolderTree
+import app.winters.octo.playlists.PlaylistFolderWords
 
 // A place in the sidebar: the page, its name and icon.
 private class Place(val page: Page, val label: String, val icon: ImageVector)
@@ -138,6 +158,7 @@ fun Sidebar(
     val frame = settings.frame
     val lit = app.navigator.sidebarItem
     val liveLists by app.liveLists.lists.collectAsState()
+    val picks = remember { SidebarPicks() }
     fun go(page: Page) = app.navigator.go(page)
     Column(modifier.then(if (film) Modifier.chromeFilm(backdrop) else Modifier).padding(horizontal = Space.M, vertical = Space.M)) {
         if (rail) RailSearch(app) else OmniField(app, Modifier.fillMaxWidth())
@@ -175,16 +196,41 @@ fun Sidebar(
             val pinned = frame.pinnedPlaylists
             val listener = app.connection?.client?.username.orEmpty()
             val isOcto = app.connection?.isOcto == true
-            // Octo's own lists have a group of their own, below the listener's.
+            // Octo's own lists have a group of their own, below the listener's,
+            // and its library upkeep lists another, closed until opened.
             val fromOcto = octoLists(app.playlists, listener, isOcto).flatMap { it.second }
-            val playlists = app.playlists.filter { it !in fromOcto }.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
-            group(app, "playlists", "Playlists", rail, frame.foldedGroups, action = {
-                val pointer = LocalPointer.current
-                IconAction(OctoIcons.AddToLibrary, "New playlist or live list", { showNewListMenu(app, pointer.point) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
-            }) {
+            val own = app.playlists.filter { it !in fromOcto }
+            val upkeep = own.filter { it.octoUpkeep }
+            val mine = own.filterNot { it.octoUpkeep }
+            // Folders on a server that keeps them (sidebarPlaylistRows).
+            val tree = app.folderTree.takeIf { app.playlistFoldersOffered }
+            val rows = sidebarPlaylistRows(mine, pinned, tree, frame.openFolders, rail)
+            // The playlists in the order their rows show, for shift clicks.
+            val order = rows.mapNotNull { (it as? SidebarPlaylistRow.Item)?.playlist?.id }.distinct()
+            group(
+                app,
+                "playlists",
+                "Playlists",
+                rail,
+                frame.foldedGroups,
+                action = {
+                    val pointer = LocalPointer.current
+                    IconAction(OctoIcons.AddToLibrary, "New playlist, folder or live list", { showNewListMenu(app, pointer.point) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
+                },
+                // Playlists dropped on the group's name leave their folders.
+                dropPlaylists = if (tree == null) null else ({ dropped -> app.placePlaylists(dropped.map { it.id }, null) }),
+            ) {
                 // Live lists first, each with its own mark (LiveListParts.kt).
                 items(liveLists, key = { "ll:${it.id}" }) { list -> LiveListRow(app, list, lit == SidebarItem.LiveListItem(list.id), rail) }
-                items(playlists, key = { "pl:${it.id}" }) { playlist ->
+                items(rows, key = { it.key }) { row ->
+                    when (row) {
+                        is SidebarPlaylistRow.Item -> PlaylistRow(app, row.playlist, lit == SidebarItem.PlaylistItem(row.playlist.id), rail, row.pinned, row.depth, picks, order, mine)
+                        is SidebarPlaylistRow.Folder -> FolderRow(app, row, rail)
+                    }
+                }
+            }
+            if (upkeep.isNotEmpty()) {
+                upkeepGroup(app, upkeep, rail, frame.upkeepOpen) { playlist ->
                     PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
                 }
             }
@@ -256,6 +302,9 @@ private fun LazyListScope.group(
     rail: Boolean,
     folded: Set<String>,
     action: (@Composable () -> Unit)? = null,
+    // Playlists dropped on the name, when it takes them (the Playlists
+    // group's, where they leave their folders); lit while they are held over it.
+    dropPlaylists: ((List<Playlist>) -> Unit)? = null,
     rows: LazyListScope.() -> Unit,
 ) {
     val shut = key in folded && !rail
@@ -263,9 +312,17 @@ private fun LazyListScope.group(
         if (rail) {
             Separator(Modifier.padding(vertical = Space.S))
         } else {
+            val target = if (dropPlaylists != null) {
+                Modifier
+                    .playlistDropTarget(TOP_LEVEL_DROP, PlaylistFolderWords.NOT_IN_A_FOLDER, dropPlaylists)
+                    .then(if (isDropOver(TOP_LEVEL_DROP)) Modifier.background(DropLit, Corner.ControlShape) else Modifier)
+            } else {
+                Modifier
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .then(target)
                     .padding(top = Space.L, bottom = Space.Xxs)
                     .height(RowHeight.Nav - Space.Xs)
                     .clickable(role = Role.Button) {
@@ -287,6 +344,57 @@ private fun LazyListScope.group(
         }
     }
     if (!shut) rows()
+}
+
+// The id the Playlists group's name takes dropped playlists under.
+private const val TOP_LEVEL_DROP = "pf:top"
+
+// Octo's library upkeep lists (its library actions and notices, a family
+// member's request lists): a group of their own below the playlists, closed
+// until opened, which is remembered. While it is closed, a note under its
+// name says which notice lists hold songs ("Review has 3 songs"). They are
+// never filed. On the rail its rows always show.
+private fun LazyListScope.upkeepGroup(app: AppState, upkeep: List<Playlist>, rail: Boolean, open: Boolean, row: @Composable (Playlist) -> Unit) {
+    val shut = !open && !rail
+    item(key = "g:upkeep") {
+        if (rail) {
+            Separator(Modifier.padding(vertical = Space.S))
+        } else {
+            val note = if (shut) PlaylistFolderWords.upkeepNote(upkeep.filter { it.octoNotice != null }.map { it.name to it.songCount }) else null
+            Column(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = Space.L, bottom = Space.Xxs)
+                        .height(RowHeight.Nav - Space.Xs)
+                        .clickable(role = Role.Button) { app.updateFrame { it.copy(upkeepOpen = !it.upkeepOpen) } }
+                        .semantics {
+                            heading()
+                            contentDescription = listOfNotNull(PlaylistFolderWords.LIBRARY_UPKEEP, note).joinToString(", ")
+                            stateDescription = if (shut) "Folded" else "Open"
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Txt(PlaylistFolderWords.LIBRARY_UPKEEP.uppercase(), DesktopType.label, OctoColors.TextMuted, Modifier.padding(start = Space.M))
+                    Glyph(OctoIcons.Chevron, Modifier.padding(start = Space.Xs).rotate(if (shut) 0f else 90f), size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
+                }
+                if (note != null) {
+                    // The glyph on the middle of the first line's capitals,
+                    // in the accent; the words in the secondary color, as a
+                    // form's note.
+                    val caps = capsMiddle(DesktopType.meta)
+                    Row(
+                        Modifier.padding(start = Space.M, end = Space.M, bottom = Space.Xs),
+                        horizontalArrangement = Arrangement.spacedBy(Space.Xs),
+                    ) {
+                        Glyph(OctoIcons.Info, Modifier.alignBy { it.measuredHeight / 2 + caps }, size = IconSize.Inline, tint = OctoColors.Accent)
+                        Txt(note, DesktopType.meta, OctoColors.TextSecondary, Modifier.alignBy(FirstBaseline), maxLines = 2)
+                    }
+                }
+            }
+        }
+    }
+    if (!shut) items(upkeep, key = { "up:${it.id}" }) { row(it) }
 }
 
 // The downloads drawer's way in, on a server that keeps a log of its
@@ -365,42 +473,112 @@ private fun NavMark(modifier: Modifier = Modifier) {
     Box(modifier.size(FrameSize.NavMark).background(OctoColors.Accent, CircleShape))
 }
 
-// A playlist with its small cover; right-click opens its menu, to play,
-// pin, rename, copy, export or delete it. On the rail, the cover alone.
+// A playlist with its small cover, `depth` folders in; right-click opens its
+// menu, to play, pin, file, rename, copy, export or delete it. On the rail,
+// the cover alone. With `picks`, ctrl (command on a Mac) and shift clicks
+// pick several (`order` is the rows' order, `all` the playlists they are),
+// and a drag carries the picks, or the row alone, to a folder.
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, rail: Boolean, pinned: Boolean) {
+private fun PlaylistRow(
+    app: AppState,
+    playlist: Playlist,
+    selected: Boolean,
+    rail: Boolean,
+    pinned: Boolean,
+    depth: Int = 0,
+    picks: SidebarPicks? = null,
+    order: List<String> = emptyList(),
+    all: List<Playlist> = emptyList(),
+) {
     val pointer = LocalPointer.current
     var here by remember { mutableStateOf(false) }
     val keyboard = LocalFocusVisibility.current.keyboard
-    // Songs dragged onto a playlist the listener can add to are added to it.
+    // Songs dragged onto a playlist the listener can add to are added to it,
+    // songs found online only where they can be kept (songsFor). A row that
+    // can't take any of the songs held over the sidebar fades while they are.
     val drag = LocalDrag.current
     val dropId = "pl:${playlist.id}"
-    val takes = drag.active && app.access(playlist).add
+    val adds = app.access(playlist).add
+    val takes = drag.active && adds && songsFor(playlist, drag.songs, app.playlistSongs).isNotEmpty()
+    val refuses = drag.active && adds && !takes
     val lit = takes && isDropOver(dropId)
+    val picked = picks != null && playlist.id in picks.picked
+    val movable = picks != null && !rail && app.playlistFoldersOffered && PlaylistFolderTree.fileable(playlist.id)
+    // Where the row is in the window, to follow a drag of playlists, and the
+    // keys held at the last press: 1 picks one more, 2 picks a run.
+    var placed by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var held by remember { mutableStateOf(0) }
+    // What a drag or the menu takes: the picks when this row is one of them.
+    val carried = {
+        val ids = picks?.group(playlist.id, order) ?: listOf(playlist.id)
+        ids.mapNotNull { id -> all.firstOrNull { it.id == id } }.ifEmpty { listOf(playlist) }
+    }
+    val latestCarried by rememberUpdatedState(carried)
     val row: @Composable () -> Unit = {
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(RowHeight.Nav + Space.Xs)
+                .alpha(if (refuses) REFUSED_ALPHA else 1f)
                 .then(if (takes) Modifier.dropTarget(dropId, "Add to ${playlist.name}") { addDroppedSongs(app, playlist, it, pointer.point) } else Modifier)
+                .onGloballyPositioned { placed = it }
+                .then(
+                    if (movable) {
+                        Modifier.pointerInput(playlist.id) {
+                            detectDragGestures(
+                                onDragStart = { local -> placed?.let { drag.startPlaylists(latestCarried(), it.localToWindow(local)) } },
+                                onDragEnd = { drag.drop() },
+                                onDragCancel = { drag.cancel() },
+                            ) { change, _ ->
+                                change.consume()
+                                placed?.let { drag.move(it.localToWindow(change.position)) }
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .onPointerEvent(PointerEventType.Press) { event ->
+                    val keys = event.keyboardModifiers
+                    val toggle = if (app.mac) keys.isMetaPressed else keys.isCtrlPressed
+                    held = when {
+                        toggle -> 1
+                        keys.isShiftPressed -> 2
+                        else -> 0
+                    }
+                }
                 .hoverLift(Corner.ControlShape, lifted = false)
-                .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close) } }
+                .onRightClick { app.popups.showAt(pointer.point) { close -> PlaylistMenu(app, playlist, close, carried()) } }
                 .onFocusChanged { here = it.isFocused }
-                .menuKey { at -> app.popups.showUnder(at) { close -> PlaylistMenu(app, playlist, close) } }
-                .clickable(role = Role.Tab) { app.navigator.go(Page.Playlist(playlist.id)) }
+                .menuKey { at -> app.popups.showUnder(at) { close -> PlaylistMenu(app, playlist, close, carried()) } }
+                .clickable(role = Role.Tab) {
+                    val how = held
+                    held = 0
+                    if (movable && how != 0) {
+                        picks?.click(playlist.id, toggle = how == 1, range = how == 2, order = order)
+                    } else {
+                        picks?.clear()
+                        app.navigator.go(Page.Playlist(playlist.id))
+                    }
+                }
                 .semantics {
-                    contentDescription = if (pinned) "${playlist.name}, playlist, pinned" else "${playlist.name}, playlist"
-                    this.selected = selected
+                    contentDescription = listOfNotNull(playlist.name, "playlist", "pinned".takeIf { pinned }, "picked".takeIf { picked }).joinToString(", ")
+                    this.selected = selected || picked
                 },
             contentAlignment = if (rail) Alignment.Center else Alignment.CenterStart,
         ) {
-            if (selected) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
+            if (selected || picked) GlazeSelected(Modifier.matchParentSize(), Corner.ControlShape)
             if (lit) Box(Modifier.matchParentSize().background(DropLit, Corner.ControlShape))
-            SelectedFill(selected && LocalOctoSurfaces.current.light) {
-                Row(Modifier.padding(horizontal = if (rail) Space.None else Space.M), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs)) {
+            SelectedFill((selected || picked) && LocalOctoSurfaces.current.light) {
+                Row(
+                    Modifier.padding(start = if (rail) Space.None else Space.M + FolderIndent * depth, end = if (rail) Space.None else Space.M),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Space.M + Space.Xxs),
+                ) {
                     PlaylistPicture(app, playlist, Modifier.size(FrameSize.PlaylistCover), Corner.ArtSShape)
                     if (!rail) {
-                        CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
+                        CompositionLocalProvider(LocalKeyboardHere provides (here && keyboard)) { CutTxt(playlist.name, DesktopType.body, if (selected || picked) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f)) }
                         if (pinned) Glyph(OctoIcons.Pinned, size = IconSize.Inline - Space.Xxs, tint = OctoColors.TextMuted, exact = true)
                     }
                 }
@@ -409,6 +587,9 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
     }
     if (rail) OctoTooltip(playlist.name, side = TooltipSide.Right) { row() } else row()
 }
+
+// How far a playlist row that can't take the songs held over it fades.
+private const val REFUSED_ALPHA = 0.4f
 
 // A small form for naming a new, empty playlist, in the middle of the
 // window, or making one from a playlist file instead.

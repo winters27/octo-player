@@ -52,6 +52,8 @@ import app.winters.octo.subsonic.SubsonicException
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import app.winters.octo.desktop.AddQuestion
 import app.winters.octo.desktop.addSongsToPlaylist
@@ -77,6 +79,10 @@ import app.winters.octo.design.Txt
 import app.winters.octo.playlists.playlistFileName
 import app.winters.octo.ui.playlist.ADD_NEW_ONES
 import app.winters.octo.ui.playlist.addAgainChoice
+import app.winters.octo.desktop.playlists.refusesFinds
+import app.winters.octo.playlists.PlaylistFolderTree
+import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.ui.playlist.PickerGroups
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.desktop.system.isOpenedFile
@@ -146,6 +152,7 @@ fun ColumnScope.SongMenu(
                 canDelete = canDeleteFromDisk(app, songs),
                 canRequest = family.offersRequest,
                 canKeep = true,
+                outsideToPlaylists = app.playlistSongs || songs.any { !it.isExternal },
                 canRemoveFromMine = offersRemoveFromMyLibrary(me) &&
                     songs.all { offersRemoveOn(it.octoPersonal, index?.marksPersonal == true) },
             ).forEachIndexed { index, group ->
@@ -220,7 +227,7 @@ fun ColumnScope.SongMenu(
                 }
             }
         }
-        MenuPage.Playlists -> PlaylistChooser(app, { songs }, close, start = start) {
+        MenuPage.Playlists -> PlaylistChooser(app, { songs }, close, start = start, forFind = app.playlistSongs && songs.any { it.isExternal }) {
             start = null
             page = MenuPage.Main
         }
@@ -314,7 +321,7 @@ fun ColumnScope.AlbumMenu(app: AppState, album: Album, close: () -> Unit, outsid
     var choosing by remember { mutableStateOf(false) }
     val songs: suspend () -> List<Song> = { app.albumSongs(album.id) }
     if (choosing) {
-        PlaylistChooser(app, songs, close) { choosing = false }
+        PlaylistChooser(app, songs, close, forFind = outside && app.playlistSongs) { choosing = false }
         return
     }
     MenuTitle(album.name)
@@ -391,17 +398,25 @@ fun ColumnScope.ArtistMenu(app: AppState, id: String, name: String, starred: Str
 }
 
 // The menu for a playlist, in the sidebar, on its page or in a list: play
-// it, pin it, rename it in place, copy it, write it to a file, and for the
-// listener's own, make it public or private or delete it (asked first, in
-// the menu itself). A family playlist is renamed by anyone who can add to it
-// (Octo answers for its maker) and deleted only by a family manager.
+// it, pin it, file it in a folder, rename it in place, copy it, write it to
+// a file, and for the listener's own, make it public or private or delete it
+// (asked first, in the menu itself). A family playlist is renamed by anyone
+// who can add to it (Octo answers for its maker) and deleted only by a family
+// manager. An imported playlist's copy is never renamed or deleted here.
+// `picked` are the playlists picked with it in the sidebar, which Move to
+// folder moves together.
 @Composable
-fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Unit) {
+fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Unit, picked: List<Playlist> = listOf(playlist)) {
     var deleting by remember { mutableStateOf(false) }
+    var moving by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var name by remember(playlist.name) { mutableStateOf(playlist.name) }
     if (deleting) {
         ConfirmDelete(app, playlist, close) { deleting = false }
+        return
+    }
+    if (moving) {
+        MoveToFolderMenu(app, picked, close) { moving = false }
         return
     }
     MenuTitle(playlist.name)
@@ -412,6 +427,8 @@ fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Uni
         renames = access.rename || access.mayRename,
         visibility = access.visibility,
         deletes = access.delete,
+        imported = playlist.octoImport,
+        files = app.playlistFoldersOffered && PlaylistFolderTree.fileable(playlist.id) && !playlist.octoUpkeep,
     ).forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
         group.forEach { action ->
@@ -420,6 +437,13 @@ fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Uni
                     val pinned = app.isPinned(playlist.id)
                     MenuRow(if (pinned) "Unpin" else "Pin to the top", { app.setPinned(playlist.id, !pinned); close() }, OctoIcons.Pin)
                 }
+                CollectionAction.MoveToFolder -> MenuRow(
+                    PlaylistFolderWords.MOVE_TO_FOLDER,
+                    { moving = true },
+                    OctoIcons.PlaylistFolder,
+                    more = true,
+                    detail = if (picked.size > 1) "${picked.size}" else null,
+                )
                 CollectionAction.Rename -> if (renaming) {
                     val save = {
                         if (name.isNotBlank()) {
@@ -500,8 +524,13 @@ fun playlistMenu(app: AppState, playlist: Playlist): () -> Unit {
 // The songs are gathered only once a playlist is chosen. When some are on
 // it already, the chooser turns into the question of what to add. With
 // `start`, it adds to that playlist at once, as "Add to last playlist" does.
+//
+// The playlists come in their groups (PickerGroups): up to three added to
+// lately, then those in no folder A to Z, then each folder's under its
+// path, then Octo's library upkeep lists. For songs found online
+// (`forFind`) the upkeep lists that refuse them are left out.
 @Composable
-fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, close: () -> Unit, start: Playlist? = null, back: () -> Unit) {
+fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, close: () -> Unit, start: Playlist? = null, forFind: Boolean = false, back: () -> Unit) {
     var naming by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var asking by remember { mutableStateOf<AddQuestion?>(null) }
@@ -541,11 +570,27 @@ fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, 
     } else {
         MenuRow("New playlist", { naming = true }, OctoIcons.AddToLibrary)
     }
-    val recent = app.lastPlaylists()
-    val rest = app.playlists.filter { app.access(it).add } - recent.toSet()
-    listOf(recent, rest).filter { it.isNotEmpty() }.forEach { group ->
+    val recent = app.lastPlaylists().filterNot { it.octoImport }
+    val addable = app.playlists.filter { app.access(it).add && !it.octoImport }
+    val groups = PickerGroups.build(
+        addable,
+        id = { it.id },
+        placeKey = { it.id },
+        name = { it.name },
+        upkeep = { it.octoUpkeep },
+        refusesFind = ::refusesFinds,
+        recentIds = recent.map { it.id },
+        tree = app.folderTree.takeIf { app.playlistFoldersOffered },
+        forFind = forFind,
+    )
+    groups.forEach { group ->
         MenuSeparator()
-        group.forEach { playlist ->
+        // A group's heading sits close to its own playlists, further from
+        // the group above.
+        group.title?.let {
+            Txt(it, OctoType.label, OctoColors.TextSecondary, Modifier.padding(start = Space.Xl, end = Space.Xl, top = Space.L - Space.Xxs, bottom = Space.Xxs).semantics { heading() })
+        }
+        group.items.forEach { playlist ->
             MenuRow(playlist.name, { pick(playlist) }, detail = "${playlist.songCount}", leading = {
                 PlaylistPicture(app, playlist, Modifier.size(FrameSize.MenuArt), Corner.ArtSShape)
             })

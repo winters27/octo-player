@@ -52,6 +52,9 @@ object OctoIcons {
     val StarFilled by sym("sym_star_filled")
     val Lyrics by sym("sym_lyrics")
     val Folder by sym("sym_folder")
+
+    // A folder of playlists, set apart from the music Folders page's glyph.
+    val PlaylistFolder by sym("sym_playlist_folder")
     val Sort by sym("sym_sort")
     val Ascending by sym("sym_arrow_upward")
     val Descending by sym("sym_arrow_downward")

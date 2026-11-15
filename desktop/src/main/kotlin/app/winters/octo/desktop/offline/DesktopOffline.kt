@@ -60,6 +60,10 @@ data class KeptFile(
     val album: String = "",
 )
 
+// The songs of a kept playlist that are kept here: its library songs. A
+// song found online in it is not the library's, so it is never fetched.
+fun keptEntries(entries: List<Song>): List<Song> = entries.filterNot { it.isExternal }
+
 // Whether a kept file is the server's file as it is: it has the song's own
 // type. Opus is left out, since smaller copies are made as Opus too.
 fun keptAsIs(path: String, suffix: String?): Boolean {
@@ -276,8 +280,9 @@ class DesktopOffline(
         for (id in choices.playlists) {
             try {
                 val list = client.playlist(id)
-                lists[id] = list.entry.map { it.id }
-                list.entry.forEach {
+                val entries = keptEntries(list.entry)
+                lists[id] = entries.map { it.id }
+                entries.forEach {
                     songs.putIfAbsent(it.id, it)
                     now.putIfAbsent(it.id, it)
                 }

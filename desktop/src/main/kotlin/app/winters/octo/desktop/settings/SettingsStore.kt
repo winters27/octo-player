@@ -166,6 +166,10 @@ data class FramePrefs(
     val foldedGroups: Set<String> = emptySet(),
     // Playlists kept at the top of the sidebar's list, by id, in order.
     val pinnedPlaylists: List<String> = emptyList(),
+    // Playlist folders open in the sidebar, by id; none open until opened.
+    val openFolders: Set<String> = emptySet(),
+    // Whether the sidebar's Library upkeep group is open; closed until opened.
+    val upkeepOpen: Boolean = false,
     // Whether the time on the right counts down (the time left) or shows
     // the song's length.
     val showTimeLeft: Boolean = true,

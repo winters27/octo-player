@@ -2,7 +2,13 @@ package app.winters.octo.desktop
 
 import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.playlists.PlaylistMove
+import app.winters.octo.desktop.playlists.SongMove
 import app.winters.octo.desktop.playlists.importPlaylist
+import app.winters.octo.desktop.playlists.reapplied
+import app.winters.octo.desktop.playlists.refusesFinds
+import app.winters.octo.desktop.playlists.songMoveOf
+import app.winters.octo.desktop.playlists.songsFor
+import app.winters.octo.playlists.PlaylistFolderWords
 import app.winters.octo.desktop.playlists.m3uLinesOf
 import app.winters.octo.desktop.playlists.missedDetail
 import app.winters.octo.desktop.playlists.movedBy
@@ -78,10 +84,11 @@ const val FAMILY_MISCOUNT = "Octo couldn't read every song in this family playli
 const val FAMILY_CHANGED = "This family playlist changed since it was shown, so nothing was taken out. It's up to date now; try again."
 
 // A refused playlist change in the server's own words when it says why
-// (error 50, not allowed), otherwise the usual line.
+// (error 50, not allowed, or a playlist that changed since it was read),
+// otherwise the usual line.
 internal fun playlistFailure(e: SubsonicException): String {
     val words = e.message
-    return if (e is SubsonicException.Server && e.code == 50 && !words.isNullOrBlank()) words else e.userMessage()
+    return if (e is SubsonicException.Server && (e.code == 50 || e.conflict) && !words.isNullOrBlank()) words else e.userMessage()
 }
 
 // A playlist the server says it does not have (deleted on another device,
@@ -99,7 +106,11 @@ fun AppState.playlistGone(id: String) {
 // The playlist as a list of playlists has it, for its menus: the sidebar's
 // entry, or one made from the page's own copy.
 fun PlaylistWithSongs.asPlaylist(): Playlist =
-    Playlist(id, name, comment, owner, public, songCount = entry.size, duration = entry.sumOf { it.duration }, coverArt = coverArt, changed = changed, readonly = readonly, octoList = octoList, octoNotice = octoNotice, octoCoverTitle = octoCoverTitle, octoFamily = octoFamily, octoFamilyCreatedBy = octoFamilyCreatedBy, octoFamilyMayRename = octoFamilyMayRename, octoFamilyMayDelete = octoFamilyMayDelete)
+    Playlist(id, name, comment, owner, public, songCount = entry.size, duration = entry.sumOf { it.duration }, coverArt = coverArt, changed = changed, readonly = readonly, octoList = octoList, octoNotice = octoNotice, octoCoverTitle = octoCoverTitle, octoFamily = octoFamily, octoFamilyCreatedBy = octoFamilyCreatedBy, octoFamilyMayRename = octoFamilyMayRename, octoFamilyMayDelete = octoFamilyMayDelete, octoUpkeep = octoUpkeep, octoImport = octoImport, octoUpkeepKind = octoUpkeepKind)
+
+// Why a reorder was not saved: another device changed the playlist since
+// its page read it, and a moved song is no longer in it.
+const val PLAYLIST_CHANGED_TRY_AGAIN = "The playlist changed. Try again."
 
 // Shows a change to a playlist's page at once, sends it, and puts the page
 // back with a line saying why when the server refuses it. The sidebar is
@@ -133,8 +144,12 @@ private fun AppState.editPlaylist(
 // Moving songs.
 
 // Makes a playlist's songs exactly these, in this order, as a drag that
-// ends or a Move row does: shown at once, then saved in one replace.
-fun AppState.reorderPlaylist(id: String, songs: List<Song>) {
+// ends or a Move row does: shown at once, then saved in one replace. On a
+// server listing octoPlaylistSongs the replace carries the changed time the
+// page read (octoIfStamp) and octoOwnIds; when the playlist changed since,
+// it is read again and `move` (the same move by song ids) is made over the
+// new list, or the line says to try again when a moved song is gone.
+fun AppState.reorderPlaylist(id: String, songs: List<Song>, move: SongMove? = null) {
     val family = playlists.firstOrNull { it.id == id }?.let { access(it).family }
         ?: playlistView(id)?.asPlaylist()?.let { access(it).family }
     if (family == true) {
@@ -142,8 +157,26 @@ fun AppState.reorderPlaylist(id: String, songs: List<Song>) {
         return
     }
     val formPost = formPost
+    val stamped = playlistSongs
+    val stamp = playlistView(id)?.changed
     editPlaylist(id, "Couldn't move the songs", { it.copy(entry = songs) }) { client ->
-        client.replacePlaylistSongs(id, songs.map { it.id }, formPost)
+        if (!stamped) {
+            client.replacePlaylistSongs(id, songs.map { it.id }, formPost)
+            return@editPlaylist
+        }
+        try {
+            client.replacePlaylistSongs(id, songs.map { it.id }, formPost, ifStamp = stamp, ownIds = true)
+        } catch (e: SubsonicException.Server) {
+            if (!e.conflict) throw e
+            val fresh = client.playlist(id)
+            val order = move?.let { reapplied(it, fresh.entry.map(Song::id)) }
+            if (order == null) {
+                // The page shows the list as it is now.
+                playlistViews[id] = PlaylistView(client, fresh)
+                throw SubsonicException.Server(0, PLAYLIST_CHANGED_TRY_AGAIN, conflict = true)
+            }
+            client.replacePlaylistSongs(id, order.map { fresh.entry[it].id }, formPost, ifStamp = fresh.changed, ownIds = true)
+        }
     }
 }
 
@@ -168,7 +201,12 @@ fun AppState.moveInPlaylist(id: String, positions: List<Int>, move: PlaylistMove
 
 private fun AppState.movedIn(id: String, songs: List<Song>, positions: List<Int>, move: PlaylistMove) {
     val order = movedBy(move, songs.size, positions)
-    if (order != songs.indices.toList()) reorderPlaylist(id, order.map(songs::get))
+    if (order == songs.indices.toList()) return
+    // Where the picked songs landed, as the place of the first one after them.
+    val places = positions.filter { it in songs.indices }.toSet()
+    val landed = order.indexOfFirst { it in places }
+    val to = order.drop(landed).firstOrNull { it !in places } ?: songs.size
+    reorderPlaylist(id, order.map(songs::get), songMoveOf(songs.map(Song::id), places, to))
 }
 
 // A playlist's details.
@@ -258,6 +296,9 @@ private fun AppState.usedPlaylist(id: String) =
 // go on at once and the answer is null; otherwise nothing is added and the
 // question comes back to be asked. The playlist is read afresh, or taken
 // from its page when the server cannot say.
+// Songs found online go only where they can be kept (songsFor): a server
+// listing octoPlaylistSongs, and never one of Octo's library upkeep lists
+// that refuses them.
 suspend fun AppState.checkAdd(playlist: Playlist, songs: List<Song>): AddQuestion? {
     val client = connection?.client ?: return null
     if (songs.isEmpty()) return null
@@ -266,16 +307,24 @@ suspend fun AppState.checkAdd(playlist: Playlist, songs: List<Song>): AddQuestio
         notice = if (access.family) "Your plan lets you listen to family playlists, not change them." else "Only its owner can change ${playlist.name}"
         return null
     }
+    val taken = songsFor(playlist, songs, playlistSongs)
+    if (taken.isEmpty()) {
+        if (refusesFinds(playlist)) notice = UPKEEP_REFUSES_FINDS
+        return null
+    }
     val onIt = try {
         client.playlist(playlist.id).entry
     } catch (e: SubsonicException) {
         playlistView(playlist.id)?.entry.orEmpty()
     }.mapTo(HashSet()) { it.id }
-    val question = AddQuestion(playlist, planAdd(songs.map { it.id }, onIt), songs)
+    val question = AddQuestion(playlist, planAdd(taken.map { it.id }, onIt), taken)
     if (question.plan.asks) return question
     addSongsToPlaylist(playlist, question.all)
     return null
 }
+
+// Why songs found online did not go in one of Octo's library upkeep lists.
+const val UPKEEP_REFUSES_FINDS = "Songs found online can't go in Octo's library upkeep playlists."
 
 // Adds songs to a playlist the way a drop or a menu does: `ask` is called
 // only when some are on it already, with the question to show where the
@@ -289,13 +338,16 @@ fun AppState.addToPlaylistChecked(playlist: Playlist, songs: List<Song>, ask: (A
 // saying so, and remembers the playlist for "Add to last playlist".
 fun AppState.addSongsToPlaylist(playlist: Playlist, songs: List<Song>) {
     val client = connection?.client ?: return
-    if (songs.isEmpty()) return
+    val taken = songsFor(playlist, songs, playlistSongs)
+    if (taken.isEmpty()) return
     val formPost = formPost
     usedPlaylist(playlist.id)
     scope.launch {
         try {
-            client.updatePlaylist(playlist.id, songIdsToAdd = songs.map { it.id }, formPost = formPost)
-            notice = addedMessage(playlist.name, songs.size)
+            val skipped = ArrayList<String>()
+            client.updatePlaylist(playlist.id, songIdsToAdd = taken.map { it.id }, formPost = formPost, skipped = { skipped += it })
+            // Songs the server could not keep (octoSkipped) are named once.
+            notice = if (skipped.isEmpty()) addedMessage(playlist.name, taken.size) else PlaylistFolderWords.SKIPPED_SONGS
             refreshPlaylists()
         } catch (e: SubsonicException) {
             notice = "Couldn't add to the playlist: ${playlistFailure(e)}"

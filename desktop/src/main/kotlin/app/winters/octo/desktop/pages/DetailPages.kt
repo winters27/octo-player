@@ -39,6 +39,7 @@ import app.winters.octo.desktop.nav.Page
 import app.winters.octo.desktop.nav.Visit
 import app.winters.octo.desktop.playlistView
 import app.winters.octo.desktop.playlists.movedPositions
+import app.winters.octo.desktop.playlists.songMoveOf
 import app.winters.octo.desktop.renamePlaylist
 import app.winters.octo.desktop.reorderPlaylist
 import app.winters.octo.desktop.setPlaylistComment
@@ -114,7 +115,9 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
                 RowDrop("Move here", takes = { (it as? SongPlace.Playlist)?.id == id }) { _, from, row, below ->
                     val picked = (from as? SongPlace.Playlist)?.positions.orEmpty()
                     val to = shown.placeOf(row.position) + if (below) 1 else 0
-                    if (picked.isNotEmpty()) app.reorderPlaylist(id, movedPositions(all.indices.toList(), picked, to).map { all[it] })
+                    if (picked.isNotEmpty()) {
+                        app.reorderPlaylist(id, movedPositions(all.indices.toList(), picked, to).map { all[it] }, songMoveOf(all.map { it.id }, picked, to))
+                    }
                 }
             },
             empty = {

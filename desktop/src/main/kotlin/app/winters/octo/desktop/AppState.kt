@@ -107,6 +107,11 @@ import app.winters.octo.server.switchNotice
 import app.winters.octo.sort.SortList
 import app.winters.octo.sort.SortOrder
 import app.winters.octo.subsonic.FAMILY_PLAYLISTS_EXTENSION
+import app.winters.octo.playlists.PlaylistFolderTree
+import app.winters.octo.subsonic.PLAYLIST_FOLDERS_EXTENSION
+import app.winters.octo.subsonic.PLAYLIST_SONGS_EXTENSION
+import app.winters.octo.subsonic.PlaylistFolders
+import app.winters.octo.subsonic.playlistFolders
 import app.winters.octo.subsonic.FORM_POST_EXTENSION
 import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.PlaylistAccess
@@ -395,6 +400,17 @@ class AppState(
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
         private set
+
+    // The listener's playlist folders on a server listing
+    // octoPlaylistFolders, as last read or changed (PlaylistFolderActions.kt).
+    var folderTree by mutableStateOf(PlaylistFolderTree.Empty)
+        private set
+
+    // Takes the folders a folder call or read answered: the server's whole
+    // list, as it stands after the call.
+    internal fun takeFolders(answer: PlaylistFolders) {
+        folderTree = PlaylistFolderTree(answer.folders, answer.places)
+    }
 
     private val keptShelves = homeShelves?.let { HomeShelfStore(it, KeptShelves.serializer()) }
 
@@ -903,6 +919,7 @@ class AppState(
             followServerUpdate(null)
             animated.follow(null)
             playlists = emptyList()
+            folderTree = PlaylistFolderTree.Empty
             fullPlayer = false
             navigator.startOver()
         }
@@ -1023,6 +1040,7 @@ class AppState(
     fun refreshPlaylists() {
         val client = connection?.client ?: return
         val home = home
+        val folders = playlistFoldersOffered
         scope.launch {
             try {
                 playlists = client.playlists()
@@ -1030,6 +1048,15 @@ class AppState(
                 home?.playlistsAnswered(playlists)
             } catch (e: SubsonicException) {
                 // The sidebar keeps what it had.
+            }
+            if (folders) {
+                try {
+                    val answer = client.playlistFolders()
+                    // Not for a server left meanwhile.
+                    if (connection?.client === client) takeFolders(answer)
+                } catch (e: SubsonicException) {
+                    // The folders keep what they had.
+                }
             }
         }
     }
@@ -1228,6 +1255,17 @@ class AppState(
     // Whether the server takes playlist changes in a form body.
     internal val formPost: Boolean
         get() = connection?.server?.extensions?.any { it.startsWith("$FORM_POST_EXTENSION:") } == true
+
+    // Whether the server keeps songs found online in the listener's own
+    // playlists (octoPlaylistSongs): only then do such songs go to Add to
+    // playlist and to drops, a reorder carries the page's changed time, and
+    // removals go by song.
+    val playlistSongs: Boolean
+        get() = connection?.supports(PLAYLIST_SONGS_EXTENSION) == true
+
+    // Whether the server keeps the listener's playlist folders.
+    val playlistFoldersOffered: Boolean
+        get() = connection?.supports(PLAYLIST_FOLDERS_EXTENSION) == true
 
     // Sort orders kept between runs.
 

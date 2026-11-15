@@ -161,7 +161,7 @@ internal fun twoLines(): Int = if (LocalDensity.current.fontScale <= 1f) 2 else 
 // on the middle of their capitals at every text size, as a song title's
 // mark does.
 @Composable
-private fun capsMiddle(style: TextStyle): Int = with(LocalDensity.current) { (style.fontSize.toPx() * CAP_SHARE / 2).roundToInt() }
+internal fun capsMiddle(style: TextStyle): Int = with(LocalDensity.current) { (style.fontSize.toPx() * CAP_SHARE / 2).roundToInt() }
 
 // How tall a capital is, as a share of the type's size, in the desktop's
 // faces.

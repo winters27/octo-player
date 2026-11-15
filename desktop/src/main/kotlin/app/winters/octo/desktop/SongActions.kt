@@ -13,6 +13,7 @@ import app.winters.octo.radio.radioMix
 import app.winters.octo.radio.radioSong
 import app.winters.octo.sort.SortList
 import app.winters.octo.subsonic.FAMILY_PLAYLISTS_EXTENSION
+import app.winters.octo.subsonic.PLAYLIST_SONGS_EXTENSION
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicException
 import app.winters.octo.subsonic.songsToRemove
@@ -223,7 +224,8 @@ fun AppState.removeFromPlaylist(id: String, positions: List<Int>) {
     val seen = playlistView(id)?.entry?.map { it.id }
     scope.launch {
         try {
-            if (isFamily && connection?.supports(FAMILY_PLAYLISTS_EXTENSION) == true) {
+            val bySong = if (isFamily) connection?.supports(FAMILY_PLAYLISTS_EXTENSION) == true else connection?.supports(PLAYLIST_SONGS_EXTENSION) == true
+            if (bySong) {
                 // Octo takes these out by song, so places can never point at another one.
                 val ids = seen ?: client.playlist(id).entry.map { it.id }
                 client.updatePlaylist(id, songsToRemove = songsToRemove(ids, positions), formPost = formPost)

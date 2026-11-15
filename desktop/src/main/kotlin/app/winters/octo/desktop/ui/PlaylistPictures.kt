@@ -109,7 +109,7 @@ fun playlistOrder(playlist: Playlist, you: String?) = CoverOrder(
 )
 
 // A playlist read with its songs, as the list of playlists has it.
-fun PlaylistWithSongs.summary() = Playlist(id, name, comment, owner, public, songCount, duration, coverArt, changed, readonly, created, octoList = octoList, octoNotice = octoNotice, octoCoverTitle = octoCoverTitle, octoFamily = octoFamily, octoFamilyCreatedBy = octoFamilyCreatedBy, octoFamilyMayRename = octoFamilyMayRename, octoFamilyMayDelete = octoFamilyMayDelete)
+fun PlaylistWithSongs.summary() = Playlist(id, name, comment, owner, public, songCount, duration, coverArt, changed, readonly, created, octoList = octoList, octoNotice = octoNotice, octoCoverTitle = octoCoverTitle, octoFamily = octoFamily, octoFamilyCreatedBy = octoFamilyCreatedBy, octoFamilyMayRename = octoFamilyMayRename, octoFamilyMayDelete = octoFamilyMayDelete, octoUpkeep = octoUpkeep, octoImport = octoImport, octoUpkeepKind = octoUpkeepKind)
 
 // A playlist's picture, as the listener chose: designed, or the server's mosaic.
 @Composable
