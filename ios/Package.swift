@@ -29,8 +29,11 @@ let package = Package(
         // SQLite for the library database where Apple's own SQLite3 module is missing (Linux,
         // for the tests). Apple platforms import SQLite3.
         .systemLibrary(name: "CSQLite", path: "Sources/CSQLite"),
-        // Talking to the server, the models and the queue rules. Foundation only.
-        .target(name: "OctoKit", dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))]),
+        // Talking to the server, the models and the queue rules. Foundation only. Optimized in
+        // every build, debug ones too: the phone's mix runs here on the audio thread, and
+        // unoptimized it overran the output's cycle through every Automix blend.
+        .target(name: "OctoKit", dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))],
+                swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
         // The inbox the share extension leaves a shared list in for the app. Foundation only.
         .target(name: "ShareInbox"),
         // What the app leaves for its widgets, the links the widgets open it with, and the
