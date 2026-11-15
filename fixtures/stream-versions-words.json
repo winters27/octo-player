@@ -1,0 +1,258 @@
+{
+  "words": {
+    "menu.row": "Try another version",
+    "sheet.title": "Choose the version",
+    "sheet.done": "Done",
+    "section.playing": "Playing now",
+    "section.others": "Other versions",
+    "picked.mine": "Your pick",
+    "picked.by": "Picked by {name}",
+    "picked.someone": "Picked by someone on this server",
+    "picked.earlier": "A pick from before",
+    "picked.octo": "Octo's pick",
+    "nextStart": "Plays from your next start",
+    "kind.release": "Official audio",
+    "kind.musicVideo": "Music video",
+    "kind.video": "Video",
+    "looking": "Looking on YouTube",
+    "couldNotReach": "Could not reach YouTube just now.",
+    "serverUnreachable": "Could not reach your server just now.",
+    "tryAgain": "Try again",
+    "nothing": "No other versions found.",
+    "missed.youtubeMusic": "YouTube Music could not answer this time, so this list may be short.",
+    "missed.youtube": "YouTube could not answer this time, so this list may be short.",
+    "checking": "Checking",
+    "playsFrom.download": "This server adds every song it plays to the library, so a song's version can't be chosen here.",
+    "playsFrom.file": "This song plays from a file in your library, so its version can't be chosen here.",
+    "busy": "This song is being added to your library right now. You can choose its version once that finishes.",
+    "footer.note": "The version you choose plays for everyone on this server, on every device.",
+    "footer.undo": "Go back to Octo's pick",
+    "moreBelow": "More below",
+    "pick.unreachable": "Could not reach your server. Try again.",
+    "song.line": "{title} by {artist}"
+  },
+  "songLines": [
+    { "title": "Song", "artist": "Artist", "text": "Song by Artist" },
+    { "title": "Song", "artist": "", "text": "Song" },
+    { "title": "Song", "artist": "  ", "text": "Song" }
+  ],
+  "lengths": [
+    { "seconds": 0, "text": "0:00" },
+    { "seconds": 65, "text": "1:05" },
+    { "seconds": 215, "text": "3:35" },
+    { "seconds": 3600, "text": "60:00" }
+  ],
+  "rowDetails": [
+    { "channel": "Artist - Topic", "duration": 215, "kind": "release", "text": "Artist - Topic · 3:35 · Official audio" },
+    { "channel": "Artist", "duration": 240, "kind": "musicVideo", "text": "Artist · 4:00 · Music video" },
+    { "channel": null, "duration": 65, "kind": "video", "text": "1:05 · Video" },
+    { "channel": "  ", "duration": null, "kind": "podcast", "text": "" },
+    { "channel": "Fan", "duration": null, "kind": null, "text": "Fan" }
+  ],
+  "playingNotes": [
+    { "videoId": "v1", "picked": "person", "mine": true, "pickedBy": "winters", "heard": null, "text": "Your pick" },
+    { "videoId": "v1", "picked": "person", "mine": false, "pickedBy": "ede", "heard": "v0", "text": "Picked by ede · Plays from your next start" },
+    { "videoId": "v1", "picked": "person", "mine": false, "pickedBy": null, "heard": null, "text": "Picked by someone on this server" },
+    { "videoId": "v1", "picked": "earlier", "mine": false, "pickedBy": null, "heard": null, "text": "A pick from before" },
+    { "videoId": "v1", "picked": "octo", "mine": false, "pickedBy": null, "heard": "v1", "text": "Octo's pick" },
+    { "videoId": "v1", "picked": "later", "mine": false, "pickedBy": null, "heard": null, "text": "Octo's pick" }
+  ],
+  "answers": {
+    "picked": {"id":"X","playsFrom":"stream","playing":{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release","picked":"person","pickedBy":"ede","mine":false,"pickedAt":"2026-11-14T10:00:00Z"},"heardVideoId":"v0","busy":false,"version":[{"videoId":"v2","title":"Song (Live)","channel":"Artist","duration":240,"kind":"video"}],"missed":["youtubeMusic"],"ids":["X","Y"]},
+    "file": {"id":"X","playsFrom":"file","playing":{"videoId":"v9","title":null,"channel":null,"duration":null,"kind":null,"picked":"octo","pickedBy":null,"mine":false,"pickedAt":null},"busy":true,"version":[],"missed":[],"ids":["X"]},
+    "download": {"id":"X","playsFrom":"download","busy":false,"version":[],"missed":[],"ids":["X"]},
+    "octo": {"id":"X","playsFrom":"stream","playing":{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release","picked":"octo","pickedBy":null,"mine":false,"pickedAt":null},"busy":false,"version":[{"videoId":"v2","title":"Song (Live)","channel":"Artist","duration":240,"kind":"video"},{"videoId":"v3","title":"Song (Sped Up)","channel":"Fan","duration":180,"kind":"video"}],"missed":[],"ids":["X"]},
+    "afterPick": {"id":"X","playsFrom":"stream","playing":{"videoId":"v2","title":"Song (Live)","channel":"Artist","duration":240,"kind":"video","picked":"person","pickedBy":"winters","mine":true,"pickedAt":"2026-11-14T10:05:00Z"},"busy":false,"version":[{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release"},{"videoId":"v3","title":"Song (Sped Up)","channel":"Fan","duration":180,"kind":"video"}],"missed":[],"ids":["X","Y"]},
+    "empty": {"id":"X","playsFrom":"stream","playing":{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release","picked":"octo","pickedBy":null,"mine":false,"pickedAt":null},"busy":false,"version":[],"missed":[],"ids":["X"]},
+    "unreached": {"id":"X","playsFrom":"stream","playing":{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release","picked":"octo","pickedBy":null,"mine":false,"pickedAt":null},"busy":false,"version":[],"missed":["youtubeMusic","youtube"],"ids":["X"]},
+    "busy": {"id":"X","playsFrom":"stream","playing":{"videoId":"v2","title":"Song (Live)","channel":"Artist","duration":240,"kind":"video","picked":"person","pickedBy":"winters","mine":true,"pickedAt":"2026-11-14T10:05:00Z"},"busy":true,"version":[{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release"}],"missed":[],"ids":["X"]},
+    "earlier": {"id":"X","playsFrom":"stream","playing":{"videoId":"v1","title":"Song","channel":"Artist - Topic","duration":215,"kind":"release","picked":"earlier","pickedBy":null,"mine":false,"pickedAt":null},"busy":false,"version":[{"videoId":"v2","title":"Song (Live)","channel":"Artist","duration":240,"kind":"video"}],"missed":["youtube"],"ids":["X"]},
+    "otherSong": {"id":"Z","playsFrom":"stream","busy":false,"version":[],"missed":[],"ids":["Z"]}
+  },
+  "reducer": [
+    {
+      "name": "a listing shows the video playing and the others",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": { "state": "looking", "message": "Looking on YouTube", "rows": [] } },
+        { "event": "listed", "answer": "octo", "expect": { "state": "shown", "playing": "v1", "rows": ["v2", "v3"], "canUndo": false, "message": null, "empty": null, "checking": null } }
+      ]
+    },
+    {
+      "name": "one pick at a time, and its answer becomes the sheet",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "pick", "video": "v2", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "pick", "video": "v3", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "undo", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "picked", "answer": "afterPick", "expect": { "state": "shown", "playing": "v2", "rows": ["v1", "v3"], "checking": null, "canUndo": true } }
+      ]
+    },
+    {
+      "name": "the video playing and a video not listed are not picks",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "pick", "video": "v1", "entry": "e1", "song": "X", "expect": { "checking": null } },
+        { "event": "pick", "video": "v9", "entry": "e1", "song": "X", "expect": { "checking": null } }
+      ]
+    },
+    {
+      "name": "a pick for a song no longer playing is refused",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "pick", "video": "v2", "entry": "e2", "song": "X", "expect": { "checking": null } },
+        { "event": "pick", "video": "v2", "entry": "e1", "song": "Y", "expect": { "checking": null } },
+        { "event": "pick", "video": "v2", "entry": null, "song": null, "expect": { "checking": null } },
+        { "event": "undo", "entry": "e2", "song": "X", "expect": { "checking": null } }
+      ]
+    },
+    {
+      "name": "the sheet closes when the playing entry changes",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "entryChanged", "entry": "e1", "expect": { "state": "shown" } },
+        { "event": "entryChanged", "entry": "e2", "expect": { "state": "closed", "message": null, "rows": [] } },
+        { "event": "listed", "answer": "octo", "expect": { "state": "closed" } },
+        { "event": "pick", "video": "v2", "entry": "e2", "song": "X", "expect": { "state": "closed" } }
+      ]
+    },
+    {
+      "name": "an entry change while looking closes too",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "entryChanged", "entry": null, "expect": { "state": "closed" } }
+      ]
+    },
+    {
+      "name": "a refused pick shows the server's words under its row",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "pick", "video": "v2", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "pickFailed", "message": "That video can't be played here. Pick another.", "expect": { "checking": null, "refused": "v2", "refusal": "That video can't be played here. Pick another.", "state": "shown" } },
+        { "event": "pick", "video": "v3", "entry": "e1", "song": "X", "expect": { "checking": "v3", "refused": null, "refusal": null } }
+      ]
+    },
+    {
+      "name": "going back is a pick of Octo's own",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "picked", "expect": { "state": "shown", "playing": "v1", "rows": ["v2"], "canUndo": true, "message": "YouTube Music could not answer this time, so this list may be short." } },
+        { "event": "undo", "entry": "e1", "song": "X", "expect": { "checking": "auto" } },
+        { "event": "pickFailed", "message": "Could not reach YouTube to find Octo's pick. Try again in a moment.", "expect": { "checking": null, "refused": "auto", "refusal": "Could not reach YouTube to find Octo's pick. Try again in a moment." } },
+        { "event": "undo", "entry": "e1", "song": "X", "expect": { "checking": "auto", "refused": null } },
+        { "event": "picked", "answer": "octo", "expect": { "playing": "v1", "canUndo": false, "checking": null, "rows": ["v2", "v3"], "message": null } }
+      ]
+    },
+    {
+      "name": "a pick from before can be undone, and a missed YouTube says the list may be short",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "earlier", "expect": { "canUndo": true, "message": "YouTube could not answer this time, so this list may be short.", "rows": ["v2"] } }
+      ]
+    },
+    {
+      "name": "nothing found",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "empty", "expect": { "state": "shown", "rows": [], "empty": "No other versions found.", "message": null, "playing": "v1" } }
+      ]
+    },
+    {
+      "name": "no source answered, then Try again",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "unreached", "expect": { "state": "couldNotReach", "message": "Could not reach YouTube just now." } },
+        { "event": "retry", "expect": { "state": "looking" } },
+        { "event": "listFailed", "message": null, "expect": { "state": "couldNotReach", "message": "Could not reach your server just now." } },
+        { "event": "retry", "expect": { "state": "looking" } },
+        { "event": "listFailed", "message": "This song can't be given another version", "expect": { "state": "unavailable", "message": "This song can't be given another version" } },
+        { "event": "retry", "expect": { "state": "unavailable" } }
+      ]
+    },
+    {
+      "name": "busy shows the server's words, keeps the playing row and going back",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "busy", "expect": { "state": "shown", "rows": [], "playing": "v2", "message": "This song is being added to your library right now. You can choose its version once that finishes.", "canUndo": true, "empty": null } },
+        { "event": "pick", "video": "v1", "entry": "e1", "song": "X", "expect": { "checking": null } },
+        { "event": "undo", "entry": "e1", "song": "X", "expect": { "checking": "auto" } }
+      ]
+    },
+    {
+      "name": "a song played from a file or downloaded on play lists no versions",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "file", "expect": { "state": "shown", "rows": [], "playing": null, "message": "This song plays from a file in your library, so its version can't be chosen here.", "canUndo": false, "empty": null } },
+        { "event": "undo", "entry": "e1", "song": "X", "expect": { "checking": null } },
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": { "state": "looking" } },
+        { "event": "listed", "answer": "download", "expect": { "state": "shown", "rows": [], "playing": null, "message": "This server adds every song it plays to the library, so a song's version can't be chosen here.", "canUndo": false, "empty": null } }
+      ]
+    },
+    {
+      "name": "an answer for another song is not taken",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "otherSong", "expect": { "state": "looking" } },
+        { "event": "listed", "answer": "octo", "expect": { "state": "shown" } },
+        { "event": "pick", "video": "v2", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "picked", "answer": "otherSong", "expect": { "checking": "v2", "playing": "v1" } }
+      ]
+    },
+    {
+      "name": "Try again only after could not reach, and Done closes",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "retry", "expect": { "state": "shown" } },
+        { "event": "close", "expect": { "state": "closed" } }
+      ]
+    },
+    {
+      "name": "a late pick answer after closing changes nothing",
+      "steps": [
+        { "event": "open", "entry": "e1", "song": "X", "title": "Song", "artist": "Artist", "expect": {} },
+        { "event": "listed", "answer": "octo", "expect": {} },
+        { "event": "pick", "video": "v2", "entry": "e1", "song": "X", "expect": { "checking": "v2" } },
+        { "event": "close", "expect": { "state": "closed" } },
+        { "event": "picked", "answer": "afterPick", "expect": { "state": "closed" } },
+        { "event": "pickFailed", "message": "That video can't be played here. Pick another.", "expect": { "state": "closed" } }
+      ]
+    }
+  ],
+  "feed": [
+    {
+      "name": "no cursor stored drops every outside song once",
+      "stored": null,
+      "answer": {"epoch":"e1","seq":7,"complete":true,"change":[{"seq":6,"ids":["X","Y"]},{"seq":7,"ids":["Z"]}]},
+      "expect": { "dropAll": true, "dropIds": ["X", "Y", "Z"], "next": { "epoch": "e1", "seq": 7 } }
+    },
+    {
+      "name": "the same epoch drops the listed ids",
+      "stored": { "epoch": "e1", "seq": 5 },
+      "answer": {"epoch":"e1","seq":7,"complete":true,"change":[{"seq":6,"ids":["X","Y"]},{"seq":7,"ids":["Z"]}]},
+      "expect": { "dropAll": false, "dropIds": ["X", "Y", "Z"], "next": { "epoch": "e1", "seq": 7 } }
+    },
+    {
+      "name": "another epoch drops every outside song",
+      "stored": { "epoch": "e0", "seq": 9 },
+      "answer": {"epoch":"e1","seq":3,"complete":true,"change":[]},
+      "expect": { "dropAll": true, "dropIds": [], "next": { "epoch": "e1", "seq": 3 } }
+    },
+    {
+      "name": "an incomplete answer drops every outside song",
+      "stored": { "epoch": "e1", "seq": 5 },
+      "answer": {"epoch":"e1","seq":900,"complete":false,"change":[{"seq":600,"ids":["X"]}]},
+      "expect": { "dropAll": true, "dropIds": ["X"], "next": { "epoch": "e1", "seq": 900 } }
+    },
+    {
+      "name": "nothing changed",
+      "stored": { "epoch": "e1", "seq": 7 },
+      "answer": {"epoch":"e1","seq":7,"complete":true,"change":[]},
+      "expect": { "dropAll": false, "dropIds": [], "next": { "epoch": "e1", "seq": 7 } }
+    }
+  ]
+}

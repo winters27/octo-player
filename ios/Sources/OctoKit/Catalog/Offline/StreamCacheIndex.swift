@@ -123,6 +123,27 @@ public struct StreamCacheIndex: Sendable, Equatable {
 
     public mutating func removeAll() { entries = [:] }
 
+    /// Lets go of every saved copy of one song of one server, whatever type, request or size it was
+    /// saved in, as when the server changed the video it streams from, which makes each of them
+    /// another file. The names wait in `dropped` for their files to go. Answers them, in order.
+    @discardableResult
+    public mutating func dropSong(sourceId: String, serverId: String) -> [String] {
+        let prefix = "\(sourceId)|\(serverId)|"
+        let going = entries.keys.filter { $0.hasPrefix(prefix) && Self.isCopyTail($0.dropFirst(prefix.count)) }.sorted()
+        for key in going { drop(key) }
+        return going
+    }
+
+    /// Whether what follows a song's server and id in a saved name is a type and a request, with a
+    /// file size or not (see `streamCacheKey`), so a song whose id starts with this one's and a bar
+    /// is never taken for it.
+    private static func isCopyTail(_ tail: Substring) -> Bool {
+        let parts = tail.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 2 || parts.count == 3, !parts[0].isEmpty else { return false }
+        let digits = { (part: Substring) in !part.isEmpty && part.allSatisfy { $0.isASCII && $0.isNumber } }
+        return (parts[1] == "raw" || digits(parts[1])) && (parts.count == 2 || digits(parts[2]))
+    }
+
     /// The songs to let go so `incoming` more bytes fit in `limitBytes`, least recently played
     /// first; a song goes whole. Never `keeping`, the song being saved now.
     public func evictions(limitBytes: Int64?, incoming: Int64, keeping: String? = nil) -> Set<String> {

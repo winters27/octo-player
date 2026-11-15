@@ -103,5 +103,9 @@ tasks.named<ProcessResources>("desktopProcessResources") {
     }
 }
 
-// The gateway tests read the fixtures shared with the iPhone app.
-tasks.withType<Test>().configureEach { inputs.dir(rootProject.file("fixtures/gateway")) }
+// The gateway and stream version tests read the fixtures shared with the
+// iPhone app.
+tasks.withType<Test>().configureEach {
+    inputs.dir(rootProject.file("fixtures/gateway"))
+    inputs.file(rootProject.file("fixtures/stream-versions-words.json"))
+}

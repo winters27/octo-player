@@ -792,6 +792,36 @@ class SubsonicClient(
             LyricsChoiceAnswer(id, candidate),
         ).choice
 
+    // An outside song's versions: the video it streams from and the other
+    // videos it can, which the server lists from YouTube (up to ten
+    // seconds). `id` is the song's id as it streams. Only for servers that
+    // list STREAM_VERSIONS_EXTENSION.
+    suspend fun streamVersions(id: String): StreamVersions =
+        get("getStreamVersions", mapOf("id" to id), "streamVersions", StreamVersions.serializer())
+
+    // Makes `video` (one of streamVersions' rows) the one the outside song
+    // streams from for everyone on the server, from each play's next start,
+    // or with STREAM_VERSION_AUTO goes back to Octo's own pick. Answers the
+    // song's versions as they are now, `ids` every id the song has. A
+    // refusal is the server's error in its own words (SubsonicException).
+    suspend fun setStreamVersion(id: String, video: String): StreamVersions =
+        get("setStreamVersion", mapOf("id" to id, "video" to video), "streamVersions", StreamVersions.serializer())
+
+    // The outside songs whose chosen version changed after a cursor, as the
+    // last answer gave it (`epoch`, `since`); both null asks for every
+    // change the server keeps. Only for servers that list
+    // STREAM_VERSION_CHANGES_EXTENSION.
+    suspend fun streamVersionChanges(epoch: String?, since: Long?): StreamVersionChanges =
+        get(
+            "getStreamVersionChanges",
+            buildMap {
+                epoch?.let { put("epoch", it) }
+                since?.let { put("since", "$it") }
+            },
+            "streamVersionChanges",
+            StreamVersionChanges.serializer(),
+        )
+
     // The older lyrics call, found by artist and title: plain text, or null
     // when the server has none.
     suspend fun lyrics(artist: String, title: String): String? =

@@ -90,6 +90,10 @@ class DeviceIdentity(id: String, name: String) {
 enum class OctoPurpose(val wire: String) {
     // A copy kept on the device to play without a connection.
     Offline("offline"),
+
+    // A read that analyzes a song the player plays or will play (its
+    // first or last seconds, its length), never a play of its own.
+    Scout("scout"),
 }
 
 // Marks a request as being for this purpose.

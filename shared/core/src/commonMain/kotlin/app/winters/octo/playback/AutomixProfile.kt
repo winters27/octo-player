@@ -116,12 +116,18 @@ class TransitionProfiles(
     // The song's profile when it is already here.
     fun cached(id: String): TransitionProfile? = synchronized(this) { ready[id] }
 
+    // Goes up at each forget and clear, so an answer asked for before one is
+    // never kept: it may be of the file the song streamed as before.
+    private var generation = 0L
+
     // The song's profile, asking the server unless it has lately said there
-    // is none. Null when there is none to have.
+    // is none. Null when there is none to have, or when what was kept was
+    // forgotten while the server was being asked.
     suspend fun profile(id: String): TransitionProfile? {
-        synchronized(this) {
+        val asked = synchronized(this) {
             ready[id]?.let { return it }
             missing[id]?.let { at -> if (now() - at < PROFILE_RETRY_MS) return null }
+            generation
         }
         val answer = try {
             fetch(id)
@@ -131,6 +137,7 @@ class TransitionProfiles(
         }
         val profile = answer?.let(TransitionProfile::of)
         synchronized(this) {
+            if (generation != asked) return null
             if (profile != null) {
                 ready[id] = profile
                 missing.remove(id)
@@ -144,7 +151,18 @@ class TransitionProfiles(
 
     // Forgets everything, as when the server changes.
     fun clear() = synchronized(this) {
+        generation++
         ready.clear()
         missing.clear()
+    }
+
+    // Forgets these songs' profiles, and that they had none, as when the
+    // file a song found online streams as changed: each is asked for again.
+    fun forget(ids: Collection<String>) = synchronized(this) {
+        generation++
+        ids.forEach { id ->
+            ready.remove(id)
+            missing.remove(id)
+        }
     }
 }
