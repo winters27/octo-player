@@ -1,5 +1,6 @@
 import Foundation
 import OctoKit
+import os
 import ShareInbox
 import SwiftUI
 
@@ -65,8 +66,16 @@ enum AccountHooks {
 ///   tapping it in Servers does (one needing its password again is left as it is)
 /// - `account:remove:TEXT` takes the kept server whose id or address holds TEXT off the list,
 ///   deleting what the phone keeps for it, as Remove and delete does
+/// - `account:ask:TEXT` asks to sign in to the kept server whose id or address holds TEXT, as Octo's
+///   own asks do (behind an open sign-in or a link's form it shows the ask's message instead)
+/// - `account:toast` keeps the message showing now, and logs it, for `account:toastAction`
+/// - `account:toastAction` runs the kept message's action, after the message itself has gone
+/// - `account:close` closes the sign-in cover and waits for it to go, at most five seconds,
+///   logging whether it went
 @MainActor
 enum AccountDrive {
+    private static let log = Logger(subsystem: "app.winters.octo", category: "drive")
+
     static func run(_ value: String, session: Session, serverSwitch: ServerSwitch) async {
         guard let entries = SystemEntries.shared else { return }
         let router = entries.router
@@ -109,6 +118,20 @@ enum AccountDrive {
         case "again": if let server = session.active { router.signIn = .again(server, note: serverSwitchPasswordRefusedWords(server.name)) }
         case "connection": if let server = session.active { router.signIn = .editConnection(server) }
         case "join": if let link = parseFamilyLink(rest) { accounts.family.open(.join(link)) } else { router.signIn = .join(rest, opened: 0) }
+        case "ask": if let named { router.askSignIn(serverId: named.id, note: nil) }
+        case "toast":
+            // The message showing now, kept so its action can run after its own timer has put it away.
+            DriveToast.held = router.toast
+            let text = router.toast?.text ?? "none"
+            log.info("toast \(text, privacy: .public)")
+        case "toastAction": DriveToast.held?.perform?()
+        case "close":
+            DriveToast.coverGone = false
+            router.signIn = nil
+            // Waits for the cover's own leaving, at most five seconds.
+            for _ in 0..<50 where !DriveToast.coverGone { try? await Task.sleep(for: .milliseconds(100)) }
+            let line = DriveToast.coverGone ? "cover closed" : "cover still up"
+            log.info("\(line, privacy: .public)")
         case "scan":
             SignInView.scanOnOpen = true
             router.signIn = .signIn
@@ -134,5 +157,13 @@ enum DriveSheets {
             InviteSheetView(invite: sample, server: server, owner: true, newLink: {}, done: { overlays.hideSheet(id) })
         )) { overlays.hideSheet(id) }
     }
+}
+
+/// The message a drive step read, kept so a later step can run its action after the message has
+/// gone, and whether the sign-in cover has gone since `account:close` asked.
+@MainActor
+enum DriveToast {
+    static var held: Router.Toast?
+    static var coverGone = true
 }
 #endif

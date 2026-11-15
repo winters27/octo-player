@@ -191,7 +191,7 @@ final class Session {
         // The server is asked through a session of its own, with its own client certificate, so
         // the one in use keeps its own until this one comes into use.
         let own = try ownSession(main: main, home: home, picked: form.certificate,
-                                 saved: form.certificate == nil && !form.removesCertificate ? before : nil)
+                                 saved: form.certificate == nil && !form.removesCertificate ? before : nil, seconds: 30)
         defer { own.finishTasksAndInvalidate() }
 
         let use: Bool = switch purpose {
@@ -446,7 +446,7 @@ final class Session {
     /// cannot be opened.
     func linkClient(at address: URL, home: URL?, headers: [String: String],
                     certificate: (data: Data, password: String)?) throws -> SubsonicClient {
-        let own = try ownSession(main: address, home: home, picked: certificate, saved: nil)
+        let own = try ownSession(main: address, home: home, picked: certificate, saved: nil, seconds: 30)
         return makeClient(address, home: home, Credentials(username: "", password: ""), headers, session: own)
     }
 

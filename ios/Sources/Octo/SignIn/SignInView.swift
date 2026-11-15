@@ -12,6 +12,7 @@ struct SignInView: View {
     @Environment(Session.self) private var session
     @Environment(ServerSync.self) private var sync
     @Environment(ServerSwitch.self) private var serverSwitch
+    @Environment(Router.self) private var router
     @Environment(\.dismiss) private var dismiss
     @Environment(\.octoPalette) private var palette
     @Environment(\.octoReduceMotion) private var still
@@ -85,11 +86,17 @@ struct SignInView: View {
             }
             .background { PageBackdrop(page: glowPage, route: nil) }
             .overlay(alignment: .topLeading) {
-                Button { dismiss() } label: {
+                Button {
+                    // A request that commits finishes first. With a finished sign-up held, Back leaves
+                    // the link and keeps its username; the next Back leaves the page.
+                    guard !model.committing else { return }
+                    if model.holdsSignUp { model.stopJoin() } else { dismiss() }
+                } label: {
                     Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
+                .disabled(model.committing)
                 .padding(.leading, 16)
                 .accessibilityLabel("Back")
             }
@@ -143,7 +150,15 @@ struct SignInView: View {
                 #endif
                 if !model.didOpenJoin, case .join(let text, _) = model.form, let link = parseFamilyLink(text) { model.didOpenJoin = true; model.startJoin(link, session: session) }
             }
-            .onDisappear { model.leave() }
+            .onDisappear {
+                router.markSignIn(model, open: false)
+                model.leave()
+                #if DEBUG
+                DriveToast.coverGone = true
+                #endif
+            }
+            // A link from outside never replaces this cover while a sign-in is open in it.
+            .onChange(of: model.signInOpen, initial: true) { router.markSignIn(model, open: model.signInOpen) }
             .onChange(of: model.signedIn) { _, signedIn in
                 if signedIn {
                     done(model.notice)
@@ -390,7 +405,15 @@ struct SignInView: View {
             FormFieldRow(title: SignInWords.serverAddress, value: model.rest, onChange: { model.typeAddress($0, session: session) },
                          placeholder: "music.example.com", contentType: .URL, keyboardType: .URL,
                          submitLabel: addressNext == nil ? .done : .next, leading: { schemeToggle }, onSubmit: addressNext,
-                         focus: $focus, field: .address)
+                         focus: $focus, field: .address, readOnly: model.holdsSignUp)
+                // A refused link pasted here leaves the field drawn again without it, with focus back in it.
+                .id(model.addressResets)
+                .task(id: model.addressResets) { if model.addressResets > 0 { focus = .address } }
+            if let note = model.linkNote {
+                FormNote(.info, note)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
             if model.showsName {
                 FormDivider()
                 FormFieldRow(title: SignInWords.serverName, optional: true, value: model.label, onChange: { model.label = $0 },
@@ -416,6 +439,7 @@ struct SignInView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(model.holdsSignUp)
         .accessibilityLabel(model.scheme == .https ? "Encrypted, https" : "Not encrypted, http")
         .accessibilityHint(model.scheme == .https ? "Use http" : "Use https")
     }
@@ -566,7 +590,7 @@ struct SignInView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 12)
         }
-        GlazeButton("Sign in with a password", size: .small) { model.stopJoin() }
+        GlazeButton("Sign in with a password", size: .small, enabled: !model.committing) { model.stopJoin() }
             .frame(maxWidth: .infinity)
             .padding(.top, 12)
     }
