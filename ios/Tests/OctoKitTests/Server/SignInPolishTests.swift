@@ -189,6 +189,42 @@ import Testing
             "Color.clear .allowsHitTesting(false).accessibilityHidden(true).id(id) .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom($0) }"))
     }
 
+    /// Red when whether the reveal runs is decided only after its wait for the row, so a callout or the
+    /// API key row's scroll that finishes first is scrolled away by it: with either on its way as
+    /// Advanced opens, the reveal never runs.
+    @Test func aRevealIsDecidedAsAdvancedOpens() throws {
+        let raw = try SourceText.read(Self.view)
+        let reveal = SourceText.squashed(try SourceText.slice(raw, from: "    private func revealAdvanced(", to: "\n    }\n"))
+        #expect(reveal.contains(
+            "async { guard model.advancedOpen, revealsAdvanced else { return } revealsAdvanced = false guard !model.calloutPending, !model.keyPending else { return } let run = wait.begin()"))
+    }
+
+    /// Red when Done on Change password's last field can send a second change while one runs.
+    @Test func changePasswordSendsOneChangeAtATime() throws {
+        let change = try SourceText.read(Self.changePassword)
+        let body = try SourceText.slice(change, from: "    private func change() {", to: "\n    }\n")
+        #expect(body.hasPrefix("    private func change() {\n        guard !busy else { return }\n"))
+        #expect(SourceText.count("busy = true", in: body) == 1)
+        #expect(change.contains("default: change()"))
+    }
+
+    /// Red when a certificate file saved with no password has to go through the password question,
+    /// whose Use it stays off on an empty field so the file could never be chosen, or when the first
+    /// try reads "opened, with no last day" as a failure (`try?` makes both nil).
+    @Test func aCertificateSavedWithNoPasswordIsTakenWithoutAsking() throws {
+        let raw = try SourceText.read(Self.view)
+        #expect(raw.contains(".fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { certificatePicked($0) }"))
+        let picked = try SourceText.slice(raw, from: "    private func certificatePicked(", to: "\n    }\n")
+        let empty = try SourceText.at("let expires = try CertificateCheck.validate(data, password: \"\")", in: picked)
+        let ask = try SourceText.at("pendingCertificate = ", in: picked)
+        #expect(empty < ask)
+        #expect(SourceText.squashed(picked).contains(
+            "do { let expires = try CertificateCheck.validate(data, password: \"\") model.certificate = (name, data, \"\", expires) model.removesCertificate = false } catch { pendingCertificate = (name, data) certificatePassword = \"\" }"))
+        #expect(!raw.contains("try? CertificateCheck.validate("))
+        // The password question is asked from here alone.
+        #expect(SourceText.count("pendingCertificate = (", in: raw) == 1)
+    }
+
     /// Red when a sign-in question's answers sit in a plain row again, where a short main answer can
     /// be narrower than Cancel and large text squeezes both, or the row stops following the shared
     /// placement.

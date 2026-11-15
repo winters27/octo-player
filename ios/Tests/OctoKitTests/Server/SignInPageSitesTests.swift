@@ -183,7 +183,7 @@ import Testing
         let model = SourceText.squashed(raw)
         for anchor in [
             "var certificate: (name: String, data: Data, password: String, expires: Date?)?",
-            "if hadCertificate { readSavedExpiry(server.id) }",
+            "if hadCertificate, let server = saved { readSavedExpiry(server.id) }",
             "let expires = await Task.detached(priority: .utility) { CertificateCheck.savedExpiry(forServer: id) }.value",
             "guard !Task.isCancelled, let self, self.hadCertificate, !self.removesCertificate, self.certificate == nil else { return } self.savedCertificateExpiry = expires",
             "receiving?.cancel() expiryRead?.cancel()",
@@ -191,6 +191,23 @@ import Testing
             #expect(model.contains(anchor), "\(anchor)")
         }
         #expect(SourceText.count("CertificateCheck.savedExpiry(", in: raw) == 1)
+    }
+
+    /// Red when the saved certificate's file is opened for a model SwiftUI builds and never shows: the
+    /// read is asked for once, when the page appears, and never in `init`.
+    @Test func theSavedCertificatesDayIsReadOnceThePageAppears() throws {
+        let model = try SourceText.read(Self.model)
+        let initializer = try SourceText.slice(model, from: "    init(form: Form, session: Session) {", to: "\n    }\n")
+        #expect(!initializer.contains("readSavedExpiry("))
+        let appeared = SourceText.squashed(try SourceText.slice(model, from: "    func appeared() {", to: "\n    }\n"))
+        #expect(appeared.contains(
+            "guard !expiryAsked else { return } expiryAsked = true if hadCertificate, let server = saved { readSavedExpiry(server.id) }"))
+        #expect(model.contains("@ObservationIgnored private var expiryAsked = false"))
+        // Its declaration and its one call.
+        #expect(SourceText.count("readSavedExpiry(", in: model) == 2)
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(".onAppear { model.serverSwitch = serverSwitch model.appeared()"))
+        #expect(SourceText.count("model.appeared()", in: view) == 1)
     }
 
     /// Red when a field skips the row that applies focus, a raw text field comes back to the page,

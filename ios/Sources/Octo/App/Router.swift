@@ -8,7 +8,7 @@ import SwiftUI
 final class Router {
     /// The sign-in page, while it is open. A cover set by anything but an ask is no longer the ask's.
     var signIn: SignInModel.Form? {
-        didSet { if signIn?.id != askedCover { askedCover = nil } }
+        didSet { askedCover = askedCoverKept(askedCover, showing: signIn?.id) }
     }
     /// The kept servers, for an ask to look its server up again each time it runs.
     @ObservationIgnored weak var session: Session?
@@ -16,7 +16,7 @@ final class Router {
     @ObservationIgnored private var askedCover: SignInModel.Form.ID?
     /// The sign-in forms the covers show, each marked while a sign-in is open in it. Nothing draws
     /// from it.
-    @ObservationIgnored private(set) var openSignIns: [ObjectIdentifier: WeakSignIn] = [:]
+    @ObservationIgnored private var openSignIns = OpenSignIns<SignInModel>()
     /// A page to open on the tab in use, asked for from outside the tabs (the player).
     private(set) var route: Route?
 
@@ -62,19 +62,21 @@ final class Router {
 
     /// Marks a sign-in form open or not; a cover going away never clears another cover's mark.
     func markSignIn(_ model: SignInModel, open: Bool) {
-        openSignIns[ObjectIdentifier(model)] = open ? WeakSignIn(model) : nil
+        openSignIns.mark(model, open: open)
     }
 
     /// Whether a sign-in is open in a form still alive. A form gone without its last mark is dropped,
     /// so it never keeps links out.
-    var hasOpenSignIn: Bool {
-        openSignIns = openSignIns.filter { $0.value.model != nil }
-        return !openSignIns.isEmpty
-    }
+    var hasOpenSignIn: Bool { openSignIns.anyOpen() }
 
     /// Puts `words` in the link note of every form with a sign-in open.
     func noteLink(_ words: String) {
-        for entry in openSignIns.values { entry.model?.noteLink(words) }
+        for model in openSignIns.forms { model.noteLink(words) }
+    }
+
+    /// The phone's servers as an ask reads them, or nil before the session is set.
+    private var askServers: AskServers? {
+        session.map { AskServers(kept: $0.servers, activeId: $0.activeId, signedIn: $0.client != nil) }
     }
 
     /// Octo's own ask to sign in to a kept server (app start did not sign in to it again, or a
@@ -82,9 +84,7 @@ final class Router {
     /// otherwise the message offers it, and Sign in asks again, looking the server up anew. Dropped
     /// when the server is gone, or is the one in use and signed in.
     func askSignIn(serverId: String, note: String?) {
-        guard let session, let server = session.servers.first(where: { $0.id == serverId }),
-              !(session.client != nil && session.activeId == serverId)
-        else { return }
+        guard let server = askServers?.target(serverId) else { return }
         let showingJoin = if case .join? = signIn { true } else { false }
         if askOpens(hasOpenSignIn: hasOpenSignIn, showingJoin: showingJoin) {
             signIn = .again(server, note: note)
@@ -99,9 +99,8 @@ final class Router {
     /// Before a link's join replaces the cover: a cover an ask opened leaves that ask's message, so
     /// the sign-in it asked for is one tap away again. A cover the person opened leaves nothing.
     func setAside() {
-        guard let askedCover, signIn?.id == askedCover, case .again(let server, let note)? = signIn,
-              let session, let kept = session.servers.first(where: { $0.id == server.id }),
-              !(session.client != nil && session.activeId == kept.id)
+        guard case .again(let server, let note)? = signIn, let servers = askServers,
+              let kept = askLeftOnReplace(asked: askedCover, showing: signIn?.id, server: server.id, servers: servers)
         else { return }
         show(SignInWords.askWhileSignInOpen(kept.name), action: "Sign in") { [weak self] in
             self?.askSignIn(serverId: kept.id, note: note)
@@ -153,16 +152,6 @@ final class Router {
     }
 
     func dismissToast() { toast = nil }
-}
-
-/// A sign-in form held without keeping it alive.
-@MainActor
-final class WeakSignIn {
-    weak var model: SignInModel?
-
-    init(_ model: SignInModel) {
-        self.model = model
-    }
 }
 
 /// What the server downloads sheet shows: the list (on a song's newest download when `focus`

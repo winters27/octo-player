@@ -137,6 +137,7 @@ struct SignInView: View {
         covered
             .onAppear {
                 model.serverSwitch = serverSwitch
+                model.appeared()
                 #if DEBUG
                 if Self.scanOnOpen {
                     Self.scanOnOpen = false
@@ -203,15 +204,7 @@ struct SignInView: View {
 
     var body: some View {
         reacting
-            .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { result in
-                guard case .success(let url) = result else { return }
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: url) {
-                    pendingCertificate = (url.lastPathComponent, data)
-                    certificatePassword = ""
-                }
-            }
+            .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { certificatePicked($0) }
             .alert(SignInWords.certPasswordTitle, isPresented: Binding(get: { pendingCertificate != nil }, set: { if !$0 { pendingCertificate = nil } })) {
                 SecureField(SignInWords.certPasswordField, text: $certificatePassword)
                 // Off until the password is typed in.
@@ -320,11 +313,14 @@ struct SignInView: View {
 
     /// Advanced opened from its head: its first group's first row comes into view when it opened
     /// under the scroll's visible bottom (see `advancedRevealScrolls`), the page gliding until the
-    /// row's foot sits on that bottom, or moving at once under reduced motion. It waits for the row
-    /// to be measured; a field taking focus on the way ends it, since the person is typing.
+    /// row's foot sits on that bottom, or moving at once under reduced motion. Whether it runs is
+    /// decided as Advanced opens: with a callout or the API key row's scroll on its way it never
+    /// does, so a callout that finishes first is never scrolled away. It waits for the row to be
+    /// measured; a field taking focus on the way ends it, since the person is typing.
     private func revealAdvanced(_ proxy: ScrollViewProxy) async {
         guard model.advancedOpen, revealsAdvanced else { return }
         revealsAdvanced = false
+        guard !model.calloutPending, !model.keyPending else { return }
         let run = wait.begin()
         defer { wait.end(run) }
         while marks.rowBottom == nil || marks.visibleBottom == nil {
@@ -762,6 +758,25 @@ struct SignInView: View {
                     model.removesCertificate = model.hadCertificate
                 }
             }
+        }
+    }
+
+    /// A file picked for the certificate: one saved with no password is taken at once, and any other
+    /// asks for its password. Only checked here: the server in use keeps its certificate until this
+    /// one is saved.
+    private func certificatePicked(_ result: Result<URL, any Error>) {
+        guard case .success(let url) = result else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        let name = url.lastPathComponent
+        do {
+            let expires = try CertificateCheck.validate(data, password: "")
+            model.certificate = (name, data, "", expires)
+            model.removesCertificate = false
+        } catch {
+            pendingCertificate = (name, data)
+            certificatePassword = ""
         }
     }
 

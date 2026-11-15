@@ -60,7 +60,9 @@ struct ChangePasswordForm: View {
         }
     }
 
+    /// Sends the change once: Done on the last field while one runs sends nothing more.
     private func change() {
+        guard !busy else { return }
         if let problem = passwordDraftProblem(draft) {
             self.problem = problem
             return
