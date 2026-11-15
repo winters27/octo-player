@@ -234,24 +234,32 @@ struct AskingView: View {
 }
 
 /// Changing a family member's password: the current one, the new one twice with how strong it
-/// looks. It signs every other app and device out.
+/// looks. It signs every other app and device out. While a change is on its way, from here or
+/// Settings' form, Done sends nothing and the sheet stays. The change runs on its own
+/// (`PasswordChanges`): once changed the sheet closes and the app's notice says so; a refusal
+/// shows here, or in the notice once the sheet is gone.
 struct FamilyPasswordSheet: View {
-    let change: (String, String) async -> PasswordChange
-    let done: (String) -> Void
+    let change: @MainActor (String, String) async -> PasswordChange
     let close: () -> Void
+    @Environment(Session.self) private var session
+    @Environment(Router.self) private var router
     @State private var draft = PasswordDraft()
-    @State private var busy = false
     @State private var problem: String?
+    @State private var onScreen = OnScreen()
     /// The field with the focus, by its place.
     @State private var typing: Int?
 
+    /// A change of password is on its way, from this sheet or another form.
+    private var busy: Bool { session.passwordChanges.running }
+
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader(title: FamilyText.changePassword, subtitle: FamilyText.signOutEverywhereLine, clock: false, close: close)
+            SheetHeader(title: FamilyText.changePassword, subtitle: FamilyText.signOutEverywhereLine, clock: false, closeEnabled: !busy,
+                        close: leave)
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     field("Current password", $draft.current, 0)
-                    field("New password, at least \(minPassword) characters", $draft.new, 1)
+                    field("New password", $draft.new, 1)
                     if let strength = passwordStrength(draft.new) { Text(strength).font(.octoCaption).foregroundStyle(OctoColor.textMuted) }
                     field("New password again", $draft.confirm, 2)
                     if let problem { Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error) }
@@ -260,38 +268,66 @@ struct FamilyPasswordSheet: View {
                 .padding(.vertical, 6)
             }
             SoftHairline()
+            // The main answer first and Cancel second, as every question in the app sets them.
             HStack(spacing: 10) {
-                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: close)
                 AccentButton(FamilyText.changePassword, size: .medium, bright: true, loading: busy, fillWidth: true, action: go)
+                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: leave)
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)
             .padding(.bottom, 12)
         }
+        // A swipe down does nothing while a change is on its way.
+        .interactiveDismissDisabled(busy)
+        .onAppear { onScreen.shown = true }
+        .onDisappear { onScreen.shown = false }
     }
 
-    /// One password field; Next hands the focus to the field after it, Done on the last sends.
-    private func field(_ placeholder: String, _ text: Binding<String>, _ index: Int) -> some View {
-        GlassInput(placeholder, text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }), secure: true,
-                   submitLabel: index == 2 ? .done : .next,
-                   focus: Binding(get: { typing == index }, set: { now in if now { typing = index } else if typing == index { typing = nil } })) {
-            if index == 2 { go() } else { typing = index + 1 }
+    /// One password field with its name over it; Next hands the focus to the field after it, Done
+    /// on the last sends.
+    private func field(_ name: String, _ text: Binding<String>, _ index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(name).font(.octoFormName).foregroundStyle(OctoColor.textPrimary).accessibilityHidden(true)
+            GlassInput(index == 1 ? "At least \(minPassword) characters" : SignInWords.required,
+                       text: Binding(get: { text.wrappedValue }, set: { text.wrappedValue = $0; problem = nil }),
+                       secure: true, submitLabel: index == 2 ? .done : .next,
+                       focus: Binding(get: { typing == index }, set: { now in if now { typing = index } else if typing == index { typing = nil } })) {
+                if index == 2 { go() } else { typing = index + 1 }
+            }
+            .textContentType(index == 0 ? .password : .newPassword)
+            .accessibilityLabel(name)
         }
-        .textContentType(index == 0 ? .password : .newPassword)
     }
 
+    /// Closes the sheet, unless a change is on its way: it stays until that answers.
+    private func leave() {
+        guard !busy else { return }
+        close()
+    }
+
+    /// Sends the change once: while one is on its way, from here or another form, Done sends
+    /// nothing more.
     private func go() {
+        guard !busy else { return }
         if let problem = passwordDraftProblem(draft) {
             self.problem = problem
             return
         }
-        busy = true
         problem = nil
         let draft = draft
-        Task {
-            let result = await change(draft.current, draft.new)
-            busy = false
-            if result == .changed { done(passwordChangeWords(result, family: true)) } else { problem = passwordChangeWords(result, family: true) }
+        let change = change
+        let router = router
+        let onScreen = onScreen
+        session.passwordChanges.change {
+            await change(draft.current, draft.new)
+        } words: { result in
+            passwordChangeWords(result, family: true)
+        } answered: { result, words in
+            guard onScreen.shown else { return false }
+            if result == .changed { close() } else { problem = words }
+            return true
+        } notice: { words, done in
+            router.show(words, done: done)
         }
     }
 }

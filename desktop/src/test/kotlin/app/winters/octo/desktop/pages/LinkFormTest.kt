@@ -49,6 +49,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -63,8 +64,9 @@ import kotlin.time.Duration.Companion.seconds
 // sign-in page, saved secret, Method, certificate, everything typed), a late
 // fill for the old server changes nothing, a link while a sign-in runs is
 // refused in the link note, a hand-over's sealed sign-in is checked before
-// anything goes to it, a sign-up or a sealed sign-in is used once, and a
-// waiting hand-over can be left while a committing request cannot.
+// anything goes to it, a sign-up or a sealed sign-in is used once and, while
+// held, refuses every link but its own, and a waiting hand-over can be left
+// while a committing request cannot.
 class LinkFormTest {
     @get:Rule val folder = TemporaryFolder()
     private val opened = mutableListOf<AutoCloseable>()
@@ -189,6 +191,32 @@ class LinkFormTest {
         assertEquals("", form.gatewaySecond)
         assertFalse("no saved secret stands in any more", form.keepsPassword)
         assertEquals("the name stays", "Home", form.label)
+    }
+
+    // A file opening on the row for the old server (being read, or asking
+    // for its password) ends with a link to another server, so its answer
+    // lands nowhere and Choose is ready; a fitting link leaves it. Red when
+    // the forget leaves the opening's turn, which lets the old server's file
+    // onto the new server's form.
+    @Test
+    fun aLinkToAnotherServerEndsAFileOpeningForTheOldOne() {
+        val fitting = SignInForm(kept)
+        val turn = Any()
+        fitting.certificateTurn = turn
+        fitting.certificateOpening = true
+        fitting.take(FamilySignInPrefill("https://music.example.com"))
+        assertSame("a fitting link keeps the opening", turn, fitting.certificateTurn)
+        assertTrue(fitting.certificateOpening)
+
+        val form = SignInForm(kept)
+        form.certificateTurn = Any()
+        form.certificateOpening = true
+        form.certificateProblem = "That file isn't a certificate."
+        form.take(FamilyInviteLink("https://other.example.com", "t1"))
+        assertEquals("t1", form.invite?.token)
+        assertNull("the opening's turn ends", form.certificateTurn)
+        assertFalse("Choose is ready", form.certificateOpening)
+        assertNull(form.certificateProblem)
     }
 
     // The late saved sign-in page and the late certificate read land on the
@@ -340,9 +368,9 @@ class LinkFormTest {
         assertNull(form.signedUp)
     }
 
-    @Test
-    fun leavingAHeldSignUpKeepsItsUsernameAndAnotherInviteDropsIt() = runTest {
-        val s = server()
+    // An invite to `server` taken, signed up, and its sign-in step failed:
+    // the sign-up is held.
+    private suspend fun heldSignUp(s: FakeServer): SignInForm {
         s.answerBy("join") { """{"username":"alex"}""" }
         s.fail("ping", 40, "Wrong username or password")
         val form = SignInForm()
@@ -352,36 +380,93 @@ class LinkFormTest {
         form.inviteAgain = "long enough"
         assertNull(signUpFromForm(accounts(), form))
         assertNotNull(form.signedUp)
+        return form
+    }
+
+    // A held sign-up is a sign-in that is open: another invite to its own
+    // server is refused with the open sign-in's words and changes nothing,
+    // the held sign-up, its invite, the address and the home included; so is
+    // a sign-in link. Leaving the link then puts the sign-up's username in
+    // the field. Red when another token drops the held sign-up.
+    @Test
+    fun anotherTokenOnTheHeldServerIsRefusedAndKeepsTheSignUp() = runTest {
+        val s = server()
+        val form = heldSignUp(s)
+        val held = form.signedUp
+        val address = form.url.toString()
+        val home = form.home
         assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode(s.address, Charsets.UTF_8)}&invite=tok_2"))
-        assertNull("another invite drops the held sign-up", form.signedUp)
-        assertFalse(form.addressLocked)
-        form.signedUp = HeldSignUp("alex", "long enough", s.address)
+        assertEquals(SignInWords.LINK_WHILE_SIGN_IN_OPEN, form.linkNote)
+        assertSame("the held sign-up stays", held, form.signedUp)
+        assertEquals("tok_1", form.invite?.token)
+        assertTrue(form.addressLocked)
+        assertEquals(address, form.url.toString())
+        assertEquals(home, form.home)
+        form.take(FamilySignInPrefill(s.address, "ana"))
+        assertEquals(SignInWords.LINK_WHILE_SIGN_IN_OPEN, form.linkNote)
+        assertSame(held, form.signedUp)
+        assertEquals("tok_1", form.invite?.token)
         form.leaveLink()
         assertEquals("alex", form.username)
         assertNull(form.signedUp)
         assertNull(form.invite)
     }
 
-    // An invite to another server is never the same invite, whatever its
-    // token: the held sign-up is dropped and the address is the new
-    // server's. Red when a link to another server keeps it (the address
-    // would stay locked on the old server).
+    // The same invite token for another server is never the same invite:
+    // refused with the open sign-in's words, and the held sign-up, the
+    // address (still the server it was made at) and the home stay. Its own
+    // invite again is taken and keeps the sign-up. Red when a link to
+    // another server drops the held sign-up or moves the address.
     @Test
-    fun theSameTokenForAnotherServerDropsTheHeldSignUp() = runTest {
+    fun theSameTokenForAnotherServerIsRefusedAndKeepsTheSignUp() = runTest {
         val s = server()
-        s.answerBy("join") { """{"username":"alex"}""" }
+        val form = heldSignUp(s)
+        val held = form.signedUp
+        val home = form.home
+        assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode("https://other.example.com", Charsets.UTF_8)}&invite=tok_1"))
+        assertEquals(SignInWords.LINK_WHILE_SIGN_IN_OPEN, form.linkNote)
+        assertSame("the held sign-up stays", held, form.signedUp)
+        assertTrue(form.addressLocked)
+        assertEquals(s.address, form.url.toString())
+        assertEquals(home, form.home)
+        assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode(s.address, Charsets.UTF_8)}&invite=tok_1"))
+        assertNull("its own invite again is taken", form.linkNote)
+        assertSame(held, form.signedUp)
+    }
+
+    // A sealed sign-in held (its sign-in step failed) is open too: another
+    // hand-over to its server, an invite, a sign-in link, and its own
+    // hand-over's token for another server are each refused and keep it,
+    // its address and its hand-over; its own hand-over again is taken and
+    // keeps it, so the code is never redeemed twice.
+    @Test
+    fun aHeldSealedSignInRefusesEveryLinkButItsOwn() = runTest {
+        val s = server()
+        val key = HandOverBox.newKey()
+        s.redeems { allowed(HandOverSignIn("winters", "pw", server = s.address), key) }
         s.fail("ping", 40, "Wrong username or password")
         val form = SignInForm()
-        assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode(s.address, Charsets.UTF_8)}&invite=tok_1"))
-        form.inviteName = "Alex"
-        form.invitePassword = "long enough"
-        form.inviteAgain = "long enough"
-        assertNull(signUpFromForm(accounts(), form))
-        assertNotNull(form.signedUp)
-        assertTrue(form.takeJoinLink("octo://join?server=${java.net.URLEncoder.encode("https://other.example.com", Charsets.UTF_8)}&invite=tok_1"))
-        assertNull("the same token for another server drops the held sign-up", form.signedUp)
-        assertFalse(form.addressLocked)
-        assertEquals("other.example.com", form.address)
+        val own = FamilyHandOverLink(base = s.address, token = "t1", key = key, server = s.address)
+        form.take(own)
+        assertNull(receiveFromForm(accounts(), FamilyPlatform.Windows, form))
+        val held = form.received ?: throw AssertionError("the sealed sign-in is not held")
+        for (other in listOf(
+            FamilyHandOverLink(base = s.address, token = "t2", key = key, server = s.address),
+            FamilyInviteLink(s.address, "t1"),
+            FamilySignInPrefill(s.address, "winters"),
+            FamilyHandOverLink(base = "https://other.example.com", token = "t1", key = key, server = "https://other.example.com"),
+        )) {
+            form.take(other)
+            assertEquals("$other", SignInWords.LINK_WHILE_SIGN_IN_OPEN, form.linkNote)
+            assertSame("$other", held, form.received)
+            assertEquals("t1", form.handOver?.token)
+            assertNull(form.invite)
+            assertEquals(s.address, form.url.toString())
+        }
+        form.take(own)
+        assertNull("its own hand-over again is taken", form.linkNote)
+        assertSame(held, form.received)
+        assertEquals(1, s.count("redeemFamilySignIn"))
     }
 
     // A sealed sign-in that failed its sign-in step is used again by Try

@@ -84,10 +84,12 @@ final class SignInModel {
     var removesCertificate = false
     /// The saved certificate's file name.
     private(set) var savedCertificateName: String?
-    /// The saved certificate's last valid day, read once off the main actor when the form opens; nil
+    /// The saved certificate's last valid day, read once off the main actor when the page appears; nil
     /// until then, and when its file cannot be opened.
     private(set) var savedCertificateExpiry: Date?
     @ObservationIgnored private var expiryRead: Task<Void, Never>?
+    /// The page has appeared, and the saved certificate's read has been asked for.
+    @ObservationIgnored private var expiryAsked = false
     /// The kept server says it has a certificate, but the keychain no longer holds it (a phone
     /// restored from a backup); saving clears that.
     private var staleCertificate = false
@@ -164,7 +166,8 @@ final class SignInModel {
     /// A finished sign-up is held: its account is made but not yet signed in to.
     var holdsSignUp: Bool { signedUp != nil }
     /// A sign-in is open here: running, a certificate question waiting, or a received sign-in or a
-    /// finished sign-up held, each of which works only once. A link from outside never replaces it.
+    /// finished sign-up held, each of which works only once. No link replaces it: one from outside
+    /// waits as a message, and one taken here (pasted, or the page's own camera) is refused.
     var signInOpen: Bool {
         OctoKit.signInOpen(busy: busy, question: question != nil, holdsReceived: received != nil, holdsSignUp: signedUp != nil)
     }
@@ -200,7 +203,6 @@ final class SignInModel {
         staleCertificate = server.hasClientCertificate && certificateState == .stale
         savedCertificateName = certificateState.shown ? server.clientCertificateName : nil
         advancedOpen = server.mode != .token || server.homeAddress != nil || !headers.isEmpty || hadCertificate || gatewaySaved != .none
-        if hadCertificate { readSavedExpiry(server.id) }
         takesApiKeys = server.takesApiKeys
         if case .again(_, let note) = form { error = note }
         // After the fill's own writes, each of which ends an anchor.
@@ -299,6 +301,14 @@ final class SignInModel {
         if let certificate { return certificate.expires }
         guard hadCertificate, !removesCertificate else { return nil }
         return savedCertificateExpiry
+    }
+
+    /// The page appeared: the saved certificate's last valid day is read, once. Never in `init`, which
+    /// runs for every model SwiftUI builds while it makes the page's view, most of them never shown.
+    func appeared() {
+        guard !expiryAsked else { return }
+        expiryAsked = true
+        if hadCertificate, let server = saved { readSavedExpiry(server.id) }
     }
 
     /// Reads the saved certificate's last valid day: its file is opened with its password once, off the
@@ -604,15 +614,27 @@ final class SignInModel {
 
     // MARK: Join
 
-    /// Turns the join part on. A link goes to the form's link state first: a link the form takes
-    /// types its server in, takes its home address, and shows the sign-up for an invite, receives a
-    /// hand-over at once, or fills in the ordinary form for a sign-in to fill in; a link to another
-    /// server first forgets everything typed or saved for the last one. A refused link changes
-    /// nothing but the link note; the camera closes either way. Answers whether it was taken.
+    /// Scan a family QR code, from the plain page: the join part with the camera over it. Never
+    /// while a sign-in runs or its certificate question waits, which is never switched halfway: the
+    /// join part stays off and the camera closed.
+    func scanFamilyCode() {
+        guard startJoin() else { return }
+        scanning = true
+    }
+
+    /// Turns the join part on; with no link, never while a request runs or its certificate question
+    /// waits. A link goes to the form's link state first: a link the form takes types its server in,
+    /// takes its home address, and shows the sign-up for an invite, receives a hand-over at once, or
+    /// fills in the ordinary form for a sign-in to fill in; a link to another server first forgets
+    /// everything typed or saved for the last one. While a finished sign-up or a received sign-in is
+    /// held, each of which works once, only its own invite or hand-over for the same server is taken,
+    /// and any other link is refused with the held step left as it is. A refused link changes nothing
+    /// but the link note; the camera closes either way. Answers whether it was taken.
     @discardableResult
     func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) -> Bool {
         scanning = false
         guard let link else {
+            guard !busy, question == nil else { return false }
             error = nil
             joining = true
             return true
@@ -620,6 +642,10 @@ final class SignInModel {
         let action = linkState.take(link.facts, busy: busy || question != nil, home: homeAddress)
         guard case .take(let kind, let address, let home, _) = action else {
             linkState.took(action)
+            return false
+        }
+        if heldStepRefuses(link, take: kind, signedUp: signedUp != nil, invite: invite, received: received != nil, handOver: handOver) {
+            linkState.noted(SignInWords.linkWhileSignInOpen)
             return false
         }
         error = nil
@@ -631,17 +657,6 @@ final class SignInModel {
         if let address { rest = address }
         if let home { homeAddress = home }
         linkState.took(action)
-        // The same invite or hand-over opened again keeps what it already made: it works once. A link
-        // to another server is never the same one, whatever its token.
-        let sameToken: Bool = switch link {
-        case .invite(let held): held.token == invite?.token
-        case .handOver(let held): held.token == handOver?.token
-        case .prefill: false
-        }
-        if kind == .forget || !sameToken {
-            signedUp = nil
-            received = nil
-        }
         invite = nil
         handOver = nil
         handOverStep = nil
@@ -956,6 +971,7 @@ final class SignInModel {
                 gatewaySecond = ""
                 signedIn = true
             } catch let untrusted as ServerTrust.Untrusted {
+                handOverStep = nil
                 question = untrusted
             } catch let failure as SignInFailure {
                 handOverStep = nil

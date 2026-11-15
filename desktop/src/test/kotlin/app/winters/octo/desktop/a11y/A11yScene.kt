@@ -33,6 +33,7 @@ import app.winters.octo.desktop.player.SilentPlayer
 import app.winters.octo.desktop.secrets.SessionOnlySecrets
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.SignInOutcome
+import app.winters.octo.desktop.server.readCapped
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
@@ -48,6 +49,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import java.io.File
+import java.nio.file.Path
 import javax.swing.SwingUtilities
 
 // The whole window, signed in to a pretend server with a small library, on
@@ -92,6 +94,9 @@ class A11yScene(
     store: SettingsStore? = null,
     // No server: the window shows the sign-in page.
     signedOut: Boolean = false,
+    // How certificate files are read: from the disk, unless a test holds
+    // its reads.
+    readCertificate: (Path) -> ByteArray = ::readCapped,
 ) : AutoCloseable {
     val server = FakeServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -126,7 +131,7 @@ class A11yScene(
         settings.update { look(it.copy(lyrics = it.lyrics.copy(online = false))) }
         val http = OkHttpClient()
         val updater = updates?.invoke(settings)
-        val accounts = Accounts(settings, SessionOnlySecrets(), http)
+        val accounts = Accounts(settings, SessionOnlySecrets(), http, readCertificateBytes = readCertificate)
         val restored = when {
             signedOut -> null
             saved -> (runBlocking { accounts.signIn(server.address, "winters", "pw") } as SignInOutcome.Done).connection

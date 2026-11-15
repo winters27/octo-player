@@ -135,6 +135,8 @@ struct SheetHeader: View {
     /// The line under the title; nil takes the theme's muted words.
     var subtitleColor: Color?
     var clock = true
+    /// Whether Close can be pressed: a sheet turns it off while a request of its own runs.
+    var closeEnabled = true
     let close: () -> Void
 
     private var subtitleStyle: AnyShapeStyle {
@@ -142,8 +144,12 @@ struct SheetHeader: View {
         return AnyShapeStyle(OctoColor.textMuted)
     }
 
+    /// The title's cap middle above its baseline: half the cap height of its 22 bold.
+    private let capMiddle: CGFloat = 7.75
+
     var body: some View {
-        HStack(spacing: 12) {
+        // The avatar and Close center on the title's first line, however many lines follow it.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             if let name {
                 let initial = name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() } ?? "?"
                 Text(initial)
@@ -153,6 +159,7 @@ struct SheetHeader: View {
                     .octoSelectedFill(Circle())
                     .overlay(Circle().strokeBorder(OctoInkColor.quaternary))
                     .accessibilityHidden(true)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + capMiddle }
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(OctoColor.textPrimary).accessibilityAddTraits(.isHeader)
@@ -166,7 +173,10 @@ struct SheetHeader: View {
                 Image(systemName: "xmark").font(.system(size: 16, weight: .semibold)).foregroundStyle(OctoColor.textMuted).frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .opacity(closeEnabled ? 1 : OctoInkColor.disabled)
+            .disabled(!closeEnabled)
             .accessibilityLabel("Close")
+            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + capMiddle }
         }
         .padding(.leading, 20)
         .padding(.trailing, 8)

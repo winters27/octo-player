@@ -11,7 +11,7 @@
 - Covers kept in memory take less room, so a big library leaves more for the rest of the app.
 - When the phone is short of room for a copy or for this update, Octo says how much to free instead of failing.
 - Your likes, favorite albums and artists, and Home pins stay with their songs when the server files them anew.
-- **A heart gets the version you heard.** When you heart a song, your Octo server downloads the best copy of the take you were listening to, checked by its sound, not just its name. A lossless remaster of it counts, but a live take, a cover or an edit doesn't.
+- **A heart gets the version you heard.** When you heart a song, your Octo server downloads the best copy of the take you were listening to, checked by its sound, not just its name. A remaster of it counts, but a live take, a cover or an edit doesn't.
 - **Downloads that need you say so.** When the server can't prove a version yet, the song waits and says why, like "Play it once so Octo can keep the version you hear". Keep anyway keeps the copy as it is.
 - **Albums too.** A hearted album keeps the tracks it can prove and holds the rest, each one proven by a play or kept with Keep these anyway.
 - A download that waits for you carries the small accent dot instead of a busy ring, and Server downloads under Library says how many are on their way and how many wait for you.
@@ -40,6 +40,8 @@
 ## Server
 
 - **Servers behind a sign-in page work.** If your server sits behind Authentik, Authelia or Cloudflare Access, Octo signs in through it, and when the sign-in page turns Octo away, Octo names it instead of saying the server can't be reached. A sign-in page is never played or kept as a song.
+- **A clearer sign-in page.** Your server and how you sign in come first, and a sign-in page, a home address, the method, headers and a certificate wait under Advanced. When a sign-in page turns Octo away, Advanced opens on its fields with the reason under them.
+- **A family link starts clean.** A link to another server brings nothing of the last one with it, such as its headers or its certificate, and a link that arrives while you are signing in leaves that sign-in as it is.
 - **Certificates from eMudhra's compromised keys are refused**, so no one can pose as your server with one. Octo says so when a server uses one.
 - **Servers with their own certificate authority work.** If you installed your authority's certificate on the phone (step-ca, say), Octo trusts your server's certificates like any other, so short ones renewed every day keep playing.
 - **A changed certificate is asked about again.** When a server whose certificate you trusted shows a new one, Octo asks with the new fingerprint instead of failing every song until you sign in again, and the song plays once you trust it. A renewal that keeps the same key needs no question.
@@ -69,4 +71,5 @@
 ## Settings
 
 - **Themes.** Pick Octo, Moss, Dusk, Daylight or Paper, or let Octo match the system's light and dark. Every screen draws in the theme's colors, and backups keep your theme.
+- Change password names each of its fields, and its button waits until all three are filled in.
 - Backups of a big library save and restore a page at a time.

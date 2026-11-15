@@ -45,7 +45,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -93,10 +93,12 @@ class GatedSignIns : SignInSwitch {
         return gate?.await() ?: (null to null)
     }
 
-    // The `nth` call for `username`, once it has arrived (at most 10 s).
+    // The `nth` call for `username`, once it has arrived (at most 10 s; the
+    // row fails when it never does).
     fun awaitCall(username: String, nth: Int = 1): RecordedSignIn = runBlocking {
-        withTimeout(10.seconds) { calls.first { all -> all.count { it.request.username == username } >= nth } }
-            .filter { it.request.username == username }[nth - 1]
+        val all = withTimeoutOrNull(10.seconds) { calls.first { all -> all.count { it.request.username == username } >= nth } }
+            ?: throw AssertionError("Sign-in $nth for $username never came")
+        all.filter { it.request.username == username }[nth - 1]
     }
 
     fun callsFor(username: String): List<RecordedSignIn> = calls.value.filter { it.request.username == username }
@@ -257,24 +259,25 @@ class JoinHarness {
     fun allowAtOnce(box: String): PathAnswers =
         PathAnswers(mapOf(REDEEM to { subsonic(REDEEMED) }, POLL to { subsonic(allowed(box)) })).also { server.dispatcher = it }
 
-    // Waits for what `vm` started to finish (at most 10 s), leaving out its
-    // open-set marker, which never ends.
+    // Waits for what `vm` started to finish (at most 10 s; the row fails when
+    // it never does), leaving out its open-set marker, which never ends.
     fun settle(vm: SignInViewModel) = runBlocking {
-        withTimeout(10.seconds) { vm.viewModelScope.coroutineContext.job.children.filter { it !== vm.marking }.toList().joinAll() }
+        withTimeoutOrNull(10.seconds) { vm.viewModelScope.coroutineContext.job.children.filter { it !== vm.marking }.toList().joinAll() }
+            ?: throw AssertionError("The form's request never finished")
     }
 
-    // Waits until `vm` is in the open set, or out of it (at most 5 s). The
-    // set changes on the view model's thread, so it is waited for, never read
-    // at once; a write made here reaches the marker only once the snapshot
-    // is applied.
+    // Waits until `vm` is in the open set, or out of it (at most 5 s; the row
+    // fails when it never is). The set changes on the view model's thread, so
+    // it is waited for, never read at once; a write made here reaches the
+    // marker only once the snapshot is applied.
     fun awaitOpen(vm: SignInViewModel) {
         Snapshot.sendApplyNotifications()
-        runBlocking { withTimeout(5.seconds) { running.open.first { vm in it } } }
+        runBlocking { withTimeoutOrNull(5.seconds) { running.open.first { vm in it } } ?: throw AssertionError("The form never joined the open set") }
     }
 
     fun awaitClosed(vm: SignInViewModel) {
         Snapshot.sendApplyNotifications()
-        runBlocking { withTimeout(5.seconds) { running.open.first { vm !in it } } }
+        runBlocking { withTimeoutOrNull(5.seconds) { running.open.first { vm !in it } } ?: throw AssertionError("The form never left the open set") }
     }
 
     // An invite's name and password, filled in.

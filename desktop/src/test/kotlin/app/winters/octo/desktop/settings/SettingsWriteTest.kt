@@ -184,6 +184,7 @@ class SettingsWriteTest {
             icacls(dir, "/reset", "/T")
         }
         assertTrue("refused: $thrown", thrown is IOException)
+        assertTrue("the old file is still there", file().exists())
         assertArrayEquals(before, file().readBytes())
         assertFalse(File(dir, SettingsStore.FILE_NAME + ".tmp").exists())
     }

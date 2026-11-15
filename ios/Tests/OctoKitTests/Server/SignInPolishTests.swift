@@ -88,6 +88,9 @@ import Testing
     private static let style = "Octo/Design/OctoStyle.swift"
     private static let buttons = "Octo/Design/Buttons.swift"
     private static let changePassword = "Octo/Settings/Server/ChangePassword.swift"
+    private static let familySheets = "Octo/Family/FamilySheets.swift"
+    private static let familyParts = "Octo/Family/FamilySheetParts.swift"
+    private static let words = "OctoKit/Server/SignInWords.swift"
 
     /// Red when the ring round a called-out group is the accent again instead of the error red.
     @Test func theCalloutRingIsTheErrorRed() throws {
@@ -126,9 +129,10 @@ import Testing
         let choice = try SourceText.slice(groups, from: "struct FormChoiceRow: View {", to: "\n}\n")
         #expect(choice.contains("@ScaledMetric(relativeTo: .subheadline) private var chevronSize: CGFloat = 13"))
         #expect(choice.contains(".font(.system(size: chevronSize, weight: .semibold))"))
-        // Side by side and, at the accessibility sizes, the answer's own line.
-        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 12) {", in: choice) == 1)
-        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 6) {", in: choice) == 1)
+        // Beside the name on its first baseline, and on the answer's own line (where it does not fit
+        // beside the name, and at the accessibility sizes) with the chevron after it.
+        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 0) {", in: choice) == 1)
+        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 6) {", in: choice) == 2)
         #expect(!choice.contains("alignment: .center"))
         #expect(!choice.contains("size: 13,"))
         let style = try SourceText.read(Self.style)
@@ -141,9 +145,8 @@ import Testing
         let view = SourceText.squashed(try SourceText.read(Self.view))
         for anchor in [
             "AccentButton(model.buttonTitle, enabled: model.ready, loading: model.busy, fillWidth: true)",
-            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small) { model.startJoin() model.scanning = true } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
-            "GlazeButton(\"Scan the QR code\", icon: .camera, size: .small) { model.scanning = true } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
-            "GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing) { model.stopJoin() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
+            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() } .frame(maxWidth: .infinity, alignment: .trailing) .padding(.top, 12)",
+            "TrailingColumn(gap: 12) { if model.handOver == nil { GlazeButton(\"Scan the QR code\", icon: .camera, size: .small, fillWidth: true) { model.scanning = true } } GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() } } .padding(.top, 12)",
         ] {
             #expect(view.contains(anchor), "\(anchor)")
         }
@@ -183,10 +186,64 @@ import Testing
         #expect(SourceText.count(".revealMark(", in: raw) == 1)
         #expect(view.contains(
             "value: GatewayWords.kindLabel(model.gatewayKind), question: kinds) .revealMark(\"advancedFirstRow\", bottom: firstRowMoved)"))
-        #expect(view.contains("if !open { gatewayHeight = nil marks.rowBottom = nil }"))
+        #expect(view.contains("if !open { gatewayHeight = nil gatewayErrorFoot = nil marks.rowBottom = nil }"))
         let groups = SourceText.squashed(try SourceText.read(Self.groups))
         #expect(groups.contains(
             "Color.clear .allowsHitTesting(false).accessibilityHidden(true).id(id) .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom($0) }"))
+    }
+
+    /// Red when whether the reveal runs is decided only after its wait for the row, so a callout or the
+    /// API key row's scroll that finishes first is scrolled away by it: with either on its way as
+    /// Advanced opens, the reveal never runs.
+    @Test func aRevealIsDecidedAsAdvancedOpens() throws {
+        let raw = try SourceText.read(Self.view)
+        let reveal = SourceText.squashed(try SourceText.slice(raw, from: "    private func revealAdvanced(", to: "\n    }\n"))
+        #expect(reveal.contains(
+            "async { guard model.advancedOpen, revealsAdvanced else { return } revealsAdvanced = false guard !model.calloutPending, !model.keyPending else { return } let run = wait.begin()"))
+    }
+
+    /// Red when Done on Change password's last field can send a second change while one runs, from
+    /// this form or another: the flag it checks is the app's one (`PasswordChangeSitesTests`).
+    @Test func changePasswordSendsOneChangeAtATime() throws {
+        let change = try SourceText.read(Self.changePassword)
+        let body = try SourceText.slice(change, from: "    private func change() {", to: "\n    }\n")
+        #expect(body.hasPrefix("    private func change() {\n        guard !busy else { return }\n"))
+        #expect(change.contains("    private var busy: Bool { session.passwordChanges.running }\n"))
+        #expect(SourceText.count("passwordChanges.change {", in: body) == 1)
+        #expect(change.contains("default: change()"))
+    }
+
+    /// Red when a certificate file saved with no password has to go through the password question,
+    /// whose Use it stays off on an empty field so the file could never be chosen, or when the first
+    /// try reads "opened, with no last day" as a failure (`try?` makes both nil).
+    @Test func aCertificateSavedWithNoPasswordIsTakenWithoutAsking() throws {
+        let raw = try SourceText.read(Self.view)
+        #expect(raw.contains(".fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { certificatePicked($0) }"))
+        let picked = try SourceText.slice(raw, from: "    private func certificatePicked(", to: "\n    }\n")
+        let empty = try SourceText.at("let expires = try CertificateCheck.validate(data, password: \"\")", in: picked)
+        let ask = try SourceText.at("pendingCertificate = ", in: picked)
+        #expect(empty < ask)
+        #expect(SourceText.squashed(picked).contains(
+            "do { let expires = try CertificateCheck.validate(data, password: \"\") model.certificate = (name, data, \"\", expires) model.removesCertificate = false } catch { pendingCertificate = (name, data) certificatePassword = \"\" }"))
+        #expect(!raw.contains("try? CertificateCheck.validate("))
+        // The password question is asked from here alone.
+        #expect(SourceText.count("pendingCertificate = (", in: raw) == 1)
+    }
+
+    /// Red when the password question, which opens only once the file did not open with an empty
+    /// password, leaves a file saved with none at a Use it that stays off: its message must say to
+    /// export the file again with a password, since iPhone's own import may refuse an empty one.
+    @Test func thePasswordQuestionSaysWhatToDoWithAFileSavedWithNone() throws {
+        let raw = try SourceText.read(Self.view)
+        let view = SourceText.squashed(raw)
+        #expect(view.contains(
+            "} message: { Text(SignInWords.certPasswordHint + \" \" + SignInWords.certNoPasswordOnPhone) }"))
+        let words = SourceText.squashed(try SourceText.read(Self.words))
+        #expect(words.contains(
+            "public static let certNoPasswordOnPhone = \"If this file has no password, export it again with one: iPhone can't open certificates without a password.\""))
+        // Its words follow the alert's hint, whose own words stay the shared ones.
+        #expect(words.contains("public static let certPasswordHint = \"The password the certificate file was saved with.\""))
+        #expect(SourceText.count("certNoPasswordOnPhone", in: raw) == 1)
     }
 
     /// Red when a sign-in question's answers sit in a plain row again, where a short main answer can
@@ -200,7 +257,7 @@ import Testing
         #expect(!trust.contains("HStack("))
         let change = try SourceText.read(Self.changePassword)
         #expect(SourceText.squashed(change).contains(
-            "AnswerRow(gap: 12) { AccentButton(\"Change password\", size: .medium, enabled: draft.filled, loading: busy, fillWidth: true, action: change) GlazeButton(\"Cancel\", size: .medium, enabled: !busy, fillWidth: true, action: close) }"))
+            "AnswerRow(gap: 12) { AccentButton(\"Change password\", size: .medium, enabled: draft.filled, loading: busy, fillWidth: true, action: change) GlazeButton(\"Cancel\", size: .medium, enabled: !busy, fillWidth: true, action: leave) }"))
         #expect(!change.contains("HStack("))
         let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
         for anchor in [
@@ -229,10 +286,105 @@ import Testing
         let raw = try SourceText.read(Self.view)
         let setups = SourceText.squashed(try SourceText.slice(raw, from: "    private var specialSetups: some View {", to: "\n    }\n"))
         #expect(setups.contains("certificateRow } notes: { if let certificateError { FormNote(.error, certificateError) } }"))
-        #expect(SourceText.squashed(raw).contains("} message: { Text(SignInWords.certPasswordHint) }"))
+        #expect(SourceText.squashed(raw).contains(
+            "} message: { Text(SignInWords.certPasswordHint + \" \" + SignInWords.certNoPasswordOnPhone) }"))
         #expect(!raw.contains("certificateError ?? SignInWords.certPasswordHint"))
         // A new pick starts with no note; a failed one sets it and keeps the file's question closed.
         #expect(SourceText.squashed(raw).contains("certificateError = nil choosingCertificate = true"))
         #expect(SourceText.squashed(raw).contains("} catch { certificateError = error.localizedDescription }"))
+    }
+
+    /// Red when a choice row's words column takes the whole row again, so the answer gets no width
+    /// (no "Normal" beside Method, and above Large an empty row one letter wide per line), when an
+    /// answer that fits is pushed under the name by spacing on both sides of the spacer, or when an
+    /// answer under the name has no chevron after it and reads as the row's line.
+    @Test func aChoiceRowShowsItsAnswerBesideOrUnderItsName() throws {
+        let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        #expect(groups.contains(
+            "ViewThatFits(in: .horizontal) { HStack(alignment: .firstTextBaseline, spacing: 0) { RowTitle(title: title, optional: false) Spacer(minLength: 8) answer(.trailing) chevron.padding(.leading, 12) } VStack(alignment: .leading, spacing: 2) { RowTitle(title: title, optional: false) HStack(alignment: .firstTextBaseline, spacing: 6) { answer(.leading) chevron } } }"))
+        #expect(groups.contains("if let description { RowDescription(text: description).padding(.trailing, chevronSize + 12) }"))
+        #expect(!groups.contains(".layoutPriority(1) answer(.trailing)"))
+        #expect(!groups.contains("Spacer(minLength: 0) answer(.trailing)"))
+    }
+
+    /// Red when Change password's title is body text again, or a field's name lives only in its
+    /// placeholder (three typed fields would be three rows of dots), in Settings or Family.
+    @Test func changePasswordLeadsWithAHeadingAndNamesItsFields() throws {
+        let change = SourceText.squashed(try SourceText.read(Self.changePassword))
+        #expect(change.contains(
+            "Text(\"Change password\") .font(.octoHeadline) .foregroundStyle(OctoColor.textPrimary) .accessibilityAddTraits(.isHeader)"))
+        #expect(change.contains(".font(.octoBodySmall) .foregroundStyle(OctoColor.textSecondary)"))
+        #expect(change.contains(".padding(.horizontal, 20) // Room under the sheet's grabber, as Family's sheets keep over their titles. .padding(.top, 30)"))
+        #expect(!change.contains("Text(\"Change password\").font(.octoBody)"))
+        let family = SourceText.squashed(try SourceText.read(Self.familySheets))
+        for code in [change, family] {
+            #expect(code.contains("VStack(alignment: .leading, spacing: 6) { Text(name).font(.octoFormName).foregroundStyle(OctoColor.textPrimary).accessibilityHidden(true)"))
+            #expect(code.contains(".accessibilityLabel(name)"))
+        }
+        #expect(change.contains("GlassInput(SignInWords.required,"))
+        #expect(family.contains("GlassInput(index == 1 ? \"At least \\(minPassword) characters\" : SignInWords.required,"))
+        // Family's footer puts the main answer first, as every question does.
+        #expect(family.contains(
+            "HStack(spacing: 10) { AccentButton(FamilyText.changePassword, size: .medium, bright: true, loading: busy, fillWidth: true, action: go) GlazeButton(\"Cancel\","))
+    }
+
+    /// Red when the page's words are cut by the screen's bottom edge again instead of melting.
+    @Test func wordsMeltAtTheBottomEdge() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(
+            "LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black.opacity(0.35), location: 0.6), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom) .frame(height: 24) } .ignoresSafeArea()"))
+    }
+
+    /// Red when a family sheet's avatar or Close centers on the title and its line together
+    /// instead of on the title's first line.
+    @Test func aFamilySheetsHeaderCentersOnItsTitlesFirstLine() throws {
+        let parts = SourceText.squashed(try SourceText.read(Self.familyParts))
+        #expect(parts.contains("private let capMiddle: CGFloat = 7.75"))
+        #expect(parts.contains("HStack(alignment: .firstTextBaseline, spacing: 12) { if let name {"))
+        #expect(SourceText.count(".alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + capMiddle }", in: parts) == 2)
+    }
+
+    /// Red when a note's words start where its glyph happens to end, so notes do not share a column
+    /// and switching http and https moves the words.
+    @Test func everyNotesWordsStartOnOneColumn() throws {
+        let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        #expect(groups.contains(".font(.system(size: glyph, weight: .regular)) .foregroundStyle(glyphStyle) .frame(width: glyph) .accessibilityHidden(true)"))
+    }
+
+    /// Red when the join page's connection line drifts under the join note again, or its two ways
+    /// stack with ragged left edges.
+    @Test func theJoinPagesLinesAndWaysHangTogether() throws {
+        let raw = try SourceText.read(Self.view)
+        let notes = try SourceText.slice(raw, from: "    private var cardNotes: some View {", to: "\n    }\n")
+        let connection = try SourceText.at("if let note = model.note { connectionNote(note) }", in: notes)
+        let first = try SourceText.at("if model.handOver != nil {", in: notes)
+        #expect(connection < first)
+        #expect(SourceText.count("connectionNote(note)", in: notes) == 1)
+        #expect(notes.contains(
+            "\"Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this\\u{00A0}phone.\""))
+        let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
+        #expect(buttons.contains("struct TrailingColumn: Layout {"))
+        #expect(buttons.contains(
+            "let widest = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0 guard let room = proposal.width else { return widest } return min(widest, room)"))
+        #expect(buttons.contains("subview.place(at: CGPoint(x: bounds.maxX - width, y: y), proposal: offer)"))
+    }
+
+    /// Red when the address field's lock or a button's icon stays one size while the words beside
+    /// it grow or shrink with the text size.
+    @Test func iconsGrowWithTheWordsBesideThem() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains("@ScaledMetric(relativeTo: .subheadline) private var lockSize: CGFloat = 13"))
+        #expect(view.contains(".font(.system(size: lockSize, weight: .semibold))"))
+        let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
+        #expect(buttons.contains("@ScaledMetric(relativeTo: .footnote) private var iconScale: CGFloat = 1"))
+        #expect(buttons.contains("IconView(icon, size: CGFloat(size.iconSize) * iconScale, color: ink)"))
+    }
+
+    /// Red when Advanced's turned chevron is left low on its title's line.
+    @Test func advancedsOpenChevronSitsOnItsTitle() throws {
+        let head = try SourceText.slice(SourceText.read(Self.groups), from: "struct FormSectionHead: View {", to: "\n}\n")
+        let turn = try SourceText.at(".rotationEffect(.degrees(open ? 90 : 0))", in: head)
+        let lift = try SourceText.at(".offset(y: open ? -chevronSize * 0.1 : 0)", in: head)
+        #expect(turn < lift)
     }
 }

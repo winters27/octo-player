@@ -2,7 +2,8 @@ import Foundation
 import Testing
 
 /// The iPhone's link and open sign-in wiring, checked in its own sources: the decisions are OctoKit's (the
-/// link vectors, `LinkFields`, `signInOpen`, `askOpens`), and these rows pin where the app calls them.
+/// link vectors, `LinkFields`, `signInOpen`, `heldStepRefuses`, `askOpens` and the covers' rules), and
+/// these rows pin where the app calls them.
 @Suite struct SignInLinkSitesTests {
     private static let model = "Octo/SignIn/SignInModel.swift"
     private static let view = "Octo/SignIn/SignInView.swift"
@@ -22,9 +23,71 @@ import Testing
             "guard case .take(let kind, let address, let home, _) = action else { linkState.took(action) return false }"))
         #expect(start.contains("if kind == .forget {"))
         #expect(start.contains("forgetLastServer(linkUsername: named)"))
-        // An invite to another server is never the same invite, whatever its token. Red when a link
-        // to another server keeps the held sign-up or hand-over.
-        #expect(SourceText.squashed(start).contains("if kind == .forget || !sameToken { signedUp = nil received = nil }"))
+        // A held sign-up or received sign-in works once and ends only by its own ways out. Red when a
+        // taken link clears either again.
+        for clear in ["signedUp = ", "received = "] {
+            #expect(!start.contains(clear), "\(clear)")
+        }
+    }
+
+    /// Red when a link taken on the page (pasted, or its own camera) gets past a held sign-up or
+    /// received sign-in: the held step's check sits right after the take's own refusals and before
+    /// every write, says the open sign-in's words under the address and changes nothing else. Which
+    /// links it refuses is OctoKit's `heldStepRefuses`, fed the held step as the model holds it.
+    @Test func aHeldStepRefusesEveryOtherLinkBeforeAnyWrite() throws {
+        let model = try SourceText.read(Self.model)
+        let start = try SourceText.slice(model, from: "    func startJoin(", to: "\n    }\n")
+        let squashed = SourceText.squashed(start)
+        #expect(squashed.contains(
+            "guard case .take(let kind, let address, let home, _) = action else { linkState.took(action) return false } if heldStepRefuses(link, take: kind, signedUp: signedUp != nil, invite: invite, received: received != nil, handOver: handOver) { linkState.noted(SignInWords.linkWhileSignInOpen) return false } error = nil if kind == .forget {"))
+        let held = try SourceText.at("if heldStepRefuses(", in: start)
+        let after = String(start[held...])
+        for write in ["error = nil", "forgetLastServer(", "if let address { rest = address }", "if let home { homeAddress = home }",
+                      "linkState.took(action)\n        invite = nil", "handOver = nil", "handOverStep = nil", "receive(session)"] {
+            #expect(after.contains(write), "\(write)")
+        }
+        let before = SourceText.squashed(String(start[..<held]))
+        for write in ["rest = ", "homeAddress = ", "forgetLastServer(", "invite = ", "handOver = ", "handOverStep = "] {
+            #expect(!before.contains(write), "\(write)")
+        }
+        #expect(SourceText.count("heldStepRefuses(", in: model) == 1)
+        // Both ways a link reaches the page come through here.
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains("QrScanner { link in model.startJoin(link, session: session) } cancel: {"))
+        #expect(model.contains("if !startJoin(link, session: session) { addressResets += 1 }"))
+    }
+
+    /// Red when Scan a family QR code is live while a sign-in commits, or the model opens the join
+    /// part or the camera while a request runs or its certificate question waits: a tap that lands
+    /// before the button is drawn off switches nothing halfway.
+    @Test func scanningAFamilyCodeWaitsForASignInThatCommits() throws {
+        let raw = try SourceText.read(Self.view)
+        let view = SourceText.squashed(raw)
+        #expect(view.contains(
+            "GlazeButton(\"Scan a family QR code\", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() }"))
+        // The page never opens the join part and the camera by itself.
+        #expect(!view.contains("model.startJoin() model.scanning = true"))
+        #expect(SourceText.count("model.scanFamilyCode()", in: raw) == 2)
+        let model = SourceText.squashed(try SourceText.read(Self.model))
+        #expect(model.contains(
+            "func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) -> Bool { scanning = false guard let link else { guard !busy, question == nil else { return false } error = nil joining = true return true }"))
+        #expect(model.contains("func scanFamilyCode() { guard startJoin() else { return } scanning = true }"))
+    }
+
+    /// Red when a failure of a received sign-in's request leaves the hand-over's row on its last step
+    /// ("Allowed, signing in"): every `catch` of that request clears it, the certificate question's
+    /// too.
+    @Test func everyFailureOfAReceivedSignInClearsItsStep() throws {
+        let model = try SourceText.read(Self.model)
+        let finish = try SourceText.slice(model, from: "    private func finish(", to: "\n    }\n")
+        let received = String(finish[try SourceText.at("        case .received(let signIn):", in: finish)...])
+        let catches = Array(received.components(separatedBy: "} catch").dropFirst())
+        #expect(catches.count == 3)
+        for (index, body) in catches.enumerated() {
+            let first = body.components(separatedBy: "\n").dropFirst().first ?? ""
+            #expect(first.trimmingCharacters(in: .whitespaces) == "handOverStep = nil", "catch \(index + 1): \(first)")
+        }
+        #expect(SourceText.squashed(received).contains("} catch let untrusted as ServerTrust.Untrusted { handOverStep = nil question = untrusted }"))
     }
 
     /// Red when an edit of the address, its scheme or the home stops ending the form's tie to its
@@ -155,7 +218,7 @@ import Testing
         let view = SourceText.squashed(try SourceText.read(Self.view))
         #expect(view.contains("guard !model.committing else { return } if model.holdsSignUp { model.stopJoin() } else { dismiss() }"))
         #expect(view.contains(".buttonBorderShape(.circle) .disabled(model.committing)"))
-        #expect(view.contains("GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing) { model.stopJoin() }"))
+        #expect(view.contains("GlazeButton(\"Sign in with a password\", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() }"))
     }
 
     /// Red when a link from outside can replace an open sign-in, an ask buries a link's form or opens
@@ -166,18 +229,11 @@ import Testing
             "guard !router.hasOpenSignIn else { router.noteLink(SignInWords.linkWhileSignInOpen) router.show(SignInWords.linkWhileSignInOpen, action: \"Use it\") { [weak self] in self?.open(.join(link)) } return } joinOpens += 1 router.setAside() router.signIn = .join(familyAppLink(link), opened: joinOpens)"))
         let router = SourceText.squashed(try SourceText.read("Octo/App/Router.swift"))
         for anchor in [
-            "var signIn: SignInModel.Form? { didSet { if signIn?.id != askedCover { askedCover = nil } } }",
             "@ObservationIgnored weak var session: Session?",
             "@ObservationIgnored private var askedCover: SignInModel.Form.ID?",
-            "openSignIns[ObjectIdentifier(model)] = open ? WeakSignIn(model) : nil",
-            "var hasOpenSignIn: Bool { openSignIns = openSignIns.filter { $0.value.model != nil } return !openSignIns.isEmpty }",
-            "for entry in openSignIns.values { entry.model?.noteLink(words) }",
-            "guard let session, let server = session.servers.first(where: { $0.id == serverId }), !(session.client != nil && session.activeId == serverId) else { return }",
             "let showingJoin = if case .join? = signIn { true } else { false }",
             "if askOpens(hasOpenSignIn: hasOpenSignIn, showingJoin: showingJoin) { signIn = .again(server, note: note) askedCover = signIn?.id } else { show(SignInWords.askWhileSignInOpen(server.name), action: \"Sign in\") { [weak self] in self?.askSignIn(serverId: serverId, note: note) } }",
-            "guard let askedCover, signIn?.id == askedCover, case .again(let server, let note)? = signIn,",
-            "!(session.client != nil && session.activeId == kept.id) else { return } show(SignInWords.askWhileSignInOpen(kept.name), action: \"Sign in\") { [weak self] in self?.askSignIn(serverId: kept.id, note: note) }",
-            "weak var model: SignInModel?",
+            "else { return } show(SignInWords.askWhileSignInOpen(kept.name), action: \"Sign in\") { [weak self] in self?.askSignIn(serverId: kept.id, note: note) }",
         ] {
             #expect(router.contains(anchor), "\(anchor)")
         }
@@ -190,6 +246,30 @@ import Testing
         #expect(model.contains("    func noteLink(_ words: String) {\n        linkState.noted(words)\n    }"))
     }
 
+    /// Red when the router decides an ask, its cover or its open sign-ins in its own text again
+    /// instead of calling OctoKit's rules (`askedCoverKept`, `AskServers.target`, `askLeftOnReplace`,
+    /// `OpenSignIns`), which `SignInCoversTests` tests.
+    @Test func theRoutersAskDecisionsAreOctoKits() throws {
+        let raw = try SourceText.read("Octo/App/Router.swift")
+        let router = SourceText.squashed(raw)
+        for anchor in [
+            "var signIn: SignInModel.Form? { didSet { askedCover = askedCoverKept(askedCover, showing: signIn?.id) } }",
+            "@ObservationIgnored private var openSignIns = OpenSignIns<SignInModel>()",
+            "func markSignIn(_ model: SignInModel, open: Bool) { openSignIns.mark(model, open: open) }",
+            "var hasOpenSignIn: Bool { openSignIns.anyOpen() }",
+            "func noteLink(_ words: String) { for model in openSignIns.forms { model.noteLink(words) } }",
+            "private var askServers: AskServers? { session.map { AskServers(kept: $0.servers, activeId: $0.activeId, signedIn: $0.client != nil) } }",
+            "func askSignIn(serverId: String, note: String?) { guard let server = askServers?.target(serverId) else { return }",
+            "func setAside() { guard case .again(let server, let note)? = signIn, let servers = askServers, let kept = askLeftOnReplace(asked: askedCover, showing: signIn?.id, server: server.id, servers: servers) else { return }",
+        ] {
+            #expect(router.contains(anchor), "\(anchor)")
+        }
+        // None of the rules is left in the router's own text.
+        for gone in ["WeakSignIn", "ObjectIdentifier", ".filter", "session.activeId", "session.servers", "!= askedCover", "== askedCover"] {
+            #expect(!raw.contains(gone), "\(gone)")
+        }
+    }
+
     /// Red when Octo's own asks open their form past the router's check.
     @Test func octosOwnAsksGoThroughTheRouter() throws {
         let shell = try SourceText.read("Octo/Shell/MainShell.swift")
@@ -200,6 +280,14 @@ import Testing
         #expect(servers.contains("case .needsPassword(_, let note): router.askSignIn(serverId: server.id, note: note)"))
         let app = try SourceText.read("Octo/OctoApp.swift")
         #expect(app.contains("        let router = Router()\n        router.session = session\n"))
+    }
+
+    /// Red when the sign-in cover's page is not keyed by its form, so a link or an ask that replaces the
+    /// form showing keeps the last page and its model.
+    @Test func aReplacedFormGetsAPageOfItsOwn() throws {
+        let shell = SourceText.squashed(try SourceText.read("Octo/Shell/MainShell.swift"))
+        #expect(shell.contains(
+            ".fullScreenCover(item: Bindable(router).signIn) { form in SignInView(form: form, session: session) { notice in if let notice { router.done(notice) } } .id(form.id) .environment(drift) }"))
     }
 
     /// Red when a call a commit makes can wait without a total limit, so a held way out never ends.

@@ -3,7 +3,8 @@ package app.winters.octo.ui.family
 import app.winters.octo.ui.imports.GET_MY_MUSIC
 import app.winters.octo.ui.imports.IMPORT
 import app.winters.octo.ui.common.PageHeader
-import app.winters.octo.ui.common.LocalFeedback
+import app.winters.octo.data.PasswordChanges
+import app.winters.octo.server.passwordChangeWords
 import app.winters.octo.design.OctoSwitch
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.selection.toggleable
@@ -78,7 +79,7 @@ val LocalFamilyCovers = staticCompositionLocalOf<(String) -> String?> { { null }
 
 // The one FamilyHub, for screens and the shell.
 @HiltViewModel
-class FamilyShellViewModel @Inject constructor(val hub: FamilyHub) : ViewModel()
+class FamilyShellViewModel @Inject constructor(val hub: FamilyHub, val passwords: PasswordChanges) : ViewModel()
 
 // Family on the server in use: a manager's requests waiting and members
 // first, then what the account may do in plain words with the library's size, the
@@ -117,13 +118,18 @@ fun FamilyScreen(onBack: () -> Unit, onImport: () -> Unit = {}, owner: FamilyShe
     }
     HandOverSheetHost(model, hub.serverAddress().orEmpty(), model.me?.username.orEmpty())
     InviteSheetHost(model, hub.serverAddress().orEmpty())
-    val feedback = LocalFeedback.current
-    GlassSheet(visible = changingPassword, onDismiss = { changingPassword = false }, tall = true, scrolls = false) {
+    // While a change of password is on its way the sheet stays: Back and a
+    // tap outside it do nothing until it answers.
+    val passwords = owner.passwords
+    GlassSheet(visible = changingPassword, onDismiss = { if (!passwords.changing.value) changingPassword = false }, tall = true, scrolls = false) {
         if (changingPassword) {
-            PasswordSheetContent(hub::changePassword, done = { words ->
-                changingPassword = false
-                feedback.done(words)
-            }, close = { changingPassword = false })
+            PasswordSheetContent(
+                passwords.changing,
+                change = { current, new, answered ->
+                    passwords.change(current, new, family = model.me?.managed == true, words = { passwordChangeWords(it, family = true) }, answered = answered)
+                },
+                close = { changingPassword = false },
+            )
         }
     }
     // Before a manager resets a member's password: it stops working at once.

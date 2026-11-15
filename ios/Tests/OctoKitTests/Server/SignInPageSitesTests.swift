@@ -183,7 +183,7 @@ import Testing
         let model = SourceText.squashed(raw)
         for anchor in [
             "var certificate: (name: String, data: Data, password: String, expires: Date?)?",
-            "if hadCertificate { readSavedExpiry(server.id) }",
+            "if hadCertificate, let server = saved { readSavedExpiry(server.id) }",
             "let expires = await Task.detached(priority: .utility) { CertificateCheck.savedExpiry(forServer: id) }.value",
             "guard !Task.isCancelled, let self, self.hadCertificate, !self.removesCertificate, self.certificate == nil else { return } self.savedCertificateExpiry = expires",
             "receiving?.cancel() expiryRead?.cancel()",
@@ -191,6 +191,23 @@ import Testing
             #expect(model.contains(anchor), "\(anchor)")
         }
         #expect(SourceText.count("CertificateCheck.savedExpiry(", in: raw) == 1)
+    }
+
+    /// Red when the saved certificate's file is opened for a model SwiftUI builds and never shows: the
+    /// read is asked for once, when the page appears, and never in `init`.
+    @Test func theSavedCertificatesDayIsReadOnceThePageAppears() throws {
+        let model = try SourceText.read(Self.model)
+        let initializer = try SourceText.slice(model, from: "    init(form: Form, session: Session) {", to: "\n    }\n")
+        #expect(!initializer.contains("readSavedExpiry("))
+        let appeared = SourceText.squashed(try SourceText.slice(model, from: "    func appeared() {", to: "\n    }\n"))
+        #expect(appeared.contains(
+            "guard !expiryAsked else { return } expiryAsked = true if hadCertificate, let server = saved { readSavedExpiry(server.id) }"))
+        #expect(model.contains("@ObservationIgnored private var expiryAsked = false"))
+        // Its declaration and its one call.
+        #expect(SourceText.count("readSavedExpiry(", in: model) == 2)
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(".onAppear { model.serverSwitch = serverSwitch model.appeared()"))
+        #expect(SourceText.count("model.appeared()", in: view) == 1)
     }
 
     /// Red when a field skips the row that applies focus, a raw text field comes back to the page,
@@ -245,11 +262,13 @@ import Testing
             ".onChange(of: model.keyPending) { _, pending in if pending { focusedWhileKeyPending = false } }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false wait.send(.hidden) }",
-            "proxy.scrollTo(\"gatewayMarker\", anchor: .top)",
-            "proxy.scrollTo(\"gatewayEnd\", anchor: .bottom)",
-            "proxy.scrollTo(\"keyMarker\", anchor: .top)",
+            "let landing = UnitPoint(x: 0, y: CGFloat(calloutLanding) / max(visibleHeight ?? 730, 1))",
+            "proxy.scrollTo(\"gatewayMarker\", anchor: landing)",
+            "let end = gatewayErrorFoot == nil ? \"gatewayEnd\" : \"gatewayErrorEnd\"",
+            "proxy.scrollTo(end, anchor: .bottom)",
+            "proxy.scrollTo(\"keyMarker\", anchor: landing)",
             "FormGroup(title: AdvancedGroup.gettingThere.title, marker: \"gatewayMarker\", outlined: model.calloutShowing) {",
-            ".onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in gatewayHeight = height wait.send(.measured) } .calloutEnd(\"gatewayEnd\")",
+            "{ $0.size.height } action: { height in gatewayHeight = height wait.send(.measured) } .calloutEnd(\"gatewayEnd\")",
             ".calloutMarker(\"keyMarker\")",
             "focus = nil UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)",
         ]
@@ -261,8 +280,11 @@ import Testing
         #expect(!raw.contains("scrollPosition"))
         #expect(!raw.contains("ScrollPosition("))
         let groups = SourceText.squashed(try SourceText.read(Self.groups))
+        // The top mark is part of the layout: the scroll reads an overlay's place without its shift,
+        // so a 68 point overlay above the title landed the title itself under the Back button.
         #expect(groups.contains(
-            "overlay(alignment: .top) { Color.clear.frame(height: 68).alignmentGuide(.top) { $0[.bottom] } .allowsHitTesting(false).accessibilityHidden(true).id(id) }"))
+            "func calloutMarker(_ id: String) -> some View { VStack(alignment: .leading, spacing: 0) { Color.clear.frame(height: 0).allowsHitTesting(false).accessibilityHidden(true).id(id) self } }"))
+        #expect(!groups.contains("Color.clear.frame(height: 68)"))
         #expect(groups.contains(
             "overlay(alignment: .bottom) { Color.clear.frame(height: 8).alignmentGuide(.bottom) { $0[.top] } .allowsHitTesting(false).accessibilityHidden(true).id(id) }"))
     }
@@ -273,7 +295,32 @@ import Testing
         let wait = try SourceText.read("OctoKit/Server/CalloutWait.swift")
         #expect(!wait.contains("UIApplication"))
         #expect(!wait.contains("import UIKit"))
-        #expect(wait.contains("group <= visible - 68"))
+        #expect(wait.contains("group <= visible - calloutLanding"))
+        #expect(wait.contains("public let calloutLanding: Double = 78"))
+        #expect(!SourceText.squashed(try SourceText.read(Self.view)).contains("68 /"))
+    }
+
+    /// Red when the view's height for a callout is read behind the scroll again (it took the safe
+    /// area off twice and came out 82 points short, so groups that fit were shown by their end and
+    /// every landing sat low), or read anywhere but the window's safe area.
+    @Test func aCalloutMeasuresTheViewByTheWindowsSafeArea() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(
+            "private var visibleHeight: CGFloat? { let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first guard let height = window?.safeAreaLayoutGuide.layoutFrame.height, height > 0 else { return nil } return height }"))
+        #expect(!view.contains("@State private var visibleHeight"))
+        #expect(!view.contains("visibleHeight = "))
+    }
+
+    /// Red when a tall group's callout fits the whole group instead of the part it must show (its
+    /// title through its error note), so at large text the first row's name lands under the Back
+    /// button, or the end it shows is the group's last hint instead of its failure.
+    @Test func aTallGroupsCalloutShowsItsTitleThroughItsFailure() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains("groupHeight: { (gatewayErrorFoot ?? gatewayHeight).map { Double($0) } },"))
+        #expect(view.contains(
+            "FormNote(.error, GatewayWords.inGroup(error)) .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(\"gatewayGroup\")).maxY } action: { foot in gatewayErrorFoot = foot wait.send(.measured) } .onDisappear { gatewayErrorFoot = nil } .calloutEnd(\"gatewayErrorEnd\")"))
+        #expect(view.contains(".coordinateSpace(.named(\"gatewayGroup\")) .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in gatewayHeight = height"))
+        #expect(view.contains("gatewayHeight = nil gatewayErrorFoot = nil"))
     }
 
     /// Red when the error note, the outline or the pointer draws outside a callout, or VoiceOver is
@@ -282,7 +329,7 @@ import Testing
         let model = try SourceText.read(Self.model)
         #expect(model.contains("var calloutShowing: Bool { callout && advancedOpen && error != nil }"))
         let view = SourceText.squashed(try SourceText.read(Self.view))
-        #expect(view.contains("if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) }"))
+        #expect(view.contains("if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) .onGeometryChange("))
         #expect(view.contains("Button { model.pointTo() } label: { FormNote(.error, GatewayWords.pointer) }"))
         #expect(view.contains("AccessibilityNotification.Announcement(GatewayWords.inGroup(error)).post()"))
     }

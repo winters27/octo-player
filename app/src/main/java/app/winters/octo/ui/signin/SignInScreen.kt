@@ -455,7 +455,7 @@ private fun MainCard(vm: SignInViewModel, addressFocus: FocusRequester, onKeyRow
         FormFieldRow(
             title = SignInWords.SERVER_ADDRESS,
             value = vm.address,
-            onChange = { if (!vm.takeJoinLink(it)) vm.typeAddress(it) },
+            onChange = { if (!vm.takeJoinLink(it)) vm.typeAddressFromField(it) },
             placeholder = "music.example.com",
             keyboardType = KeyboardType.Uri,
             imeAction = if (vm.joining && vm.invite == null && !showsName) ImeAction.Done else ImeAction.Next,
@@ -587,7 +587,7 @@ private fun MainNotes(vm: SignInViewModel) {
             "You're invited to ${shownServer(invite.server)}. Choose your name and a password. Your login then works in Octo and any other music app.",
         )
         vm.joining -> FormNote(
-            "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.",
+            "Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this phone.",
         )
     }
 }
@@ -613,14 +613,12 @@ private fun SignInButtons(vm: SignInViewModel) {
     ResultLine(vm)
     if (vm.form == null && !vm.editing) {
         // An invite, or a sign-in shown on another device of one's own, under
-        // the button on its right edge.
+        // the button on its right edge; off while a sign-in runs.
         Box(Modifier.fillMaxWidth().padding(top = 12.dp), contentAlignment = Alignment.CenterEnd) {
             GlazeButton(
                 "Scan a family QR code",
-                {
-                    vm.startJoin()
-                    vm.scanning = true
-                },
+                vm::scanFamilyCode,
+                enabled = !vm.busy,
                 size = ButtonSize.Small,
                 icon = octoIcon(OctoIcons.Camera),
             )

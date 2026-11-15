@@ -52,11 +52,8 @@ struct FamilyScreen: View {
             InviteSheetHost(hub: hub).familySheet()
         }
         .sheet(isPresented: $changingPassword) {
-            FamilyPasswordSheet(change: hub.changePassword, done: { words in
-                changingPassword = false
-                router.done(words)
-            }, close: { changingPassword = false })
-            .familySheet()
+            FamilyPasswordSheet(change: hub.changePassword, close: { changingPassword = false })
+                .familySheet()
         }
     }
 

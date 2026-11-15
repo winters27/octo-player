@@ -244,8 +244,8 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
 
     // A hand-over's sealed sign-in, once redeemed, and a finished sign-up
     // with the main address it was made at: each works only once, so Try
-    // again and Trust reuse them. A new link, leaving the link, or signing in
-    // ends them.
+    // again and Trust reuse them. Leaving the link, a sealed sign-in refused
+    // here, or signing in ends them; a link never does (see take).
     var received by mutableStateOf<HandOverSignIn?>(null)
     var signedUp by mutableStateOf<HeldSignUp?>(null)
 
@@ -559,16 +559,19 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
     // words in the link note and nothing else changed. One for the server
     // this form holds keeps what it holds; one for another server starts the
     // form over first (forgetServerDetails), then writes its server and home.
-    // The same invite or hand-over again keeps the sign-up or sign-in it
-    // already made, so its token is never spent twice; a link to another
-    // server is never the same one, whatever its token.
+    // While a finished sign-up or a received sign-in is held, the sign-in is
+    // open: only the same invite or hand-over again, for the same server, is
+    // taken, keeping what it already made so its token is never spent twice;
+    // any other link is refused with the open sign-in's words, and the held
+    // step, the address and the home stay as they are.
     fun take(link: FamilyLink, switching: Boolean = false) {
         val action = this.link.take(linkFacts(link), busy = busy || question != null || switching, home = home)
+        val holds = signedUp != null || received != null
+        if (action is LinkAction.Take && holds && (action.kind == LinkTake.Forget || !sameToken(link))) {
+            this.link = this.link.noted(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            return
+        }
         if (action is LinkAction.Take) {
-            if (action.kind == LinkTake.Forget || !sameToken(link)) {
-                received = null
-                signedUp = null
-            }
             if (action.kind == LinkTake.Forget) forgetServerDetails(namedUsername(link))
             action.address?.let(::typeAddress)
             action.home?.let { home = it }
@@ -605,10 +608,11 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
 
     // Starts the form over for another server: nothing of the server it held
     // goes with it (its header rows, sign-in page, saved kind, saved secret,
-    // Method, client certificate), nor anything typed for it, nor its
-    // username unless the link names one (a sign-in link then writes it); the
-    // caller then writes the new server and home. The name given to the
-    // server stays: it is never sent anywhere.
+    // Method, client certificate, a file still opening on the row or asking
+    // for its password, which then lands nowhere), nor anything typed for it,
+    // nor its username unless the link names one (a sign-in link then writes
+    // it); the caller then writes the new server and home. The name given to
+    // the server stays: it is never sent anywhere.
     private fun forgetServerDetails(linkUsername: String?) {
         keptId = null
         filledFrom = null
@@ -632,6 +636,9 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
         startCertificate = CertificateDraft.None
         certificateDraft = CertificateDraft.None
         certificateLoad = null
+        certificateTurn = null
+        certificateOpening = false
+        certificateProblem = null
     }
 
     // Back to the plain sign-in. Never while a request commits; a hand-over

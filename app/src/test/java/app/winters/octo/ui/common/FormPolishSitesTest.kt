@@ -116,4 +116,39 @@ class FormPolishSitesTest {
         assertTrue(password, password.contains("last = true, onDone = ::change"))
         assertTrue(password, password.contains("passwordDraftProblem(draft)?.let { problem = it; return }"))
     }
+
+    // Change password's title is its pop-up's group title, as Advanced's head
+    // is: the group-title size, heard as a heading. Red with body text again.
+    @Test
+    fun changePasswordsTitleIsAGroupTitle() {
+        val password = between(source("ui/settings/ServerPage.kt"), "private fun PasswordForm(", "\n}\n")
+        assertTrue(password, password.contains("Text(SettingsIndex.ChangePassword.title, style = OctoType.formGroup, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })"))
+        assertFalse(password, password.contains("style = OctoType.body,"))
+    }
+
+    // Red when a password field's name lives only in its placeholder again
+    // (three typed fields would be three rows of dots), in Settings or Family,
+    // or Family's footer puts Cancel before the main answer.
+    @Test
+    fun passwordFieldsKeepTheirNamesOverThem() {
+        val server = between(source("ui/settings/ServerPage.kt"), "private fun PasswordInput(", "\n}\n")
+        val sheets = source("ui/family/FamilySheets.kt")
+        val family = between(sheets, "private fun PasswordField(", "\n}\n")
+        for (field in listOf(server, family)) {
+            assertTrue(field, field.contains("Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {\n        Text(name, style = OctoType.formName, color = OctoColors.TextPrimary)"))
+        }
+        assertTrue(server, server.contains("placeholder = SignInWords.REQUIRED,"))
+        assertTrue(family, family.contains("placeholder: String = SignInWords.REQUIRED,"))
+        assertTrue(sheets, sheets.contains("PasswordField(draft.new, \"New password\", placeholder = \"At least \$MIN_PASSWORD characters\")"))
+        val footer = between(sheets, "    // The main answer first and Cancel second", "\n    }\n")
+        assertTrue(footer, footer.indexOf("AccentButton(CHANGE_PASSWORD") in 0 until footer.indexOf("GlazeButton(\"Cancel\""))
+    }
+
+    // Red when the join note stumbles again ("on another device on your other
+    // phone"), or its last word can wrap alone.
+    @Test
+    fun theJoinNoteReadsInOneGo() {
+        assertTrue(screen.contains("\"Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this${Char(0xA0)}phone.\""))
+        assertFalse(screen.contains("on another device on your other phone"))
+    }
 }

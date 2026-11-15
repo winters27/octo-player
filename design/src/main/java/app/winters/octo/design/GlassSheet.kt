@@ -3,6 +3,7 @@ package app.winters.octo.design
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -98,6 +99,8 @@ private fun SheetBody(
             exit = slideOutVertically(octoTween(motion, OctoDuration.Card, OctoEasing.EaseIn)) { it },
             modifier = Modifier.align(Alignment.BottomCenter).then(if (tall) Modifier.statusBarsPadding() else Modifier),
         ) {
+            // Where the sheet is headed: Visible until its owner lets it go.
+            val stage = transition
             BoxWithConstraints {
                 val scope = rememberCoroutineScope()
                 val density = LocalDensity.current
@@ -126,10 +129,15 @@ private fun SheetBody(
                                 onDragStopped = { velocity ->
                                     val far = with(density) { 96.dp.toPx() }
                                     val fast = with(density) { 1_200.dp.toPx() }
-                                    if (pull > far || velocity > fast) {
-                                        dismiss()
-                                    } else {
-                                        scope.launch { animate(pull, 0f, animationSpec = spring(0.8f, 400f)) { v, _ -> pull = v } }
+                                    if (pull > far || velocity > fast) dismiss()
+                                    // Back to rest unless it is on its way out: a sheet
+                                    // whose dismiss refuses (a change still running)
+                                    // settles in place, and one that closes slides away
+                                    // from where the pull left it.
+                                    scope.launch {
+                                        animate(pull, 0f, animationSpec = spring(0.8f, 400f)) { v, _ ->
+                                            if (stage.targetState == EnterExitState.Visible) pull = v
+                                        }
                                     }
                                 },
                             )

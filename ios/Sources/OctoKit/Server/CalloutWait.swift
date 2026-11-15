@@ -62,14 +62,19 @@ public final class CalloutWait {
     }
 }
 
+/// How far under the scroll's top a callout lands its target: the 56 points of the top fade and 22
+/// more, clear of the fade and the Back button.
+public let calloutLanding: Double = 78
+
 /// One callout. A field focused since the callout was asked for ends it at once, with `shown` and
 /// no scroll. Otherwise the keyboard is closed and, when it was up, waited for until it has
 /// finished closing; the sign-in page group's callout then waits until the group and the view are
 /// measured and, with Advanced still open, brings the group's title under the top fade, or, for a
-/// group taller than the view less the 68 points of the marker (the 56 of the fade and 12 more),
-/// the group's last note above the view's bottom; the key's callout brings the key row under the
-/// fade. A field taking focus on the way ends it with `shown` and no scroll. A run cancelled on the
-/// way, or one that finds Advanced shut, ends without `shown`, so the callout waits for its next run.
+/// group (`groupHeight`: its title through what the callout must show) taller than the view less
+/// `calloutLanding`, that part's end above the view's bottom; the key's callout brings the key row
+/// under the fade. A field taking focus on the way ends it with `shown` and no scroll. A run
+/// cancelled on the way, or one that finds Advanced shut, ends without `shown`, so the callout waits
+/// for its next run.
 @MainActor
 public func runCallout(_ kind: CalloutKind, wait: CalloutWait, focusedAtStart: () -> Bool, keyboardWasUp: () -> Bool,
                        clearFocus: () -> Void, groupHeight: () -> Double?, visibleHeight: () -> Double?,
@@ -111,7 +116,7 @@ public func runCallout(_ kind: CalloutKind, wait: CalloutWait, focusedAtStart: (
     guard !Task.isCancelled, kind == .key || advancedOpen() else { return }
     if kind == .key {
         scroll(.key)
-    } else if let group = groupHeight(), let visible = visibleHeight(), group <= visible - 68 {
+    } else if let group = groupHeight(), let visible = visibleHeight(), group <= visible - calloutLanding {
         scroll(.marker)
     } else {
         scroll(.end)

@@ -32,8 +32,19 @@ struct SignInView: View {
     /// The sign-in page group's height, from its title through its last note; nil while Advanced
     /// is shut.
     @State private var gatewayHeight: CGFloat?
-    /// The scroll's height between the status bar and the home indicator.
-    @State private var visibleHeight: CGFloat?
+    /// How far the callout's part of the group reaches, from its title through its error note;
+    /// nil while no error note shows. The callout lands the title when this fits under the fade,
+    /// so a tall group's hints may scroll on past the bottom while its title and failure show.
+    @State private var gatewayErrorFoot: CGFloat?
+    /// The scroll's height between the status bar and the home indicator: the key window's safe
+    /// area, which the page fills. A callout reads it as it decides, once the keyboard has closed.
+    private var visibleHeight: CGFloat? {
+        let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+        guard let height = window?.safeAreaLayoutGuide.layoutFrame.height, height > 0 else { return nil }
+        return height
+    }
+    /// The address field's lock grows with the text size, as "https://" beside it does.
+    @ScaledMetric(relativeTo: .subheadline) private var lockSize: CGFloat = 13
     /// A field took focus while the group waited to come into view: the callout then leaves the
     /// page where the person is.
     @State private var focusedWhilePending = false
@@ -84,6 +95,13 @@ struct SignInView: View {
                                        startPoint: .top, endPoint: .bottom)
                             .frame(height: top + 56)
                         Color.black
+                        // Words leaving the bottom melt over its last 24 points instead of being cut
+                        // by the screen's edge.
+                        LinearGradient(stops: [.init(color: .black, location: 0),
+                                               .init(color: .black.opacity(0.35), location: 0.6),
+                                               .init(color: .clear, location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(height: 24)
                     }
                     .ignoresSafeArea()
                 }
@@ -137,11 +155,11 @@ struct SignInView: View {
         covered
             .onAppear {
                 model.serverSwitch = serverSwitch
+                model.appeared()
                 #if DEBUG
                 if Self.scanOnOpen {
                     Self.scanOnOpen = false
-                    model.startJoin()
-                    model.scanning = true
+                    model.scanFamilyCode()
                 }
                 if let sample = Self.sampleOnOpen {
                     Self.sampleOnOpen = nil
@@ -191,6 +209,7 @@ struct SignInView: View {
             .onChange(of: model.advancedOpen) { _, open in
                 if !open {
                     gatewayHeight = nil
+                    gatewayErrorFoot = nil
                     marks.rowBottom = nil
                 }
             }
@@ -203,22 +222,16 @@ struct SignInView: View {
 
     var body: some View {
         reacting
-            .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { result in
-                guard case .success(let url) = result else { return }
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: url) {
-                    pendingCertificate = (url.lastPathComponent, data)
-                    certificatePassword = ""
-                }
-            }
+            .fileImporter(isPresented: $choosingCertificate, allowedContentTypes: [.pkcs12]) { certificatePicked($0) }
+            // Asked only once the file did not open with an empty password (`certificatePicked`), so it
+            // also says what to do with a file saved with none.
             .alert(SignInWords.certPasswordTitle, isPresented: Binding(get: { pendingCertificate != nil }, set: { if !$0 { pendingCertificate = nil } })) {
                 SecureField(SignInWords.certPasswordField, text: $certificatePassword)
                 // Off until the password is typed in.
                 Button(SignInWords.certPasswordUse) { takeCertificate() }.disabled(certificatePassword.isEmpty)
                 Button("Cancel", role: .cancel) { pendingCertificate = nil }
             } message: {
-                Text(SignInWords.certPasswordHint)
+                Text(SignInWords.certPasswordHint + " " + SignInWords.certNoPasswordOnPhone)
             }
     }
 
@@ -238,18 +251,8 @@ struct SignInView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background {
-                // The height a callout measures against: the scroll's frame less the status bar and
-                // the home indicator it reaches under.
                 GeometryReader { geo in
                     Color.clear
-                        .onAppear {
-                            visibleHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
-                            wait.send(.measured)
-                        }
-                        .onChange(of: geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom) { _, height in
-                            visibleHeight = height
-                            wait.send(.measured)
-                        }
                         // Where the scroll's visible part ends on screen: over the home indicator,
                         // or the keyboard while it is up.
                         .onChange(of: geo.frame(in: .global).maxY - geo.safeAreaInsets.bottom, initial: true) { _, bottom in
@@ -272,7 +275,7 @@ struct SignInView: View {
         guard model.calloutPending, model.advancedOpen else { return }
         let wasUp = keyboardUp
         await runCallout(.gateway, wait: wait, focusedAtStart: { focusedWhilePending }, keyboardWasUp: { wasUp },
-                         clearFocus: { closeKeyboard() }, groupHeight: { gatewayHeight.map { Double($0) } },
+                         clearFocus: { closeKeyboard() }, groupHeight: { (gatewayErrorFoot ?? gatewayHeight).map { Double($0) } },
                          visibleHeight: {
                              let height = visibleHeight.map { Double($0) }
                              #if DEBUG
@@ -306,13 +309,18 @@ struct SignInView: View {
                          shown: { model.keyShown() })
     }
 
-    /// Brings a callout's target into view; at once under reduced motion.
+    /// Brings a callout's target into view; at once under reduced motion. A group's title or the
+    /// key row lands `calloutLanding` points under the scroll's top (the 56 of the top fade and 22
+    /// more), clear of the fade and of the Back button, whose foot is 59 under the top. A group too
+    /// tall for that shows the end of what the callout needs: its error note above the bottom.
     private func scrollCallout(_ proxy: ScrollViewProxy, to target: CalloutTarget) {
+        let landing = UnitPoint(x: 0, y: CGFloat(calloutLanding) / max(visibleHeight ?? 730, 1))
+        let end = gatewayErrorFoot == nil ? "gatewayEnd" : "gatewayErrorEnd"
         let move = {
             switch target {
-            case .marker: proxy.scrollTo("gatewayMarker", anchor: .top)
-            case .end: proxy.scrollTo("gatewayEnd", anchor: .bottom)
-            case .key: proxy.scrollTo("keyMarker", anchor: .top)
+            case .marker: proxy.scrollTo("gatewayMarker", anchor: landing)
+            case .end: proxy.scrollTo(end, anchor: .bottom)
+            case .key: proxy.scrollTo("keyMarker", anchor: landing)
             }
         }
         if still { move() } else { withAnimation(.snappy) { move() } }
@@ -320,11 +328,14 @@ struct SignInView: View {
 
     /// Advanced opened from its head: its first group's first row comes into view when it opened
     /// under the scroll's visible bottom (see `advancedRevealScrolls`), the page gliding until the
-    /// row's foot sits on that bottom, or moving at once under reduced motion. It waits for the row
-    /// to be measured; a field taking focus on the way ends it, since the person is typing.
+    /// row's foot sits on that bottom, or moving at once under reduced motion. Whether it runs is
+    /// decided as Advanced opens: with a callout or the API key row's scroll on its way it never
+    /// does, so a callout that finishes first is never scrolled away. It waits for the row to be
+    /// measured; a field taking focus on the way ends it, since the person is typing.
     private func revealAdvanced(_ proxy: ScrollViewProxy) async {
         guard model.advancedOpen, revealsAdvanced else { return }
         revealsAdvanced = false
+        guard !model.calloutPending, !model.keyPending else { return }
         let run = wait.begin()
         defer { wait.end(run) }
         while marks.rowBottom == nil || marks.visibleBottom == nil {
@@ -418,12 +429,10 @@ struct SignInView: View {
                 .padding(.top, 20)
                 failureLine
                 if model.offersScan {
-                    GlazeButton("Scan a family QR code", icon: .camera, size: .small) {
-                        model.startJoin()
-                        model.scanning = true
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 12)
+                    // Off while a sign-in runs.
+                    GlazeButton("Scan a family QR code", icon: .camera, size: .small, enabled: !model.busy) { model.scanFamilyCode() }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.top, 12)
                 }
             }
             // Advanced shows while joining too: a family link's server may stand behind a sign-in
@@ -477,7 +486,7 @@ struct SignInView: View {
         Button(action: model.toggleScheme) {
             HStack(spacing: 4) {
                 Image(systemName: model.scheme == .https ? "lock.fill" : "lock.open.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: lockSize, weight: .semibold))
                     .foregroundStyle(model.scheme == .https ? OctoColor.accent : OctoColor.textMuted)
                 Text(model.scheme.prefix).font(.octoFormValue).foregroundStyle(OctoColor.textMuted)
             }
@@ -574,14 +583,16 @@ struct SignInView: View {
     /// then how the connection travels.
     private var cardNotes: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // How the connection travels, first under the card on every state, beside the address
+            // it describes.
+            if let note = model.note { connectionNote(note) }
             if model.handOver != nil {
                 FormNote(.info, "On your other device, tap Allow when it asks about this phone.")
             } else if let invite = model.invite {
                 FormNote(.info, "You're invited to \(shownServer(invite.server)). Choose your name and a password. Your login then works in Octo and any other music app.")
             } else if model.joining {
-                FormNote(.info, "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.")
+                FormNote(.info, "Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this\u{00A0}phone.")
             }
-            if let note = model.note { connectionNote(note) }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -629,14 +640,14 @@ struct SignInView: View {
                 .padding(.top, 20)
         }
         failureLine
-        if model.handOver == nil {
-            GlazeButton("Scan the QR code", icon: .camera, size: .small) { model.scanning = true }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.top, 12)
+        // One block on the trailing edge, both ways as wide as the wider.
+        TrailingColumn(gap: 12) {
+            if model.handOver == nil {
+                GlazeButton("Scan the QR code", icon: .camera, size: .small, fillWidth: true) { model.scanning = true }
+            }
+            GlazeButton("Sign in with a password", size: .small, enabled: !model.committing, fillWidth: true) { model.stopJoin() }
         }
-        GlazeButton("Sign in with a password", size: .small, enabled: !model.committing) { model.stopJoin() }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, 12)
+        .padding(.top, 12)
     }
 
     /// Advanced's groups, in the order every app draws them.
@@ -693,7 +704,15 @@ struct SignInView: View {
                 }
             }
         } notes: {
-            if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) }
+            if model.calloutShowing, let error = model.error {
+                FormNote(.error, GatewayWords.inGroup(error))
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("gatewayGroup")).maxY } action: { foot in
+                        gatewayErrorFoot = foot
+                        wait.send(.measured)
+                    }
+                    .onDisappear { gatewayErrorFoot = nil }
+                    .calloutEnd("gatewayErrorEnd")
+            }
             // A sign-in page's password never crosses the internet readable.
             if model.gatewayInsecure { FormNote(.error, GatewayWords.needsHttps) }
             if let met = model.gatewayMet {
@@ -704,6 +723,7 @@ struct SignInView: View {
             if model.joining { FormNote(.info, GatewayWords.joinHint) }
             FormNote(.info, SignInWords.homeNote)
         }
+        .coordinateSpace(.named("gatewayGroup"))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             gatewayHeight = height
             wait.send(.measured)
@@ -762,6 +782,25 @@ struct SignInView: View {
                     model.removesCertificate = model.hadCertificate
                 }
             }
+        }
+    }
+
+    /// A file picked for the certificate: one saved with no password is taken at once, and any other
+    /// asks for its password. Only checked here: the server in use keeps its certificate until this
+    /// one is saved.
+    private func certificatePicked(_ result: Result<URL, any Error>) {
+        guard case .success(let url) = result else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else { return }
+        let name = url.lastPathComponent
+        do {
+            let expires = try CertificateCheck.validate(data, password: "")
+            model.certificate = (name, data, "", expires)
+            model.removesCertificate = false
+        } catch {
+            pendingCertificate = (name, data)
+            certificatePassword = ""
         }
     }
 

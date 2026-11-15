@@ -290,10 +290,13 @@ struct MainShell: View {
                 .presentationDragIndicator(.visible)
         }
         .modifier(CodeSheetHost())
+        // Each form is a page with a model of its own: a link or an ask that replaces the form showing
+        // draws the new form, never the last one's page.
         .fullScreenCover(item: Bindable(router).signIn) { form in
             SignInView(form: form, session: session) { notice in
                 if let notice { router.done(notice) }
             }
+            .id(form.id)
             .environment(drift)
         }
         // A server app start did not sign in to again asks for its sign-in form with why, the same

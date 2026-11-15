@@ -1,6 +1,8 @@
 package app.winters.octo.desktop.pages
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
@@ -13,10 +15,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.IntOffset
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.MenuRow
 import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.POPUP_TAG
 import app.winters.octo.design.Space
@@ -32,6 +36,7 @@ import app.winters.octo.desktop.server.CertificateDraft
 import app.winters.octo.desktop.server.CertificateOpened
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SavedGateway
+import app.winters.octo.desktop.server.readCapped
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.subsonic.AuthMode
@@ -58,6 +63,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -72,11 +80,37 @@ import kotlin.math.sqrt
 class SignInLayoutTest {
     @get:Rule val folder = TemporaryFolder()
 
-    private fun page(height: Int = 900, serve: (FakeServer) -> Unit = {}) =
-        A11yScene(folder.newFolder(), height = height, reduceMotion = true, signedOut = true, serve = serve)
+    // The window signed out, on the sign-in page, or signed in. `chosen` is
+    // the file a certificate row's Choose picks, and `reads` holds the
+    // certificate reads when a row asks for that.
+    private fun page(height: Int = 900, chosen: File? = null, reads: HeldReads? = null, serve: (FakeServer) -> Unit = {}) =
+        A11yScene(folder.newFolder(), height = height, reduceMotion = true, signedOut = true, serve = serve, wrap = choosing(chosen), readCertificate = reads?.read ?: ::readCapped)
 
-    private fun signedIn(height: Int = 900, serve: (FakeServer) -> Unit = {}) =
-        A11yScene(folder.newFolder(), height = height, reduceMotion = true, serve = serve)
+    private fun signedIn(height: Int = 900, chosen: File? = null, reads: HeldReads? = null, serve: (FakeServer) -> Unit = {}) =
+        A11yScene(folder.newFolder(), height = height, reduceMotion = true, serve = serve, wrap = choosing(chosen), readCertificate = reads?.read ?: ::readCapped)
+
+    // The file window gives `chosen` when there is one.
+    private fun choosing(chosen: File?): @Composable (@Composable () -> Unit) -> Unit = { content ->
+        if (chosen == null) content() else CompositionLocalProvider(LocalChooseCertificateFile provides { _ -> chosen }) { content() }
+    }
+
+    // Certificate file reads that wait, once held, until let go, at most 10 s.
+    private class HeldReads {
+        @Volatile private var gate: CountDownLatch? = null
+
+        val read: (Path) -> ByteArray = { path ->
+            gate?.let { check(it.await(10, TimeUnit.SECONDS)) { "held too long" } }
+            readCapped(path)
+        }
+
+        fun hold() {
+            gate = CountDownLatch(1)
+        }
+
+        fun release() {
+            gate?.countDown()
+        }
+    }
 
     // Draws until `what` holds, for at most 10 s.
     private fun A11yScene.until(what: () -> Boolean) {
@@ -1130,7 +1164,7 @@ class SignInLayoutTest {
             assertEquals("Change password", "Current password", s.focused()?.name())
             s.onUi {
                 s.app.popups.close()
-                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
             }
             s.settle(600).close()
             assertEquals("the certificate's ask", SignInWords.CERT_PASSWORD_FIELD, s.focused()?.name())
@@ -1215,16 +1249,135 @@ class SignInLayoutTest {
     }
 
     // Asks for `file`'s password for `form`, as choosing a file that needs
-    // one does.
+    // one does, from the pop-up open now (the row's), if any.
     private fun A11yScene.chooseNeedingPassword(form: SignInForm, file: File) {
         val opened = runBlocking { app.accounts.openPicked(file.path, "") }
         assertTrue("the file needs its password", opened is CertificateOpened.Refused && opened.wrongPassword)
         val turn = Any()
         onUi {
             form.certificateTurn = turn
-            askCertificatePassword(app, form, file.path, turn)
+            askCertificatePassword(app, form, file.path, turn, app.popups.request)
         }
         settle(600).close()
+    }
+
+    // The control drawing these words on the page, not in a pop-up.
+    private fun A11yScene.controlOnPage(words: String): SemanticsNode =
+        generateSequence(withText(words).single { !it.inPopup() }) { it.parent }.first { it.clickable }
+
+    // Presses it the way a screen reader does.
+    private fun A11yScene.pressOnPage(words: String) {
+        val control = controlOnPage(words)
+        onUi { control.config[SemanticsActions.OnClick].action?.invoke() }
+        render(3)
+    }
+
+    // A file chosen for one server asks for its password, then a link to
+    // another server starts the page's form over: Use it opens the file
+    // and closes the ask, but puts nothing on the form the link made. Red
+    // when the forget leaves the opening's turn, so the first server's file
+    // lands on the second server's form.
+    @Test(timeout = 120_000)
+    fun aFileAskedForBeforeALinkToAnotherServerIsNotTaken() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        page().use { s ->
+            val form = s.app.signInForm
+            s.onUi {
+                form.typeAddress("https://a.example.com")
+                form.advancedOpen = true
+            }
+            s.settle(600).close()
+            s.chooseNeedingPassword(form, file)
+            s.onUi { s.app.openFamilyLink(FamilyInviteLink("https://b.example.com", "t1")) }
+            s.render(3)
+            assertEquals("the link started the form over", "t1", form.invite?.token)
+            assertEquals("b.example.com", form.address)
+            s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inOpenPopup() }, CertFixtures.PASSWORD)
+            val asking = s.app.popups.request
+            s.activate(SignInWords.CERT_PASSWORD_USE)
+            s.until { s.app.popups.request !== asking }
+            s.settle(300).close()
+            assertEquals("no file on the new server's form", CertificateDraft.None, form.certificateDraft)
+            assertNull(form.certificateLoad)
+        }
+    }
+
+    // Choose opening a file that is slow to read, then Advanced closed: the
+    // opening ends with its row, and Choose is ready again once Advanced
+    // opens. Red when the flag that turns Choose off is cleared only once the
+    // read comes back: the row's scope ends first, and Choose stays off with
+    // its spinner.
+    @Test(timeout = 120_000)
+    fun closingAdvancedWhileAFileIsReadLeavesChooseReady() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        val reads = HeldReads()
+        page(chosen = file, reads = reads).use { s ->
+            val form = s.app.signInForm
+            s.onUi { form.advancedOpen = true }
+            s.settle(600).close()
+            reads.hold()
+            try {
+                s.pressOnPage(SignInWords.CERT_CHOOSE)
+                s.until { form.certificateOpening && s.app.accounts.certificateReading.isNotEmpty() }
+                s.onUi { form.advancedOpen = false }
+                s.settle(600).close()
+                assertTrue("the row is gone", s.withText(SignInWords.CERT_CHOOSE).isEmpty())
+            } finally {
+                reads.release()
+            }
+            s.until { s.app.accounts.certificateReading.isEmpty() }
+            s.render(3)
+            assertFalse("the opening ended with its row", form.certificateOpening)
+            s.onUi { form.advancedOpen = true }
+            s.settle(600).close()
+            assertFalse("Choose is on", s.controlOnPage(SignInWords.CERT_CHOOSE).config.contains(SemanticsProperties.Disabled))
+            assertEquals("nothing was taken", CertificateDraft.None, form.certificateDraft)
+        }
+    }
+
+    // The certificate's password ask keeps under it only the pop-up its row
+    // is drawn in, while that one is on top. From the Add sheet's Choose the
+    // sheet is kept and comes back after Cancel; from the page's Choose, a
+    // menu opened while the file was read is replaced and never comes back.
+    // Red when the ask keeps whatever is on top: the menu returns after
+    // Cancel.
+    @Test(timeout = 180_000)
+    fun theCertificateAskKeepsUnderItOnlyThePopUpItWasAskedFrom() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn(chosen = file).use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            val sheet = s.app.popups.request!!
+            val form = s.sheetForm()
+            s.onUi { form.advancedOpen = true }
+            s.settle(600).close()
+            s.activate(SignInWords.CERT_CHOOSE)
+            s.until { s.app.popups.request !== sheet && s.withText(SignInWords.CERT_PASSWORD_TITLE).any { it.inOpenPopup() } }
+            assertSame("the sheet is kept under the ask", sheet, s.app.popups.request?.under)
+            s.activate("Cancel")
+            s.settle(600).close()
+            assertSame("the sheet is back", sheet, s.app.popups.request)
+        }
+        val reads = HeldReads()
+        page(chosen = file, reads = reads).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(600).close()
+            reads.hold()
+            val menu = try {
+                s.pressOnPage(SignInWords.CERT_CHOOSE)
+                s.until { s.app.accounts.certificateReading.isNotEmpty() }
+                s.onUi { s.app.popups.showAt(IntOffset(40, 40)) { _ -> MenuRow("A menu row", {}) } }
+                s.render(3)
+                s.app.popups.request ?: throw AssertionError("the menu did not open")
+            } finally {
+                reads.release()
+            }
+            s.until { s.app.popups.request !== menu && s.withText(SignInWords.CERT_PASSWORD_TITLE).any { it.inOpenPopup() } }
+            assertNull("the menu is not kept under the ask", s.app.popups.request?.under)
+            s.activate("Cancel")
+            s.settle(600).close()
+            assertNull("nothing comes back after Cancel", s.app.popups.request)
+        }
     }
 
     // From the open server sheet titled `title`: Advanced open and Choose
@@ -1690,7 +1843,7 @@ class SignInLayoutTest {
             s.shot("polish-sheet-change-password-130")
         }
         signedIn().use { s ->
-            s.onUi { askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any()) }
+            s.onUi { askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null) }
             s.settle(600).close()
             s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
             s.shot("polish-sheet-certificate-password")
@@ -2217,7 +2370,7 @@ class SignInLayoutTest {
                 s.shot("polish-popup-change-password$size")
                 s.onUi {
                     s.app.popups.close()
-                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
                 }
                 s.shot("polish-popup-certificate-password$size")
                 s.onUi { s.app.popups.close() }
@@ -2235,7 +2388,7 @@ class SignInLayoutTest {
             s.shot("polish-popup-change-password-notes")
             s.onUi {
                 s.app.popups.close()
-                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
             }
             s.shot("polish-popup-certificate-password-paper")
             s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
@@ -2282,7 +2435,7 @@ class SignInLayoutTest {
             val change = s.fillRightOfCancel(Space.M.value)
             s.onUi {
                 s.app.popups.close()
-                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
             }
             s.settle(600).close()
             s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
@@ -2347,7 +2500,7 @@ class SignInLayoutTest {
                 s.mainButtonFits("Change password", how)
                 s.onUi {
                     s.app.popups.close()
-                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
                 }
                 s.settle(600).close()
                 s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
@@ -2437,7 +2590,7 @@ class SignInLayoutTest {
                 s.titleIsLoudest("Change password", how)
                 s.onUi {
                     s.app.popups.close()
-                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
                 }
                 s.titleIsLoudest(SignInWords.CERT_PASSWORD_TITLE, how)
                 s.onUi {
@@ -2467,7 +2620,7 @@ class SignInLayoutTest {
             assertEquals("hints saying required", 3, s.withText(SignInWords.REQUIRED).count { it.inPopup() })
             s.onUi {
                 s.app.popups.close()
-                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any(), null)
             }
             s.settle(600).close()
             assertEquals("'${SignInWords.CERT_PASSWORD_FIELD}' shown", 1, s.withText(SignInWords.CERT_PASSWORD_FIELD).count { it.inPopup() })

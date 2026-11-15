@@ -58,15 +58,16 @@ object GatewayWords {
             Gateway.PasswordPrompt ->
                 "This server asks for a username and password before Octo can reach it. Fill in the sign-in page fields under Advanced."
             Gateway.SignInPage ->
-                "A sign-in page answered instead of the server. On public Wi-Fi, sign in to the Wi-Fi first. Otherwise fill in the sign-in page fields under Advanced."
+                "A sign-in page answered instead of the server. On public Wi-⁠Fi, sign in to the Wi-⁠Fi first. Otherwise fill in the sign-in page fields under Advanced."
         }
     }
 
     // A failure's words as the sign-in page group's own error note shows
-    // them, under the fields it names: "under Advanced" there reads "above".
+    // them, under the fields it names: "under Advanced" there reads "above",
+    // kept with "fields" so it never ends a wrapped note alone.
     fun inGroup(text: String): String = text
-        .replace("Otherwise fill in the sign-in page fields under Advanced.", "Otherwise fill in the fields above.")
-        .replace("Fill in the sign-in page fields under Advanced.", "Fill in the fields above.")
+        .replace("Otherwise fill in the sign-in page fields under Advanced.", "Otherwise fill in the fields above.")
+        .replace("Fill in the sign-in page fields under Advanced.", "Fill in the fields above.")
 
     // The same, short enough for a server's row in the list.
     fun row(gateway: Gateway, loginSent: Boolean): String =
@@ -75,14 +76,14 @@ object GatewayWords {
     // How to fill in the fields for that gateway.
     fun hint(gateway: Gateway): String = when (gateway) {
         Gateway.Authentik ->
-            "Use your Authentik username and an app password. Make one in Authentik under your user settings, Tokens and App passwords."
+            "Use your Authentik username and an app password. Make one in Authentik under your user settings, Tokens and App passwords."
         Gateway.Authelia ->
             "Use your Authelia username and password. Authelia lets apps in only where its rule for this address is one factor."
         Gateway.CloudflareAccess ->
-            "Use a service token from Cloudflare Zero Trust, and add a Service Auth rule for it to this app's Access policy."
+            "Use a service token from Cloudflare Zero Trust, and add a Service Auth rule for it to this app's Access policy."
         Gateway.PasswordPrompt -> "Use the username and password the server's proxy asks for."
         Gateway.SignInPage ->
-            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /rest/ through."
+            "If the sign-in page takes a username and password from apps, enter them here. A page that only works in a browser can't let Octo in: ask whoever runs it to let /⁠rest/ through."
     }
 
     // The note under the sign-in page group when a kind is picked and no

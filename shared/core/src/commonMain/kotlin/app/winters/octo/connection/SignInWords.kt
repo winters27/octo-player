@@ -48,7 +48,7 @@ object SignInWords {
 
     // What the home address and the custom headers are for, and the danger
     // note for an API key over plain http across the internet.
-    const val HOME_NOTE = "On Wi-Fi, Octo uses it when it answers, and the main address otherwise."
+    const val HOME_NOTE = "On Wi-⁠Fi, Octo uses it when it answers, and the main address otherwise."
     const val HEADERS_DESCRIPTION = "Sent with every request to this server, such as an access token for a proxy in front of it."
     const val API_KEY_IN_THE_OPEN = "Not encrypted, and your API key travels as it is. Anyone on the way can read it."
 

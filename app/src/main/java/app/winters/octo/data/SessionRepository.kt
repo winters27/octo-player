@@ -591,7 +591,9 @@ class SessionRepository @Inject constructor(
 
     // Changes the signed-in user's password on the server. The current one is
     // checked first; on success the new one is sealed in place of the old,
-    // and the client in use already signs in with it.
+    // and the client in use already signs in with it. The sign-in kept for
+    // rebuilding the client takes it only while that server is still the one
+    // in use (a switch may have come in meanwhile).
     // A family member's password goes through the family's own call, which
     // signs every other app and device out.
     suspend fun changePassword(current: String, new: String, family: Boolean = false): PasswordChange {
@@ -602,7 +604,7 @@ class SessionRepository @Inject constructor(
             _servers.value.find(session.id)?.let { saved ->
                 _servers.value = store.update { it.replacing(saved.copy(passwordSealed = vault.seal(new))) }
             }
-            credentials = credentials?.let { Credentials(it.username, new, it.mode) }
+            if (this.current?.id == session.id) credentials = credentials?.let { Credentials(it.username, new, it.mode) }
         }
         return result
     }

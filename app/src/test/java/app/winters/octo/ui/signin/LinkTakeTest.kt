@@ -16,6 +16,7 @@ import app.winters.octo.ui.nav.ServerForm
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -33,7 +34,9 @@ import java.util.concurrent.TimeUnit
 // busy is refused with words under the address and nothing else changed. A
 // hand-over's sealed sign-in is checked the same way before anything is
 // sent with it. What a link may keep is kept: what was typed for its own
-// server, a fitting link's saved details, a home certificate trusted.
+// server, a fitting link's saved details, a home certificate trusted. A held
+// sign-up or received sign-in is never dropped or written over by a link, and
+// a link note outlives the app's own writes.
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class LinkTakeTest {
@@ -287,19 +290,150 @@ class LinkTakeTest {
         assertTrue(vm.signedIn)
     }
 
-    // An invite to another server is never the same invite, whatever its
-    // token: the sign-up the last server made is dropped and the address
-    // is the new server's. Red when a link to another server keeps it (the
-    // field would show the new server while the sign-in goes to the old).
+    // While a sign-up is held, an invite with its token for another server
+    // is refused with the open sign-in's words, and nothing of the form
+    // changes: the address, the home, the invite and the sign-up stay, and
+    // Sign up again signs in with it, never signing up again. Red when the
+    // link drops the sign-up (an invite works once, so the person is locked
+    // out of it) or writes the other server's address over it.
     @Test
-    fun theSameTokenForAnotherServerDropsTheSignUp() {
+    fun theSameTokenForAnotherServerIsRefusedAndKeepsTheSignUp() {
         val vm = harness.form()
         harness.heldSignUp(vm)
+        keepsItsSignUpThrough(vm, FamilyInviteLink(server = "https://b.example.com", token = "invite-token"))
+    }
+
+    // Red when another invite for the same server drops the held sign-up or
+    // takes its place.
+    @Test
+    fun anotherTokenForTheSameServerIsRefusedAndKeepsTheSignUp() {
+        val vm = harness.form()
+        harness.heldSignUp(vm)
+        keepsItsSignUpThrough(vm, FamilyInviteLink(server = harness.link, token = "another-token"))
+    }
+
+    // `link`, refused over the sign-up `vm` holds, which then signs in as it
+    // was.
+    private fun keepsItsSignUpThrough(vm: SignInViewModel, link: FamilyInviteLink) {
         assertTrue(vm.holdsSignUp)
-        vm.startJoin(FamilyInviteLink(server = "https://b.example.com", token = "invite-token"))
-        assertFalse(vm.holdsSignUp)
+        val address = vm.address
+        val home = vm.home
+        val invite = vm.invite
+        val sent = harness.server.requestCount
+        vm.startJoin(link)
+        assertEquals(SignInWords.LINK_WHILE_SIGN_IN_OPEN, vm.linkNote)
+        assertTrue(vm.holdsSignUp)
+        assertEquals(address, vm.address)
+        assertEquals(home, vm.home)
+        assertEquals(invite, vm.invite)
+        vm.join()
+        val call = harness.signIns.awaitCall("alice-new", 2)
+        harness.settle(vm)
+        assertEquals(harness.address.toString(), call.request.address)
+        assertEquals(sent, harness.server.requestCount)
+        assertTrue(vm.signedIn)
+    }
+
+    // While a received sign-in is held (its sign-in step failed), another
+    // hand-over is refused with the open sign-in's words and the held one
+    // stays: Try again signs in with it, with no redeem. Red when a link
+    // drops it (its token is spent, so the other device would have to allow
+    // again) or takes its place.
+    @Test
+    fun aLinkOverAHeldReceivedSignInIsRefusedAndKeepsIt() {
+        val vm = harness.form()
+        val (link, box) = harness.handOver(HandOverSignIn(username = "alice", secret = "pw", server = harness.link))
+        harness.allowAtOnce(box)
+        harness.signIns.hold("alice")
+        vm.startJoin(link)
+        harness.signIns.awaitCall("alice")
+        harness.signIns.release("alice", wrong)
+        harness.settle(vm)
+        assertTrue(vm.holdsReceived)
+        val sent = harness.server.requestCount
+        val (other, _) = harness.handOver(HandOverSignIn(username = "alice", secret = "pw", server = harness.link), token = "another-token")
+        vm.startJoin(other)
+        assertEquals(SignInWords.LINK_WHILE_SIGN_IN_OPEN, vm.linkNote)
+        assertTrue(vm.holdsReceived)
+        assertEquals(link, vm.handOver)
+        vm.receive()
+        harness.signIns.awaitCall("alice", 2)
+        harness.settle(vm)
+        assertEquals(sent, harness.server.requestCount)
+        assertTrue(vm.signedIn)
+    }
+
+    // A held sign-up signs in at the address it was made for, so the address
+    // takes no edit while it is held: neither typing in its field nor the
+    // scheme button; once the link is left, both work again. Red when the
+    // model takes either (the field would show one address while the sign-in
+    // goes to another).
+    @Test
+    fun aHeldSignUpsAddressTakesNoEdit() {
+        val vm = harness.form()
+        harness.heldSignUp(vm)
+        val address = vm.address
+        val scheme = vm.scheme
+        vm.typeAddressFromField("https://b.example.com")
+        vm.toggleScheme()
+        assertEquals(address, vm.address)
+        assertEquals(scheme, vm.scheme)
+        vm.stopJoin()
+        vm.toggleScheme()
+        assertNotEquals(scheme, vm.scheme)
+        vm.typeAddressFromField("https://b.example.com")
         assertEquals("b.example.com", vm.address)
     }
+
+    // A link refused while a home QR's hand-over waits for Allow says so
+    // under the address, and the words stay through the address and home
+    // its sealed sign-in then writes in, the sign-in failing after. Red when
+    // the app's own writes wipe the note.
+    @Test
+    fun aNoteSetWhileAHomeQrIsAllowedOutlivesItsAdoption() {
+        val vm = harness.form()
+        val (link, box) = harness.handOver(HandOverSignIn(username = "alice", secret = "pw", server = "https://music.example.com", home = harness.link), home = harness.link)
+        val answers = PathAnswers(mapOf(REDEEM to { subsonic(REDEEMED) }, POLL to { subsonic(allowed(box)) }), holding = POLL)
+        harness.server.dispatcher = answers
+        harness.signIns.hold("alice")
+        vm.startJoin(link)
+        takeOne()
+        takeOne()
+        vm.startJoin(FamilySignInPrefill(server = "https://b.example.com", username = "bob"))
+        assertEquals(SignInWords.LINK_WHILE_BUSY, vm.linkNote)
+        answers.release()
+        harness.signIns.awaitCall("alice")
+        assertEquals("music.example.com", vm.address)
+        harness.signIns.release("alice", wrong)
+        harness.settle(vm)
+        assertEquals(SignInWords.LINK_WHILE_BUSY, vm.linkNote)
+    }
+
+    // A link refused while a sign-up runs, after its address was edited,
+    // keeps its words when the sign-up puts back the address it was made
+    // for. Red when that write wipes the note.
+    @Test
+    fun aNoteSetWhileASignUpRunsOutlivesItsAddressPutBack() {
+        val signUp = PathAnswers(mapOf(JOIN to { joined("alice-new") }), holding = JOIN)
+        harness.server.dispatcher = signUp
+        val vm = harness.form()
+        vm.startJoin(FamilyInviteLink(server = harness.link, token = "invite-token"))
+        harness.fillInvite(vm)
+        harness.signIns.hold("alice-new")
+        vm.join()
+        takeOne()
+        vm.typeAddressFromField("https://c.example.com")
+        vm.startJoin(FamilySignInPrefill(server = "https://b.example.com", username = "bob"))
+        assertEquals(SignInWords.LINK_WHILE_BUSY, vm.linkNote)
+        signUp.release()
+        harness.signIns.awaitCall("alice-new")
+        harness.signIns.release("alice-new", wrong)
+        harness.settle(vm)
+        assertEquals(harness.address, vm.url)
+        assertEquals(SignInWords.LINK_WHILE_BUSY, vm.linkNote)
+    }
+
+    private fun takeOne() = harness.server.takeRequest(10, TimeUnit.SECONDS) ?: throw AssertionError("no request came within 10 s")
 
     // A hand-over that fits a kept server's form signs in to that server
     // again (by its id, at its own addresses, with its saved details), while
@@ -391,8 +525,10 @@ class LinkTakeTest {
     }
 
     // A home QR from the person's own device: its link names the home address,
-    // its sealed sign-in the outside address and that home. The certificate
-    // trusted at home stays trusted for it. Red when adoption drops every pin.
+    // its sealed sign-in the outside address and that home. The form adopts
+    // the outside server, and the certificate trusted at home stays trusted
+    // for it. Red when adoption drops every pin, or the received sign-in is
+    // never checked (nothing is adopted and the form keeps showing the home).
     @Test
     fun aHomeQrKeepsTheHomesPin() {
         val vm = formWithPin(harness.link, "127.0.0.1")
@@ -403,12 +539,16 @@ class LinkTakeTest {
         harness.settle(vm)
         assertEquals("https://music.example.com", call.request.address)
         assertEquals(mapOf("127.0.0.1" to "ab12"), call.request.pins)
+        assertEquals("music.example.com", vm.address)
+        assertEquals(harness.link, vm.home)
     }
 
     // After adoption, a sign-in step that meets Cloudflare Access opens its
     // fields there; filled in, Try again sends them, and nothing is forgotten
     // again. Red when the attempt is not re-tagged with the adopted address
-    // (the page met would be dropped), or Try again forgets.
+    // (the page met would be dropped), Try again forgets, or the received
+    // sign-in is never checked (nothing is adopted, so the form shows the
+    // link's server while the sign-in goes to another).
     @Test
     fun anAdoptedServersSignInPageOpensAndTryAgainSendsItsFields() {
         val vm = harness.form()
@@ -419,6 +559,7 @@ class LinkTakeTest {
         harness.signIns.awaitCall("alice")
         harness.signIns.release("alice", SignInError.Failed(SubsonicException.NotSubsonic("HTTP 403 from ping", 403, Gateway.CloudflareAccess, false)) to null)
         harness.settle(vm)
+        assertEquals("music.example.com", vm.address)
         assertTrue(vm.advancedOpen)
         assertEquals(GatewayKind.CloudflareToken, vm.gatewayKind)
         vm.gatewayFirst = "id.access"

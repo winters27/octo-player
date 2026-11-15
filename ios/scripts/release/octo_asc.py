@@ -13,7 +13,8 @@ Octo's own state is in /root/.octo-asc (mode 700). Nothing here prints a secret 
   octo_asc.py set-review --requires SHA --demo-host HOST    what the beta review build must contain
   octo_asc.py mark-checked N                    build N passed the device checks
   octo_asc.py prepare --tree DIR --unsigned IPA --out IPA      the signed App Store IPA
-  octo_asc.py sideload --tree DIR --unsigned IPA --out IPA     the IPA for sideloading
+  octo_asc.py sideload --tree DIR --unsigned IPA --out IPA [--build N]
+                                                the IPA for sideloading (--build: no TestFlight)
   octo_asc.py validate --tree DIR --ipa IPA [--sideload]
   octo_asc.py record-built --signed IPA --sideload IPA
   octo_asc.py upload IPA [--wait]
@@ -786,12 +787,26 @@ def cmd_prepare(tree: Path, unsigned: Path, out: Path) -> None:
     say("wrote", out, f"({out.stat().st_size >> 20} MB)")
 
 
-def cmd_sideload(tree: Path, unsigned: Path, out: Path) -> None:
-    res = reservation()
-    unsigned_from(tree)
+def built_from(tree: Path) -> None:
+    """A sideload-only build has no reservation; its unsigned build must still be of the tree's commit."""
+    from_file = (WORK / "unsigned.from").read_text().split()
+    if from_file[0] != tree.name:
+        refuse(f"the unsigned build is of {from_file[0]}, the tree is {tree.name}")
+
+
+def cmd_sideload(tree: Path, unsigned: Path, out: Path, build: int = None) -> None:
+    """The IPA for sideloading: with no `build`, the open TestFlight reservation's number; with one,
+    a sideload-only release, which needs no App Store Connect."""
+    if build is None:
+        build = reservation()["build"]
+        unsigned_from(tree)
+    else:
+        if build < 1:
+            refuse("--build takes a positive build number")
+        built_from(tree)
     with tempfile.TemporaryDirectory(prefix="octo-tf-") as temp:
         work = Path(temp)
-        app = stage(tree, unsigned, res["build"], work / "x", sideload=True)
+        app = stage(tree, unsigned, build, work / "x", sideload=True)
         args = ["-a"]
         for b in BUNDLES:
             ent = work / f"{b['id']}.entitlements"
@@ -1628,6 +1643,8 @@ def main(argv=None) -> int:
         q.add_argument("--tree", type=Path, required=True)
         q.add_argument("--unsigned", type=Path, required=True)
         q.add_argument("--out", type=Path, required=True)
+        if name == "sideload":
+            q.add_argument("--build", type=int)
     q = sub.add_parser("validate")
     q.add_argument("--tree", type=Path, required=True)
     q.add_argument("--ipa", type=Path, required=True)
@@ -1658,7 +1675,7 @@ def main(argv=None) -> int:
             if args.cmd == "prepare":
                 cmd_prepare(args.tree, args.unsigned, args.out)
             elif args.cmd == "sideload":
-                cmd_sideload(args.tree, args.unsigned, args.out)
+                cmd_sideload(args.tree, args.unsigned, args.out, args.build)
             elif args.cmd == "validate":
                 cmd_validate(args.tree, args.ipa, args.sideload)
             elif args.cmd == "record-built":

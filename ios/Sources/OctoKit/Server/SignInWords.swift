@@ -47,7 +47,7 @@ public enum SignInWords {
 
     /// What the home address and the custom headers are for, and the danger note for an API key
     /// over plain http across the internet.
-    public static let homeNote = "On Wi-Fi, Octo uses it when it answers, and the main address otherwise."
+    public static let homeNote = "On Wi-\u{2060}Fi, Octo uses it when it answers, and the main address\u{00A0}otherwise."
     public static let headersDescription = "Sent with every request to this server, such as an access token for a proxy in front of it."
     public static let apiKeyInTheOpen = "Not encrypted, and your API key travels as it is. Anyone on the way can read it."
 
@@ -110,6 +110,11 @@ public enum SignInWords {
     public static let certPasswordHint = "The password the certificate file was saved with."
     public static let certPasswordField = "Password"
     public static let certPasswordUse = "Use it"
+    /// The iPhone's password question says this after its hint: the question opens only once the
+    /// file did not open with an empty password, so a file saved with none has to be exported again
+    /// with one. The iPhone's alone, so not among the shared words.
+    public static let certNoPasswordOnPhone =
+        "If this file has no password, export it again with one: iPhone can't open certificates without a password."
 
     public static func certificateLine(_ name: String, date: String) -> String { "\(name), expires \(date)" }
 

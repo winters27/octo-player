@@ -19,6 +19,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,6 +34,7 @@ import app.winters.octo.connection.ConnectionChooser
 import app.winters.octo.connection.FolderChoice
 import app.winters.octo.connection.Place
 import app.winters.octo.data.KeptServers
+import app.winters.octo.data.PasswordChanges
 import app.winters.octo.data.ServerLook
 import app.winters.octo.data.Session
 import app.winters.octo.data.SessionRepository
@@ -62,15 +65,16 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.serverupdate.upToDateLine
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.subsonic.MusicFolder
+import app.winters.octo.connection.SignInWords
 import app.winters.octo.ui.common.AnswerRow
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.rememberCopyNoticeAsk
 import app.winters.octo.ui.common.LocalChoiceSheet
-import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.PopupQuestion
 import app.winters.octo.ui.common.rememberOpenedBeside
+import app.winters.octo.ui.common.rememberStillDrawn
 import app.winters.octo.ui.nav.EditConnectionRoute
 import app.winters.octo.ui.nav.OctoAdminRoute
 import app.winters.octo.ui.nav.ImportRoute
@@ -84,6 +88,7 @@ import app.winters.octo.ui.settings.rows.SettingsPageFrame
 import app.winters.octo.ui.settings.rows.SwitchRow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -98,6 +103,7 @@ class ServerViewModel @Inject constructor(
     private val sync: ServerSync,
     private val playlists: PlaylistSync,
     private val switcher: ServerSwitch,
+    private val passwords: PasswordChanges,
     chooser: ConnectionChooser,
 ) : ViewModel() {
     val session: StateFlow<SessionState> = sessions.state
@@ -150,7 +156,14 @@ class ServerViewModel @Inject constructor(
 
     fun disconnect() = sync.disconnect()
 
-    suspend fun changePassword(current: String, new: String): PasswordChange = sessions.changePassword(current, new, family = family.model.me?.managed == true)
+    // Whether a change of password is on its way, from this page or another.
+    val changingPassword: StateFlow<Boolean> = passwords.changing
+
+    // Changes the password on its own (PasswordChanges), so nothing on screen
+    // cuts it in half; the form's answer, while it is drawn, comes through
+    // `answered`. False when one was already on its way and nothing was sent.
+    suspend fun changePassword(current: String, new: String, answered: (PasswordChange, String) -> Boolean): Boolean =
+        passwords.change(current, new, family = family.model.me?.managed == true, words = { passwordChangeWords(it) }, answered = answered)
 
     // Opens "Sign in on another device" on the Family screen.
     fun signInElsewhere() = family.model.handOver.open()
@@ -283,13 +296,16 @@ fun ServerPage(onOpen: (NavKey) -> Unit, onBack: () -> Unit, highlight: String?,
             }
         }
     }
+    // While a change of password is on its way the pop-up stays: a tap
+    // outside it and Back do nothing until it answers.
     GlassPopup(
         visible = changing,
         anchor = null,
-        onDismiss = { changing = false },
+        onDismiss = { if (!vm.changingPassword.value) changing = false },
         backdrop = LocalHaze.current,
         title = SettingsIndex.ChangePassword.title,
         maxWidth = 400.dp,
+        onBack = { vm.changingPassword.value },
     ) {
         if (changing) PasswordForm(vm) { changing = false }
     }
@@ -312,26 +328,28 @@ private fun ServerFacts(vm: ServerViewModel, session: Session, updates: ServerUp
 }
 
 // The current password, then the new one twice. Nothing is sent until the
-// form is right; what the server says comes back in plain words.
+// form is right; what the server says comes back in plain words. While a
+// change is on its way, from here or another page, Done sends nothing. The
+// change runs on its own: once changed this form closes and the app's notice
+// says so; a refusal shows here, or in the notice once the form is gone.
 @Composable
 private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val feedback = LocalFeedback.current
+    val drawn = rememberStillDrawn()
     var draft by remember { mutableStateOf(PasswordDraft()) }
-    var busy by remember { mutableStateOf(false) }
+    val busy by vm.changingPassword.collectAsStateWithLifecycle()
     var problem by remember { mutableStateOf<String?>(null) }
     fun change() {
+        if (vm.changingPassword.value) return
         passwordDraftProblem(draft)?.let { problem = it; return }
-        busy = true
         problem = null
-        scope.launch {
-            val result = vm.changePassword(draft.current, draft.new)
-            busy = false
-            if (result == PasswordChange.Changed) {
-                close()
-                feedback.done(passwordChangeWords(result))
-            } else {
-                problem = passwordChangeWords(result)
+        val sent = draft
+        // Started at once, so a second Done in the same frame finds this one.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            vm.changePassword(sent.current, sent.new) { result, words ->
+                if (!drawn()) return@changePassword false
+                if (result == PasswordChange.Changed) close() else problem = words
+                true
             }
         }
     }
@@ -339,8 +357,8 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(SettingsIndex.ChangePassword.title, style = OctoType.body, color = OctoColors.TextPrimary)
-        Text("Your other apps will ask for the new password the next time they sign in.", style = OctoType.caption, color = OctoColors.TextMuted)
+        Text(SettingsIndex.ChangePassword.title, style = OctoType.formGroup, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
+        Text("Your other apps will ask for the new password the next time they sign in.", style = OctoType.formNote, color = OctoColors.TextSecondary)
         PasswordInput(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
         PasswordInput(draft.new, "New password") { draft = draft.copy(new = it); problem = null }
         PasswordInput(draft.confirm, "New password again", last = true, onDone = ::change) { draft = draft.copy(confirm = it); problem = null }
@@ -353,16 +371,20 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
     }
 }
 
+// A password field with its name over it, so a typed field keeps its name.
 @Composable
-private fun PasswordInput(value: String, placeholder: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
-    GlassInput(
-        value = value,
-        onValueChange = onChange,
-        placeholder = placeholder,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
-        keyboardActions = KeyboardActions(onDone = { onDone() }),
-        visualTransformation = PasswordVisualTransformation(),
-    )
+private fun PasswordInput(value: String, name: String, last: Boolean = false, onDone: () -> Unit = {}, onChange: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(name, style = OctoType.formName, color = OctoColors.TextPrimary)
+        GlassInput(
+            value = value,
+            onValueChange = onChange,
+            placeholder = SignInWords.REQUIRED,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = if (last) ImeAction.Done else ImeAction.Next),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+    }
 }
 
 // Whether the question before disconnecting is showing. The shell draws

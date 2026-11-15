@@ -276,12 +276,16 @@ class SignInSitesTest {
         assertTrue(app.contains("carried?.let(form::noteLink)"))
     }
 
-    // A link from outside checks for an open sign-in where it is routed.
+    // A link from outside checks for an open sign-in where it is routed, a
+    // switch on its way included, signed in or out; the link's sheet starts
+    // nothing while a switch is on its way.
     @Test
     fun theLinkRouteChecksForAnOpenSignIn() {
         val route = slice(join, "fun AppState.openFamilyLink(", "\n}\n")
         assertTrue(route.contains("if (switching != null || signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null)) {"))
-        assertTrue(route.contains("if (open != null && open.open()) {"))
+        assertTrue(route.contains("val open = popups.request?.takeIf { it.open() }\n    if (open != null || switching != null) {"))
+        val go = slice(slice(join, "private fun ColumnScope.LinkSheet(", "\n}\n"), "    fun go() {", "\n    }\n")
+        assertTrue(go.contains("if (form.busy || app.switching != null) return"))
         assertTrue(route.contains("busy = { signInOpen(form.committing, form.question != null, form.received != null, form.signedUp != null) },"))
         assertTrue(route.contains("open = { signInOpen(form.busy, form.question != null, form.received != null, form.signedUp != null) },"))
         assertTrue(route.contains("link = true,"))
