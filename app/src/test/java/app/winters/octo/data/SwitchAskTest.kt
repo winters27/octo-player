@@ -51,6 +51,9 @@ class SwitchAskTest {
         return testSessions(store, vault)
     }
 
+    // The ask the sessions raised; the row fails when there is none.
+    private fun SessionRepository.raised(): SignInAsk = signInAsk.value ?: throw AssertionError("The switch raised no ask")
+
     private fun stored(vault: CredentialVault, address: String, settings: ConnectionSettings = ConnectionSettings()) = StoredServer(
         serverUrl = address,
         username = "alice",
@@ -66,7 +69,7 @@ class SwitchAskTest {
         val vault = CredentialVault()
         val sessions = sessionsKeeping(vault, StoredServer("https://music.example.com/", "alice", id = "a", signedOut = true))
         assertTrue(runBlocking { sessions.switchTo("a") } is SwitchResult.NeedsPassword)
-        val ask = sessions.signInAsk.value!!
+        val ask = sessions.raised()
         assertEquals("a", ask.serverId)
         assertNull(ask.note)
     }
@@ -83,7 +86,7 @@ class SwitchAskTest {
         val kept = stored(vault, main.toString())
         val sessions = sessionsKeeping(vault, kept)
         assertTrue(runBlocking { sessions.switchTo("a") } is SwitchResult.NeedsPassword)
-        val ask = sessions.signInAsk.value!!
+        val ask = sessions.raised()
         assertEquals("a", ask.serverId)
         assertEquals(passwordRefusedWords(kept.name), ask.note)
         val sent = server.requestCount
@@ -102,7 +105,7 @@ class SwitchAskTest {
         val kept = stored(vault, "http://music.example.com/", ConnectionSettings(headers = listOf(ServerHeader("Authorization", "Basic YTpi"))))
         val sessions = sessionsKeeping(vault, kept)
         assertTrue(runBlocking { sessions.switchTo("a") } is SwitchResult.NeedsPassword)
-        assertEquals(GatewayWords.NEEDS_HTTPS, sessions.signInAsk.value!!.note)
+        assertEquals(GatewayWords.NEEDS_HTTPS, sessions.raised().note)
     }
 
     // Red when a switch that works raises an ask.

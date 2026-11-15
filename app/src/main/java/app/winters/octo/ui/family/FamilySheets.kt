@@ -7,8 +7,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import app.winters.octo.design.GlassInput
-import app.winters.octo.server.passwordChangeWords
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.winters.octo.server.passwordDraftProblem
+import app.winters.octo.ui.common.rememberStillDrawn
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.StateFlow
 import app.winters.octo.server.PasswordDraft
 import app.winters.octo.server.PasswordChange
 import app.winters.octo.subsonic.familyAppLink
@@ -367,24 +370,39 @@ fun ColumnScope.AskingContent(asking: FamilySignInPending, sending: Boolean, all
 }
 
 // Changing a family member's password: the current one, the new one twice
-// with how strong it looks. It signs every other app and device out.
+// with how strong it looks. It signs every other app and device out. The
+// change runs on its own (`change`, which answers false when one was already
+// on its way and nothing was sent): while one is on its way (`changing`, from
+// here or another page) Done sends nothing and the sheet stays. Once changed
+// the sheet closes and the app's notice says so; a refusal shows here, or in
+// the notice once the sheet is gone.
 @Composable
-fun ColumnScope.PasswordSheetContent(change: suspend (String, String) -> PasswordChange, done: (String) -> Unit, close: () -> Unit) {
+fun ColumnScope.PasswordSheetContent(
+    changing: StateFlow<Boolean>,
+    change: suspend (String, String, (PasswordChange, String) -> Boolean) -> Boolean,
+    close: () -> Unit,
+) {
     val scope = rememberCoroutineScope()
+    val drawn = rememberStillDrawn()
     var draft by remember { mutableStateOf(PasswordDraft()) }
-    var busy by remember { mutableStateOf(false) }
+    val busy by changing.collectAsStateWithLifecycle()
     var problem by remember { mutableStateOf<String?>(null) }
+    val leave = { if (!changing.value) close() }
     fun go() {
+        if (changing.value) return
         passwordDraftProblem(draft)?.let { problem = it; return }
-        busy = true
         problem = null
-        scope.launch {
-            val result = change(draft.current, draft.new)
-            busy = false
-            if (result == PasswordChange.Changed) done(passwordChangeWords(result, family = true)) else problem = passwordChangeWords(result, family = true)
+        val sent = draft
+        // Started at once, so a second Done in the same frame finds this one.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            change(sent.current, sent.new) answer@{ result, words ->
+                if (!drawn()) return@answer false
+                if (result == PasswordChange.Changed) close() else problem = words
+                true
+            }
         }
     }
-    Header("", CHANGE_PASSWORD, SIGN_OUT_EVERYWHERE_LINE, OctoColors.TextMuted, clock = false, close = close, avatar = false)
+    Header("", CHANGE_PASSWORD, SIGN_OUT_EVERYWHERE_LINE, OctoColors.TextMuted, clock = false, close = leave, avatar = false)
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         PasswordField(draft.current, "Current password") { draft = draft.copy(current = it); problem = null }
         PasswordField(draft.new, "New password, at least $MIN_PASSWORD characters") { draft = draft.copy(new = it); problem = null }
@@ -398,7 +416,7 @@ fun ColumnScope.PasswordSheetContent(change: suspend (String, String) -> Passwor
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        GlazeButton("Cancel", close, size = ButtonSize.Medium, enabled = !busy, modifier = Modifier.weight(1f))
+        GlazeButton("Cancel", leave, size = ButtonSize.Medium, enabled = !busy, modifier = Modifier.weight(1f))
         AccentButton(CHANGE_PASSWORD, onClick = ::go, size = ButtonSize.Medium, fill = OctoColors.Accent, loading = busy, modifier = Modifier.weight(1f))
     }
 }

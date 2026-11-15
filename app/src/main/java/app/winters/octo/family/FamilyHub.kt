@@ -1,6 +1,5 @@
 package app.winters.octo.family
 
-import app.winters.octo.server.PasswordChange
 import app.winters.octo.catalog.ArtworkRef
 import app.winters.octo.subsonic.parseFamilyLink
 import kotlinx.coroutines.flow.StateFlow
@@ -99,11 +98,6 @@ class FamilyHub @Inject constructor(
         val words = if (link is app.winters.octo.subsonic.FamilyInviteLink) "A family invite is on the clipboard" else "A family sign-in link is on the clipboard"
         feedback.show(words, "Use it", { open(FamilyOpen.Join(link)) })
     }
-
-    // Changes the member's own password, which signs every other app and
-    // device out; this phone keeps the new one.
-    suspend fun changePassword(current: String, new: String): PasswordChange =
-        sessions.changePassword(current, new, family = model.me?.managed == true)
 
     // The address of the server in use, as people read it.
     fun serverAddress(): String? = session()?.client?.primaryUrl?.toString()?.removeSuffix("/")

@@ -337,7 +337,14 @@ class SignInViewModel @Inject constructor(
         links = links.edited(serverUrl(schemeChoice, addressText)?.toString(), homeRead, addressText.isNotBlank())
     }
 
-    // Takes what was typed or pasted into the address field. A full address
+    // What the person typed or pasted into the address field. A held sign-up
+    // signs in at the address it was made for, which then stays as it is.
+    fun typeAddressFromField(text: String) {
+        if (signedUp != null) return
+        typeAddress(text)
+    }
+
+    // Writes the address, as typed or as the app puts it. A full address
     // sets the scheme and leaves the rest; otherwise the scheme follows the
     // address until one is picked: http at home, https anywhere else.
     fun typeAddress(text: String) {
@@ -379,14 +386,28 @@ class SignInViewModel @Inject constructor(
         startJoin(link)
     }
 
-    // Takes a family link into the form. One that comes while the form signs
-    // in, or while a certificate question waits, is refused, as is one a form
-    // for a kept server cannot take: its words go under the address and
-    // nothing else changes, but the camera closes. A link to another server
-    // forgets every detail of the last one before it fills anything in.
+    // Scan a family QR code, from the plain page: the join form with the
+    // camera over it. Never while a sign-in runs or its certificate question
+    // waits, which is never switched halfway.
+    fun scanFamilyCode() {
+        if (busy || question != null) return
+        startJoin()
+        scanning = true
+    }
+
+    // Takes a family link into the form; with none, opens the join form
+    // (never while a request runs or its certificate question waits). A link
+    // that comes while the form signs in, or while a certificate question
+    // waits, is refused, as is one a form for a kept server cannot take, and,
+    // while a sign-up or a received sign-in is held, any but the same invite
+    // or hand-over again for the same server: its words go under the address
+    // and nothing else changes, but the camera closes. A link to another
+    // server forgets every detail of the last one before it fills anything
+    // in.
     fun startJoin(link: FamilyLink? = null) {
         scanning = false
         if (link == null) {
+            if (busy || question != null) return
             error = null
             joining = true
             return
@@ -397,6 +418,13 @@ class SignInViewModel @Inject constructor(
             links = links.took(action)
             return
         }
+        // A held sign-up or received sign-in works once and keeps the
+        // address it was made for: no link drops it or writes over it. The
+        // same one again, for the same server, picks it up where it was.
+        if ((signedUp != null || received != null) && !(action.kind != LinkTake.Forget && isHeld(link))) {
+            links = links.noted(SignInWords.LINK_WHILE_SIGN_IN_OPEN)
+            return
+        }
         error = null
         if (action.kind == LinkTake.Forget) forget(facts.username)
         if (action.kind != LinkTake.Fitting) {
@@ -404,12 +432,6 @@ class SignInViewModel @Inject constructor(
             home = action.home.orEmpty()
         }
         links = links.took(action)
-        // The same invite or hand-over opened again keeps what it already
-        // made: each works once. A link to another server is never the same
-        // one, whatever its token.
-        val again = action.kind != LinkTake.Forget
-        if (!(again && link is FamilyInviteLink && signedUp?.token == link.token)) signedUp = null
-        if (!(again && link is FamilyHandOverLink && received?.token == link.token)) received = null
         invite = null
         handOver = null
         handOverStep = null
@@ -430,6 +452,13 @@ class SignInViewModel @Inject constructor(
                 useApiKey = false
             }
         }
+    }
+
+    // Whether `link` is the invite or hand-over whose step the form holds.
+    private fun isHeld(link: FamilyLink): Boolean = when (link) {
+        is FamilyInviteLink -> signedUp?.token == link.token
+        is FamilyHandOverLink -> received?.token == link.token
+        is FamilySignInPrefill -> false
     }
 
     // Leaves the family link. A step that commits (a sign-up, a sign-in) is
@@ -584,13 +613,17 @@ class SignInViewModel @Inject constructor(
                 // A certificate trusted for an address both the link and the
                 // sign-in name stays trusted; nothing else of the last server
                 // does. The form then shows where the sign-in goes, and what
-                // it meets there is reported against that address.
+                // it meets there is reported against that address. A link
+                // note set meanwhile (a link refused while this ran) stays
+                // through these writes of the app's own.
+                val note = links.note
                 val keep = check.addresses.filter { it in links.taken }.mapNotNull { it.toHttpUrlOrNull()?.host }.map(::pinKey).toSet()
                 forget(link.username, keep)
                 typeAddress(check.address)
                 home = check.home
                 links = links.adopted(check)
                 attempt = sentAddress
+                if (note != null) links = links.noted(note)
             }
             val own = check is ReceivedAction.Keep && check.useForm
             val request = SignInRequest(
@@ -666,8 +699,13 @@ class SignInViewModel @Inject constructor(
                 when (joined) {
                     is JoinOutcome.SignedUp -> joined.also {
                         signedUp = HeldSignUp(it, main, invited.token)
-                        // The address field shows where the sign-in goes.
-                        if (sentAddress != main.toString()) typeAddress(main.toString())
+                        // The address field shows where the sign-in goes; a
+                        // link note set meanwhile stays through that write.
+                        if (sentAddress != main.toString()) {
+                            val note = links.note
+                            typeAddress(main.toString())
+                            if (note != null) links = links.noted(note)
+                        }
                     }
                     // A certificate of the server's own is asked about as
                     // signing in asks; trusting it signs up again.
@@ -715,8 +753,10 @@ class SignInViewModel @Inject constructor(
         }
     }
 
-    // Switches between https and http by hand.
+    // Switches between https and http by hand. A held sign-up's address stays
+    // as it is.
     fun toggleScheme() {
+        if (signedUp != null) return
         scheme = if (scheme == Scheme.Https) Scheme.Http else Scheme.Https
         schemePicked = true
         error = null

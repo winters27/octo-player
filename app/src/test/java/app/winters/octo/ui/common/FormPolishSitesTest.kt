@@ -116,4 +116,13 @@ class FormPolishSitesTest {
         assertTrue(password, password.contains("last = true, onDone = ::change"))
         assertTrue(password, password.contains("passwordDraftProblem(draft)?.let { problem = it; return }"))
     }
+
+    // Change password's title is its pop-up's group title, as Advanced's head
+    // is: the group-title size, heard as a heading. Red with body text again.
+    @Test
+    fun changePasswordsTitleIsAGroupTitle() {
+        val password = between(source("ui/settings/ServerPage.kt"), "private fun PasswordForm(", "\n}\n")
+        assertTrue(password, password.contains("Text(SettingsIndex.ChangePassword.title, style = OctoType.formGroup, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })"))
+        assertFalse(password, password.contains("style = OctoType.body,"))
+    }
 }

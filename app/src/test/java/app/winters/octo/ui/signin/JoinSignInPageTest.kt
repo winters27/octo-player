@@ -228,6 +228,46 @@ class JoinSignInPageTest {
         assertFalse(vm.busy)
     }
 
+    // While a sign-in commits, Scan a family QR code is off and its action
+    // does nothing: the page stays on the sign-in, with no camera, and
+    // opening the join form by any other way is refused too; so while its
+    // certificate question waits. Once answered, the scanner opens. Red when
+    // the button is live, or the model switches to the join form over the
+    // running sign-in. The page is taken away before the question (its
+    // pop-up window cannot be built in a unit test).
+    @Test
+    fun scanningAFamilyCodeWaitsForASignInThatCommits() {
+        val vm = harness.form()
+        var shown by mutableStateOf(true)
+        ui.compose.setContent { PageLocals { if (shown) SignInScreen(onBack = {}, onDone = {}, vm = vm) } }
+        vm.typeAddress(harness.link)
+        vm.username = "alice"
+        vm.password = "pw"
+        harness.signIns.hold("alice")
+        vm.submit()
+        harness.signIns.awaitCall("alice")
+        ui.compose.waitForIdle()
+        assertTrue(vm.committing)
+        ui.compose.onNodeWithText("Scan a family QR code").assertIsNotEnabled()
+        ui.compose.runOnIdle { vm.scanFamilyCode() }
+        assertFalse(vm.joining)
+        assertFalse(vm.scanning)
+        vm.startJoin()
+        assertFalse(vm.joining)
+        shown = false
+        ui.compose.waitForIdle()
+        harness.signIns.release("alice", SignInError.Untrusted("127.0.0.1", "ab12") to null)
+        harness.settle(vm)
+        assertNotNull(vm.question)
+        vm.scanFamilyCode()
+        assertFalse(vm.joining)
+        assertFalse(vm.scanning)
+        vm.distrust()
+        vm.scanFamilyCode()
+        assertTrue(vm.joining)
+        assertTrue(vm.scanning)
+    }
+
     // The sign-in step of a received sign-in commits, from the run that
     // redeemed it and from Try again after it failed; leaving it is refused
     // even called directly, the form stays in the open set, and the way out
