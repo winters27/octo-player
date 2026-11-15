@@ -221,8 +221,12 @@ class UpgradeGuardTest {
             .build()
         val read = CountDownLatch(1)
         thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
-        assertFalse(read.await(2, TimeUnit.SECONDS))
+        // The open reaches the guard on its own thread: wait for the guard to hold it (at most
+        // 10 s), not for a fixed time. Held, the read has not happened.
+        val heldBy = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (guard.state.value !is UpgradeState.NeedsSpace && System.nanoTime() < heldBy) Thread.sleep(10)
         assertTrue(guard.state.value is UpgradeState.NeedsSpace)
+        assertEquals(1L, read.count)
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
         free = Long.MAX_VALUE
         assertTrue(guard.retry())
