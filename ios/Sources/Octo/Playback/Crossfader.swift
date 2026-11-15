@@ -324,6 +324,26 @@ final class Crossfader {
         spare.clear()
     }
 
+    /// The song of `entryId` opens anew as another file (a version was picked for it): what was
+    /// read of its end and start, the deck's reading of it and any plan with it belonged to the old
+    /// file and go; they are read again from the new one.
+    func forgetReads(of entryId: String) {
+        if tail?.entryId == entryId {
+            tail?.job?.cancel()
+            tail = nil
+        }
+        if head?.entryId == entryId {
+            head?.job?.cancel()
+            head = nil
+        }
+        if reading?.entryId == entryId {
+            reading?.job?.cancel()
+            reading = nil
+        }
+        dropPlan()
+        schedule(0)
+    }
+
     /// Whether a crossfade is under way.
     var isBlending: Bool { outgoing != nil }
 

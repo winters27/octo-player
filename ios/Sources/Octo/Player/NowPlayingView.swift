@@ -59,6 +59,7 @@ struct NowPlayingView: View {
     @State private var airPlay = AirPlayTrigger()
     @State private var showsTiming = false
     @State private var showsChooser = false
+    @State private var showsVersions = false
     /// While a live station plays: its details, and the stations it was started from.
     @State private var showsStationInfo = false
     @State private var showsStations = false
@@ -225,7 +226,7 @@ struct NowPlayingView: View {
     /// The wash slows to 10 frames a second while a card is open over it or the app is not in
     /// front.
     private var focused: Bool {
-        scenePhase == .active && !(showsSleep || showsSpeed || showsTiming || showsChooser || showsStationInfo || showsStations)
+        scenePhase == .active && !(showsSleep || showsSpeed || showsTiming || showsChooser || showsStationInfo || showsStations || showsVersions)
     }
 
     // MARK: Layouts
@@ -537,12 +538,18 @@ struct NowPlayingView: View {
         player.current.map { SongSubject(track: libraryActions.state.provisional($0), song: $0) }
     }
 
-    /// The song menu for the song playing, the same one every song row opens.
+    /// The song menu for the song playing, the same one every song row opens; for a song found
+    /// online, Try another version leads the player's own items, before AirPlay and Sound.
     private var moreButton: some View {
         Menu {
             Group {
                 if let menuSubject {
                     SongMenuItems(subject: menuSubject) {
+                        if offersVersions {
+                            Button { showsVersions = true } label: {
+                                Label(StreamVersionWords.menuRow, systemImage: "arrow.left.arrow.right")
+                            }
+                        }
                         PlayerMenuExtras(airPlay: airPlay) { route in close { router.go(route) } }
                     }
                 }
@@ -556,6 +563,27 @@ struct NowPlayingView: View {
         .menuOrder(.fixed)
         .disabled(menuSubject == nil)
         .accessibilityLabel("More")
+        .sheet(isPresented: $showsVersions) { versionsSheet }
+    }
+
+    /// Whether the song playing can be given another version: found online, streaming from the
+    /// server in use while signed in, on a server that lets this person pick; never a station.
+    private var offersVersions: Bool {
+        guard let item = player.currentItem, let menuSubject else { return false }
+        return offersStreamVersions(extensions: session.extensions, signedIn: session.client != nil,
+                                    isFound: menuSubject.track.isFound, isStation: item.isRadioStation)
+    }
+
+    /// The versions sheet for the entry playing, at the large detent.
+    @ViewBuilder
+    private var versionsSheet: some View {
+        if let item = player.currentItem, let entry = item.entryId, let ref = parseStreamUri(item.uri), let song = player.current {
+            VersionsSheet(entryId: entry, serverId: ref.serverId, song: song) { showsVersions = false }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(.dark)
+                .octoOverArt()
+        }
     }
 
     private var switches: some View {

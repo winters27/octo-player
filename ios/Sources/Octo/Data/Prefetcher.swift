@@ -126,7 +126,9 @@ final class Prefetcher {
                 if (try? blocking({ await StreamCache.shared.isFullySaved(key) })) == true {
                     return done.resume(returning: .skip)
                 }
-                guard let (request, client) = try? context.streamRequest(pinned) else { return done.resume(returning: .stop) }
+                guard let (request, client) = try? context.streamRequest(pinned, purpose: octoPurposeOffline) else {
+                    return done.resume(returning: .stop)
+                }
                 done.resume(returning: .fetch(key: key, request: request, client: client))
             }
         }
@@ -136,6 +138,8 @@ final class Prefetcher {
         case .stop: return false
         case .fetch(let savedKey, let asked, let through): (key, request, client) = (savedKey, asked, through)
         }
+        // A drop of the song's copies while this fetch runs (a version picked) refuses what it saves.
+        let generation = await StreamCache.shared.generation(key)
         do {
             // The exchange adds the server's headers and its sign-in page's cookies, and refuses a
             // web page (a sign-in page in front of the server) before anything is saved.
@@ -146,14 +150,15 @@ final class Prefetcher {
             let cache = StreamCache.shared
             // A part saved earlier of another file (the server's listed preview, say) goes first.
             let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int64) ?? nil
-            await cache.answered(key, contentLength: size, mimeType: http.mimeType)
+            let video = http.value(forHTTPHeaderField: VIDEO_HEADER)
+            await cache.answered(key, contentLength: size, mimeType: http.mimeType, video: video, generation: generation)
             var offset: Int64 = 0
             while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
                 if Task.isCancelled { return false }
-                await cache.write(key, offset: offset, data: chunk)
+                await cache.write(key, offset: offset, data: chunk, generation: generation)
                 offset += Int64(chunk.count)
             }
-            await cache.describe(key, contentLength: offset, mimeType: http.mimeType)
+            await cache.describe(key, contentLength: offset, mimeType: http.mimeType, video: video, generation: generation)
             await cache.save()
             return true
         } catch {

@@ -257,6 +257,12 @@ final class Library {
     /// Finds by id ("find:<server id>").
     func finds(_ ids: [String]) async -> [OnlineSong] { await read([]) { try await $0.finds(ids) } }
 
+    /// The server ids of every find kept of one server.
+    func findIds(sourceId: String) async -> Set<String> {
+        let rows = await read([]) { try await $0.finds(sourceId: sourceId) }
+        return Set(rows.map { isFind($0.id) ? String($0.id.dropFirst(findPrefix.count)) : $0.id })
+    }
+
     /// Each find now in the library, by its id, and the library song it became.
     func adoptions() async -> [String: String] {
         let rows = await read([]) { try await $0.requestedFinds() }

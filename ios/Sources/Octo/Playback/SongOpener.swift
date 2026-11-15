@@ -96,24 +96,53 @@ struct StreamContext: Sendable {
         }
     }
 
-    /// A request for one load of a server song, and the client it goes through. Fails at once
-    /// with no connection, no server, an unreadable address, or another server's song.
-    func streamRequest(_ ref: StreamRef) throws -> (request: URLRequest, client: SubsonicClient) {
+    /// A request for one load of a server song, and the client it goes through. `play` is the
+    /// play token of the queue entry's play it is for (the same on every request of that play);
+    /// `purpose` is what the request is for when it is no play (a scout's read, a copy fetched
+    /// ahead to keep), sent as `X-Octo-Purpose`. Fails at once with no connection, no server, an
+    /// unreadable address, or another server's song.
+    func streamRequest(_ ref: StreamRef, play: String? = nil, purpose: String? = nil) throws -> (request: URLRequest, client: SubsonicClient) {
         guard OnlineWatch.shared.online else { throw PlayError(.ioUnspecified, detail: "No connection") }
         guard let (client, inUse) = serverNow() else { throw PlayError(.ioUnspecified, detail: "No server signed in") }
         if let source = ref.sourceId, source != inUse, keptSources.contains(source) {
             throw PlayError(.ioUnspecified, detail: "Another server's song")
         }
-        return (URLRequest(url: client.streamURL(serverId: ref.serverId, request: ref.request(quality))), client)
+        var url = client.streamURL(serverId: ref.serverId, request: ref.request(quality))
+        if let play, let named = Self.naming(url, play: play) { url = named }
+        var request = URLRequest(url: url)
+        if let purpose { request.setValue(purpose, forHTTPHeaderField: octoPurposeHeader) }
+        return (request, client)
+    }
+
+    /// The stream address with the play token added to its query as it is, so the signature's own
+    /// parts are never encoded again.
+    private static func naming(_ url: URL, play: String) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let token = play.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~")))
+        else { return nil }
+        let pair = "\(PLAY_TOKEN_PARAM)=\(token)"
+        parts.percentEncodedQuery = parts.percentEncodedQuery.map { "\($0)&\(pair)" } ?? pair
+        return parts.url
     }
 
     /// A signed request for one load of a server song: the server's headers for its address and
-    /// the sign-in page's cookies, with the store its answers keep cookies in. Fails as
-    /// `streamRequest` does.
-    func sign(_ ref: StreamRef) throws -> SignedStream {
-        let (request, client) = try streamRequest(ref)
+    /// the sign-in page's cookies, with the store its answers keep cookies in. `play` and `purpose`
+    /// as `streamRequest` takes them. Fails as `streamRequest` does.
+    func sign(_ ref: StreamRef, play: String? = nil, purpose: String? = nil) throws -> SignedStream {
+        let (request, client) = try streamRequest(ref, play: play, purpose: purpose)
         return SignedStream(request: client.prepared(request), cookies: client.cookies, scope: client.scope,
                             headers: { client.headers(for: $0) })
+    }
+
+    /// Before a song found online opens from the server in use while a copy of it is saved: the
+    /// server's list of songs given another version is read (one read at a time, waited for here;
+    /// offline, or with nothing saved, nothing is asked), and what it lists has its copies dropped,
+    /// so a copy of a file the server no longer sends never plays.
+    func beforeOpening(_ ref: StreamRef) {
+        guard keeping, OnlineWatch.shared.online, let sourceId, ref.sourceId == nil || ref.sourceId == sourceId else { return }
+        let id = ref.serverId
+        guard (try? blocking({ await StreamCache.shared.holdsSong(sourceId, id) })) == true else { return }
+        _ = try? blocking { await StreamVersionFeed.shared.refresh(opening: id) }
     }
 }
 
@@ -153,15 +182,21 @@ struct NotSeekable: Error {}
 /// each request goes out, and saved as they play.
 enum SongOpener {
     /// How a deck opens `item`. `scouting` asks the server first whether it sends parts of a
-    /// song, and gives up when it does not.
+    /// song, and gives up when it does not; a scout's requests say they are one. Every request of
+    /// a queue entry's play carries the play's token (the entry and its restarts). A song found
+    /// online with a saved copy has the server's list of changed songs read first.
     static func opener(_ item: QueueItem, context: StreamContext, outputRate: Double,
                        scouting: Bool = false) -> @Sendable (OpenToken) throws -> OpenedSong {
         let uri = item.uri
         let mime = item.mimeType
         let trackId = item.trackId
+        let find = item.isFind
+        let play = item.entryId.flatMap { entry in parseStreamUri(uri).map { streamPlayToken(entryId: entry, restarts: $0.restarts) } }
+        let purpose = scouting ? StreamPlays.scoutPurpose : nil
         return { token in
             if let ref = parseStreamUri(uri) {
                 guard OnlineWatch.shared.online || context.keeping else { throw PlayError(.ioUnspecified, detail: "No connection") }
+                if find { context.beforeOpening(ref) }
                 let pinned = context.pinned(ref)
                 let savedKey = context.savedKey(pinned)
                 if let key = savedKey,
@@ -169,13 +204,13 @@ enum SongOpener {
                    let file = try? LocalFile(url: saved.url, contentType: saved.mimeType) {
                     // A saved copy that fails part way is passed over for the server's.
                     let copy = SavedCopy(file) {
-                        try RemoteFile(online: { OnlineWatch.shared.online }) { try context.sign(pinned) }
+                        try RemoteFile(online: { OnlineWatch.shared.online }) { try context.sign(pinned, play: play, purpose: purpose) }
                     }
                     token.adopt(copy)
                     return OpenedSong(decoder: try SongDecoder(source: copy, mimeType: saved.mimeType ?? mime, outputRate: outputRate), bytes: copy)
                 }
                 let remote = try RemoteFile(savedKey: savedKey, online: { OnlineWatch.shared.online }) {
-                    try context.sign(pinned)
+                    try context.sign(pinned, play: play, purpose: purpose)
                 }
                 token.adopt(remote)
                 if scouting && !remote.answersRanges() { throw NotSeekable() }

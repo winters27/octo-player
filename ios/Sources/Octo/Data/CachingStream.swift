@@ -26,10 +26,13 @@ final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         return URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
     }()
     private var requests: [Int: (request: AVAssetResourceLoadingRequest, offset: Int64)] = [:]
+    /// The generation of the song's saved copies this stream saves under (`StreamCache.generation`).
+    private let generation: Int
 
-    init(key: String, signed: SignedStream, cache: StreamCache = .shared) {
+    init(key: String, signed: SignedStream, generation: Int, cache: StreamCache = .shared) {
         self.key = key
         self.signed = signed
+        self.generation = generation
         self.cache = cache
     }
 
@@ -127,7 +130,8 @@ final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         let length = TrustedStream.totalLength(http)
         // A whole answer to a ranged ask starts at the top of the file.
         if http.statusCode == 200 { requests[dataTask.taskIdentifier]?.offset = 0 }
-        await cache.describe(key, contentLength: length > 0 ? length : nil, mimeType: http.mimeType)
+        await cache.describe(key, contentLength: length > 0 ? length : nil, mimeType: http.mimeType,
+                             video: http.value(forHTTPHeaderField: VIDEO_HEADER), generation: generation)
         if let content = waiting.request.contentInformationRequest {
             if let mime = http.mimeType, let type = UTType(mimeType: mime) { content.contentType = type.identifier }
             content.contentLength = length
@@ -143,7 +147,8 @@ final class CachingStream: NSObject, AVAssetResourceLoaderDelegate, URLSessionDa
         requests[dataTask.taskIdentifier]?.offset = offset + Int64(data.count)
         let key = key
         let cache = cache
-        Task { await cache.write(key, offset: offset, data: data) }
+        let made = generation
+        Task { await cache.write(key, offset: offset, data: data, generation: made) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

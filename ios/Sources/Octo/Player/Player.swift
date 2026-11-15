@@ -146,6 +146,10 @@ final class Player {
     @ObservationIgnored private var failuresInARow = 0
     /// The queue entry last opened again because the server began sending another file for it.
     @ObservationIgnored private var reopenedEntry: String?
+    /// The songs' transition profiles from the server in use, let go for songs given another version.
+    @ObservationIgnored private let profiles: ServerProfiles
+    /// Songs given another version whose saved copies wait until they stop playing.
+    @ObservationIgnored private var versionDrops = VersionDrops()
     @ObservationIgnored private var saveSoon: Task<Void, Never>?
     @ObservationIgnored private var ticker: Timer?
     @ObservationIgnored private var ticks = 0
@@ -170,6 +174,7 @@ final class Player {
         let shared = PlayerShared()
         self.shared = shared
         let profiles = ServerProfiles(session: { shared.profileSession.withLock { $0 } })
+        self.profiles = profiles
         engine = PlaybackEngine(sound: sound, scout: Scout(), profiles: profiles, lengths: lengths,
                                 keepActive: { shared.crossfadeOn.load(ordering: .relaxed) },
                                 streamContext: { StreamContext.now(session) })
@@ -227,6 +232,7 @@ final class Player {
         engine.output.onRouteChange = { [weak self] reason, now, before in self?.headset.routeChanged(reason, now: now, before: before) }
         followSettings()
         listenForApp()
+        attachVersionFeed()
         Task { await restoreSaved() }
     }
 
@@ -820,6 +826,8 @@ final class Player {
         nowPlaying.publish()
         updatePrefetch()
         ensureTicking()
+        // A song given another version while it played loses its saved copies once it stops.
+        Task { await settleVersionDrops(opening: nil) }
     }
 
     /// Asks Octo once for the song the live station on now has on air.
@@ -1173,7 +1181,11 @@ final class Player {
             MainActor.assumeIsolated { self?.serverQueue.check() }
         })
         observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.serverQueue.check() }
+            MainActor.assumeIsolated {
+                self?.serverQueue.check()
+                // Songs other devices gave another version meanwhile.
+                self?.readVersionChanges()
+            }
         })
         observers.append(center.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -1224,6 +1236,7 @@ extension Player: SwitchPlayer {
 
     func serverArrived() {
         serverQueue.arrived()
+        readVersionChanges()
     }
 
     /// The arriving server's queue comes back in place of whatever is in the player, paused.
@@ -1266,4 +1279,91 @@ extension Player {
     /// The position as the playing deck has it at this moment, for views that move with the
     /// song every frame (the lyrics, the progress line).
     var livePosition: TimeInterval { Double(engine.positionMs) / 1_000 }
+}
+
+// MARK: Versions picked for songs found online
+
+extension Player {
+    /// The song on now plays again from its start as a new play of its entry (a version was picked
+    /// for it), and a file changing under it may be opened again once more. False when that entry
+    /// no longer plays.
+    @discardableResult
+    func restartCurrent(entryId: String) -> Bool {
+        guard engine.restartCurrent(entryId: entryId) else { return false }
+        if reopenedEntry == entryId { reopenedEntry = nil }
+        return true
+    }
+
+    /// A pick (or Octo's pick back) was taken: what the phone kept of the song's old file goes for
+    /// every id the song has (fenced, so nothing of it lands later; the song about to start over
+    /// counts as opening, so its copies go now), the entry starts over from its start when it
+    /// still plays, and the list of changes is read for the rest.
+    func streamVersionTaken(entryId: String, answer: StreamVersions) async {
+        guard let sourceId = session.inUse?.sourceId else { return }
+        var ids = Set(answer.ids)
+        let current = engine.currentItem.flatMap { $0.entryId == entryId ? serverSongOf($0.uri, sourceId: sourceId) : nil }
+        if let current { ids.insert(current) }
+        await dropVersions(ids, sourceId: sourceId, opening: current)
+        restartCurrent(entryId: entryId)
+        readVersionChanges()
+    }
+
+    /// Reads the server's list of songs given another version, without waiting for it.
+    func readVersionChanges() {
+        Task { await StreamVersionFeed.shared.refresh() }
+    }
+
+    /// What a read of the list found: the listed songs lose what the phone kept of their old files,
+    /// and when the list cannot say which changed, every song found online does too (each saved
+    /// copy made from a video, and each find the library keeps of the server).
+    func versionsChanged(_ plan: FeedPlan, sourceId: String, opening: String?) async {
+        var songs = plan.dropIds
+        if plan.dropAll {
+            songs.formUnion(await StreamCache.shared.videoSongs(sourceId: sourceId))
+            songs.formUnion(await data?.library.findIds(sourceId: sourceId) ?? [])
+        }
+        await dropVersions(songs, sourceId: sourceId, opening: opening, everyProfile: plan.dropAll)
+    }
+
+    /// The fenced drop: the songs' transition profiles and lyrics timing go; their saved copies go
+    /// now, except for a song playing (the song on now or the one leaving in a blend, unless it is
+    /// the one `opening`), whose generation moves on at once and whose copies go once it stops.
+    private func dropVersions(_ songs: Set<String>, sourceId: String, opening: String?, everyProfile: Bool = false) async {
+        guard !songs.isEmpty || everyProfile else { return }
+        profiles.forget(everyProfile ? nil : songs)
+        for id in songs {
+            LyricsSongTiming.shared.reset(findId(id))
+            LyricsSongTiming.shared.reset(id)
+        }
+        let now = versionDrops.take(songs, playing: playingSongs(sourceId), opening: opening)
+        for id in songs.subtracting(now) { await StreamCache.shared.fence(sourceId: sourceId, serverId: id) }
+        for id in now { await StreamCache.shared.dropSong(sourceId: sourceId, serverId: id) }
+    }
+
+    /// The waiting drops of songs that no longer play (or open now) go.
+    func settleVersionDrops(opening: String?) async {
+        guard !versionDrops.waiting.isEmpty, let sourceId = session.inUse?.sourceId else { return }
+        let done = versionDrops.settle(playing: playingSongs(sourceId), opening: opening)
+        for id in done { await StreamCache.shared.dropSong(sourceId: sourceId, serverId: id) }
+    }
+
+    /// The server songs playing now, by their id there: the deck's, and the one leaving in a blend.
+    private func playingSongs(_ sourceId: String) -> Set<String> {
+        let items = [engine.deck.item, engine.crossfader.outgoing?.item].compactMap { $0 }
+        return Set(items.compactMap { serverSongOf($0.uri, sourceId: sourceId) })
+    }
+
+    /// Hands the list of changes the server in use and the player's drops.
+    private func attachVersionFeed() {
+        let feed = StreamVersionFeed.shared
+        Task {
+            await feed.attach(
+                server: { [weak self] in await self?.versionServer() },
+                apply: { [weak self] plan, sourceId, opening in await self?.versionsChanged(plan, sourceId: sourceId, opening: opening) },
+                settle: { [weak self] opening in await self?.settleVersionDrops(opening: opening) })
+        }
+    }
+
+    /// The server in use, as the list of changes reads it.
+    private func versionServer() -> ServerInUse? { session.inUse }
 }

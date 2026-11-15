@@ -18,6 +18,8 @@ actor StreamCache {
     private var dirty = false
     /// The write of the list that waits for changes to settle.
     private var saving: Task<Void, Never>?
+    /// Each song's write generation: a write begun before its copies were dropped lands nowhere.
+    private var writes = StreamWriteFence()
 
     /// How long the list waits after a change before it is written.
     private static let saveAfter: Duration = .seconds(2)
@@ -107,10 +109,10 @@ actor StreamCache {
         }
     }
 
-    /// What is known of a saved song: its whole length and type.
-    func info(_ key: String) -> (length: Int64?, mimeType: String?)? {
+    /// What is known of a saved song: its whole length, type and video.
+    func info(_ key: String) -> (length: Int64?, mimeType: String?, video: String?)? {
         dropIfGone(key)
-        return index.entries[key].map { ($0.contentLength, $0.mimeType) }
+        return index.entries[key].map { ($0.contentLength, $0.mimeType, $0.video) }
     }
 
     /// How many bytes from `offset` on are saved without a gap.
@@ -152,29 +154,31 @@ actor StreamCache {
         return true
     }
 
-    /// The server answered for a saved song: a saved copy of another file (another type or whole
-    /// length) goes, file and all, then the song is described as the server gave it. True when the
-    /// saved copy went.
+    /// The server answered for a saved song: a saved copy of another file (another type, whole
+    /// length or video) goes, file and all, then the song is described as the server gave it. True
+    /// when the saved copy went. An answer to a request begun under an older `generation` (the
+    /// song's copies were dropped since) changes nothing.
     @discardableResult
-    func answered(_ key: String, contentLength: Int64?, mimeType: String?) -> Bool {
-        guard index.enabled else { return false }
-        let went = index.answered(key, StreamShape(type: mimeType, total: contentLength))
+    func answered(_ key: String, contentLength: Int64?, mimeType: String?, video: String? = nil, generation: Int) -> Bool {
+        guard index.enabled, writes.admits(key, generation: generation) else { return false }
+        let went = index.answered(key, StreamShape(type: mimeType, total: contentLength, video: video))
         if went { settleDropped() }
-        describe(key, contentLength: contentLength, mimeType: mimeType)
+        describe(key, contentLength: contentLength, mimeType: mimeType, video: video, generation: generation)
         return went
     }
 
-    /// Notes the whole length and type of a song as the server gave them, or the length a stream
-    /// really had once it ended.
-    func describe(_ key: String, contentLength: Int64?, mimeType: String?) {
-        guard index.enabled else { return }
-        index.describe(key, contentLength: contentLength, mimeType: mimeType, nowMs: epochMs())
+    /// Notes the whole length, type and video of a song as the server gave them, or the length a
+    /// stream really had once it ended; not under an older `generation`.
+    func describe(_ key: String, contentLength: Int64?, mimeType: String?, video: String? = nil, generation: Int) {
+        guard index.enabled, writes.admits(key, generation: generation) else { return }
+        index.describe(key, contentLength: contentLength, mimeType: mimeType, video: video, nowMs: epochMs())
         changed()
     }
 
-    /// Saves bytes of a song at `offset`, letting the least recently played go to make room.
-    func write(_ key: String, offset: Int64, data: Data) {
-        guard index.enabled, !data.isEmpty else { return }
+    /// Saves bytes of a song at `offset`, letting the least recently played go to make room; not
+    /// under an older `generation`.
+    func write(_ key: String, offset: Int64, data: Data, generation: Int) {
+        guard index.enabled, !data.isEmpty, writes.admits(key, generation: generation) else { return }
         evict(incoming: Int64(data.count), keeping: key)
         let url = file(key)
         let fresh = !FileManager.default.fileExists(atPath: url.path)
@@ -192,6 +196,37 @@ actor StreamCache {
         }
         index.wrote(key, offset: offset, count: Int64(data.count), freshFile: fresh, nowMs: epochMs())
         changed()
+    }
+
+    /// The generation writes for the song saved under `key` are made at now.
+    func generation(_ key: String) -> Int { writes.generation(of: key) }
+
+    /// Moves a song's write generation on, so nothing begun before lands; its copies stay for now
+    /// (the song plays from them).
+    func fence(sourceId: String, serverId: String) {
+        writes.bump(sourceId: sourceId, serverId: serverId)
+    }
+
+    /// Drops every saved copy of a song (each request and size of it), its generation moved on
+    /// first, so a write begun before never brings any of it back.
+    func dropSong(sourceId: String, serverId: String) {
+        writes.bump(sourceId: sourceId, serverId: serverId)
+        index.dropSong(sourceId: sourceId, serverId: serverId)
+        settleDropped()
+    }
+
+    /// Whether any of a song is saved, under any request.
+    func holdsSong(_ sourceId: String, _ serverId: String) -> Bool {
+        dropAllGone()
+        let song = "\(sourceId)|\(serverId)"
+        return index.entries.keys.contains { savedSongOf($0) == song }
+    }
+
+    /// The songs of a server whose saved copies were saved from a video (songs found online), by
+    /// their id there.
+    func videoSongs(sourceId: String) -> Set<String> {
+        dropAllGone()
+        return videoSavedSongs(index, sourceId: sourceId)
     }
 
     /// Marks a song as just played, so it is the last to go.

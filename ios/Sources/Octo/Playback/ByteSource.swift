@@ -131,6 +131,11 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
     /// The player has had the length or bytes: from then on another file cannot take this one's
     /// place, and the song is opened again instead.
     private var served = false
+    /// The video the server named for this song's stream (a song found online), once it did.
+    private var video: String?
+    /// The generation of the song's saved copies this file saves under: once they are dropped (a
+    /// version picked for the song), nothing it writes or describes lands.
+    private let generation: Int
 
     private let file: URL
     private let handle: FileHandle
@@ -155,6 +160,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         self.sign = sign
         self.savedKey = savedKey
         self.online = online
+        generation = savedKey.flatMap { key in try? blocking { await StreamCache.shared.generation(key) } } ?? 0
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("playing", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         file = folder.appendingPathComponent(UUID().uuidString)
@@ -304,6 +310,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         let info = (try? blocking { await StreamCache.shared.info(savedKey).map { Unchecked($0) } }) ?? nil
         if total == nil, let length = info?.value.length, length > 0 { total = length }
         if type == nil { type = info?.value.mimeType }
+        if video == nil { video = info?.value.video }
         if let total {
             let run = (try? blocking { await StreamCache.shared.savedRun(savedKey, from: 0) }) ?? 0
             savedPartly = run > 0 && run < total
@@ -449,16 +456,20 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         }
         let answer = streamShapeOf(status: http.statusCode, contentType: http.mimeType,
                                    contentRange: http.value(forHTTPHeaderField: "Content-Range"),
-                                   contentLength: http.expectedContentLength)
-        let changed = StreamShape(type: type, total: total).differs(from: answer)
+                                   contentLength: http.expectedContentLength,
+                                   video: http.value(forHTTPHeaderField: VIDEO_HEADER))
+        let changed = StreamShape(type: type, total: total, video: video).differs(from: answer)
         if changed {
-            // Another file than the one begun or saved (a whole FLAC for a listed preview, say):
-            // the saved copy goes with its length and type, and nothing held of it is read again.
+            // Another file than the one begun or saved (a whole FLAC for a listed preview, or
+            // another video of a song found online): the saved copy goes with its length, type and
+            // video, and nothing held of it is read again.
             ignoreSaved = true
             if let savedKey {
                 let length = answer.total
                 let mime = http.mimeType
-                Task { await StreamCache.shared.answered(savedKey, contentLength: length, mimeType: mime) }
+                let named = answer.video
+                let made = self.generation
+                Task { await StreamCache.shared.answered(savedKey, contentLength: length, mimeType: mime, video: named, generation: made) }
             }
             if served {
                 // The player has read the other file: it opens the song again.
@@ -471,6 +482,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             held = ByteRanges()
             total = nil
             type = nil
+            video = nil
             responseHeaders = [:]
             sendsParts = nil
             if http.statusCode == 206 && taskStart > 0 {
@@ -487,6 +499,7 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
             for (key, value) in http.allHeaderFields { responseHeaders["\(key)"] = ["\(value)"] }
         }
         if type == nil { type = http.mimeType }
+        if video == nil { video = answer.video }
         if http.statusCode == 206, let range = http.value(forHTTPHeaderField: "Content-Range"),
            let whole = range.split(separator: "/").last.flatMap({ Int64($0) }) {
             if total == nil { total = whole }
@@ -503,7 +516,9 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         if let savedKey, !changed {
             let length = total
             let mime = http.mimeType
-            Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: mime) }
+            let named = answer.video
+            let made = self.generation
+            Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: mime, video: named, generation: made) }
         }
         condition.broadcast()
         completionHandler(.allow)
@@ -525,7 +540,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
         if let savedKey {
             // Saved as it plays, under the song's stable name, so it plays again without the network.
             let at = writeAt
-            Task { await StreamCache.shared.write(savedKey, offset: at, data: data) }
+            let made = self.generation
+            Task { await StreamCache.shared.write(savedKey, offset: at, data: data, generation: made) }
         }
         writeAt += Int64(data.count)
         condition.broadcast()
@@ -571,7 +587,8 @@ final class RemoteFile: NSObject, ByteSource, URLSessionDataDelegate, @unchecked
                 // The saved copy takes the length the song really has, so it counts as whole.
                 if let savedKey, held.covers(0..<writeAt) {
                     let length = writeAt
-                    Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: nil) }
+                    let made = self.generation
+                    Task { await StreamCache.shared.describe(savedKey, contentLength: length, mimeType: nil, generation: made) }
                 }
             }
         }

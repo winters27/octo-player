@@ -300,6 +300,33 @@ final class PlaybackEngine: @preconcurrency SleepTarget {
         crossfader.followUp()
     }
 
+    /// Plays the song on now again from its start as a new play, a version having been picked for
+    /// it: a blend under way is undone and a spare unloaded (`interrupt`), what was read of the
+    /// song and planned for it is forgotten, and the deck opens a new source at 0 (the old one's
+    /// reader stopped and its source closed as it is retired) from the song's address without the
+    /// old file's size and with the next restart count, playing. False when `entryId` is not the
+    /// song on now, or it is not a server song.
+    @discardableResult
+    func restartCurrent(entryId: String) -> Bool {
+        guard let item = queue.currentItem, item.entryId == entryId, !item.isRadioStation,
+              let ref = parseStreamUri(item.uri), let at = queue.position(ofEntry: entryId) else { return false }
+        crossfader.interrupt()
+        crossfader.forgetReads(of: entryId)
+        queue.update(at: at) { $0.uri = streamUri(ref.restarted()) }
+        ended = false
+        stoppedAtEnd = false
+        let wasPlaying = playWhenReady
+        playWhenReady = startOutput()
+        loadCurrent(atMs: 0)
+        crossfader.songChanged()
+        crossfader.followUp()
+        onQueueChange?()
+        onSongChange?(.seek)
+        if playWhenReady != wasPlaying { onPlayWhenReadyChange?(playWhenReady, false) }
+        ensureTicking()
+        return true
+    }
+
     /// Opens the current song again from where it is, with a fresh source: the server began
     /// sending another file for it than the one the player had read.
     func reopenCurrent() {
