@@ -346,7 +346,7 @@ private fun PasswordForm(vm: ServerViewModel, close: () -> Unit) {
         PasswordInput(draft.confirm, "New password again", last = true, onDone = ::change) { draft = draft.copy(confirm = it); problem = null }
         problem?.let { Text(it, style = OctoType.caption, color = OctoColors.Error) }
         AnswerRow(
-            main = { AccentButton("Change password", onClick = ::change, loading = busy) },
+            main = { AccentButton("Change password", onClick = ::change, enabled = draft.current.isNotEmpty() && draft.new.isNotEmpty() && draft.confirm.isNotEmpty(), loading = busy) },
             other = { GlazeButton("Cancel", onClick = close, enabled = !busy) },
             gap = 12.dp,
         )
