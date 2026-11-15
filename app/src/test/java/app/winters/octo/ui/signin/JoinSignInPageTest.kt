@@ -29,6 +29,7 @@ import app.winters.octo.testing.RobolectricComposeRule
 import app.winters.octo.ui.family.HANDOVER_DENIED
 import app.winters.octo.ui.family.HANDOVER_EXPIRED
 import app.winters.octo.ui.family.HandOverSignIn
+import app.winters.octo.ui.family.shownServer
 import app.winters.octo.ui.nav.FamilyJoinRoute
 import app.winters.octo.ui.nav.FamilyRoute
 import app.winters.octo.ui.nav.SettingsRoute
@@ -192,6 +193,22 @@ class JoinSignInPageTest {
         signUp.release()
         harness.settle(vm)
         assertTrue(vm.signedIn)
+    }
+
+    // A hand-over the other device refused says over its failure that it is
+    // not signed in yet, never that it is ready. Red with "Ready to sign in"
+    // over the refusal.
+    @Test
+    fun aRefusedHandOversRowSaysItIsNotSignedInYet() {
+        val (denied, _) = harness.handOver(HandOverSignIn(username = "alice", secret = "pw", server = harness.link))
+        harness.server.dispatcher = PathAnswers(mapOf(REDEEM to { subsonic(REDEEMED) }, POLL to { subsonic(DENIED) }))
+        val vm = harness.form()
+        ui.compose.setContent { PageLocals { SignInScreen(onBack = {}, onDone = {}, vm = vm) } }
+        vm.startJoin(denied)
+        harness.settle(vm)
+        ui.compose.waitForIdle()
+        assertEquals(HANDOVER_DENIED, vm.error)
+        ui.compose.onNodeWithText("Not signed in to ${shownServer(denied.server)} yet").assertExists()
     }
 
     // A plain sign-in held by the switch commits. Red when `committing` is

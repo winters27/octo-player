@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
@@ -588,6 +589,7 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                     SheetKind.SignIn, SheetKind.Secure -> "Sign in"
                 },
                 ::save,
+                Modifier.widthIn(min = SheetMainButton),
                 enabled = form.ready,
                 loading = form.busy,
                 size = ButtonSize.Medium,
@@ -688,7 +690,7 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
         shown?.let { Txt(it, DesktopType.meta, OctoColors.Error, maxLines = 3) }
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            AccentButton("Change password", ::change, loading = busy, size = ButtonSize.Medium)
+            AccentButton("Change password", ::change, Modifier.widthIn(min = SheetMainButton), loading = busy, size = ButtonSize.Medium)
         }
     }
 }

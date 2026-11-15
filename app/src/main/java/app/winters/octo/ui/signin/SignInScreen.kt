@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
@@ -130,19 +131,24 @@ import app.winters.octo.ui.common.LocalFeedback
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalReduceMotion
 import app.winters.octo.ui.common.PopupQuestion
+import app.winters.octo.ui.common.glideTo
 import app.winters.octo.ui.common.octoIcon
 import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.family.LocalQrScanner
 import app.winters.octo.ui.family.passwordStrength
+import app.winters.octo.ui.family.shownServer
 import app.winters.octo.ui.nav.ServerForm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Date
+import kotlin.math.roundToInt
 
 // Soft edges on the page's scroll. What runs up under the back button melts
 // away over the top gap instead of showing through behind it; what runs on
@@ -177,6 +183,16 @@ private fun Modifier.pageFades(scroll: ScrollState): Modifier = this
 
 // How tall the soft edge at the bottom of the page's scroll is.
 private val BottomFade = 24.dp
+
+// How much of Advanced's first card shows under its group's title, above the
+// soft bottom edge, once Advanced is opened from its head.
+private val AdvancedPeek = 24.dp
+
+// Whether Advanced's head opened it: only that opening scrolls its first
+// group into view. Not state: the effect that scrolls reads and clears it.
+private class HeadOpening {
+    var fromHead = false
+}
 
 // What a fade's mask draws where the page shows: only its alpha counts.
 private val Shown = Color.Black
@@ -305,9 +321,14 @@ private fun SignInForm(vm: SignInViewModel, scanAgain: FocusRequester, addressFo
     val calloutFocus = remember { CalloutFocus() }
     var content by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var gatewayGroup by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var gatewayTitle by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var keyRow by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val advanced = remember { MutableTransitionState(vm.advancedOpen) }
-    SideEffect { advanced.targetState = vm.advancedOpen }
+    // Read in this part's own body, which a side effect's reads are not, so
+    // the groups fade in or out on every change of it, a tap on the head
+    // included.
+    val advancedOpen = vm.advancedOpen
+    val advanced = remember { MutableTransitionState(advancedOpen) }
+    SideEffect { advanced.targetState = advancedOpen }
     val topInset = with(density) { (DetailTopGap + 12.dp).roundToPx() }
     val host = content?.let {
         CalloutHost(
@@ -322,6 +343,25 @@ private fun SignInForm(vm: SignInViewModel, scanAgain: FocusRequester, addressFo
     }
     CalloutEffect(vm.calloutPending, host, { gatewayGroup }, vm::calloutShown)
     CalloutEffect(vm.keyPending, host?.copy(settled = { true }), { keyRow }, vm::keyShown)
+
+    // Advanced opened from its head (a tap, or the keyboard's Enter) brings
+    // its first group's title, with the top of that group's card, above the
+    // soft bottom edge in one glide, or at once with calm motion, so groups
+    // that open under a head low on the screen are seen. A page that already
+    // shows that much stays where it is, and a callout on its way does its
+    // own scroll instead.
+    val opening = remember { HeadOpening() }
+    val reveal = with(density) { (AdvancedPeek + BottomFade).roundToPx() }
+    LaunchedEffect(advancedOpen) {
+        if (!advancedOpen || !opening.fromHead) return@LaunchedEffect
+        opening.fromHead = false
+        if (vm.calloutPending || vm.keyPending) return@LaunchedEffect
+        val title = snapshotFlow { gatewayTitle?.takeIf { it.isAttached } }.filterNotNull().first()
+        val page = content?.takeIf { it.isAttached } ?: return@LaunchedEffect
+        val target = page.localPositionOf(title, Offset.Zero).y.roundToInt() + title.size.height + reveal - scroll.viewportSize
+        if (target <= scroll.value) return@LaunchedEffect
+        if (still) scroll.scrollTo(target) else scroll.glideTo(target)
+    }
 
     CompositionLocalProvider(LocalCalloutHost provides host) {
         Box(
@@ -388,11 +428,14 @@ private fun SignInForm(vm: SignInViewModel, scanAgain: FocusRequester, addressFo
                         SignInWords.ADVANCED,
                         SignInWords.ADVANCED_LINE,
                         vm.advancedOpen,
-                        { vm.advancedOpen = !vm.advancedOpen },
+                        {
+                            vm.advancedOpen = !vm.advancedOpen
+                            opening.fromHead = vm.advancedOpen
+                        },
                         Modifier.padding(top = 20.dp),
                     )
                     AnimatedVisibility(advanced, enter = fadeIn(), exit = fadeOut()) {
-                        Advanced(vm) { gatewayGroup = it }
+                        Advanced(vm, onGatewayTitle = { gatewayTitle = it }) { gatewayGroup = it }
                     }
                 }
             }
@@ -438,7 +481,8 @@ private fun MainCard(vm: SignInViewModel, addressFocus: FocusRequester, onKeyRow
         when {
             handOver != null -> {
                 FormDivider()
-                FormStatusRow(vm.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}", vm.busy)
+                val host = shownServer(handOver.server)
+                FormStatusRow(vm.handOverStep ?: if (vm.error != null) "Not signed in to $host yet" else "Ready to sign in to $host", vm.busy)
             }
             vm.invite != null -> {
                 FormDivider()
@@ -540,7 +584,7 @@ private fun MainNotes(vm: SignInViewModel) {
     when {
         vm.handOver != null -> FormNote("On your other device, tap Allow when it asks about this phone.")
         invite != null -> FormNote(
-            "You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.",
+            "You're invited to ${shownServer(invite.server)}. Choose your name and a password. Your login then works in Octo and any other music app.",
         )
         vm.joining -> FormNote(
             "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.",
@@ -604,16 +648,20 @@ private fun JoinButtons(vm: SignInViewModel, scanAgain: FocusRequester) {
         )
     }
     ResultLine(vm)
-    if (vm.handOver == null) {
-        GlazeButton(
-            "Scan the QR code",
-            { vm.scanning = true },
-            size = ButtonSize.Small,
-            icon = octoIcon(OctoIcons.Camera),
-            modifier = Modifier.padding(top = 12.dp).focusRequester(scanAgain),
-        )
+    // The scanner and the way back to a password sign-in, under the button
+    // on its right edge, where Scan a family QR code sits on the plain page.
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        if (vm.handOver == null) {
+            GlazeButton(
+                "Scan the QR code",
+                { vm.scanning = true },
+                size = ButtonSize.Small,
+                icon = octoIcon(OctoIcons.Camera),
+                modifier = Modifier.padding(top = 12.dp).focusRequester(scanAgain),
+            )
+        }
+        GlazeButton("Sign in with a password", vm::stopJoin, enabled = !vm.committing, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
     }
-    GlazeButton("Sign in with a password", vm::stopJoin, enabled = !vm.committing, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
 }
 
 // What the last attempt came to, under its button: while the sign-in page
@@ -740,17 +788,18 @@ private fun ConnectionNote(vm: SignInViewModel) {
 // app draws them: getting to the server (a sign-in page in front of it and
 // the home address), signing in (the Method; left out for a family link,
 // whose way of signing in is the link's), and special setups (custom headers
-// and the client certificate). `onGatewayGroup` hears where the first group
-// sits, from its title through its last note.
+// and the client certificate). `onGatewayTitle` hears where the first
+// group's title sits, down to the top of its card; `onGatewayGroup` where
+// the whole group sits, from its title through its last note.
 @Composable
-internal fun Advanced(vm: SignInViewModel, onGatewayGroup: (LayoutCoordinates) -> Unit = {}) {
+internal fun Advanced(vm: SignInViewModel, onGatewayTitle: (LayoutCoordinates) -> Unit = {}, onGatewayGroup: (LayoutCoordinates) -> Unit = {}) {
     val layout = advancedLayout(vm.joining, vm.takesApiKeys, vm.useApiKey, vm.gatewayKind, certificateRow = true)
     Column(Modifier.fillMaxWidth()) {
         layout.groups.forEachIndexed { index, group ->
             key(group.group) {
                 val gap = if (index == 0) 12.dp else 26.dp
                 when (group.group) {
-                    AdvancedGroup.GettingThere -> GatewayGroup(vm, group.rows, Modifier.padding(top = gap).onGloballyPositioned(onGatewayGroup))
+                    AdvancedGroup.GettingThere -> GatewayGroup(vm, group.rows, Modifier.padding(top = gap).onGloballyPositioned(onGatewayGroup), onGatewayTitle)
                     AdvancedGroup.SigningIn -> MethodGroup(vm, layout.methods, Modifier.padding(top = gap))
                     AdvancedGroup.SpecialSetups -> SetupsGroup(vm, group.rows, Modifier.padding(top = gap))
                 }
@@ -763,9 +812,10 @@ internal fun Advanced(vm: SignInViewModel, onGatewayGroup: (LayoutCoordinates) -
 // password or Cloudflare Access): which sign-in it takes from apps, its two
 // fields once a kind is picked, named for the page met, and the home
 // address. Under the card: a failure it calls out (the card outlined, the
-// failure in the group's own words), then what to know about it.
+// failure in the group's own words), then what to know about it. `onTitle`
+// hears where its title sits.
 @Composable
-private fun GatewayGroup(vm: SignInViewModel, rows: List<AdvancedRow>, modifier: Modifier) {
+private fun GatewayGroup(vm: SignInViewModel, rows: List<AdvancedRow>, modifier: Modifier, onTitle: (LayoutCoordinates) -> Unit) {
     val sheet = LocalChoiceSheet.current
     val error = vm.error
     val calling = vm.callout && vm.advancedOpen && error != null
@@ -774,7 +824,7 @@ private fun GatewayGroup(vm: SignInViewModel, rows: List<AdvancedRow>, modifier:
     val saved = vm.gatewayKind == vm.gatewaySaved
     val kinds = GatewayKind.entries
     Column(modifier.fillMaxWidth()) {
-        FormGroupTitle(SignInWords.GROUP_GETTING_THERE)
+        FormGroupTitle(SignInWords.GROUP_GETTING_THERE, Modifier.onGloballyPositioned(onTitle))
         FormGroupCard(outlined = calling) {
             rows.forEachIndexed { index, row ->
                 key(row) {

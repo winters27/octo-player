@@ -18,8 +18,9 @@ public enum GatewayWords {
     public static let control = "Remove the line break or special character from the sign-in page fields."
     public static let reservedRow = "That header is set by the sign-in page fields. Remove the row."
     /// The line under Sign in while the sign-in page's group calls out a failure: a button that
-    /// brings the group back into view.
-    public static let pointer = "Your server's sign-in page needs its own login, below."
+    /// brings the group back into view. A no-break space keeps its last two words together, so a
+    /// wrapped line never ends on one word.
+    public static let pointer = "Your server's sign-in page needs its own login, under\u{00A0}Advanced."
 
     public static func name(_ gateway: Gateway) -> String {
         switch gateway {

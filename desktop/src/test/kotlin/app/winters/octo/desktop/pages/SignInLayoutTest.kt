@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
@@ -15,6 +16,7 @@ import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.FrameSize
 import app.winters.octo.design.IconSize
+import app.winters.octo.design.OctoDuration
 import app.winters.octo.design.POPUP_TAG
 import app.winters.octo.design.Space
 import app.winters.octo.desktop.FakeServer
@@ -50,8 +52,8 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-// The sign-in page and its sheets as drawn: Advanced opening moves nothing
-// above it, a failure that met a sign-in page brings its group under the
+// The sign-in page and its sheets as drawn: Advanced opening glides the
+// card up to sit balanced, a failure that met a sign-in page brings its group under the
 // top (or ends a tall group's last note 8 above the bottom), picking API key
 // brings its row up, header rows keep their focus and Show through adds and
 // removes, a late answer or a swapped form never shows a secret, and Tab
@@ -178,17 +180,126 @@ class SignInLayoutTest {
         form.password = "pw"
     }
 
-    // Red when Advanced opening moves what is above it (the card centered
-    // again on its new height).
+    // A click in the middle of a node, with no frame drawn after it: the
+    // frames that follow are the test's own, on the real clock.
+    private fun A11yScene.clickOnly(node: SemanticsNode) {
+        val at = Offset(node.positionInRoot.x + node.size.width / 2f, node.middle())
+        onUi {
+            scene.sendPointerEvent(PointerEventType.Move, at)
+            scene.sendPointerEvent(PointerEventType.Press, at, buttons = PointerButtons(isPrimaryPressed = true))
+            scene.sendPointerEvent(PointerEventType.Release, at)
+        }
+    }
+
+    // The room the card has in a window 720 or taller: from the window's
+    // title bar and the page's 32 over the card, to the page's 32 under it.
+    private fun A11yScene.room(): Pair<Float, Float> = pagePad to height - 32f
+
+    // Opening Advanced in a tall window glides the card up from its rest:
+    // its top rises on every frame it moves, never by more than the glide's
+    // own curve moves it in that frame's time, its words going up with it,
+    // until the open card, which fits the room, sits in the room's middle.
+    // Opened with a click and drawn with motion on. Red with the card left at
+    // its rest as Advanced opens (431 over it and 33 under at 1600), or set
+    // in its place in one frame.
     @Test(timeout = 120_000)
-    fun signInStaysPutWhenAdvancedOpens() {
-        page(height = 1_200).use { s ->
+    fun openingAdvancedGlidesTheCardUpToSitBalanced() {
+        A11yScene(folder.newFolder(), height = 1_600, signedOut = true).use { s ->
             s.settle(800).close()
-            val before = s.text("Sign in").boundsInRoot.top
-            s.click(s.text(SignInWords.ADVANCED))
-            s.settle(800).close()
+            val rest = s.cardTop()
+            val inside = s.text("Octo").positionInRoot.y - rest
+            s.clickOnly(generateSequence(s.text(SignInWords.ADVANCED)) { it.parent }.first { it.clickable })
+            // Frames 16 ms apart on the scene's clock, however long each
+            // takes to draw, so the glide is seen frame by frame.
+            val start = System.nanoTime()
+            val tops = mutableListOf(rest)
+            val times = mutableListOf(start)
+            for (frame in 1..60) {
+                val now = start + frame * 16_000_000L
+                s.frameAt(now).close()
+                val top = s.cardTop()
+                if (top > s.room().first + 0.5f) assertEquals("the words lift with the card at $top", inside, s.text("Octo").positionInRoot.y - top, 0.5f)
+                tops += top
+                times += now
+            }
             assertTrue(s.app.signInForm.advancedOpen)
-            assertEquals(before, s.text("Sign in").boundsInRoot.top, 1f)
+            val (top, bottom) = s.cardEdges()
+            val (roomTop, roomBottom) = s.room()
+            assertTrue("the open card, $top to $bottom, fits the room from $roomTop to $roomBottom", bottom - top < roomBottom - roomTop - 1f)
+            assertEquals("the open card sits in the room's middle: ${top - roomTop} over it, ${roomBottom - bottom} under", top - roomTop, roomBottom - bottom, 1f)
+            val distance = rest - top
+            assertTrue("the card rose $distance", distance > 100f)
+            val rises = tops.zipWithNext().filter { (a, b) -> b > a + 0.5f }
+            assertTrue("the card's top fell back ${rises.take(3)} on its way up", rises.isEmpty())
+            // The glide's tween, at its steepest, per nanosecond of its 300 ms.
+            val steepest = (0 until 1_000).maxOf { i -> FastOutSlowInEasing.transform((i + 1) / 1_000f) - FastOutSlowInEasing.transform(i / 1_000f) } * 1_000f
+            val perNano = distance * steepest / (OctoDuration.Neutral * 1_000_000f)
+            val jumps = tops.indices.drop(1).filter { i -> tops[i - 1] - tops[i] > perNano * (times[i] - times[i - 1]) + 1f }
+            assertTrue("frames that jumped past the glide: ${jumps.take(3).map { tops[it - 1] to tops[it] }}", jumps.isEmpty())
+            val between = tops.count { it < rest - 1f && it > top + 1f }
+            assertTrue("$between frames between rest and its place", between >= 6)
+        }
+    }
+
+    // In a shorter window, where the open card does not fit, opening
+    // Advanced lifts the card to the window's top pad with its words still
+    // at their top inside it, and goes no further. Red with the card left at
+    // its rest.
+    @Test(timeout = 120_000)
+    fun openingAdvancedInAShorterWindowLiftsTheCardToTheTop() {
+        page(height = 900).use { s ->
+            s.settle(600).close()
+            val rest = s.cardTop()
+            val title = s.text("Octo")
+            val inside = title.positionInRoot.y - rest
+            assertTrue("the closed card rests under the pad at $rest", rest > pagePad + 10f)
+            s.click(s.text(SignInWords.ADVANCED))
+            s.settle(300).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            val (top, bottom) = s.cardEdges()
+            assertEquals("lifted to the pad", pagePad, top, 0.5f)
+            assertEquals("to the room's foot: the words run on past it", s.room().second, bottom, 0.5f)
+            assertEquals("the words still at their top inside it", inside, title.positionInRoot.y - top, 0.5f)
+        }
+    }
+
+    // Advanced's first group's title shows on the card, clear of its soft
+    // edges.
+    private fun A11yScene.firstGroupShows(how: String) {
+        val (top, bottom) = cardEdges()
+        val title = text(SignInWords.GROUP_GETTING_THERE)
+        val y = title.positionInRoot.y
+        assertTrue("$how: the first group's title at $y to ${y + title.size.height}, on a card from $top to $bottom", y >= top + PageFade.value && y + title.size.height <= bottom - PageFade.value)
+    }
+
+    // Opened from its head with none of its groups in view, Advanced brings
+    // its first group's title over the card's soft foot in the same glide:
+    // at 130% text in a 900 window, opened from the keyboard, and in a 600
+    // window scrolled down to the head, opened with a click. Red when only
+    // the chevron turns (the title starts under the card's foot).
+    @Test(timeout = 240_000)
+    fun openingAdvancedFromItsHeadShowsItsFirstGroup() {
+        largerText().use { s ->
+            s.settle(600).close()
+            s.onUi { s.keyboard.keyboard = true }
+            var presses = 0
+            while (s.focused()?.name()?.startsWith(SignInWords.ADVANCED) != true) {
+                check(presses++ < 60) { "Tab never reached Advanced" }
+                s.press(Key.Tab)
+            }
+            s.press(Key.Enter)
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            s.firstGroupShows("130%")
+        }
+        page(height = 600).use { s ->
+            s.settle(600).close()
+            val head = s.text(SignInWords.ADVANCED)
+            s.scrollToEnd(head)
+            s.click(head)
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            s.firstGroupShows("600 tall")
         }
     }
 
@@ -527,6 +638,25 @@ class SignInLayoutTest {
             s.type(s.named(SignInWords.API_KEY).single(), "key-1")
             assertEquals(SignInWords.API_KEY, s.entry("key-1").config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" "))
             assertNotEquals("the key is typed into its own field", s.named(SignInWords.USERNAME).firstOrNull(), s.entry("key-1"))
+        }
+    }
+
+    // A sheet's Advanced, opened from its head with none of its groups in
+    // view, does the same in the sheet's own scroll: the Add sheet at 130%
+    // text in a 700 window, scrolled down to the head. Red when only the
+    // chevron turns.
+    @Test(timeout = 120_000)
+    fun aSheetsAdvancedOpenedFromItsHeadShowsItsFirstGroup() {
+        A11yScene(folder.newFolder(), height = 700, reduceMotion = true, textScale = 1.3f).use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            s.scrollToEnd(s.inPopup(SignInWords.ADVANCED))
+            s.click(s.inPopup(SignInWords.ADVANCED))
+            s.settle(400).close()
+            val title = s.inPopup(SignInWords.GROUP_GETTING_THERE)
+            val view = scrollOf(title).boundsInRoot
+            val y = title.positionInRoot.y
+            assertTrue("the first group's title at $y to ${y + title.size.height}, in a view from ${view.top} to ${view.bottom}", y >= view.top && y + title.size.height <= view.bottom - SheetFade.value)
         }
     }
 
@@ -1068,16 +1198,103 @@ class SignInLayoutTest {
         }
     }
 
-    // The page with the words set 130% larger, closed and with Advanced open.
+    // The page with the words set 130% larger, closed and with Advanced
+    // opened from its head.
     @Test(timeout = 300_000)
     fun picturesAtLargerText() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
         A11yScene(folder.newFolder(), height = 900, reduceMotion = true, signedOut = true, textScale = 1.3f).use { s ->
             s.shot("polish-page-text-130")
-            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.click(s.text(SignInWords.ADVANCED))
             s.settle(600).close()
             assertTrue(s.app.signInForm.advancedOpen)
             s.shot("polish-page-text-130-advanced")
+        }
+    }
+
+    // Where Advanced's opening glide ends, opened from its head: in a 1600
+    // window, where the open card sits in the middle, in a 900 one, where it
+    // is lifted to the top, and in a 600 one scrolled down to the head.
+    @Test(timeout = 300_000)
+    fun picturesOfTheOpenGlide() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        for (height in listOf(1_600, 900)) {
+            page(height = height).use { s ->
+                s.settle(600).close()
+                s.click(s.text(SignInWords.ADVANCED))
+                s.settle(600).close()
+                assertTrue(s.app.signInForm.advancedOpen)
+                s.shot("polish-page-open-$height")
+            }
+        }
+        page(height = 600).use { s ->
+            s.settle(600).close()
+            val head = s.text(SignInWords.ADVANCED)
+            s.scrollToEnd(head)
+            s.shot("polish-page-open-600-before")
+            s.click(head)
+            s.settle(600).close()
+            assertTrue(s.app.signInForm.advancedOpen)
+            s.shot("polish-page-open-600")
+        }
+    }
+
+    // The card's scrollbar shown by the pointer over the card, with Advanced
+    // open in a 900 window: at rest after the glide, and at the scroll's end.
+    @Test(timeout = 300_000)
+    fun picturesOfTheCardsScrollbar() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page(height = 900).use { s ->
+            s.settle(600).close()
+            s.click(s.text(SignInWords.ADVANCED))
+            s.settle(600).close()
+            val (top, bottom) = s.cardEdges()
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(s.width / 2f, (top + bottom) / 2f)) }
+            s.shot("polish-page-scrollbar-rest", ms = 300)
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(5f, s.height - 5f)) }
+            s.settle(600).close()
+            s.shot("polish-page-scrollbar-resting", ms = 300)
+            s.scrollToEnd(s.text("Octo"))
+            s.onUi { s.scene.sendPointerEvent(PointerEventType.Move, Offset(s.width / 2f, (top + bottom) / 2f)) }
+            s.shot("polish-page-scrollbar-end", ms = 300)
+        }
+    }
+
+    // The sheets' feet with the words 130% larger (Add, Edit, Sign in and
+    // Change password), and the certificate password's ask and the changed
+    // certificate question at the usual size.
+    @Test(timeout = 300_000)
+    fun picturesOfTheSheetsFeet() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        A11yScene(folder.newFolder(), reduceMotion = true, textScale = 1.3f).use { s ->
+            s.onUi { addServer(s.app) }
+            s.shot("polish-sheet-add-130")
+            s.onUi {
+                s.app.popups.close()
+                editServer(s.app, s.app.connection!!.server)
+            }
+            s.shot("polish-sheet-edit-130")
+            s.onUi {
+                s.app.popups.close()
+                signInTo(s.app, s.app.connection!!.server)
+            }
+            s.shot("polish-sheet-sign-in-130")
+            s.onUi {
+                s.app.popups.close()
+                changePassword(s.app)
+            }
+            s.shot("polish-sheet-change-password-130")
+        }
+        signedIn().use { s ->
+            s.onUi { askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any()) }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
+            s.shot("polish-sheet-certificate-password")
+            s.onUi {
+                s.app.popups.close()
+                askAboutChangedCertificate(s.app.popups, s.app.accounts.security, CertificateQuestion("music.example.com", "AB".repeat(32)))
+            }
+            s.shot("polish-sheet-trust")
         }
     }
 
@@ -1157,6 +1374,20 @@ class SignInLayoutTest {
             frameAt(System.nanoTime()).close()
         } while (abs(range.value() - goal) > 0.5f)
         return goal
+    }
+
+    // Scrolls the node's scroll back to its start, gliding as bringUp does:
+    // the card back at its pin with its words at their top.
+    private fun A11yScene.scrollToStart(node: SemanticsNode) {
+        val scroll = scrollOf(node)
+        val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+        onUi { scroll.config[SemanticsActions.ScrollBy].action?.invoke(0f, -range.value()) }
+        render(1)
+        val end = System.currentTimeMillis() + 10_000
+        do {
+            check(System.currentTimeMillis() < end) { "waited too long" }
+            frameAt(System.nanoTime()).close()
+        } while (range.value() > 0.5f)
     }
 
     // The rows from `top` until `bottom` where the card shows the page
@@ -1278,12 +1509,13 @@ class SignInLayoutTest {
         settle(600).close()
     }
 
-    // In a tall window with Advanced open, the wheel's first turns toward
-    // the end lift the whole card, its words going up with it and never
-    // moving inside it, until its top meets the window's top pad; only then
-    // do the words move inside it. Over the card and beside it alike, the
-    // words move once for each pixel scrolled. Red with the card held at its
-    // pin, where the words move inside it from the first turn.
+    // In a tall window with Advanced open and the card wheeled back down to
+    // its pin (opening lifts it), the wheel's first turns toward the end
+    // lift the whole card, its words going up with it and never moving
+    // inside it, until its top meets the window's top pad; only then do the
+    // words move inside it. Over the card and beside it alike, the words
+    // move once for each pixel scrolled. Red with the card held at its pin,
+    // where the words move inside it from the first turn.
     @Test(timeout = 120_000)
     fun theWheelLiftsTheCardBeforeItsWordsMoveInsideIt() {
         page(height = 1_600).use { s ->
@@ -1291,6 +1523,8 @@ class SignInLayoutTest {
             val pin = s.cardTop()
             s.tallAdvanced()
             val title = s.text("Octo")
+            s.scrollToStart(title)
+            assertEquals("back at its pin", pin, s.cardTop(), 1f)
             val scroll = scrollOf(title)
             val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
             assertTrue("more than fits once lifted: ${range.maxValue()} past a pin of $pin", range.maxValue() > pin - pagePad + 100f)
@@ -1399,8 +1633,9 @@ class SignInLayoutTest {
         }
     }
 
-    // The lift in a tall window: Advanced open at rest, the card lifted half
-    // way, and lifted to the top with its words moved 120 inside it.
+    // The lift in a tall window: Advanced open with the card wheeled back
+    // to its pin, the card lifted half way, and lifted to the top with its
+    // words moved 120 inside it.
     @Test(timeout = 300_000)
     fun picturesOfTheLift() {
         assumeTrue(System.getenv("OCTO_SHOTS") == "1")
@@ -1408,6 +1643,8 @@ class SignInLayoutTest {
             s.settle(600).close()
             val pin = s.cardTop()
             s.tallAdvanced()
+            s.scrollToStart(s.text("Octo"))
+            assertEquals(pin, s.cardTop(), 1f)
             s.shot("polish-page-lift-rest")
             val title = s.text("Octo")
             s.placeTop(title, title.positionInRoot.y - ((pin - pagePad) / 2f).toInt())
@@ -1464,6 +1701,157 @@ class SignInLayoutTest {
             s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
             val use = s.fillRightOfCancel(Space.M.value)
             assertTrue("Save $save:1, Change password $change:1, Use $use:1", save >= 1.8 && change >= 1.8 && use >= 1.8)
+        }
+    }
+
+    // The open pop-up's main button, named by its words, is 96 wide or more,
+    // the least a sheet's main button may be, and its foot still fits the pop-up:
+    // the button ends inside it, and Cancel (and Test connection before it)
+    // end before the next one starts.
+    private fun A11yScene.mainButtonFits(words: String, how: String) {
+        val button = generateSequence(inPopup(words)) { it.parent }.first { it.clickable }
+        val popup = nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == POPUP_TAG }
+        val left = button.positionInRoot.x
+        val right = left + button.size.width
+        assertTrue("$words $how is ${button.size.width} wide", button.size.width >= 96)
+        assertTrue("$words $how ends at $right, past the pop-up's ${popup.positionInRoot.x + popup.size.width}", right <= popup.positionInRoot.x + popup.size.width)
+        val cancel = named("Cancel").single { it.inPopup() }
+        assertTrue("Cancel $how runs into $words", cancel.positionInRoot.x + cancel.size.width <= left)
+        named("Test connection").singleOrNull { it.inPopup() }?.let { test ->
+            assertTrue("Test connection $how runs into Cancel", test.positionInRoot.x + test.size.width <= cancel.positionInRoot.x)
+        }
+    }
+
+    // Every sign-in pop-up's main button is 96 wide or more, at the usual
+    // text size and at 130%, and its foot still fits: Add, Save and Sign in
+    // in the server sheets, Change password, the certificate password's Use,
+    // and Trust in the changed-certificate question. Red with the buttons
+    // sized to their words (Add 50 wide beside an 80 Cancel).
+    @Test(timeout = 240_000)
+    fun everySignInPopupsMainButtonHasItsLeastWidth() {
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), reduceMotion = true, textScale = scale).use { s ->
+                val how = "at ${scale}x"
+                s.onUi { addServer(s.app) }
+                s.settle(600).close()
+                s.mainButtonFits("Add", how)
+                s.onUi {
+                    s.app.popups.close()
+                    editServer(s.app, s.app.connection!!.server)
+                }
+                s.settle(600).close()
+                s.mainButtonFits("Save", how)
+                s.onUi {
+                    s.app.popups.close()
+                    signInTo(s.app, s.app.connection!!.server)
+                }
+                s.settle(600).close()
+                s.mainButtonFits("Sign in", how)
+                s.onUi {
+                    s.app.popups.close()
+                    changePassword(s.app)
+                }
+                s.settle(600).close()
+                s.mainButtonFits("Change password", how)
+                s.onUi {
+                    s.app.popups.close()
+                    askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+                }
+                s.settle(600).close()
+                s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
+                s.mainButtonFits(SignInWords.CERT_PASSWORD_USE, how)
+                s.onUi {
+                    s.app.popups.close()
+                    askAboutChangedCertificate(s.app.popups, s.app.accounts.security, CertificateQuestion("music.example.com", "AB".repeat(32)))
+                }
+                s.settle(600).close()
+                s.mainButtonFits(SignInWords.TRUST_CONFIRM, how)
+                s.onUi { s.app.popups.close() }
+            }
+        }
+    }
+
+    // How many pixels change when the card's scrollbar shows, outside the
+    // card's rounded corner at its top (or its foot) in the lane the bar runs
+    // down: the corner's arc, 22 round, with a pixel's grace. The bar shows
+    // while the pointer moves over the card, and the frame it is compared
+    // with has the pointer away from the card. Also how many change inside
+    // the card in that lane, 24 to 60 from that end, where the bar's end is.
+    private fun A11yScene.barAroundTheCorner(atTop: Boolean): Pair<Int, Int> {
+        val (top, bottom) = cardEdges()
+        val right = (width + 480) / 2
+        val radius = 22f
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(5f, height - 5f)) }
+        val hidden = settle(600)
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(width / 2f, (top + bottom) / 2f)) }
+        val shown = settle(300)
+        val before = Bitmap.makeFromImage(hidden)
+        val after = Bitmap.makeFromImage(shown)
+        val cx = right - radius
+        val cy = if (atTop) top + radius else bottom - radius
+        var outside = 0
+        var inside = 0
+        for (x in right - 14 until right) {
+            for (y in (top.toInt() - 2)..(bottom.toInt() + 1)) {
+                val changed = distance(before.getColor(x, y), after.getColor(x, y)) > 24.0
+                if (!changed) continue
+                val dx = x + 0.5f - cx
+                val dy = if (atTop) cy - (y + 0.5f) else y + 0.5f - cy
+                val beyond = dx > 0f && dy > 0f && dx * dx + dy * dy > (radius + 1f) * (radius + 1f)
+                val fromEnd = if (atTop) y - top else bottom - y
+                if (beyond) outside++ else if (fromEnd in 24f..60f) inside++
+            }
+        }
+        before.close()
+        after.close()
+        hidden.close()
+        shown.close()
+        onUi { scene.sendPointerEvent(PointerEventType.Move, Offset(5f, height - 5f)) }
+        return outside to inside
+    }
+
+    // The card's scrollbar keeps inside its rounded corners: shown with the
+    // words at their top and again at their end, no pixel outside the
+    // corner's arc changes. Red with the bar from 3 under the card's top,
+    // where its end stands up to 8 outside the arc over the bare page.
+    @Test(timeout = 120_000)
+    fun theCardsScrollbarKeepsInsideItsCorners() {
+        page(height = 600).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(600).close()
+            val title = s.text("Octo")
+            s.scrollToStart(title)
+            val (topOutside, topInside) = s.barAroundTheCorner(atTop = true)
+            assertTrue("the bar shows at the top: $topInside pixels", topInside > 20)
+            assertEquals("pixels outside the top corner", 0, topOutside)
+            s.scrollToEnd(title)
+            val (footOutside, footInside) = s.barAroundTheCorner(atTop = false)
+            assertTrue("the bar shows at the foot: $footInside pixels", footInside > 20)
+            assertEquals("pixels outside the foot's corner", 0, footOutside)
+        }
+    }
+
+    // Opened, Advanced's chevron still sits on its title, and an open
+    // choice's on its name: within 1 of the middle of their words' capitals
+    // at the usual text size and at 130%. Red with the chevrons set a fixed
+    // offset from the usual size's metrics (about 4 off at 130%). Turned
+    // about its box rather than its ink, the open caret's ink sits about 0.4
+    // lower, under what this measure resolves, so that alone keeps it green.
+    @Test(timeout = 240_000)
+    fun openChevronsSitOnTheirWordsAtEveryTextSize() {
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), height = 1_600, reduceMotion = true, signedOut = true, textScale = scale).use { s ->
+                s.onUi { s.app.signInForm.advancedOpen = true }
+                s.settle(800).close()
+                val (advanced, title) = s.advancedChevronAndCaps()
+                assertEquals("Advanced open at ${scale}x", title, advanced, 1f)
+                s.bringUp(s.named("${SignInWords.METHOD}, Normal").single())
+                s.click(s.named("${SignInWords.METHOD}, Normal").single())
+                s.settle(300).close()
+                assertTrue("the Method's options show", s.withText(SignInWords.methodLabel(AuthMode.LegacyPassword)).isNotEmpty())
+                val (choice, name) = s.methodChevronAndCaps()
+                assertEquals("Method open at ${scale}x", name, choice, 1f)
+            }
         }
     }
 

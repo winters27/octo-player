@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -49,6 +48,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -82,6 +82,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.design.Spinner
 import app.winters.octo.design.raisedPanel
+import app.winters.octo.player.capMiddle
+import app.winters.octo.player.rememberCapHeightPx
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.filterNotNull
@@ -106,10 +108,6 @@ private val NoteGap = 8.dp
 private val ChoiceChevron = 20.dp
 private val ChoiceGap = 12.dp
 
-// How far a choice row's chevron rises above the top of its name's line, so
-// its middle meets the middle of the name's capitals.
-private val ChevronLift = 1.dp
-
 // Descriptions and values keep to two lines at the phone's normal text
 // size; larger text wraps freely.
 @Composable
@@ -126,12 +124,14 @@ fun octoIcon(@DrawableRes id: Int): Painter = rememberVectorPainter(LocalIconVec
 
 // A section's head that opens and closes it, such as Advanced: its title,
 // set as a group's title and one size whether open or closed, and a line
-// naming what is inside, with only the chevron turning. The chevron sits on
-// the title's line and ends where the rows' chevrons end. Screen readers
-// hear a heading that expands and collapses.
+// naming what is inside, with only the chevron turning. The chevron ends
+// where the rows' chevrons end, its middle on the middle of the title's
+// capitals at any font scale. Screen readers hear a heading that expands
+// and collapses.
 @Composable
 fun FormSectionHead(title: String, line: String, open: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     val turn by animateFloatAsState(if (open) 90f else 0f, label = "section chevron")
+    val cap = rememberCapHeightPx(OctoType.formGroup)
     Row(
         modifier
             .fillMaxWidth()
@@ -152,13 +152,12 @@ fun FormSectionHead(title: String, line: String, open: Boolean, onToggle: () -> 
                 }
             }
             .padding(start = 4.dp, end = RowSides, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() }) {
             Text(title, style = OctoType.formGroup, color = OctoColors.TextPrimary)
             Text(line, style = OctoType.formDescription, color = OctoColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
         }
-        Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.size(20.dp).rotate(turn))
+        Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(20.dp).rotate(turn))
     }
 }
 
@@ -356,8 +355,9 @@ private fun RevealToggle(revealed: Boolean, onClick: () -> Unit) {
 }
 
 // A setting with a few answers: its name, the answer chosen at the row's end
-// (at most two lines), the line under the name, and a chevron on the name's
-// line, however many lines follow it. A tap asks
+// (at most two lines), the line under the name, and a chevron on the middle
+// of the name's capitals, at any font scale and however many lines follow
+// it. A tap asks
 // through the choice sheet, beside the row. Where the name and the widest
 // answer do not fit on one line, the answer goes under the name.
 @Composable
@@ -370,6 +370,7 @@ fun FormChoiceRow(
     answers: List<String> = emptyList(),
 ) {
     val sheet = LocalChoiceSheet.current
+    val cap = rememberCapHeightPx(OctoType.formName)
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     BoxWithConstraints(modifier.fillMaxWidth()) {
@@ -385,10 +386,9 @@ fun FormChoiceRow(
                 .choiceAnchor(sheet)
                 .clickable(role = Role.Button, onClick = onClick)
                 .padding(horizontal = RowSides, vertical = RowEnds),
-            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(ChoiceGap),
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() }) {
                 if (stacked) {
                     Text(title, style = OctoType.formName, color = OctoColors.TextPrimary)
                     Text(
@@ -423,7 +423,7 @@ fun FormChoiceRow(
                     )
                 }
             }
-            Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.offset(y = -ChevronLift).size(ChoiceChevron))
+            Icon(octoIcon(OctoIcons.Chevron), contentDescription = null, tint = OctoColors.TextMuted, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(ChoiceChevron))
         }
     }
 }
@@ -535,8 +535,9 @@ fun FormStatusRow(text: String, busy: Boolean) {
 }
 
 // A note under its card, on the content edge: a glyph (the accent's info by
-// default; the locks for how the connection travels) and words a step
-// quieter than the rows'.
+// default; the locks for how the connection travels) on the middle of the
+// first line's capitals at any font scale, and words a step quieter than
+// the rows'.
 @Composable
 fun FormNote(
     text: String,
@@ -544,20 +545,21 @@ fun FormNote(
     @DrawableRes icon: Int = OctoIcons.Info,
     iconTint: Color = OctoColors.Accent,
 ) {
+    val cap = rememberCapHeightPx(OctoType.formNote)
     Row(
         modifier.fillMaxWidth().padding(start = RowSides, end = RowSides, top = NoteGap),
-        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(octoIcon(icon), contentDescription = null, tint = iconTint, modifier = Modifier.padding(top = 1.dp).size(16.dp))
-        Text(text, style = OctoType.formNote, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f))
+        Icon(octoIcon(icon), contentDescription = null, tint = iconTint, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(16.dp))
+        Text(text, style = OctoType.formNote, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() })
     }
 }
 
 // A failure, where a note would sit and above the notes: its glyph (the
-// error glyph by default; the open lock for how the connection travels) and
-// words in the error red, said by a screen reader as it appears. With
-// `onClick` it is a button (the pointer under Sign in).
+// error glyph by default; the open lock for how the connection travels), on
+// the middle of the first line's capitals at any font scale, and words in
+// the error red, said by a screen reader as it appears. With `onClick` it is
+// a button (the pointer under Sign in).
 @Composable
 fun FormError(
     text: String,
@@ -566,17 +568,17 @@ fun FormError(
     onClick: (() -> Unit)? = null,
 ) {
     val red = OctoColors.ErrorWords
+    val cap = rememberCapHeightPx(OctoType.formNote)
     Row(
         modifier
             .fillMaxWidth()
             .padding(start = RowSides, end = RowSides, top = NoteGap)
             .then(if (onClick != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button, onClick = onClick) else Modifier)
             .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(octoIcon(icon), contentDescription = null, tint = red, modifier = Modifier.padding(top = 1.dp).size(16.dp))
-        Text(text, style = OctoType.formNote, color = red, modifier = Modifier.weight(1f))
+        Icon(octoIcon(icon), contentDescription = null, tint = red, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(16.dp))
+        Text(text, style = OctoType.formNote, color = red, modifier = Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() })
     }
 }
 
@@ -696,7 +698,7 @@ private fun calloutTarget(host: CalloutHost, group: LayoutCoordinates, gap: Int)
 // the animation is now, so content that shrinks under the scroll mid-way (a
 // part closing, which clamps the scroll) does not carry it past the target.
 // A drag still cancels it, as it cancels any scroll.
-private suspend fun ScrollState.glideTo(target: Int) {
+internal suspend fun ScrollState.glideTo(target: Int) {
     scroll {
         animate(value.toFloat(), target.toFloat(), animationSpec = spring()) { now, _ -> scrollBy(now - value) }
     }

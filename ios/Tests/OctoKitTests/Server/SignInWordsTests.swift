@@ -108,10 +108,12 @@ import Testing
         for (key, text) in fixture { #expect(words[key] == text, "\(key)") }
     }
 
-    /// Shared words are plain ASCII, so no dash or curly quote slips in.
+    /// Shared words are plain ASCII, so no dash or curly quote slips in. The one exception is a
+    /// no-break space in the words `glued` lists, which keeps a wrapped line's last two words together.
     @Test func everyWordIsPlainAscii() {
+        let glued: Set<String> = ["advanced.line"]
         for (key, text) in Self.swiftWords() {
-            #expect(text.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) }, "\(key)")
+            #expect(text.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) || (glued.contains(key) && $0.value == 0xA0) }, "\(key)")
         }
     }
 

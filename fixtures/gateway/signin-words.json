@@ -1,6 +1,6 @@
 {
   "advanced": "Advanced",
-  "advanced.line": "Sign-in page, home address, sign-in method, headers, certificate",
+  "advanced.line": "Sign-in page, home address, method, headers, certificate",
   "group.gettingThere": "Getting to your server",
   "group.signingIn": "Signing in",
   "group.specialSetups": "Special setups",

@@ -45,10 +45,12 @@ fun Modifier.scrollbar(state: LazyListState, bottom: Dp = 0.dp): Modifier = comp
 fun Modifier.scrollbar(state: LazyGridState, bottom: Dp = 0.dp): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom) }
 
 // A `resting` one keeps a thinner, fainter thumb while what scrolls does
-// not fit, so a list cut off at its foot says there is more.
-fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean = false): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom, resting) }
+// not fit, so a list cut off at its foot says there is more. `top` keeps
+// the bar clear of the top as `bottom` does of the foot (a rounded card's
+// corners).
+fun Modifier.scrollbar(state: ScrollState, bottom: Dp = 0.dp, resting: Boolean = false, top: Dp = 0.dp): Modifier = composed { scrollbar(state, rememberScrollbarAdapter(state), bottom, resting, top) }
 
-private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp, resting: Boolean = false): Modifier = composed {
+private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter, bottom: Dp, resting: Boolean = false, top: Dp = 0.dp): Modifier = composed {
     val rest = OctoColors.TextPrimary.copy(alpha = ScrollbarRestAlpha)
     val inkRest = OctoColors.TextPrimary.copy(alpha = ScrollbarInkAlpha)
     val inkLit = OctoColors.TextPrimary.copy(alpha = ScrollbarInkLitAlpha)
@@ -80,12 +82,12 @@ private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter
         }
     }
     this
-        .pointerInput(adapter, bottom) {
+        .pointerInput(adapter, bottom, top) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.firstOrNull() ?: continue
-                    val track = Track(size.width.toFloat(), size.height.toFloat(), this@awaitPointerEventScope, bottom)
+                    val track = Track(size.width.toFloat(), size.height.toFloat(), this@awaitPointerEventScope, bottom, top)
                     when (event.type) {
                         PointerEventType.Enter, PointerEventType.Move -> {
                             bar.poke()
@@ -124,7 +126,7 @@ private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter
             drawContent()
             val shown = seen.value
             if (state.fits()) return@drawWithContent
-            val track = Track(size.width, size.height, this, bottom)
+            val track = Track(size.width, size.height, this, bottom, top)
             val thumb = track.thumbAt(adapter) ?: return@drawWithContent
             if (resting && shown < 1f) {
                 val thin = ScrollbarResting.toPx()
@@ -150,8 +152,9 @@ private fun Modifier.scrollbar(state: ScrollableState, adapter: ScrollbarAdapter
 
 private fun ScrollableState.fits() = !canScrollForward && !canScrollBackward
 
-// The lane down the right edge the thumb runs in, in pixels.
-private class Track(width: Float, height: Float, density: androidx.compose.ui.unit.Density, bottom: Dp) {
+// The lane down the right edge the thumb runs in, in pixels, `start` under
+// the top and `bottom` over the foot.
+private class Track(width: Float, height: Float, density: androidx.compose.ui.unit.Density, bottom: Dp, start: Dp = 0.dp) {
     private val inset = with(density) { ScrollbarInset.toPx() }
     private val reach = with(density) { (ScrollbarWide + ScrollbarInset).toPx() }
     private val least = with(density) { ScrollbarMinLength.toPx() }
@@ -159,8 +162,8 @@ private class Track(width: Float, height: Float, density: androidx.compose.ui.un
 
     // Where the drawn thumb ends, short of the edge.
     val end get() = right
-    private val top = inset
-    private val length = (height - inset * 2 - with(density) { bottom.toPx() }).coerceAtLeast(0f)
+    private val top = inset + with(density) { start.toPx() }
+    private val length = (height - inset * 2 - with(density) { (bottom + start).toPx() }).coerceAtLeast(0f)
 
     // The thumb, as wide as the pointer may grab it; nothing when all fits.
     fun thumbAt(adapter: ScrollbarAdapter): androidx.compose.ui.geometry.Rect? {
