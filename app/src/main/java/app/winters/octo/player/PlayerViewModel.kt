@@ -179,8 +179,10 @@ class PlayerViewModel @Inject constructor(
         .flatMapLatest { id -> if (id == null) flowOf(false) else likes.likedFlow(id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    // A song found online has no heart (LikeStore.toggle does nothing for
+    // one); a song the server owns that the phone lacks does.
     fun toggleLike() {
-        playback.now.value.trackId?.takeUnless(::isFind)?.let(likes::toggle)
+        playback.now.value.trackId?.let(likes::toggle)
     }
 
     // The song on now when it was found online, for the download button

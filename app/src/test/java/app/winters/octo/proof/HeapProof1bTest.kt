@@ -657,7 +657,7 @@ class HeapProof1bTest {
             steps.step("the 100,000-song album's page") { browse("the 100,000-song album", albumLibraryLoader(dao, unknown.first), expect = PROOF_SONGS / 2) }
             timed("album top disc check, 100,000 songs", "no bound") { libraryOtherDisc(w.db, unknown.first, 1) }
             steps.step("the 100,000-song album's listing copy") {
-                val listing = AlbumListing(w.db, w.merge, Drains(File(w.dir, "album-drain").apply { mkdirs() }), FreeSpace { Long.MAX_VALUE }) { emptyMap() }
+                val listing = AlbumListing(w.db, w.merge, Drains(File(w.dir, "album-drain").apply { mkdirs() }), FreeSpace { Long.MAX_VALUE }, { emptyMap() })
                 listing.build(WorkOwners.marked("vm:album"), unknown.first, w.fake.client(), runsOcto = false)
                 browse("the 100,000-song album's copy", albumCopyLoader(dao, WorkOwners.marked("vm:album")), expect = null)
             }

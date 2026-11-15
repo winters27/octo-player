@@ -88,9 +88,9 @@ class SongActionsTest {
     }
 
     @Test
-    fun aSongTheServerOwnsOffersNoDownloadOrRequest() {
+    fun aSongTheServerOwnsOffersNoDownloadOrRequest_ButItsHeart() {
         assertEquals(
-            listOf(PlayNext, AddToQueue, StartRadio, Info),
+            listOf(PlayNext, AddToQueue, StartRadio, Like, Info),
             songActions(find = true, radio = true, requestCopy = true, owned = true),
         )
     }

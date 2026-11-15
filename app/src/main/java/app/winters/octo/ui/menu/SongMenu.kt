@@ -186,7 +186,8 @@ fun songActions(
     requestCopy: Boolean = false,
     removeFromMine: Boolean = false,
     // A find that is the server's own song, which the phone's copy has not
-    // brought in yet (OwnedFinds): nothing to download or ask for.
+    // brought in yet (OwnedFinds): nothing to download or ask for, and its
+    // heart, as any library song has.
     owned: Boolean = false,
 ): List<SongAction> = buildList {
     add(SongAction.PlayNext)
@@ -199,6 +200,7 @@ fun songActions(
         }
         if (place.inPlaylist) add(SongAction.RemoveFromPlaylist)
         if (place.selectable) add(SongAction.Select)
+        if (owned) add(SongAction.Like)
     } else {
         if (lastPlaylist) add(SongAction.AddToLastPlaylist)
         add(SongAction.AddToPlaylist)

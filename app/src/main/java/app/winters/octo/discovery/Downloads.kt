@@ -22,6 +22,7 @@ import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
 import app.winters.octo.playback.FindMap
+import app.winters.octo.playback.LikeStore
 import app.winters.octo.server.ServerSync
 import app.winters.octo.server.serverSourceId
 import app.winters.octo.server.sourceId
@@ -108,6 +109,8 @@ class Downloads @Inject constructor(
     // linked to their library songs once a copy brings them.
     private val owned: OwnedFinds,
     private val sources: SourceDao,
+    // Taken lazily: an owned song's heart moves onto its library song.
+    private val likes: Lazy<LikeStore>,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var checks: Job? = null
@@ -308,7 +311,7 @@ class Downloads @Inject constructor(
         val kept = sessions.servers.value.servers.mapNotNull { it.sourceId }
         online.prune(serverSourceId(client.primaryUrl), kept + serverSourceId(client.primaryUrl), now - FORGET_MS)
         forgetDeleted(serverSourceId(client.primaryUrl))
-        linkOwnedFinds(sources, online, finds, serverSourceId(client.primaryUrl), owned.serverIds())
+        linkOwnedFinds(sources, online, finds, serverSourceId(client.primaryUrl), owned.serverIds()) { find, track -> likes.get().ownedArrived(find, track) }
         val waiting = online.waiting().ifEmpty { return }
         adoptWaiting(
             waiting,

@@ -19,7 +19,7 @@
 - **Album search works where it used to come back empty.** In countries where the music catalog hides albums from searches, like movie soundtracks, Octo finds them through Apple's catalog instead, and a whole album downloads.
 - On a partly held album, saving it to your phone counts only the songs it saves.
 - **A song you delete can come back.** Search drops its check mark once your library no longer has it, and hearting it again downloads it again.
-- **Your server's songs are never offered as found online.** A song added to your library since the phone last copied it, or still on its way in a first copy, shows and plays as yours in radio, stations and lists, with no add button, and the phone brings it into your library on its own.
+- **Your server's songs are never offered as found online.** A song added to your library since the phone last copied it, or still on its way in a first copy, shows and plays as yours in radio, stations, lists and its album, with its heart and no add button, and the phone brings it into your library on its own.
 
 ## Playback
 

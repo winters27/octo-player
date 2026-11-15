@@ -20,6 +20,7 @@ import app.winters.octo.data.SessionState
 import app.winters.octo.data.accountId
 import app.winters.octo.data.runsOcto
 import app.winters.octo.playback.FindMap
+import app.winters.octo.playback.LikeStore
 import app.winters.octo.playback.tracksByIds
 import app.winters.octo.server.Arriving
 import app.winters.octo.server.ServerSync
@@ -164,6 +165,8 @@ class Discovery @Inject constructor(
     private val finds: FindMap,
     // Songs of the server's library its lists named that the copy lacks.
     private val owned: OwnedFinds,
+    // Taken lazily: an owned song's heart moves onto its library song.
+    private val likes: Lazy<LikeStore>,
 ) {
     // Names each drained answer read here, so two never share a file.
     private val drained = AtomicLong()
@@ -325,7 +328,9 @@ class Discovery @Inject constructor(
         val (album, sent) = drains.use("library-album-${drained.incrementAndGet()}.json") { file -> client.listingUpTo(native, file, most) }
         animatedArts.note(client, native, album.animatedArt)
         sent ?: return null
-        return outsideAlbumSongs(sent, resolve(client, sourceId, sent))
+        val resolved = resolve(client, sourceId, sent)
+        ownedSongs(sourceId, ownedAlbumSongs(sent, resolved), starredKnown = true)
+        return outsideAlbumSongs(sent, resolved)
     }
 
     suspend fun artist(id: String): OnlineArtistPage? {
@@ -407,19 +412,25 @@ class Discovery @Inject constructor(
         val (mine, outside) = found.partition { it.owned }
         owned.note(emptyList(), outside.map { it.song.id })
         val wanted = mine.mapTo(HashSet()) { it.song.nativeId }
-        ownedSongs(sourceId, songs.filter { it.id in wanted })
+        ownedSongs(sourceId, songs.filter { it.id in wanted }, starredKnown = true)
     }
 
     // Songs of the server's own library a read named that the copy lacks, on
     // server `sourceId`: noted as owned, and brought in as bringIn says.
-    fun ownedSongs(sourceId: String, songs: List<Song>) {
+    // With `starredKnown` (songs a full answer gave), each one's heart is
+    // whether the server stars it; songs made from a paged read's rows do
+    // not say, and keep the heart they had.
+    fun ownedSongs(sourceId: String, songs: List<Song>, starredKnown: Boolean = false) {
         if (songs.isEmpty()) return
-        owned.note(songs.map { findId(it.id) })
+        val stars = if (starredKnown) songs.associate { findId(it.id) to (it.starred != null) } else emptyMap()
+        owned.note(songs.map { findId(it.id) }, starred = stars)
         val asking = songs.distinctBy { it.id }.filter { bringing.add(it.id) }
         if (asking.isEmpty()) return
         scope.launch {
             try {
-                if (sync.get().takeInOwned(asking)) linkOwnedFinds(sources, online, finds, sourceId, asking.map { it.id })
+                if (sync.get().takeInOwned(asking)) {
+                    linkOwnedFinds(sources, online, finds, sourceId, asking.map { it.id }) { find, track -> likes.get().ownedArrived(find, track) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -63,6 +63,9 @@ class ListLoaders internal constructor(
     // The finds the library has taken in, by find, where known without
     // the downloads.
     private val adoptions: (() -> Map<String, String>)? = null,
+    // Takes the server's own songs an album listing named that the copy
+    // lacks (Discovery.ownedSongs).
+    private val owned: (String, List<app.winters.octo.subsonic.Song>) -> Unit = { _, _ -> },
 ) {
     @Inject constructor(
         db: CatalogDatabase,
@@ -78,7 +81,12 @@ class ListLoaders internal constructor(
         health: Lazy<HealthBuild>,
         live: Lazy<LivePicks>,
         servers: Lazy<ServerReads>,
-    ) : this(db, merge, freeSpace, sets, owners, drains, totals, { (sessions.state.value as? SessionState.SignedIn)?.session }, downloads, library, health, live, servers = servers)
+        discovery: Lazy<app.winters.octo.discovery.Discovery>,
+    ) : this(
+        db, merge, freeSpace, sets, owners, drains, totals, { (sessions.state.value as? SessionState.SignedIn)?.session }, downloads, library, health, live,
+        servers = servers,
+        owned = { sourceId, songs -> discovery.get().ownedSongs(sourceId, songs, starredKnown = true) },
+    )
 
     private val dao = db.listsDao()
     private val songLists = SongLists(dao)
@@ -117,7 +125,7 @@ class ListLoaders internal constructor(
     suspend fun buildAlbum(owner: String, albumId: String, keepLibrary: Boolean = true): Boolean {
         val session = signedIn()
         val taken = adoptions ?: { downloads.get().adoptions.value.orEmpty() }
-        return AlbumListing(db, merge, drains, freeSpace, taken)
+        return AlbumListing(db, merge, drains, freeSpace, taken, owned)
             .build(owner, albumId, session?.client, session?.runsOcto == true, keepLibrary = keepLibrary)
     }
 

@@ -33,10 +33,15 @@ class WholeAlbumTest {
     }
 
     @Test
-    fun anUnmarkedSongTheLibraryLacksIsLeftForTheNextCopy() {
-        // Added to the server since the library was copied: not a find.
-        val out = outsideAlbumSongs(listOf(sent("s9", 9, outside = false)), listOf(track("find:s9", "Song s9")))
-        assertEquals(emptyList<TrackEntity>(), out)
+    fun anUnmarkedSongTheLibraryLacksIsTheServersOwnInItsPlace() {
+        // Added to the server since the library was copied: the server's
+        // own, shown in its place and numbered, never found online.
+        val sent = listOf(sent("s2", 2, outside = false), sent("s9", 9, outside = false), sent("s5", 5, outside = true))
+        val resolved = listOf(two, track("find:s9", "Song s9"), track("find:s5", "Song s5"))
+        val out = outsideAlbumSongs(sent, resolved)
+        assertEquals(listOf("t2", "find:s9", "find:s5"), out.map { it.id })
+        assertEquals(9, out[1].trackNo)
+        assertEquals(listOf("s9"), ownedAlbumSongs(sent, resolved).map { it.id })
     }
 
     @Test

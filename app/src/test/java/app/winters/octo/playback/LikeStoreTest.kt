@@ -3,6 +3,11 @@ package app.winters.octo.playback
 import app.winters.octo.catalog.CatalogDatabase
 import app.winters.octo.catalog.LikedTrackEntity
 import app.winters.octo.catalog.mosaicCovers
+import app.winters.octo.discovery.OwnedFinds
+import app.winters.octo.discovery.Resolved
+import app.winters.octo.discovery.heartOwned
+import app.winters.octo.discovery.resolveSongs
+import app.winters.octo.subsonic.Song
 import app.winters.octo.listening.ListeningStore
 import app.winters.octo.listening.ListeningSync
 import app.winters.octo.listening.MemoryPrefs
@@ -37,10 +42,10 @@ class LikeStoreTest {
     @After
     fun close() = db.close()
 
-    private fun CatalogDatabase.likes(): LikeStore {
+    private fun CatalogDatabase.likes(owned: OwnedFinds = OwnedFinds()): LikeStore {
         val rows = listeningDao()
         val listening = ListeningSync({ null }, sourceDao(), userDao(), dao(), rows, ListeningStore(MemoryPrefs(), MutableStateFlow(null), rows), TestRebuilds())
-        return LikeStore(userDao(), dao(), listening, this, app.winters.octo.catalog.SongIds(this, testMerge(null)))
+        return LikeStore(userDao(), dao(), listening, this, app.winters.octo.catalog.SongIds(this, testMerge(null)), owned)
     }
 
     private suspend fun like(n: Int, at: Long = n.toLong()) = db.userDao().like(LikedTrackEntity("device:s$n", "key:$n", at))
@@ -61,6 +66,49 @@ class LikeStoreTest {
         assertTrue("$bound", bound.boundArgs <= 900)
         val most = db.counted.maxRead!!
         assertTrue("$most", most.rowsRead <= 900)
+    }
+
+    // An unmarked, unlinked song in a list Octo marked is the server's own:
+    // its heart stars it on the server by its server id and shows filled at
+    // once, and comes off the same way. A song found online has no heart.
+    @Test
+    fun anOwnedSongsHeartStarsItsServerIdAndShowsAtOnce() = timed(30) {
+        val outside = Song("e1", "Genesis", artist = "Justice", isExternal = true)
+        val added = Song("s2", "Aerodynamic", artist = "Daft Punk")
+        val owned = OwnedFinds()
+        val resolved = resolveSongs(listOf(outside, added), "server:x", emptyMap(), emptyList(), 0).map { it as Resolved.Found }
+        owned.note(resolved.filter { it.owned }.map { it.song.id }, resolved.filterNot { it.owned }.map { it.song.id })
+        val stars = mutableListOf<Pair<String, Boolean>>()
+        assertEquals(true, heartOwned(owned, "find:s2") { id, on -> stars += id to on })
+        assertEquals(listOf("s2" to true), stars)
+        assertEquals(false, heartOwned(owned, "find:s2") { id, on -> stars += id to on })
+        assertEquals(listOf("s2" to true, "s2" to false), stars)
+        assertEquals(null, heartOwned(owned, "find:e1") { id, on -> stars += id to on })
+        assertEquals(2, stars.size)
+
+        // Through the store, as the player's heart taps it.
+        val likes = db.likes(owned)
+        likes.toggle("find:s2")
+        assertTrue(likes.likedFlow("find:s2").first())
+        assertTrue(likes.isLiked("find:s2"))
+        assertEquals(setOf("find:s2"), likes.likedAmong(listOf("find:s2", "find:e1", "device:s1")).first())
+        likes.toggle("find:e1")
+        assertFalse(likes.likedFlow("find:e1").first())
+    }
+
+    @Test
+    fun anOwnedSongsHeartMovesOntoItsLibrarySongWhenItArrives() = timed(30) {
+        val owned = OwnedFinds()
+        owned.note(listOf("find:s2"), starred = mapOf("find:s2" to true))
+        db.dao().insertTracks(listOf(songRow("server:x:s2", "al1", null)))
+        val likes = db.likes(owned)
+        likes.ownedArrived("find:s2", "server:x:s2")
+        assertTrue(likes.isLiked("server:x:s2"))
+        // One the server did not star stays as it was.
+        owned.note(listOf("find:s3"), starred = mapOf("find:s3" to false))
+        db.dao().insertTracks(listOf(songRow("server:x:s3", "al1", null)))
+        likes.ownedArrived("find:s3", "server:x:s3")
+        assertFalse(likes.isLiked("server:x:s3"))
     }
 
     @Test

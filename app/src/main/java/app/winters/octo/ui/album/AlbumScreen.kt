@@ -93,6 +93,7 @@ import app.winters.octo.discovery.TopSongsSource
 import app.winters.octo.discovery.albumHighlight
 import app.winters.octo.discovery.DownloadState
 import app.winters.octo.discovery.Downloads
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.discovery.wholeAlbum
 import app.winters.octo.listening.FavouriteKind
 import app.winters.octo.playback.PlaybackConnection
@@ -102,6 +103,7 @@ import app.winters.octo.ui.common.CHECK_SETTLE_MS
 import app.winters.octo.ui.common.DetailTopGap
 import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.LocalAdoptedFinds
+import app.winters.octo.ui.common.LocalOwnedFinds
 import app.winters.octo.ui.common.Pickable
 import app.winters.octo.ui.common.HeaderControlLine
 import app.winters.octo.ui.common.HeaderMore
@@ -159,6 +161,8 @@ class AlbumViewModel @AssistedInject constructor(
     private val db: CatalogDatabase,
     owners: WorkOwners,
     private val merge: CatalogMerge,
+    // The server's own songs the copy lacks: library songs, never missing.
+    private val owned: OwnedFinds,
 ) : ViewModel() {
     val album: StateFlow<AlbumEntity?> =
         dao.album(id).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -246,8 +250,11 @@ class AlbumViewModel @AssistedInject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     val bigHeader: StateFlow<BigAlbumHeader?> by lazy {
         val generation = pages.flatMapLatest { handle -> handle?.shown?.map { handle.asked.value to it?.generation } ?: flowOf(null) }
-        val adopted = downloads.phases.map(::adoptedFinds).distinctUntilChanged()
-        combine(generation, hugeFinds, downloads.states, adopted) { shown, finds, states, done -> HeaderInputs(shown?.first, finds, states, done) }
+        // Songs the server owns count as in the library and are never asked for.
+        val adopted = combine(downloads.phases, owned.ids) { phases, mine -> adoptedFinds(phases) to mine }.distinctUntilChanged()
+        combine(generation, hugeFinds, downloads.states, adopted) { shown, finds, states, (done, mine) ->
+            HeaderInputs(shown?.first, finds, states + mine.associateWith { DownloadState.Done }, done + mine)
+        }
             .conflate()
             .map { inputs -> inputs.withFinds?.let { bigHeaderOf(it, inputs.finds, inputs.states, inputs.adopted) } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -567,8 +574,14 @@ private fun HeldAlbumSongs(id: String, vm: AlbumViewModel, onOpen: (NavKey) -> U
     val states by vm.downloadStates.collectAsStateWithLifecycle()
     // Whether the album lists songs found online, so every row says which
     // songs are in the library; `missing` whether it has any, shown or not.
-    val mixed = tracks.any { isFind(it.id) }
-    val missing = whole.any { isFind(it.id) }
+    // A song the server owns that the copy lacks is the library's.
+    val owned = LocalOwnedFinds.current
+    val outsideFind = { track: TrackEntity -> isFind(track.id) && track.id !in owned }
+    val mixed = tracks.any(outsideFind)
+    val missing = whole.any(outsideFind)
+    // Whether the rows are more than the library's own, so the heading
+    // counts the rows.
+    val listed = tracks.any { isFind(it.id) }
     val moreByArtist by vm.moreByArtist.collectAsStateWithLifecycle()
     val highlight by vm.highlight.collectAsStateWithLifecycle()
 
@@ -585,14 +598,14 @@ private fun HeldAlbumSongs(id: String, vm: AlbumViewModel, onOpen: (NavKey) -> U
                     AlbumTop(
                         id, a, vm, onOpen,
                         AlbumTopFacts(
-                            songs = if (mixed) tracks.size else a.songCount,
-                            lengthSeconds = if (mixed) (tracks.sumOf { it.durationMs } / 1000).toInt() else (a.durationMs / 1000).toInt(),
+                            songs = if (listed) tracks.size else a.songCount,
+                            lengthSeconds = if (listed) (tracks.sumOf { it.durationMs } / 1000).toInt() else (a.durationMs / 1000).toInt(),
                             genre = albumGenre(library),
                             average = averageRating(library),
                             whole = whole.size,
                             outside = outside,
-                            askable = whole.count { isFind(it.id) && (states[it.id] ?: DownloadState.None) == DownloadState.None },
-                            coming = whole.count { isFind(it.id) && states[it.id] == DownloadState.Requested },
+                            askable = whole.count { outsideFind(it) && (states[it.id] ?: DownloadState.None) == DownloadState.None },
+                            coming = whole.count { outsideFind(it) && states[it.id] == DownloadState.Requested },
                             missing = missing,
                         ),
                         download = albumDownloadItem(library, outside),

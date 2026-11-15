@@ -20,6 +20,21 @@ class OwnedFindsTest {
     }
 
     @Test
+    fun aHeartFollowsTheServersStarAndGoesWithItsSong() {
+        val owned = OwnedFinds(kept = 2)
+        owned.note(listOf("find:a", "find:b"), starred = mapOf("find:a" to true, "find:b" to false))
+        assertEquals(setOf("find:a"), owned.liked.value)
+        assertEquals(true, owned.heart("find:b"))
+        assertEquals(null, owned.heart("find:x"))
+        // A later answer says "a" is no longer starred.
+        owned.note(listOf("find:a"), starred = mapOf("find:a" to false))
+        assertEquals(setOf("find:b"), owned.liked.value)
+        // Past the cap "b" goes, and its heart with it.
+        owned.note(listOf("find:c"))
+        assertEquals(emptySet<String>(), owned.liked.value)
+    }
+
+    @Test
     fun pastTheCapTheOldestGoFirst_AndOneSeenAgainIsNewest() {
         val owned = OwnedFinds(kept = 2)
         owned.note(listOf("find:a", "find:b"))

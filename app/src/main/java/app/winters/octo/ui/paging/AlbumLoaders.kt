@@ -142,9 +142,9 @@ suspend fun serverAlbumVote(db: CatalogDatabase, albumId: String, sourceId: Stri
 // Streams a library album's listing on an Octo server into a copy under
 // `owner`, resolving each page as today's album page does (a song the
 // library has from the server is that song, one with the same title and
-// artist is that song, the rest are finds, and only finds the server marks
-// as outside the library stay, numbered as the album numbers them; a find
-// already downloaded shows as the song it became), then adds the album's
+// artist is that song, the rest are finds, numbered as the album numbers
+// them, and those the server does not mark are its own, handed to `owned`;
+// a find already downloaded shows as the song it became), then adds the album's
 // library songs the listing left out. The answer is drained to a file
 // first and its finds counted over the file; a listing with none writes
 // nothing, since the album then shows and plays as the library has it,
@@ -159,6 +159,9 @@ class AlbumListing(
     private val drains: Drains,
     private val freeSpace: FreeSpace,
     private val adoptions: () -> Map<String, String>,
+    // Takes the server's own songs the listing named that the copy lacks, on
+    // the server of that source id.
+    private val owned: (String, List<Song>) -> Unit = { _, _ -> },
 ) {
     private val dao = db.listsDao()
     private val sources = db.sourceDao()
@@ -183,15 +186,16 @@ class AlbumListing(
             if (native != null) {
                 drains.use("album-${owner.replace(':', '-').replace('/', '-')}.json") { file ->
                     client.drainAlbum(native, file, room = { written -> room(written * 2) })
-                    // Only a song the server marks as outside the library can
-                    // stay a find, so a page with none of them holds none.
+                    // A page holds a find when it holds a song the server
+                    // marks as outside the library, or one of the server's
+                    // own the copy lacks.
                     var counted = false
                     client.readAlbum(file) { songs ->
-                        if (!counted && songs.any { it.isExternal }) counted = resolve(songs, sourceId, albumId, now).any { (_, shown) -> shown.second }
+                        if (!counted) counted = resolve(songs, sourceId, albumId, now).any { (_, shown) -> shown.second }
                     }
                     if (counted) {
                         client.readAlbum(file) { songs ->
-                            val entries = resolve(songs, sourceId, albumId, now).map { (song, shown) ->
+                            val entries = resolve(songs, sourceId, albumId, now) { mine -> owned(sourceId, mine) }.map { (song, shown) ->
                                 ListsAlbumEntryEntity(owner, position++, song.id, shown.first, shown.second, null, shown.third?.first, shown.third?.second)
                             }
                             finds = finds || entries.any { it.isFind }
@@ -210,8 +214,15 @@ class AlbumListing(
 
     // Each song of a page as the album page shows it: its shown id, whether
     // that is a find, and a find's track and disc number; songs dropped as
-    // today's outsideAlbumSongs drops them are left out.
-    private suspend fun resolve(songs: List<Song>, sourceId: String, albumId: String, now: Long): List<Pair<Song, Triple<String, Boolean, Pair<Int?, Int?>?>>> {
+    // outsideAlbumSongs drops them are left out. The server's own songs the
+    // copy lacks among them are handed to `onOwned`.
+    private suspend fun resolve(
+        songs: List<Song>,
+        sourceId: String,
+        albumId: String,
+        now: Long,
+        onOwned: ((List<Song>) -> Unit)? = null,
+    ): List<Pair<Song, Triple<String, Boolean, Pair<Int?, Int?>?>>> {
         if (songs.isEmpty()) return emptyList()
         val links = songs.map { it.id }.distinct().chunked(900).flatMap { sources.libraryLinks(sourceId, it) }.associate { it.serverId to it.trackId }
         val unlinked = songs.filter { it.id !in links }
@@ -226,21 +237,24 @@ class AlbumListing(
         val adopted = adoptions().filterKeys { id -> songs.any { findId(it.id) == id } }
         val targets = adopted.values.distinct().chunked(900).flatMap { catalog.tracksByIdsUnordered(it) }
             .filter { it.albumId == albumId }.mapTo(HashSet()) { it.id }
-        return songs.zip(resolved).mapNotNull { (song, r) ->
+        val mine = ArrayList<Song>()
+        val rows = songs.zip(resolved).mapNotNull { (song, r) ->
             when (val each = asAdopted(if (r is Resolved.Found) kept[r.song.id]?.let { r.copy(song = it) } ?: r else r, present.keys)) {
                 // A song the library no longer has is left out, as today.
                 is Resolved.InLibrary -> if (each.trackId in present) song to Triple(each.trackId, false, null) else null
                 is Resolved.Found -> {
-                    // Only a song the server marks as outside the library
-                    // stays a find. One it owns is never offered as found
-                    // online; it comes in with the next copy or look, and
-                    // the album shows it from then on.
-                    if (each.owned || !song.isExternal) return@mapNotNull null
+                    // A song the server does not mark is the server's own
+                    // (Octo marks every song of a library album's listing it
+                    // lacks), so it is in its place as a library song that
+                    // streams (OwnedFinds) until the copy brings it in.
+                    if (!song.isExternal) mine += song
                     val shown = adopted[each.song.id]?.takeIf { it in targets } ?: each.song.id
                     song to Triple(shown, isFind(shown), (song.track?.takeIf { it > 0 } to song.discNumber?.takeIf { it > 0 }))
                 }
             }
         }
+        if (mine.isNotEmpty()) onOwned?.invoke(mine)
+        return rows
     }
 
     // The album's library songs the listing does not show, after it, by

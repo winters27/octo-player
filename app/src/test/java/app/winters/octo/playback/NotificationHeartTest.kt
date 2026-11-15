@@ -19,6 +19,12 @@ class NotificationHeartTest {
     }
 
     @Test
+    fun aSongTheServerOwnsHasItsHeart() {
+        assertEquals(NotificationHeart.Like(true), notificationHeart("find:9", true, emptyMap(), owned = setOf("find:9")))
+        assertEquals(NotificationHeart.Like(false), notificationHeart("find:9", false, emptyMap(), owned = setOf("find:9")))
+    }
+
+    @Test
     fun aStationOrNothingPlayingShowsNeither() {
         assertEquals(NotificationHeart.None, notificationHeart("radio:x", false, emptyMap()))
         assertEquals(NotificationHeart.None, notificationHeart(null, false, emptyMap()))

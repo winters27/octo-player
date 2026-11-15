@@ -38,6 +38,7 @@ import app.winters.octo.data.accountId
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
+import app.winters.octo.discovery.OwnedFinds
 import app.winters.octo.discovery.asTrack
 import app.winters.octo.liveradio.LiveLookup
 import app.winters.octo.offline.OfflineDownloads
@@ -162,6 +163,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var autoplay: Autoplay
     @Inject lateinit var stationRefill: StationRefill
     @Inject lateinit var downloads: Downloads
+    @Inject lateinit var owned: OwnedFinds
     @Inject lateinit var online: OnlineDao
     @Inject lateinit var lengths: FindLengths
     @Inject lateinit var realLengths: RealLengths
@@ -330,7 +332,8 @@ class OctoPlaybackService : MediaLibraryService() {
         scope.launch {
             currentId
                 .flatMapLatest { id -> (if (id == null) flowOf(false) else likes.likedFlow(id)).map { id to it } }
-                .combine(downloads.states) { (id, isLiked), states -> notificationHeart(id, isLiked, states) }
+                .combine(downloads.states) { pair, states -> pair to states }
+                .combine(owned.ids) { (pair, states), mine -> notificationHeart(pair.first, pair.second, states, mine) }
                 .combine(stationOnAir) { heart, onAir -> heart to onAir }
                 .distinctUntilChanged()
                 .collect { (heart, onAir) ->
@@ -741,7 +744,7 @@ class OctoPlaybackService : MediaLibraryService() {
             }
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
-            val why = playFailureWords(error, isFind(player.currentMediaItem?.mediaId.orEmpty()))
+            val why = playFailureWords(error, player.currentMediaItem?.mediaId.orEmpty().let { isFind(it) && it !in owned })
             // A station that cannot play stops there: the next station is
             // the listener's to choose.
             val queued = maxOf(window.logicalCount.value, player.mediaItemCount)
@@ -916,7 +919,7 @@ class OctoPlaybackService : MediaLibraryService() {
             args: Bundle,
         ): ListenableFuture<SessionResult> {
             when (customCommand) {
-                LIKE -> currentId.value?.takeUnless(::isFind)?.let(likes::toggle)
+                LIKE -> currentId.value?.let(likes::toggle)
                 DOWNLOAD -> downloadCurrent()
                 CLOSE -> close()
                 // A station stops, and lets its stream go.

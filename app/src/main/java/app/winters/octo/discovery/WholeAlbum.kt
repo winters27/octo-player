@@ -6,17 +6,25 @@ import app.winters.octo.catalog.isFind
 import app.winters.octo.subsonic.Song
 
 // A library album's songs as the server sent them (`sent`), resolved to
-// library songs and finds in the same order (`resolved`). Only songs the
-// server marks as outside the library stay finds, each numbered as the
-// album numbers it: a song with no mark that the library lacks was added
-// to the server since the last copy, and the next copy brings it in.
+// library songs and finds in the same order (`resolved`), each find
+// numbered as the album numbers it. A find the server marks is outside the
+// library; one with no mark is the server's own (ownedAlbumSongs), added
+// since the last copy, and shows in its place as a library song that
+// streams until the copy brings it in.
 fun outsideAlbumSongs(sent: List<Song>, resolved: List<TrackEntity>): List<TrackEntity> {
-    val marked = sent.filter { it.isExternal }.associateBy { findId(it.id) }
+    val songs = sent.associateBy { findId(it.id) }
     return resolved.mapNotNull { track ->
         if (!isFind(track.id)) return@mapNotNull track
-        val song = marked[track.id] ?: return@mapNotNull null
+        val song = songs[track.id] ?: return@mapNotNull null
         track.copy(trackNo = song.track?.takeIf { it > 0 }, discNo = song.discNumber?.takeIf { it > 0 })
     }
+}
+
+// The songs of a library album's listing (`sent`) that the server owns and
+// the copy lacks: unmarked ones that resolved to finds (`resolved`).
+fun ownedAlbumSongs(sent: List<Song>, resolved: List<TrackEntity>): List<Song> {
+    val finds = resolved.filter { isFind(it.id) }.mapTo(HashSet()) { it.id }
+    return sent.filter { !it.isExternal && findId(it.id) in finds }.distinctBy { it.id }
 }
 
 // A library album whole: the server's songs in the server's order (see

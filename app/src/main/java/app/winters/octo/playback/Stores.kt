@@ -9,6 +9,10 @@ import app.winters.octo.catalog.RENAME_SONG
 import app.winters.octo.catalog.SongIds
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.UserDao
+import app.winters.octo.catalog.findId
+import app.winters.octo.catalog.isFind
+import app.winters.octo.discovery.OwnedFinds
+import app.winters.octo.discovery.heartOwned
 import app.winters.octo.listening.ListenBrainzSync
 import app.winters.octo.listening.ListeningSync
 import app.winters.octo.listening.PlayTotals
@@ -46,7 +50,9 @@ private const val LIKED_COVER_PAGE = 100
 // tap reads the song's id now, whether it is liked and its key, and writes,
 // all between groups of a save, and the server's copy follows that id. While
 // a save is part way a like may be on a song's old id or its new one, and
-// either shows the heart.
+// either shows the heart. A song the server owns that the phone's copy has
+// not brought in yet (OwnedFinds) has its heart there, as the server's star
+// of the song; once the song is in, its heart moves onto it (ownedArrived).
 @Singleton
 class LikeStore @Inject constructor(
     private val userDao: UserDao,
@@ -54,25 +60,44 @@ class LikeStore @Inject constructor(
     private val listening: ListeningSync,
     private val db: CatalogDatabase,
     private val ids: SongIds,
+    private val owned: OwnedFinds = OwnedFinds(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // Whether one song is liked, as it changes.
-    fun likedFlow(trackId: String): Flow<Boolean> = userDao.likedFlow(trackId).distinctUntilChanged()
+    fun likedFlow(trackId: String): Flow<Boolean> =
+        if (isFind(trackId)) owned.liked.map { trackId in it }.distinctUntilChanged() else userDao.likedFlow(trackId).distinctUntilChanged()
 
     // Which of these songs are liked, as that changes, asked about 900 at a
     // time.
     // Read again on each change of the likes or the renames in force: a
     // song shows as liked through either of its ids (UserDao.shownLikedAmong).
     fun likedAmong(trackIds: Collection<String>): Flow<Set<String>> {
-        val chunks = trackIds.distinct().chunked(LIKED_CHUNK)
-        if (chunks.isEmpty()) return flowOf(emptySet())
-        return db.invalidationTracker.createFlow("liked_track", "save_rename")
-            .map { chunks.flatMapTo(HashSet()) { userDao.shownLikedAmong(it) } }
-            .distinctUntilChanged()
+        val (finds, library) = trackIds.distinct().partition(::isFind)
+        val chunks = library.chunked(LIKED_CHUNK)
+        val shown: Flow<Set<String>> = if (chunks.isEmpty()) {
+            flowOf(emptySet())
+        } else {
+            db.invalidationTracker.createFlow("liked_track", "save_rename")
+                .map { chunks.flatMapTo(HashSet()) { userDao.shownLikedAmong(it) } }
+        }
+        if (finds.isEmpty()) return shown.distinctUntilChanged()
+        return combine(shown, owned.liked) { mine, hearts -> mine + finds.filter { it in hearts } }.distinctUntilChanged()
     }
 
-    suspend fun isLiked(trackId: String): Boolean = userDao.isLiked(trackId)
+    suspend fun isLiked(trackId: String): Boolean = if (isFind(trackId)) trackId in owned.liked.value else userDao.isLiked(trackId)
+
+    // An owned song (`findId`) is in the library now as `trackId`: a heart it
+    // had is put on the library song, which the server already stars.
+    suspend fun ownedArrived(findId: String, trackId: String) {
+        if (findId !in owned.liked.value) return
+        ids.write {
+            val id = ids.song(trackId)
+            if (userDao.isLiked(id)) return@write
+            val track = catalog.track(id) ?: return@write
+            userDao.like(LikedTrackEntity(id, track.relinkKey, System.currentTimeMillis()))
+        }
+    }
 
     // A count that moves on every change of the likes, and once at first.
     val changes: Flow<Long> = flow {
@@ -96,7 +121,13 @@ class LikeStore @Inject constructor(
         return picker.covers
     }
 
+    // A find has a heart only when the server owns it (heartOwned); any
+    // other has none, and this does nothing.
     fun toggle(trackId: String) {
+        if (isFind(trackId)) {
+            heartOwned(owned, trackId) { serverId, on -> listening.likeChanged(findId(serverId), on) }
+            return
+        }
         scope.launch {
             val (id, liked) = ids.write {
                 val id = ids.song(trackId)

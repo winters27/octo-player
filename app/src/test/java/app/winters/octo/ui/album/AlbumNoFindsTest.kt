@@ -100,4 +100,17 @@ class AlbumNoFindsTest {
         assertTrue(listing.build(WorkOwners.marked("vm:1"), "al", server.client, runsOcto = true, keepLibrary = false))
         assertEquals(n + 6, rows(WorkOwners.marked("vm:1")))
     }
+
+    // A song of the server's own the copy lacks, with no mark and nothing
+    // marked beside it, is in its place too, and handed on to be brought in.
+    @Test
+    fun aListingWithTheServersOwnSongTheCopyLacksShowsItInPlace() = timed(90) {
+        db.albumOnServer(n, server.sourceId) { 1 }
+        server.listing = (0 until n).map { listed(it) } + app.winters.octo.subsonic.Song(id = "u1", title = "Unmarked", artist = "Band", albumId = "srv")
+        val handed = mutableListOf<String>()
+        val listing = AlbumListing(db, db.testMerge(server.sourceId), Drains(drainDir), { Long.MAX_VALUE }, { emptyMap() }) { _, songs -> handed += songs.map { it.id } }
+        assertTrue(listing.build(WorkOwners.marked("vm:1"), "al", server.client, runsOcto = true, keepLibrary = false))
+        assertEquals(n + 1, rows(WorkOwners.marked("vm:1")))
+        assertEquals(listOf("u1"), handed)
+    }
 }

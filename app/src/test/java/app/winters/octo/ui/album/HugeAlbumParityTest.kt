@@ -4,7 +4,7 @@ import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.catalog.WorkOwners
 import app.winters.octo.catalog.findId
 import app.winters.octo.data.Drains
-import app.winters.octo.discovery.today.outsideAlbumSongs
+import app.winters.octo.discovery.outsideAlbumSongs
 import app.winters.octo.discovery.today.wholeAlbum
 import app.winters.octo.listening.timed
 import app.winters.octo.testing.openTestCatalog
@@ -22,12 +22,13 @@ import java.nio.file.Files
 import kotlin.random.Random
 
 // A labeled pin: a huge album's page, streamed from the server's listing
-// into its copy and walked a page at a time, is today's whole album
-// (discovery/today's wholeAlbum over outsideAlbumSongs, as c2208eaa had
-// them): the server's order, a song listed twice shown once where it first
-// comes, finds the server marks as outside the library in their places, a
-// find since taken into the library as the song it became, a song the server
-// lists unmarked and the library lacks left out, and the library's songs
+// into its copy and walked a page at a time, is the held album's whole
+// album (discovery/today's wholeAlbum, as c2208eaa had it, over
+// outsideAlbumSongs as the held page makes it now): the server's order, a
+// song listed twice shown once where it first comes, finds the server marks
+// as outside the library in their places, a find since taken into the
+// library as the song it became, a song the server lists unmarked and the
+// library lacks in its place as the server's own, and the library's songs
 // the listing leaves out after it in album order.
 @RunWith(RobolectricTestRunner::class)
 class HugeAlbumParityTest {
@@ -79,6 +80,6 @@ class HugeAlbumParityTest {
         assertEquals(today, shown)
         assertEquals(today.size, albumCopyLoader(db.listsDao(), WorkOwners.marked("vm:1")).count())
         assertEquals("phone-only", shown.last())
-        assertTrue("t-taken" in shown && findId("f500") !in shown && findId("u1") !in shown)
+        assertTrue("t-taken" in shown && findId("f500") !in shown && findId("u1") in shown)
     }
 }
