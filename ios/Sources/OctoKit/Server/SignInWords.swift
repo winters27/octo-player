@@ -10,7 +10,9 @@ import FoundationNetworking
 public enum SignInWords {
     /// Advanced: its title, the line under it naming what is inside, and its three groups.
     public static let advanced = "Advanced"
-    public static let advancedLine = "Sign-in page, home address, sign-in method, headers, certificate"
+    /// A no-break space keeps the line's last two names together, so a wrapped line never ends on
+    /// one word.
+    public static let advancedLine = "Sign-in page, home address, method, headers,\u{00A0}certificate"
     public static let groupGettingThere = "Getting to your server"
     public static let groupSigningIn = "Signing in"
     public static let groupSpecialSetups = "Special setups"

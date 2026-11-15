@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.OctoType
+import app.winters.octo.subsonic.FamilyInviteLink
 import app.winters.octo.testing.PageLocals
 import app.winters.octo.testing.RobolectricComposeRule
 import org.junit.After
@@ -35,10 +36,11 @@ class SignInPolishTest {
     @get:Rule
     val ui = RobolectricComposeRule()
 
-    private fun open() {
+    private fun open(): SignInViewModel {
         val vm = signInForm(signIns)
         ui.compose.setContent { PageLocals { SignInScreen(onBack = {}, onDone = {}, vm = vm) } }
         ui.compose.waitForIdle()
+        return vm
     }
 
     // Red when Advanced's title is set as a section title (22 bold) again.
@@ -60,5 +62,31 @@ class SignInPolishTest {
         val button = ui.compose.onNode(hasText("Sign in") and hasClickAction()).fetchSemanticsNode()
         val scan = ui.compose.onNode(hasText("Scan a family QR code") and hasClickAction()).fetchSemanticsNode()
         assertEquals(button.positionInRoot.x + button.size.width, scan.positionInRoot.x + scan.size.width, 1f)
+    }
+
+    // A family link's other ways, the scanner and the way back to a password
+    // sign-in, end on the right edge of the button above them, where Scan a
+    // family QR code ends on the plain page. Red when they are centered.
+    @Test
+    fun aJoinsOtherWaysEndOnTheButtonsRightEdge() {
+        val vm = open()
+        vm.startJoin(FamilyInviteLink("https://music.example.com", "t1"))
+        ui.compose.waitForIdle()
+        val button = ui.compose.onNode(hasText("Sign up") and hasClickAction()).fetchSemanticsNode()
+        val right = button.positionInRoot.x + button.size.width
+        for (words in listOf("Scan the QR code", "Sign in with a password")) {
+            val node = ui.compose.onNode(hasText(words) and hasClickAction()).fetchSemanticsNode()
+            assertEquals(words, right, node.positionInRoot.x + node.size.width, 1f)
+        }
+    }
+
+    // An invite's note names its server as people read it, with no slash at
+    // its end. Red with "music.example.com/.".
+    @Test
+    fun anInvitesNoteNamesItsServerWithoutASlash() {
+        val vm = open()
+        vm.startJoin(FamilyInviteLink("https://music.example.com/", "t1"))
+        ui.compose.waitForIdle()
+        ui.compose.onNodeWithText("You're invited to music.example.com. Choose your name and a password. Your login then works in Octo and any other music app.").assertExists()
     }
 }

@@ -134,6 +134,7 @@ import app.winters.octo.ui.common.octoIcon
 import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.family.LocalQrScanner
 import app.winters.octo.ui.family.passwordStrength
+import app.winters.octo.ui.family.shownServer
 import app.winters.octo.ui.nav.ServerForm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -438,7 +439,8 @@ private fun MainCard(vm: SignInViewModel, addressFocus: FocusRequester, onKeyRow
         when {
             handOver != null -> {
                 FormDivider()
-                FormStatusRow(vm.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}", vm.busy)
+                val host = shownServer(handOver.server)
+                FormStatusRow(vm.handOverStep ?: if (vm.error != null) "Not signed in to $host yet" else "Ready to sign in to $host", vm.busy)
             }
             vm.invite != null -> {
                 FormDivider()
@@ -540,7 +542,7 @@ private fun MainNotes(vm: SignInViewModel) {
     when {
         vm.handOver != null -> FormNote("On your other device, tap Allow when it asks about this phone.")
         invite != null -> FormNote(
-            "You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.",
+            "You're invited to ${shownServer(invite.server)}. Choose your name and a password. Your login then works in Octo and any other music app.",
         )
         vm.joining -> FormNote(
             "Your invite, or Sign in on another device on your other phone or computer, shows a QR code. Scan it, or open its link on this phone.",
@@ -604,16 +606,20 @@ private fun JoinButtons(vm: SignInViewModel, scanAgain: FocusRequester) {
         )
     }
     ResultLine(vm)
-    if (vm.handOver == null) {
-        GlazeButton(
-            "Scan the QR code",
-            { vm.scanning = true },
-            size = ButtonSize.Small,
-            icon = octoIcon(OctoIcons.Camera),
-            modifier = Modifier.padding(top = 12.dp).focusRequester(scanAgain),
-        )
+    // The scanner and the way back to a password sign-in, under the button
+    // on its right edge, where Scan a family QR code sits on the plain page.
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        if (vm.handOver == null) {
+            GlazeButton(
+                "Scan the QR code",
+                { vm.scanning = true },
+                size = ButtonSize.Small,
+                icon = octoIcon(OctoIcons.Camera),
+                modifier = Modifier.padding(top = 12.dp).focusRequester(scanAgain),
+            )
+        }
+        GlazeButton("Sign in with a password", vm::stopJoin, enabled = !vm.committing, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
     }
-    GlazeButton("Sign in with a password", vm::stopJoin, enabled = !vm.committing, size = ButtonSize.Small, modifier = Modifier.padding(top = 12.dp))
 }
 
 // What the last attempt came to, under its button: while the sign-in page

@@ -64,7 +64,7 @@
   "field.CloudflareToken.PasswordPrompt.second": "Client Secret",
   "field.CloudflareToken.SignInPage.first": "Client ID",
   "field.CloudflareToken.SignInPage.second": "Client Secret",
-  "pointer": "Your server's sign-in page needs its own login, below.",
+  "pointer": "Your server's sign-in page needs its own login, under Advanced.",
   "join.hint": "If you don't have an account on this sign-in page, ask who invited you.",
   "share.line": "This server has a sign-in page in front of it, so people need an account there to open this link.",
   "play.failure": "A sign-in page answered instead of the server.",

@@ -31,23 +31,48 @@ class FormPolishSitesTest {
         assertFalse(card, card.contains("OctoColors.Accent"))
     }
 
-    // Red when Advanced's head centers its chevron on its two lines again
-    // (it sags under the title), or the chevron ends past the rows' right
+    // Red when Advanced's head centers its chevron on its two lines again (it
+    // sags under the title), sets it a fixed distance from the title's line
+    // (it rides high at a larger font scale), or ends it past the rows' right
     // edge.
     @Test
     fun advancedsChevronSitsOnItsTitleAndTheRowsEdge() {
         val head = between(groups, "fun FormSectionHead(", "\n}\n")
-        assertTrue(head, head.contains(".padding(start = 4.dp, end = RowSides, top = 10.dp, bottom = 10.dp),"))
-        assertTrue(head, head.contains("verticalAlignment = Alignment.Top,"))
-        assertFalse(head, head.contains("Alignment.CenterVertically"))
+        listOf(
+            ".padding(start = 4.dp, end = RowSides, top = 10.dp, bottom = 10.dp),",
+            "val cap = rememberCapHeightPx(OctoType.formGroup)",
+            "Column(Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() }) {",
+            "modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(20.dp).rotate(turn))",
+        ).forEach { assertTrue(it, head.contains(it)) }
+        assertFalse(head, head.contains("verticalAlignment"))
     }
 
-    // Red when a choice row centers its chevron on its lines again.
+    // Red when a choice row centers its chevron on its lines again, or lifts
+    // it a fixed distance over the name's line.
     @Test
     fun aChoicesChevronSitsOnItsName() {
         val choice = between(groups, "fun FormChoiceRow(", "\n}\n")
-        assertTrue(choice, choice.contains("verticalAlignment = Alignment.Top,\n            horizontalArrangement = Arrangement.spacedBy(ChoiceGap),"))
-        assertTrue(choice, choice.contains("modifier = Modifier.offset(y = -ChevronLift).size(ChoiceChevron)"))
+        listOf(
+            "val cap = rememberCapHeightPx(OctoType.formName)",
+            "Column(Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() }) {",
+            "modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(ChoiceChevron))",
+        ).forEach { assertTrue(it, choice.contains(it)) }
+        assertFalse(choice, choice.contains("ChevronLift"))
+    }
+
+    // Red when a note's or an error's glyph goes back to a fixed distance under
+    // its words' first line.
+    @Test
+    fun aNotesGlyphSitsOnItsFirstLine() {
+        for (start in listOf("fun FormNote(", "fun FormError(")) {
+            val note = between(groups, start, "\n}\n")
+            listOf(
+                "val cap = rememberCapHeightPx(OctoType.formNote)",
+                ".alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() }",
+                "modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(16.dp))",
+            ).forEach { assertTrue("$start $it", note.contains(it)) }
+            assertFalse(note, note.contains("padding(top = 1.dp)"))
+        }
     }
 
     // Red when the page's scroll loses its bottom fade, a fade pops in at full

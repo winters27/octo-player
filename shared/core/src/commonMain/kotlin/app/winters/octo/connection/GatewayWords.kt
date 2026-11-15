@@ -24,8 +24,10 @@ object GatewayWords {
     const val PROBLEM_RESERVED_ROW = "That header is set by the sign-in page fields. Remove the row."
 
     // The line under Sign in while the sign-in page's group calls out a
-    // failure: a button that brings the group back into view.
-    const val POINTER = "Your server's sign-in page needs its own login, below."
+    // failure: a button that brings the group back into view. A no-break
+    // space keeps its last two words together, so a wrapped line never ends
+    // on one word.
+    const val POINTER = "Your server's sign-in page needs its own login, under Advanced."
 
     fun name(gateway: Gateway): String = when (gateway) {
         Gateway.Authentik -> "Authentik"
