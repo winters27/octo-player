@@ -139,6 +139,51 @@ struct GlazeButton: View {
     }
 }
 
+/// A question's two answers, the main one first and the other (Cancel) second: side by side while
+/// both fit at their own widths, the main one widened toward the other's width as far as the row
+/// allows, so it never reads as the lesser answer; stacked at the row's full width, the main one on
+/// top, where they do not fit side by side (long words, or large text on a narrow phone), so neither
+/// is cut. Each answer is drawn to the width it is given (`fillWidth`).
+struct AnswerRow: Layout {
+    var gap: CGFloat = 10
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let placed = placement(proposal, subviews)
+        let main = subviews[0].sizeThatFits(ProposedViewSize(width: placed.main, height: nil))
+        let other = subviews[1].sizeThatFits(ProposedViewSize(width: placed.other, height: nil))
+        if placed.stacked { return CGSize(width: placed.main, height: main.height + gap + other.height) }
+        return CGSize(width: placed.main + gap + placed.other, height: max(main.height, other.height))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let placed = placement(proposal, subviews)
+        let mainOffer = ProposedViewSize(width: placed.main, height: nil)
+        let otherOffer = ProposedViewSize(width: placed.other, height: nil)
+        let main = subviews[0].sizeThatFits(mainOffer)
+        let other = subviews[1].sizeThatFits(otherOffer)
+        if placed.stacked {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), proposal: mainOffer)
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + main.height + gap), proposal: otherOffer)
+        } else {
+            let height: CGFloat = max(main.height, other.height)
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY + (height - main.height) / 2), proposal: mainOffer)
+            subviews[1].place(at: CGPoint(x: bounds.minX + placed.main + gap, y: bounds.minY + (height - other.height) / 2),
+                              proposal: otherOffer)
+        }
+    }
+
+    /// Where the two go in the width offered, from each one's own width.
+    private func placement(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (stacked: Bool, main: CGFloat, other: CGFloat) {
+        let room: Double? = proposal.width.flatMap { $0.isFinite ? Double($0) : nil }
+        let placed = answerPlacement(main: Double(subviews[0].sizeThatFits(.unspecified).width),
+                                     other: Double(subviews[1].sizeThatFits(.unspecified).width),
+                                     gap: Double(gap), room: room)
+        return (placed.stacked, CGFloat(placed.main), CGFloat(placed.other))
+    }
+}
+
 /// A small text button for a lesser action beside a title, like "See all" or "Clear all": no
 /// border and no fill. `font` sets it in the words beside it instead, as under a list row's own
 /// lines.

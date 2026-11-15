@@ -132,6 +132,15 @@ public let handOverDenied = "Your other device said no. Nothing was shared."
 public let handOverExpired = "This sign-in link expired. Make a new one on your other device."
 public let handOverUnreachable = "Octo can't reach the server. Check this device is online, then try again."
 
+/// The hand-over's row on the sign-in page: the step under way, else, after a failure, that the
+/// phone is not signed in to `server` yet, else that it is ready to sign in there, the server named
+/// as people read it.
+public func handOverRowLine(step: String?, failed: Bool, server: String) -> String {
+    if let step { return step }
+    let host = shownServer(server)
+    return failed ? "Not signed in to \(host) yet" : "Ready to sign in to \(host)"
+}
+
 /// How the new device's side ended: the sign-in to keep, or why not. A refusal names the sign-in
 /// page in front of the server when one answered, and whether the app's sign-in for it went
 /// along.
