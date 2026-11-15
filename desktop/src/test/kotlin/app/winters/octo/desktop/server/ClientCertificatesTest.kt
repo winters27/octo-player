@@ -274,11 +274,16 @@ class ClientCertificatesTest {
             check(System.nanoTime() < deadline) { "the read never started" }
             Thread.onSpinWait()
         }
+        while (reads.joins == 0) {
+            check(System.nanoTime() < deadline) { "the second read never joined" }
+            Thread.onSpinWait()
+        }
         assertEquals(setOf(path), reads.reading)
         release.countDown()
         assertArrayEquals(byteArrayOf(1, 2, 3), first.await())
         assertArrayEquals(byteArrayOf(1, 2, 3), second.await())
         assertEquals(1, started.get())
+        assertEquals(1, reads.joins)
         assertTrue(reads.reading.isEmpty())
     }
 

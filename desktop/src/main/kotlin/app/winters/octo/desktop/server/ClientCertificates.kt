@@ -37,6 +37,7 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 import app.winters.octo.audio.Origin as EngineOrigin
 
 // The largest certificate file Octo reads: a PKCS #12 file holds a key and
@@ -300,9 +301,13 @@ fun unreadableRead(e: Throwable, name: String): CertificateLoad.Unreadable = whe
 class CertificateReads(private val read: (Path) -> ByteArray, private val boundMs: Long) {
     private val pool = Executors.newCachedThreadPool { work -> Thread(work, "octo-cert-read").apply { isDaemon = true } }
     private val inFlight = ConcurrentHashMap<Path, CompletableFuture<ByteArray>>()
+    private val joined = AtomicInteger()
 
     // The paths being read now, for tests.
     val reading: Set<Path> get() = inFlight.keys.toSet()
+
+    // How many callers joined a read under way, for tests.
+    val joins: Int get() = joined.get()
 
     // The read of `path` under way, or one started now. Only the caller
     // whose future went in starts the read, which completes that future and
@@ -310,7 +315,10 @@ class CertificateReads(private val read: (Path) -> ByteArray, private val boundM
     private fun started(path: Path): CompletableFuture<ByteArray> {
         val mine = CompletableFuture<ByteArray>()
         val running = inFlight.putIfAbsent(path, mine)
-        if (running != null) return running
+        if (running != null) {
+            joined.incrementAndGet()
+            return running
+        }
         pool.execute {
             try {
                 mine.complete(read(path))
