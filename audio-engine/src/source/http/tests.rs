@@ -1366,3 +1366,40 @@ fn keys_the_desktop_app_makes_from_jdk_keys_are_shown_to_their_server() {
         }
     }
 }
+
+// Red when: the whole-length check in `open_at`'s 206 arm is removed (the other
+// file's bytes are read on after the first's), or `is_final` leaves out
+// FileChanged (it is asked again until the retries run out, as a network failure).
+#[test]
+fn a_part_of_another_file_ends_the_read_as_changed() {
+    use crate::testing::http_server::ScriptServer;
+    // The first answer breaks off; asked again, the server sends a part of a
+    // file of another length.
+    let body = data(200_000);
+    let first = body[..50_000].to_vec();
+    let answers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let server = ScriptServer::start(move |asked, conn, _| {
+        if answers.fetch_add(1, Ordering::SeqCst) == 0 {
+            let _ = conn.write_all(
+                b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-199999/200000\r\nContent-Length: 200000\r\nConnection: close\r\n\r\n",
+            );
+            let _ = conn.write_all(&first);
+        } else {
+            let range = asked.header("range").and_then(|r| r.strip_prefix("bytes=")?.strip_suffix('-'));
+            let from = range.and_then(|r| r.parse::<usize>().ok()).unwrap_or(0);
+            let other = data(300_000);
+            let sent = other.len() - from;
+            let _ =
+                write!(conn, "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-299999/300000\r\n");
+            let _ = write!(conn, "Content-Length: {sent}\r\nConnection: close\r\n\r\n");
+            let _ = conn.write_all(&other[from..]);
+        }
+    });
+    let mut source = HttpSource::open(&server.url("/rest/stream"), quick()).unwrap();
+    let mut out = Vec::new();
+    let err = source.read_to_end(&mut out).unwrap_err();
+    assert!(out == body[..50_000], "bytes of the other file were read on");
+    let failure = err.get_ref().and_then(|e| e.downcast_ref::<Failure>()).unwrap();
+    assert_eq!(failure.kind, ErrorKind::FileChanged);
+    assert_eq!(server.asked().len(), 2, "the other file was asked for again");
+}

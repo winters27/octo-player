@@ -5932,6 +5932,11 @@ enum class ErrorKind {
      * gateway in front of the server, or a public Wi-Fi's own page.
      */
     SIGN_IN_PAGE,
+    /**
+     * The server began sending another file for the song while it was
+     * read: the song has to be opened again.
+     */
+    FILE_CHANGED,
     OTHER;
 
     

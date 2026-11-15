@@ -640,12 +640,18 @@ impl Shared {
                 Err(Failure::sign_in_page(status))
             }
             206 => {
-                let start = response
-                    .headers()
-                    .get("content-range")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(range_start)
-                    .unwrap_or(offset);
+                let range = response.headers().get("content-range").and_then(|v| v.to_str().ok());
+                // A part of a file of another whole length is another file (the
+                // server began sending another version of the song): reading on
+                // would join the bytes of two files.
+                if let (Some(first), Some(total)) = (self.len, range.and_then(range_total))
+                    && total != first
+                {
+                    let message =
+                        format!("the server sent a part of another file ({total} bytes, not {first})");
+                    return Err(Failure::new(ErrorKind::FileChanged, message));
+                }
+                let start = range.and_then(range_start).unwrap_or(offset);
                 if start > offset {
                     return Err(Failure::new(ErrorKind::Network, "server sent the wrong range"));
                 }
@@ -1036,10 +1042,11 @@ fn sends_login(url: &str, opts: &HttpOptions) -> bool {
     sent.any(|(name, _)| LOGIN.iter().any(|login| name.eq_ignore_ascii_case(login)))
 }
 
-// A failure that asking again would only repeat: the server said no, or a
-// sign-in page answered in its place.
+// A failure that asking again would only repeat: the server said no, a
+// sign-in page answered in its place, or it sends another file now.
 fn is_final(failure: &Failure) -> bool {
-    failure.kind == ErrorKind::SignInPage || failure.status.is_some_and(|s| (400..500).contains(&s))
+    matches!(failure.kind, ErrorKind::SignInPage | ErrorKind::FileChanged)
+        || failure.status.is_some_and(|s| (400..500).contains(&s))
 }
 
 // How many audio bytes a live server puts between its in-stream titles.

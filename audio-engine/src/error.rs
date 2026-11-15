@@ -22,6 +22,9 @@ pub enum ErrorKind {
     /// A web page answered instead of the song: the sign-in page of a
     /// gateway in front of the server, or a public Wi-Fi's own page.
     SignInPage,
+    /// The server began sending another file for the song while it was
+    /// read: the song has to be opened again.
+    FileChanged,
     Other,
 }
 

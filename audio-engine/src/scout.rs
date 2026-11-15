@@ -31,6 +31,13 @@ pub trait PcmSink {
     fn pcm(&mut self, mono: &[f32]);
 }
 
+/// A scout's options: the song's own, its requests marked as a scout's.
+pub(crate) fn scout_http(mut http: HttpOptions) -> HttpOptions {
+    http.headers.retain(|(name, _)| !name.eq_ignore_ascii_case(SCOUT_PURPOSE.0));
+    http.headers.push((SCOUT_PURPOSE.0.to_string(), SCOUT_PURPOSE.1.to_string()));
+    http
+}
+
 /// Decodes `part` of the song at `source` into `sink`. Stops early when
 /// `cancel` is set. Fails when the song will not open, and for a tail when
 /// the length is not known or the stream cannot jump ahead without being
@@ -80,6 +87,11 @@ pub fn scout_section(
     Ok(())
 }
 
+/// The header every request of a scout carries, so a server tells a look at a
+/// song (its start or end, read for a blend) apart from the song starting to
+/// play.
+pub const SCOUT_PURPOSE: (&str, &str) = ("X-Octo-Purpose", "scout");
+
 /// A section being scouted on its own thread. Dropping it stops the work.
 pub struct ScoutJob {
     // Time counted toward the limit before `running_since`, and when the
@@ -96,6 +108,7 @@ impl ScoutJob {
     pub fn start(source: String, mut http: HttpOptions, part: SectionPart, tag_bpm: Option<f64>) -> ScoutJob {
         let cancel = Arc::new(AtomicBool::new(false));
         http.cancel = Some(cancel.clone());
+        let http = scout_http(http);
         let result = Arc::new(Mutex::new(None));
         let (c, r) = (cancel.clone(), result.clone());
         let spawned = thread::Builder::new().name("octo-scout".into()).spawn(move || {
@@ -282,6 +295,32 @@ mod tests {
         );
         assert!(r.is_err());
         assert!(sink.mono.is_empty());
+    }
+
+    // Red when: `scout_http` stops marking a scout's requests (the server takes
+    // a scout's reads for the song starting to play), or the song's own headers
+    // stop going with them. `ScoutJob::start` hands its thread these options;
+    // the read runs here, so the test waits on nothing.
+    #[test]
+    fn a_scouts_requests_say_what_they_are() {
+        use crate::testing::http_server::{Behaviour, TestServer};
+        let samples = sine(440.0, 44_100, 2, 0, 44_100 * 2, 0.3);
+        let server = TestServer::start(flac_bytes(44_100, 2, &samples, &[]), Behaviour::default());
+        let http = HttpOptions {
+            headers: vec![("X-Octo-Key".into(), "key".into()), ("x-octo-purpose".into(), "play".into())],
+            ..Default::default()
+        };
+        let never = AtomicBool::new(false);
+        let mut head = Collect::default();
+        scout_section(&server.url(), scout_http(http), SectionPart::Head { secs: 1.0 }, &never, &mut head)
+            .unwrap();
+        assert!(!head.mono.is_empty());
+        let asked = server.asked();
+        assert!(!asked.is_empty());
+        for request in &asked {
+            assert_eq!(request.header(SCOUT_PURPOSE.0), Some(SCOUT_PURPOSE.1), "{}", request.target);
+            assert_eq!(request.header("x-octo-key"), Some("key"), "{}", request.target);
+        }
     }
 
     #[test]
