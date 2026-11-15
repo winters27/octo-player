@@ -220,12 +220,15 @@ class UpgradeGuardTest {
             .allowMainThreadQueries()
             .build()
         val read = CountDownLatch(1)
-        thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
-        // The open reaches the guard on its own thread: wait for the guard to hold it (at most
-        // 10 s), not for a fixed time. Held, the read has not happened.
+        val reader = thread { db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM track").close(); read.countDown() }
+        // The open reaches the guard on its own thread: wait (at most 10 s) until the guard holds
+        // it, parked in awaitClear with the disk full, not for a fixed time. Held, the read has
+        // not happened.
+        fun heldByTheGuard() = guard.state.value is UpgradeState.NeedsSpace &&
+            reader.stackTrace.any { it.className == UpgradeGuard::class.java.name && it.methodName == "awaitClear" }
         val heldBy = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
-        while (guard.state.value !is UpgradeState.NeedsSpace && System.nanoTime() < heldBy) Thread.sleep(10)
-        assertTrue(guard.state.value is UpgradeState.NeedsSpace)
+        while (!heldByTheGuard() && System.nanoTime() < heldBy) Thread.sleep(10)
+        assertTrue("the open waits in the guard while the disk is full", heldByTheGuard())
         assertEquals(1L, read.count)
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { assertEquals(18, it.version) }
         free = Long.MAX_VALUE
