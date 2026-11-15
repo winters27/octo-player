@@ -28,6 +28,8 @@ app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-
 app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.Black | over-art
 app/src/main/java/app/winters/octo/player/PlayerOverlay.kt | Color.White | over-art
+app/src/main/java/app/winters/octo/player/StreamVersionsSheet.kt | Color.Black | mask
+app/src/main/java/app/winters/octo/player/StreamVersionsSheet.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/TitleButtons.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/TitleButtons.kt | Color.White | over-art
 app/src/main/java/app/winters/octo/player/immersive/BackgroundPrefs.kt | Color.White | over-art
