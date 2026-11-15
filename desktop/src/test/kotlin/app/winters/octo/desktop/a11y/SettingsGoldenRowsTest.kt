@@ -10,6 +10,7 @@ import app.winters.octo.desktop.pages.THEME_CHOICE
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.home.HOME_SECTIONS_TITLE
 import app.winters.octo.playback.START_AFTER_SETTING
+import app.winters.octo.playback.DOWNLOAD_FORMAT_TITLE
 import app.winters.octo.sound.CROSSFEED_CUT_TITLE
 import app.winters.octo.sound.CROSSFEED_FEED_TITLE
 import app.winters.octo.sound.CROSSFEED_MONO
@@ -111,6 +112,7 @@ class SettingsGoldenRowsTest {
             "[the server's kind]" to "This server's first row names the server's kind and what it offers",
             THEME_CHOICE to "Appearance's Theme card offers the five themes",
             MATCH_THE_SYSTEM to "the Theme card's switch for day and night themes that follow the computer",
+            DOWNLOAD_FORMAT_TITLE to "the Kept on this computer card's choice of what smaller downloads are saved as",
         )
     }
 }

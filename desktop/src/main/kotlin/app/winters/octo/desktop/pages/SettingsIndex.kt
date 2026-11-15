@@ -11,6 +11,8 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.discovery.LIBRARY_ONLY_SETTING
 import app.winters.octo.home.HOME_SECTIONS_TITLE
 import app.winters.octo.playback.START_AFTER_SETTING
+import app.winters.octo.playback.DOWNLOAD_FORMAT_HELP
+import app.winters.octo.playback.DOWNLOAD_FORMAT_TITLE
 import app.winters.octo.radio.SONG_RADIO
 import app.winters.octo.sound.CROSSFEED_CUT_TITLE
 import app.winters.octo.sound.CROSSFEED_FEED_TITLE
@@ -260,6 +262,7 @@ val DesktopSettingsIndex: List<SettingsIndexEntry> = index {
             row("Folder", listOf("offline", "downloads", "location", "where", "storage", "disk"), "Where kept songs are saved")
             row("Keep Liked songs", listOf("offline", "likes", "liked", "auto download", "favorites"), "Every song you like, as you like it")
             row("Download quality", listOf("bitrate", "kbps", "offline", "file size"), "For songs fetched from now on")
+            row(DOWNLOAD_FORMAT_TITLE, listOf("opus", "aac", "mp3", "format", "codec", "offline"), DOWNLOAD_FORMAT_HELP)
         }
         card("Playlists", keywords = listOf("offline", "download playlist", "keep playlist", "kept"), summary = "Playlists kept on this computer")
         row("Remove all", listOf("delete", "downloads", "offline", "free space", "storage", "clear"), "Lets every kept song go and stops keeping any")

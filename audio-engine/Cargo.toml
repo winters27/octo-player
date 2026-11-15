@@ -30,9 +30,10 @@ opus = ["dep:opus-decoder", "dep:symphonia-core"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
-# id3v2 and ape read the tags MP3 files carry (ReplayGain, tempo).
+# id3v2 and ape read the tags MP3 files carry (ReplayGain, tempo). mkv reads
+# WebM, which YouTube serves some songs found online as (Opus inside).
 symphonia = { version = "0.6.1", default-features = false, features = [
-    "flac", "mp3", "aac", "isomp4", "alac", "vorbis", "ogg", "wav", "aiff", "pcm", "opt-simd", "id3v2", "ape",
+    "flac", "mp3", "aac", "isomp4", "alac", "vorbis", "ogg", "wav", "aiff", "pcm", "opt-simd", "id3v2", "ape", "mkv",
 ] }
 opus-decoder = { version = "0.1.1", optional = true }
 # Named directly for the codec registration macro.

@@ -170,6 +170,26 @@ fn opus_decodes_with_its_pre_skip_trimmed() {
     assert!((f - 440.0).abs() < 1.0, "{f}");
 }
 
+// A song YouTube serves as WebM plays: the Opus inside it decodes as an
+// Ogg Opus one does. Red without symphonia's mkv feature.
+#[cfg(feature = "opus")]
+#[test]
+fn opus_in_webm_decodes() {
+    let path = fixture("tone-440-48k-stereo.webm");
+    let mut d = open(&path);
+    assert_eq!(d.info().codec, "opus");
+    assert_eq!(d.info().sample_rate, 48_000);
+    let out = decode_all(&mut d);
+    let frames = out.len() / 2;
+    // The second's 48000 frames, plus at most the encoder's padding at the
+    // end (648 here), which WebM's reader does not pass on. Red when the
+    // pre-skip is dropped from packets past the first (WebM times them in
+    // milliseconds, not frames): 46293 frames, the song's start cut.
+    assert!((48_000..=48_648).contains(&frames), "{frames}");
+    let f = frequency(&out[10_000..80_000], 48_000);
+    assert!((f - 440.0).abs() < 1.0, "{f}");
+}
+
 #[test]
 fn streams_decode_like_files() {
     let rate = 44_100;

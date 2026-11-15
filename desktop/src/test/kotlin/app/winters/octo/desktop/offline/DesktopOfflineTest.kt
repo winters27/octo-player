@@ -3,6 +3,15 @@ package app.winters.octo.desktop.offline
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.SignInPages
 import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.offline.AdtsToM4a
+import app.winters.octo.offline.KeptCopyCheck
+import app.winters.octo.offline.checkKeptCopy
+import app.winters.octo.playback.DownloadFormat
+import app.winters.octo.subsonic.StreamQuality
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import mockwebserver3.MockResponse
+import okio.Buffer
 import app.winters.octo.subsonic.gateway.GatewayCookies
 import app.winters.octo.subsonic.DeviceIdentity
 import app.winters.octo.subsonic.HeaderScope
@@ -98,16 +107,158 @@ class DesktopOfflineTest {
         assertFalse(file.exists())
     }
 
-    // A song asked for as it is can come as another file than listed (a
-    // whole FLAC for a listed preview): the kept file is named by what came.
+    // A download is named by what came: the type its bytes are, else the
+    // type the server answered with, else the listed suffix.
     @Test
     fun aKeptFileIsNamedByTheTypeTheServerSent() {
-        assertEquals("flac", keptSuffix("raw", "audio/flac", "m4a"))
-        assertEquals("m4a", keptSuffix("raw", "audio/mp4; charset=binary", "opus"))
-        assertEquals("opus", keptSuffix("opus", "audio/flac", "flac"))
-        // An answer that names no type it knows keeps the listed suffix.
-        assertEquals("flac", keptSuffix("raw", "application/octet-stream", "flac"))
-        assertEquals("flac", keptSuffix("raw", null, "flac"))
+        assertEquals("flac", keptSuffix("audio/flac", "m4a"))
+        assertEquals("m4a", keptSuffix("audio/mp4; charset=binary", "opus"))
+        assertEquals("opus", keptSuffix("audio/opus", "flac"))
+        assertEquals("webm", keptSuffix("audio/webm", "m4a"))
+        // A type it does not know keeps the listed suffix.
+        assertEquals("flac", keptSuffix("application/octet-stream", "flac"))
+        assertEquals("flac", keptSuffix(null, "flac"))
+        assertEquals("audio/mp4", arrivedType("audio/mp4", "audio/opus", "audio/opus"))
+        assertEquals("audio/mp4", arrivedType(null, "audio/MP4; x=1", "audio/opus"))
+        assertEquals("audio/opus", arrivedType(null, "application/octet-stream", "audio/opus"))
+    }
+
+    // ADTS AAC as a server makes it: `count` frames of AAC-LC, 44.1 kHz stereo.
+    private fun adts(count: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        repeat(count) {
+            val length = 7 + 100
+            out.write(
+                byteArrayOf(
+                    0xFF.toByte(), 0xF1.toByte(), 0x50, (0x80 or (length shr 11)).toByte(),
+                    ((length shr 3) and 0xFF).toByte(), (((length and 7) shl 5) or 0x1F).toByte(), 0xFC.toByte(),
+                ),
+            )
+            out.write(ByteArray(100) { 0x21 })
+        }
+        return out.toByteArray()
+    }
+
+    // The start of an M4A file, as a server sends one.
+    private fun m4a(): ByteArray = byteArrayOf(0, 0, 0, 0x18) + "ftypM4A ".toByteArray() + ByteArray(200) { 1 }
+
+    private fun answerWith(type: String, bytes: ByteArray) =
+        server.respond("stream") { MockResponse.Builder().setHeader("Content-Type", type).body(Buffer().write(bytes)).build() }
+
+    // A lossy song already at or under the quality downloads as it is; a
+    // lossless one asks for the chosen format at the quality's bitrate,
+    // never with a length estimate. Red when the format is ignored or the
+    // estimate is sent.
+    @Test
+    fun aDownloadAsksForTheChosenFormatOnlyWhenItMakesTheFileSmaller() {
+        val flac = song("tr-1", "One")
+        assertEquals(mapOf("format" to "raw"), downloadParams(flac, StreamQuality.Original, DownloadFormat.Opus))
+        assertEquals(mapOf("format" to "opus", "maxBitRate" to "160"), downloadParams(flac, StreamQuality.Standard, DownloadFormat.Opus))
+        assertEquals(mapOf("format" to "aac", "maxBitRate" to "96"), downloadParams(flac, StreamQuality.DataSaver, DownloadFormat.Aac))
+        val small = song("tr-2", "Two").copy(suffix = "mp3", contentType = "audio/mpeg", bitRate = 128)
+        assertEquals(mapOf("format" to "raw"), downloadParams(small, StreamQuality.Standard, DownloadFormat.Mp3))
+        val big = small.copy(bitRate = 320)
+        assertEquals(mapOf("format" to "mp3", "maxBitRate" to "160"), downloadParams(big, StreamQuality.Standard, DownloadFormat.Mp3))
+    }
+
+    // An Opus ask the server answers with an M4A is kept as the M4A it is,
+    // noted as made smaller. Red while a smaller copy is always named .opus.
+    @Test
+    fun anAnswerOfAnotherTypeIsKeptAsWhatItIs() {
+        answerWith("audio/mp4", m4a())
+        val offline = offline()
+        offline.setDownloadQuality(StreamQuality.Standard)
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("kept") { offline.localFile("tr-1") != null }
+        assertEquals("01 One.m4a", offline.localFile("tr-1")!!.name)
+        assertEquals("opus-160", offline.files.single().made)
+        assertTrue(File(folder.root, "kept").walk().none { it.name.endsWith(".part") })
+    }
+
+    // AAC in ADTS is kept in an M4A, so it says its own length. Red when
+    // the ADTS file is kept as it came.
+    @Test
+    fun aacInAdtsIsKeptAsAnM4a() {
+        answerWith("audio/aac", adts(40))
+        val offline = offline()
+        offline.setDownloadQuality(StreamQuality.Standard)
+        offline.setDownloadFormat(DownloadFormat.Aac)
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("kept") { offline.localFile("tr-1") != null }
+        val file = offline.localFile("tr-1")!!
+        assertEquals("01 One.m4a", file.name)
+        assertEquals("ftyp", String(file.readBytes().copyOfRange(4, 8)))
+        assertEquals(40, AdtsToM4a.samplesIn(file))
+        assertEquals("aac-160", offline.files.single().made)
+    }
+
+    // A file kept before `made` was noted reads as it always did: found,
+    // played, and checked by the old rule. Red when `made` is required.
+    @Test
+    fun filesKeptBeforeTheFormatWasNotedAreFoundAndCheckedAsBefore() {
+        val json = Json { ignoreUnknownKeys = true }
+        val old = """[{"server":"s","id":"tr-1","path":"s/Artist/Album/01 One.mp3","size":500,"title":"One","artist":"Artist","fileSize":500}]"""
+        val kept = json.decodeFromString(ListSerializer(KeptFile.serializer()), old).single()
+        assertNull(kept.made)
+        // A kept MP3 of an MP3 song was the server's file (smaller copies were
+        // all Opus then), so it is as it is, by the old rule and still.
+        assertTrue(keptAsIs(kept.path, "mp3", kept.made))
+        assertTrue(keptAsIs("s/Artist/Album/01 One.flac", "flac", null))
+        assertEquals(KeptCopyCheck.Keep, checkKeptCopy(500, 500, 500, keptAsIs(kept.path, "mp3", kept.made)))
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(500, 800, 500, keptAsIs(kept.path, "mp3", kept.made)))
+    }
+
+    // A smaller copy of a song's own type is never taken for the server's
+    // file: with no size noted, a new server size is noted, not fetched
+    // again. Red when `made` is ignored.
+    @Test
+    fun aSmallerCopyOfTheSongsOwnTypeIsNeverTheFileAsItIs() {
+        assertFalse(keptAsIs("s/Artist/Album/01 One.mp3", "mp3", "mp3-160"))
+        assertFalse(keptAsIs("s/Artist/Album/01 One.flac", "flac", "server"))
+        assertEquals(KeptCopyCheck.Note, checkKeptCopy(null, 9_000, 4_000, keptAsIs("s/Artist/Album/01 One.mp3", "mp3", "mp3-160")))
+        assertEquals(KeptCopyCheck.Refetch, checkKeptCopy(null, 9_000, 4_000, keptAsIs("s/Artist/Album/01 One.mp3", "mp3", null)))
+    }
+
+    // Part files a stopped run left in the server's folder go at the next
+    // start; the animated art's own part files and anything else stay.
+    // Red without the cleanup, or with one that walks the whole folder.
+    @Test
+    fun partFilesLeftInTheServersFolderGoAtTheNextStart() {
+        server.file("stream", ByteArray(10) { 1 })
+        val first = offline()
+        first.keep(listOf(song("tr-1", "One")), true)
+        until("kept") { first.localFile("tr-1") != null }
+        val kept = first.localFile("tr-1")!!
+        val serverFolder = kept.parentFile.parentFile.parentFile
+        val left = File(kept.parentFile, "02 Two.download.part").apply { writeText("x") }
+        val loops = File(serverFolder, ".animated/al-1.part").apply { parentFile.mkdirs(); writeText("x") }
+        val mine = File(folder.root, "kept/mine.part").apply { writeText("x") }
+        val again = offline()
+        until("cleaned") { !left.exists() }
+        assertTrue(loops.exists())
+        assertTrue(mine.exists())
+        assertTrue(kept.exists())
+        assertTrue(again.localFile("tr-1") != null)
+    }
+
+    // Letting every song go while one is put into its M4A keeps nothing of
+    // it. Red when the rename does not look again first.
+    @Test
+    fun lettingGoWhileARewrapRunsKeepsNothing() {
+        answerWith("audio/aac", adts(40))
+        val offline = offline()
+        offline.setDownloadQuality(StreamQuality.Standard)
+        offline.setDownloadFormat(DownloadFormat.Aac)
+        val rewrapped = java.util.concurrent.atomic.AtomicBoolean(false)
+        offline.rewrapAdts = { input, output ->
+            offline.removeAll()
+            AdtsToM4a.rewrap(input, output).also { rewrapped.set(true) }
+        }
+        offline.keep(listOf(song("tr-1", "One")), true)
+        until("rewrapped") { rewrapped.get() }
+        until("settled") { !offline.status.busy }
+        until("nothing kept") { File(folder.root, "kept").walk().none { it.isFile && it.name != DesktopOffline.INDEX } }
+        assertTrue(offline.files.none { it.id == "tr-1" })
     }
 
     @Test
@@ -193,9 +344,12 @@ class DesktopOfflineTest {
         assertTrue(keptAsIs("server/Artist/Album/01 One.flac", "flac"))
         assertTrue(keptAsIs("server/Artist/Album/01 One.FLAC", "flac"))
         assertFalse(keptAsIs("server/Artist/Album/01 One.opus", "flac"))
-        // Smaller copies are Opus too, so an Opus file never says.
+        // Smaller copies were made as Opus before `made` was noted, so an
+        // Opus file never says.
         assertFalse(keptAsIs("server/Artist/Album/01 One.opus", "opus"))
         assertFalse(keptAsIs("server/Artist/Album/01 One", null))
+        // A copy made smaller never is.
+        assertFalse(keptAsIs("server/Artist/Album/01 One.flac", "flac", "opus-160"))
     }
 
     @Test

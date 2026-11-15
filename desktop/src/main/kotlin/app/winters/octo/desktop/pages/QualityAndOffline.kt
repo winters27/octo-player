@@ -23,9 +23,14 @@ import app.winters.octo.design.SettingsSize
 import app.winters.octo.design.Space
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
+import app.winters.octo.playback.DOWNLOAD_FORMAT_HELP
+import app.winters.octo.playback.DOWNLOAD_FORMAT_TITLE
+import app.winters.octo.playback.DownloadFormat
 import app.winters.octo.playback.START_AFTER_HELP
 import app.winters.octo.playback.START_AFTER_SETTING
 import app.winters.octo.playback.StartAfter
+import app.winters.octo.playback.detail
+import app.winters.octo.playback.downloadQualityLabel
 import app.winters.octo.desktop.ui.ChoiceButton
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.offline.keptLine
@@ -123,6 +128,19 @@ internal fun qualityCaption(caption: String?, chosen: StreamQuality, limit: Int)
     return listOfNotNull(caption, if (blocked == null) "$ORIGINAL_LABEL." else null, note, chosenNote).joinToString(" ")
 }
 
+// What the Download quality row says under its title: with a smaller
+// quality, the bitrate and format a bigger file is made as.
+internal fun downloadQualityCaption(quality: StreamQuality, format: DownloadFormat): String =
+    if (quality == StreamQuality.Original) {
+        "For songs fetched from now on. Smaller files fit more songs."
+    } else {
+        "For songs fetched from now on, as ${downloadQualityLabel(quality.kbps, format)} at most. Smaller files fit more songs."
+    }
+
+// What the Download format row says under its title: what it is for, and
+// what the chosen format is like.
+internal fun downloadFormatCaption(format: DownloadFormat): String = "$DOWNLOAD_FORMAT_HELP. ${format.detail}."
+
 // Streaming and downloads: how long a song buffers before it starts, then
 // the songs kept on this computer to play without a connection: the folder
 // they go in, the Liked songs, chosen playlists, and how many are kept, and
@@ -159,11 +177,19 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
             })
         }
         SwitchRow("Keep Liked songs", "Every song you like, as you like it.", choices.liked) { on -> offline.keepLiked(on) }
-        SettingRow("Download quality", "For songs fetched from now on. Smaller files fit more songs.") {
-            val chosen = StreamQuality.entries.firstOrNull { it.name == settings.offline.downloadQuality } ?: StreamQuality.Original
+        val format = DownloadFormat.named(settings.offline.downloadFormat)
+        val chosen = StreamQuality.entries.firstOrNull { it.name == settings.offline.downloadQuality } ?: StreamQuality.Original
+        SettingRow("Download quality", downloadQualityCaption(chosen, format)) {
             FitOrElse(
                 { GlazeSegments(StreamQuality.entries, chosen, ::qualityName, offline::setDownloadQuality) },
                 { ChoiceButton(StreamQuality.entries, chosen, ::qualityName, offline::setDownloadQuality, title = "Download quality") },
+            )
+        }
+        // Always shown, so the card keeps its shape whatever the quality.
+        SettingRow(DOWNLOAD_FORMAT_TITLE, downloadFormatCaption(format)) {
+            FitOrElse(
+                { GlazeSegments(DownloadFormat.entries, format, { it.label }, offline::setDownloadFormat) },
+                { ChoiceButton(DownloadFormat.entries, format, { it.label }, offline::setDownloadFormat, title = DOWNLOAD_FORMAT_TITLE) },
             )
         }
     }

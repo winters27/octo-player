@@ -51,6 +51,7 @@ pub fn open(source: &str, http: HttpOptions) -> Result<Opened, Failure> {
         if http.hls || hls::is_hls_url(source) {
             return hls::open(source, http);
         }
+        let http = HttpOptions { by_time: !http.live && seeks_by_time(source), ..http };
         return open_stream(source, http, 0);
     }
     let path = source.strip_prefix("file://").unwrap_or(source);
@@ -79,7 +80,7 @@ fn open_stream(source: &str, http: HttpOptions, hops: u32) -> Result<Opened, Fai
     let listed = stream.content_type().is_some_and(hls::is_playlist_type);
     if listed || (live && starts_as_playlist(&mut stream)?) {
         drop(stream);
-        return hls::open_hop(source, http, hops);
+        return hls::open_hop(source, HttpOptions { by_time: false, ..http }, hops);
     }
     let hint = stream.content_type().and_then(extension_for_type).or_else(|| url_extension(source));
     let seeks_cheaply = stream.answered_with_range();
@@ -164,6 +165,36 @@ pub fn at_time(source: &str, secs: f64) -> (String, f64) {
     (out, whole)
 }
 
+/// The address a seek opens a time-seeking stream at: as `at_time`, but it
+/// always names the time, 0 included, so the server knows a seek of a song
+/// playing from a new start of it.
+pub fn seek_at_time(source: &str, secs: f64) -> (String, f64) {
+    let whole = secs.max(0.0).floor();
+    if whole > 0.0 {
+        return at_time(source, whole);
+    }
+    let (base, fragment) = match source.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (source, None),
+    };
+    let kept: Vec<&str> = match base.split_once('?') {
+        Some((_, q)) => q.split('&').filter(|p| !p.to_ascii_lowercase().starts_with("timeoffset=")).collect(),
+        None => Vec::new(),
+    };
+    let path = base.split('?').next().unwrap_or(base);
+    let mut query = kept.join("&");
+    if !query.is_empty() {
+        query.push('&');
+    }
+    query.push_str("timeOffset=0");
+    let mut out = format!("{path}?{query}");
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    (out, 0.0)
+}
+
 // The extension a server's content type stands for.
 fn extension_for_type(content_type: &str) -> Option<String> {
     let bare = content_type.split(';').next()?.trim().to_ascii_lowercase();
@@ -175,6 +206,7 @@ fn extension_for_type(content_type: &str) -> Option<String> {
         "audio/aac" | "audio/aacp" | "audio/x-aac" | "audio/x-aacp" => "aac",
         "audio/ogg" | "application/ogg" | "audio/vorbis" => "ogg",
         "audio/opus" => "opus",
+        "audio/webm" => "webm",
         "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
         "audio/aiff" | "audio/x-aiff" => "aiff",
         _ => return None,
@@ -227,6 +259,25 @@ mod tests {
             "http://h/rest/stream?id=1&format=mp3&timeOffset=5"
         );
         assert_eq!(at_time("http://h/rest/stream?id=1&format=mp3", 0.4).1, 0.0);
+    }
+
+    // A seek near the start still names its time, so the server never
+    // takes it for the song starting again. Red when a seek uses at_time.
+    #[test]
+    fn a_seek_always_names_its_time() {
+        assert_eq!(
+            seek_at_time("http://h/rest/stream?id=1&format=mp3", 0.4),
+            ("http://h/rest/stream?id=1&format=mp3&timeOffset=0".to_string(), 0.0)
+        );
+        assert_eq!(
+            seek_at_time("http://h/rest/stream?id=1&format=mp3&timeOffset=61", 0.0).0,
+            "http://h/rest/stream?id=1&format=mp3&timeOffset=0"
+        );
+        assert_eq!(
+            seek_at_time("http://h/rest/stream?id=1&format=mp3", 61.7).0,
+            "http://h/rest/stream?id=1&format=mp3&timeOffset=61"
+        );
+        assert_eq!(extension_for_type("audio/webm").as_deref(), Some("webm"));
     }
 
     #[test]

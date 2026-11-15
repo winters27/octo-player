@@ -8,6 +8,7 @@ tests run instead.
 | --- | --- |
 | `tone-440-44k-mono.mp3` | 1 s of 440 Hz, 44.1 kHz mono, 96 kbps CBR, with the LAME header holding the encoder delay and padding |
 | `tone-440-48k-stereo.opus` | 1 s of 440 Hz, 48 kHz stereo, Ogg Opus at 128 kbps, pre-skip 312 |
+| `tone-440-48k-stereo.webm` | 1 s of 440 Hz, 48 kHz stereo, Opus at 128 kbps in WebM, as YouTube serves some songs |
 | `tone-440-44k-stereo.aac` | 2 s of 440 Hz, 44.1 kHz stereo, AAC-LC in ADTS at 96 kbps |
 | `tone-440-48k-stereo.aac` | 1 s of 440 Hz, 48 kHz stereo, AAC-LC in ADTS at 96 kbps |
 | `tone-440-44k-stereo-aac.ts` | 2 s of 440 Hz, 44.1 kHz stereo, AAC-LC at 96 kbps in MPEG-TS |
@@ -29,6 +30,8 @@ ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=2" -ac 2 \
     -c:a aac -b:a 96k -f adts tone-440-44k-stereo.aac
 ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=1" -ac 2 \
     -c:a aac -b:a 96k -f adts tone-440-48k-stereo.aac
+ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=1" -ac 2 \
+    -c:a libopus -b:a 128k -fflags +bitexact -flags:a +bitexact -f webm tone-440-48k-stereo.webm
 ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=2" -ac 2 \
     -c:a aac -b:a 96k -f mpegts tone-440-44k-stereo-aac.ts
 ffmpeg -f lavfi -i "sine=frequency=440:sample_rate=44100:duration=2" -ac 1 \

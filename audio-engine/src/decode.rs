@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler as _};
 use symphonia::core::codecs::CodecParameters;
-use symphonia::core::codecs::audio::well_known::CODEC_ID_AAC;
+use symphonia::core::codecs::audio::well_known::{CODEC_ID_AAC, CODEC_ID_OPUS};
 use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::registry::CodecRegistry;
 use symphonia::core::errors::Error as DecodeError;
@@ -15,7 +15,8 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
 use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::{MetadataOptions, StandardTag};
-use symphonia::core::units::{Time, TimeBase};
+use symphonia::core::packet::Packet;
+use symphonia::core::units::{Time, TimeBase, Timestamp};
 
 use crate::error::{ErrorKind, Failure};
 use crate::sound::replaygain::{self, ReplayGainInfo};
@@ -73,6 +74,9 @@ pub struct Decoder {
     convert: Option<Convert>,
     stereo: Vec<f32>,
     bad_reads: u32,
+    // Opus from a container that times packets otherwise than Ogg: its time
+    // base and the stream's pre-skip (see ogg_timed).
+    opus_time: Option<(TimeBase, i64)>,
 }
 
 // A format's audio track and its decoder.
@@ -80,6 +84,7 @@ struct Track {
     decoder: Box<dyn AudioDecoder>,
     id: u32,
     time_base: Option<TimeBase>,
+    opus_time: Option<(TimeBase, i64)>,
     sample_rate: u32,
     channels: usize,
     bits_per_sample: Option<u32>,
@@ -146,6 +151,7 @@ impl Decoder {
             convert: None,
             stereo: Vec::new(),
             bad_reads: 0,
+            opus_time: parts.opus_time,
         })
     }
 
@@ -156,6 +162,7 @@ impl Decoder {
         self.decoder = parts.decoder;
         self.track_id = parts.id;
         self.time_base = parts.time_base;
+        self.opus_time = parts.opus_time;
         self.source_channels = parts.channels;
         self.convert = if parts.sample_rate == self.info.sample_rate {
             None
@@ -225,7 +232,7 @@ impl Decoder {
                 continue;
             }
             let first = self.frames_at(packet.pts.get() + packet.trim_start.get() as i64);
-            let decoded = match self.decoder.decode(&packet) {
+            let decoded = match self.decoder.decode(&ogg_timed(&packet, self.opus_time)) {
                 Ok(decoded) => decoded,
                 // A damaged packet is skipped, as players do.
                 Err(DecodeError::DecodeError(e)) => {
@@ -358,6 +365,23 @@ impl MediaSource for Watched {
     }
 }
 
+// The packet as the Opus decoder reads it. The decoder drops the stream's
+// pre-skip from packets timed before it, counting time as Ogg does: in 48 kHz
+// frames from the first encoded frame. WebM counts in its own time base from
+// the first frame after the pre-skip, so its packets are handed on timed the
+// Ogg way; any other packet as it is. The reader took the pre-skip off in
+// whole ticks of its time base, rounded down (6 of a millisecond for 6.5
+// ms), so the same ticks are put back before the time becomes frames.
+fn ogg_timed(packet: &Packet, opus_time: Option<(TimeBase, i64)>) -> std::borrow::Cow<'_, Packet> {
+    let Some((tb, pre_skip)) = opus_time else { return std::borrow::Cow::Borrowed(packet) };
+    let (numer, denom) = (i64::from(tb.numer.get()), i64::from(tb.denom.get()));
+    let delay_ticks = (pre_skip * 1_000_000_000 / 48_000) / (1_000_000_000 * numer / denom).max(1);
+    let frames = ((packet.pts.get() + delay_ticks) as f64 * f64::from(tb) * 48_000.0).round() as i64;
+    let mut timed = packet.clone();
+    timed.pts = Timestamp::new(frames);
+    std::borrow::Cow::Owned(timed)
+}
+
 // The format's audio track and a decoder for it. A live stream's decoder
 // keeps every frame: an encoder's delay and padding tags at its start would
 // otherwise end it at the length they give.
@@ -378,10 +402,20 @@ fn audio_track(format: &mut dyn FormatReader, live: bool) -> Result<Track, Failu
     let own = decoder.codec_params();
     let sample_rate = own.sample_rate.or(params.sample_rate).filter(|&r| r > 0).unwrap_or(44_100);
     let channels = own.channels.as_ref().or(params.channels.as_ref()).map(|c| c.count()).unwrap_or(2).max(1);
+    // Opus whose packets are not timed in 48 kHz frames (WebM times them in
+    // milliseconds): its pre-skip, from the OpusHead the track carries.
+    let opus_time = track
+        .time_base
+        .filter(|tb| params.codec == CODEC_ID_OPUS && (f64::from(*tb) * 48_000.0 - 1.0).abs() >= 1e-9)
+        .map(|tb| {
+            let head = params.extra_data.as_deref().filter(|e| e.len() >= 12 && &e[..8] == b"OpusHead");
+            (tb, head.map_or(0, |e| i64::from(u16::from_le_bytes([e[10], e[11]]))))
+        });
     Ok(Track {
         decoder,
         id: track.id,
         time_base: track.time_base,
+        opus_time,
         sample_rate,
         channels,
         bits_per_sample: params.bits_per_sample,

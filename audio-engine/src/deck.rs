@@ -17,6 +17,10 @@ use crate::source::{
     icy::StreamMeta,
 };
 
+/// How many times one song's time-seeking stream may be opened again after
+/// it broke off or its server answered busy, before the song fails.
+const REOPENS: u32 = 3;
+
 /// How much decoded sound a deck keeps ready, in seconds.
 const AHEAD_SECS: f64 = 0.75;
 
@@ -246,14 +250,38 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
     // A transcode is opened at its start time rather than sought into.
     let by_time = source::seeks_by_time(&source);
     let mut offset = 0.0;
+    // How often this song's stream has been opened again at a time.
+    let mut reopens = 0u32;
+    // After an opening again at a whole second, the time the song had
+    // reached: the new stream's sound before it is heard already.
+    let mut skip_until: Option<f64> = None;
     let opened = if by_time {
-        let start = shared.lock().seek.take();
-        let (address, landed) = source::at_time(&source, start.unwrap_or(0.0));
+        let start = shared.lock().seek.take().unwrap_or(0.0);
+        let (address, landed) = source::at_time(&source, start);
         offset = landed;
         shared.lock().head_secs = landed;
-        source::open(&address, http.clone()).and_then(Decoder::open)
+        match source::open(&address, http.clone()).and_then(Decoder::open) {
+            // Broken off before it could be read: opened again at its time,
+            // one of the song's reopens.
+            Err(f) if f.reopen => {
+                open_at_time(&source, &http, start, &mut reopens, false).map(|(decoder, at)| {
+                    offset = at;
+                    shared.lock().head_secs = at;
+                    decoder
+                })
+            }
+            opened => opened,
+        }
     } else {
-        source::open(&source, http.clone()).and_then(Decoder::open)
+        match source::open(&source, http.clone()).and_then(Decoder::open) {
+            // The server let go of the song's file while it was opened (it
+            // refused a later part the reader asked for): opened again from
+            // its first byte, one of the song's reopens.
+            Err(f) if f.reopen => {
+                reopen_from_start(&source, &http, 0.0, &mut reopens).map(|(decoder, _)| decoder)
+            }
+            opened => opened,
+        }
     };
     let mut decoder = match opened {
         Ok(d) => d,
@@ -289,17 +317,31 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
                     drop(state);
                     let landed = if by_time {
                         // Opened again at the time, as the server makes it from there.
-                        let (address, at) = source::at_time(&source, target);
-                        match source::open(&address, http.clone()).and_then(Decoder::open) {
-                            Ok(fresh) => {
+                        match open_at_time(&source, &http, target, &mut reopens, true) {
+                            Ok((fresh, at)) => {
                                 decoder = fresh;
                                 offset = at;
+                                skip_until = None;
                                 Ok(at)
                             }
                             Err(f) => Err(f),
                         }
                     } else {
-                        decoder.seek(target)
+                        match decoder.seek(target) {
+                            // The server let go of the song's file: opened again from
+                            // its first byte and sought there.
+                            Err(f) if f.reopen => {
+                                match reopen_from_start(&source, &http, target, &mut reopens) {
+                                    Ok((fresh, at)) => {
+                                        decoder = fresh;
+                                        skip_until = None;
+                                        Ok(at)
+                                    }
+                                    Err(f) => Err(f),
+                                }
+                            }
+                            landed => landed,
+                        }
                     };
                     state = shared.lock();
                     if state.seek_generation == generation {
@@ -337,7 +379,17 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
         match result {
             Ok(true) => {
                 let rate = decoder.sample_rate() as f64;
-                let block_secs = offset + decoder.position_secs() - (block.len() / 2) as f64 / rate;
+                let mut block_secs = offset + decoder.position_secs() - (block.len() / 2) as f64 / rate;
+                if let Some(until) = skip_until {
+                    let frames = block.len() / 2;
+                    let early = (((until - block_secs) * rate).round().max(0.0) as usize).min(frames);
+                    if early == frames {
+                        continue;
+                    }
+                    block.drain(..early * 2);
+                    block_secs += early as f64 / rate;
+                    skip_until = None;
+                }
                 if state.pcm.is_empty() {
                     state.head_secs = block_secs;
                 }
@@ -348,6 +400,52 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
                 }
             }
             Ok(false) => state.status = DeckStatus::Ended,
+            Err(f) if by_time && f.reopen => {
+                // Made on the way and broken off: opened again at the time it
+                // reached, where its server makes it from.
+                let resume = offset + decoder.position_secs();
+                drop(state);
+                log::warn!("the stream broke off at {resume:.1} s ({f}); opening it again there");
+                let reopened = open_at_time(&source, &http, resume, &mut reopens, false);
+                let mut state = shared.lock();
+                if state.seek_generation == generation && state.seek.is_none() {
+                    match reopened {
+                        Ok((fresh, at)) => {
+                            decoder = fresh;
+                            offset = at;
+                            skip_until = Some(resume);
+                        }
+                        Err(failure) => {
+                            log::warn!("decoding stopped: {failure}");
+                            state.status = DeckStatus::Failed(failure);
+                        }
+                    }
+                }
+            }
+            Err(f) if f.reopen => {
+                // The server let go of the file this song was read from (it
+                // refused a later part as busy): opened again from its first
+                // byte, the file the server has now, and on from where it was.
+                let resume = offset + decoder.position_secs();
+                drop(state);
+                log::warn!("the server let go of the song's file at {resume:.1} s ({f}); opening it again");
+                let reopened = reopen_from_start(&source, &http, resume, &mut reopens);
+                let mut state = shared.lock();
+                if state.seek_generation == generation && state.seek.is_none() {
+                    match reopened {
+                        Ok((fresh, _)) => {
+                            decoder = fresh;
+                            // A seek can land a little before where the song was: what is heard
+                            // already is left out.
+                            skip_until = Some(resume);
+                        }
+                        Err(failure) => {
+                            log::warn!("decoding stopped: {failure}");
+                            state.status = DeckStatus::Failed(failure);
+                        }
+                    }
+                }
+            }
             Err(f) => {
                 log::warn!("decoding stopped: {f}");
                 state.status = DeckStatus::Failed(f);
@@ -355,6 +453,94 @@ fn run(shared: Arc<Shared>, source: String, http: HttpOptions, first_secs: f64) 
         }
         shared.wake.notify_all();
     }
+}
+
+// Opens a song's own address again from its first byte and seeks it to
+// `secs`: what a server that let go of the file a play was reading asks of
+// its player (Octo answers a later part 503 when a kept copy is gone). One of
+// the song's reopens.
+fn reopen_from_start(
+    source: &str,
+    http: &HttpOptions,
+    secs: f64,
+    reopens: &mut u32,
+) -> Result<(Decoder, f64), Failure> {
+    loop {
+        if *reopens >= REOPENS {
+            return Err(Failure::new(crate::error::ErrorKind::Network, "the stream kept breaking off"));
+        }
+        *reopens += 1;
+        let opened = source::open(source, http.clone()).and_then(Decoder::open).and_then(|mut decoder| {
+            let at = if secs > 0.0 { decoder.seek(secs)? } else { 0.0 };
+            Ok((decoder, at))
+        });
+        match opened {
+            Ok(opened) => return Ok(opened),
+            // A server busy for a moment (restarting, say): a pause, then another try, while the
+            // song has reopens left.
+            Err(f) if mendable(&f) && *reopens < REOPENS => {
+                log::warn!("could not open the song again at {secs:.1} s ({f}); trying again");
+                if !pause(http) {
+                    return Err(f);
+                }
+            }
+            Err(f) => return Err(f),
+        }
+    }
+}
+
+// Opens a time-seeking stream at `secs`. A failure an opening again can mend
+// (the stream broke off, or its server answered busy) is tried again after
+// `http.reopen_wait`, while the song has reopens left. With `free_first`
+// (a seek) the first try is not one of them; after a break every try is.
+fn open_at_time(
+    source: &str,
+    http: &HttpOptions,
+    secs: f64,
+    reopens: &mut u32,
+    free_first: bool,
+) -> Result<(Decoder, f64), Failure> {
+    let mut counted = !free_first;
+    loop {
+        if counted {
+            if *reopens >= REOPENS {
+                return Err(Failure::new(crate::error::ErrorKind::Network, "the stream kept breaking off"));
+            }
+            *reopens += 1;
+        }
+        let (address, at) = source::seek_at_time(source, secs);
+        match source::open(&address, http.clone()).and_then(Decoder::open) {
+            Ok(decoder) => return Ok((decoder, at)),
+            Err(f) if mendable(&f) => {
+                if *reopens >= REOPENS {
+                    return Err(f);
+                }
+                log::warn!("could not open the stream again at {secs:.1} s ({f}); trying again");
+                if !pause(http) {
+                    return Err(f);
+                }
+                counted = true;
+            }
+            Err(f) => return Err(f),
+        }
+    }
+}
+
+// Whether opening a time-seeking stream again can mend this failure.
+fn mendable(failure: &Failure) -> bool {
+    failure.reopen || failure.status == Some(503)
+}
+
+// Waits `http.reopen_wait`, false when the deck is let go meanwhile.
+fn pause(http: &HttpOptions) -> bool {
+    let until = std::time::Instant::now() + http.reopen_wait;
+    while std::time::Instant::now() < until {
+        if http.cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10).min(http.reopen_wait));
+    }
+    true
 }
 
 #[cfg(test)]
@@ -518,5 +704,241 @@ mod tests {
         let r = deck.read(&mut [0.0; 8]);
         assert!(r.finished);
         assert_eq!(r.failure.unwrap().kind, crate::error::ErrorKind::NotFound);
+    }
+
+    // A song made on the way, as a server streams it: FLAC here, so the
+    // test reads exact frames. Every answer from `timeOffset=N` is the song
+    // from N seconds on; the first answer says its whole length and hangs
+    // up part way, as a broken connection does. `busy` makes every answer
+    // to a reopen a 503.
+    fn made_on_the_way(rate: u32, secs: usize, busy: bool) -> crate::testing::http_server::ScriptServer {
+        use std::io::Write;
+        crate::testing::http_server::ScriptServer::start(move |asked, conn, _| {
+            let offset = asked
+                .target
+                .split(['?', '&'])
+                .find_map(|p| p.strip_prefix("timeOffset="))
+                .and_then(|v| v.parse::<usize>().ok());
+            if busy && offset.is_some() {
+                let _ = conn.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                return;
+            }
+            let from = offset.unwrap_or(0);
+            let frames = rate as usize * secs - rate as usize * from;
+            let samples = sine(440.0, rate, 2, rate as usize * from, frames, 0.5);
+            let body = flac_bytes(rate, 2, &samples, &[]);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = conn.write_all(head.as_bytes());
+            let sent = if offset.is_none() { body.len() * 2 / 5 } else { body.len() };
+            let _ = conn.write_all(&body[..sent]);
+        })
+    }
+
+    fn quick_reopen() -> HttpOptions {
+        HttpOptions { reopen_wait: Duration::from_millis(10), ..HttpOptions::default() }
+    }
+
+    // A stream made on the way that breaks off goes on from the time it
+    // reached, with nothing heard twice and nothing missed. Red when a
+    // break is resumed by bytes (no timeOffset request) or the deck fails.
+    #[test]
+    fn a_broken_stream_made_on_the_way_goes_on_from_its_time() {
+        let rate = 48_000;
+        let server = made_on_the_way(rate, 4, false);
+        let deck = Deck::open(1, server.url("/rest/stream?id=1&format=opus"), 0.0, quick_reopen());
+        wait_ready(&deck);
+        let (all, failure) = read_all(&deck);
+        assert!(failure.is_none(), "{failure:?}");
+        let frames = all.len() / 2;
+        assert!(frames.abs_diff(rate as usize * 4) <= 4_096, "{frames}");
+        let asked: Vec<String> = server.asked().into_iter().map(|a| a.target).collect();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert!(asked[1].contains("timeOffset="), "{asked:?}");
+    }
+
+    // A server that answers busy to every reopen ends the song after three
+    // tries. Red when a 503 is retried by the stream's own six retries, or
+    // tried for ever.
+    #[test]
+    fn a_stream_made_on_the_way_fails_after_three_reopens() {
+        let rate = 48_000;
+        let server = made_on_the_way(rate, 4, true);
+        let deck = Deck::open(1, server.url("/rest/stream?id=1&format=opus"), 0.0, quick_reopen());
+        wait_ready(&deck);
+        let (_, failure) = read_all(&deck);
+        assert_eq!(failure.map(|f| f.kind), Some(crate::error::ErrorKind::Http));
+        let reopened = server.asked().iter().filter(|a| a.target.contains("timeOffset=")).count();
+        assert_eq!(reopened, REOPENS as usize);
+    }
+
+    // A seek near the start of a stream made on the way names its time.
+    // Red when a seek opens the plain address.
+    #[test]
+    fn a_seek_near_the_start_names_its_time() {
+        let rate = 48_000;
+        let server = crate::testing::http_server::ScriptServer::start(move |_, conn, _| {
+            use std::io::Write;
+            let samples = sine(440.0, rate, 2, 0, rate as usize * 2, 0.5);
+            let body = flac_bytes(rate, 2, &samples, &[]);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = conn.write_all(head.as_bytes());
+            let _ = conn.write_all(&body);
+        });
+        let deck = Deck::open(1, server.url("/rest/stream?id=1&format=opus"), 0.0, quick_reopen());
+        wait_ready(&deck);
+        deck.seek(0.4);
+        let until = Instant::now() + Duration::from_secs(5);
+        while server.asked().len() < 2 {
+            assert!(Instant::now() < until, "the seek asked nothing");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(server.asked()[1].target.contains("timeOffset=0"), "{:?}", server.asked());
+    }
+
+    // A plain stream whose server refuses a later part as busy (Octo does,
+    // when the kept copy a play read is gone) is opened again from its first
+    // byte and goes on from where it was, to the song's end. Red when the 503
+    // is asked again by bytes and the song fails.
+    #[test]
+    fn a_plain_stream_refused_part_way_is_opened_again_from_its_first_byte() {
+        use std::io::Write;
+        use std::sync::atomic::AtomicUsize;
+        let rate = 48_000;
+        let samples = sine(440.0, rate, 2, 0, rate as usize * 4, 0.5);
+        let body = flac_bytes(rate, 2, &samples, &[]);
+        let firsts = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&firsts);
+        let server = crate::testing::http_server::ScriptServer::start(move |asked, conn, _| {
+            let from = asked
+                .header("range")
+                .and_then(|r| r.strip_prefix("bytes="))
+                .and_then(|r| r.split('-').next())
+                .and_then(|from| from.parse::<usize>().ok())
+                .unwrap_or(0);
+            if from == 0 {
+                let first = seen.fetch_add(1, Ordering::SeqCst) == 0;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = conn.write_all(head.as_bytes());
+                // The first answer hangs up part way, as a broken connection does.
+                let sent = if first { body.len() * 2 / 5 } else { body.len() };
+                let _ = conn.write_all(&body[..sent]);
+                return;
+            }
+            if seen.load(Ordering::SeqCst) == 1 {
+                // The file the play was reading is gone: its later parts are refused.
+                let _ = conn.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                return;
+            }
+            let head = format!(
+                "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/flac\r\nContent-Range: bytes {from}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len() - 1,
+                body.len(),
+                body.len() - from
+            );
+            let _ = conn.write_all(head.as_bytes());
+            let _ = conn.write_all(&body[from..]);
+        });
+        let deck = Deck::open(1, server.url("/rest/stream?id=1&format=raw"), 0.0, quick_reopen());
+        wait_ready(&deck);
+        let (all, failure) = read_all(&deck);
+        assert!(failure.is_none(), "{failure:?}");
+        let frames = all.len() / 2;
+        assert!(frames.abs_diff(rate as usize * 4) <= 4_096, "{frames}");
+        assert_eq!(firsts.load(Ordering::SeqCst), 2, "opened again once from its first byte");
+    }
+
+    // A seek into a plain stream whose server now refuses later parts as
+    // busy opens the song again from its first byte and lands at the seek.
+    // Red when the seek's reopen flag is lost and the seek fails the song.
+    #[test]
+    fn a_seek_into_a_plain_stream_refused_part_way_opens_it_again_there() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        let rate = 48_000;
+        // Long enough that the seek lands much further past what the first
+        // file sent than the source waits on an open answer for.
+        let secs = 120;
+        let samples = sine(440.0, rate, 2, 0, rate as usize * secs, 0.5);
+        let body = flac_bytes(rate, 2, &samples, &[]);
+        // What the first file sends before it holds: enough to open it.
+        let part = 128 << 10;
+        // A seek starts looking from the middle, which must lie past what was
+        // sent by more than the source waits on an open answer for (512 KB),
+        // so the read there asks the server.
+        assert!(body.len() / 2 - part > 600_000, "{} bytes is too short", body.len());
+        let refused = Arc::new(AtomicBool::new(false));
+        let starts = Arc::new(AtomicUsize::new(0));
+        let (was_refused, started) = (Arc::clone(&refused), Arc::clone(&starts));
+        let server = crate::testing::http_server::ScriptServer::start(move |asked, conn, stop| {
+            let from = asked
+                .header("range")
+                .and_then(|r| r.strip_prefix("bytes="))
+                .and_then(|r| r.split('-').next())
+                .and_then(|from| from.parse::<usize>().ok())
+                .unwrap_or(0);
+            let first_file = !was_refused.load(Ordering::SeqCst);
+            // The tags a reader looks for at the end of a file it opens.
+            let tail = from + 4_096 >= body.len();
+            if first_file && !tail && from > part {
+                // The file the play was reading is gone: its later parts are refused.
+                was_refused.store(true, Ordering::SeqCst);
+                let _ = conn.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                return;
+            }
+            if !first_file && from == 0 {
+                // Asked from the first byte once refused: the song opened again.
+                started.fetch_add(1, Ordering::SeqCst);
+            }
+            let head = if from == 0 {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+            } else {
+                format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/flac\r\nContent-Range: bytes {from}-{}/{}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len() - 1,
+                    body.len(),
+                    body.len() - from
+                )
+            };
+            let _ = conn.write_all(head.as_bytes());
+            if first_file && !tail {
+                // While the first file is read, an answer sends up to a part of
+                // it, then holds the connection open, so the seek below is what
+                // asks for the rest.
+                let _ = conn.write_all(&body[from..part.max(from)]);
+                let _ = conn.flush();
+                while !stop.load(Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            } else {
+                let _ = conn.write_all(&body[from..]);
+            }
+        });
+        let deck = Deck::open(1, server.url("/rest/stream?id=1&format=raw"), 0.0, quick_reopen());
+        wait_ready(&deck);
+        deck.seek(secs as f64 - 0.5);
+        let (all, failure) = read_all(&deck);
+        assert!(refused.load(Ordering::SeqCst), "the seek met the refusal");
+        assert!(failure.is_none(), "{failure:?}");
+        let frames = all.len() / 2;
+        assert!(frames.abs_diff(rate as usize / 2) <= 4_096, "{frames}");
+        assert!(starts.load(Ordering::SeqCst) >= 1, "opened again from its first byte");
     }
 }

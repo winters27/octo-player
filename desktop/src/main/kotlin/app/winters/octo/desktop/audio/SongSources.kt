@@ -12,6 +12,8 @@ import app.winters.octo.playback.isRadio
 import app.winters.octo.playback.radioOf
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
+import app.winters.octo.ui.family.listedAudioType
+import app.winters.octo.ui.family.songParams
 import app.winters.octo.subsonic.PLAY_TOKEN_PARAM
 import app.winters.octo.subsonic.playToken
 import app.winters.octo.subsonic.gateway.GatewayNames
@@ -43,8 +45,9 @@ fun interface SongSources {
 }
 
 // Songs from the signed-in server, as the phone streams them: the file as
-// it is ("format=raw", the original quality) or, at a smaller `quality`, an
-// MP3 the server makes on the way, at an address signed the way every
+// it is ("format=raw", the original quality) or, at a smaller `quality`, a
+// copy the server makes on the way (a lossy song already at or under that
+// bitrate still comes as it is, see songParams), at an address signed the way every
 // other call is, with the server's extra headers (a sign-in page's only
 // where `gatewayOrigins` lets them go). The engine reuses the address for
 // range requests and reconnects (a made MP3 it opens again at a time
@@ -75,8 +78,12 @@ class ServerSongs(
 
     private fun address(song: Song, play: Map<String, String>): SongAddress? {
         val server = client() ?: return null
-        val id = landed(song.id) ?: song.id
-        val url = server.url("stream", mapOf("id" to id) + params() + play)
+        val landedId = landed(song.id)
+        val id = landedId ?: song.id
+        // A song since fetched into the library is that file, whose type and
+        // bitrate the listing here does not give: it asks as the quality says.
+        val asked = if (landedId != null) params() else songParams(params(), listedAudioType(song.contentType, song.suffix), song.bitRate)
+        val url = server.url("stream", mapOf("id" to id) + asked + play)
         val all = headers()
         val allowed = gatewayOrigins()
         return SongAddress(url.toString(), streamHeaders(all, url, allowed), secureStreamHeaders(all, url, allowed))

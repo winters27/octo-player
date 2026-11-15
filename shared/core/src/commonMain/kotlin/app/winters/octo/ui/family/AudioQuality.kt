@@ -1,5 +1,6 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.offline.smallerKbps
 import app.winters.octo.subsonic.DeviceQualityMode
 import app.winters.octo.subsonic.FamilyQuality
 import app.winters.octo.subsonic.StreamQuality
@@ -103,3 +104,30 @@ fun appPicksQuality(familyOn: Boolean, mode: DeviceQualityMode?): Boolean = !fam
 fun streamParams(appPicks: Boolean, quality: StreamQuality): Map<String, String> =
     if (!appPicks || quality == StreamQuality.Original) mapOf("format" to "raw")
     else mapOf("format" to "opus", "maxBitRate" to quality.kbps.toString())
+
+// What a stream of one song asks for: `params` (from streamParams), except
+// that a lossy song already at or under the bitrate asked comes as it is,
+// since a copy made smaller would be no smaller and sound worse.
+// `bitRateKbps` is the song's own, as its listing says.
+fun songParams(params: Map<String, String>, mimeType: String?, bitRateKbps: Int?): Map<String, String> {
+    val cap = params["maxBitRate"]?.toIntOrNull() ?: return params
+    return if (smallerKbps(mimeType, bitRateKbps?.let { it * 1000 }, cap) == null) mapOf("format" to "raw") else params
+}
+
+// A song's type as its listing gives it: its content type, else the one its
+// suffix stands for.
+fun listedAudioType(contentType: String?, suffix: String?): String? =
+    contentType?.trim()?.takeIf { it.isNotEmpty() } ?: when (suffix?.trim()?.lowercase()) {
+        "flac" -> "audio/flac"
+        "mp3" -> "audio/mpeg"
+        "m4a", "mp4", "m4b" -> "audio/mp4"
+        "aac" -> "audio/aac"
+        "alac" -> "audio/alac"
+        "ogg", "oga", "opus" -> "audio/ogg"
+        "webm" -> "audio/webm"
+        "wav" -> "audio/wav"
+        "aif", "aiff" -> "audio/aiff"
+        "ape" -> "audio/ape"
+        "wv" -> "audio/wavpack"
+        else -> null
+    }

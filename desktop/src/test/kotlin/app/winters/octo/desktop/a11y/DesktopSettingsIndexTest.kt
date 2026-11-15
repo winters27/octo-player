@@ -7,6 +7,7 @@ import app.winters.octo.desktop.pages.searchDesktopSettings
 import app.winters.octo.desktop.pages.settingsCardOf
 import app.winters.octo.desktop.pages.settingsIndexFor
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.playback.DOWNLOAD_FORMAT_TITLE
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -48,6 +49,14 @@ class DesktopSettingsIndexTest {
         assertTrue("Equalizer" in titles("eq"))
         assertTrue(START_WITH in titles("autostart"))
         assertEquals(emptyList<String>(), titles("   "))
+    }
+
+    // Red when the Download format row is missing from the index.
+    @Test
+    fun theDownloadFormatIsFoundByItsWords() {
+        for (word in listOf("opus", "aac", "mp3", "codec", "download format")) {
+            assertTrue(word, DOWNLOAD_FORMAT_TITLE in titles(word))
+        }
     }
 
     @Test

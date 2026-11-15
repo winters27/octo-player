@@ -1,6 +1,11 @@
 package app.winters.octo.desktop.offline
 
-import app.winters.octo.ui.family.streamParams
+import app.winters.octo.offline.AdtsToM4a
+import app.winters.octo.offline.sameAudioKind
+import app.winters.octo.offline.smallerKbps
+import app.winters.octo.offline.sniffAudio
+import app.winters.octo.playback.DownloadFormat
+import app.winters.octo.ui.family.listedAudioType
 import app.winters.octo.subsonic.StreamQuality
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -58,6 +63,11 @@ data class KeptFile(
     val fileSize: Long? = null,
     // The song's album, so the album's animated art is kept with it.
     val album: String = "",
+    // A copy made smaller than the server's file: what was asked ("opus-160"),
+    // or "server" when the server sent another kind of file than listed to an
+    // ask for the file as it is. Null for the server's file as it is, and for
+    // every file kept before this was noted.
+    val made: String? = null,
 )
 
 // The songs of a kept playlist that are kept here: its library songs. A
@@ -65,31 +75,46 @@ data class KeptFile(
 fun keptEntries(entries: List<Song>): List<Song> = entries.filterNot { it.isExternal }
 
 // Whether a kept file is the server's file as it is: it has the song's own
-// type. Opus is left out, since smaller copies are made as Opus too.
-fun keptAsIs(path: String, suffix: String?): Boolean {
+// type and was not made smaller (`made`). Opus is left out, since smaller
+// copies were made as Opus before `made` was noted.
+fun keptAsIs(path: String, suffix: String?, made: String? = null): Boolean {
     val type = path.substringAfterLast('/').substringAfterLast('.', "")
-    return type.isNotEmpty() && type.equals(suffix, ignoreCase = true) && !type.equals("opus", ignoreCase = true)
+    return made == null && type.isNotEmpty() && type.equals(suffix, ignoreCase = true) && !type.equals("opus", ignoreCase = true)
 }
 
-// The ending a kept file gets: Opus for a smaller copy made as Opus;
-// otherwise the type the server answered with, since a song asked for as it
-// is can come as another file than listed (a whole FLAC for a listed
-// preview); the listed suffix when the answer names no type it knows.
-fun keptSuffix(format: String?, answeredType: String?, listed: String?): String? {
-    if (format == "opus") return "opus"
-    val answered = when (answeredType?.substringBefore(';')?.trim()?.lowercase()) {
-        "audio/flac", "audio/x-flac" -> "flac"
-        "audio/mpeg", "audio/mp3" -> "mp3"
-        "audio/mp4", "audio/x-m4a", "audio/m4a" -> "m4a"
-        "audio/aac" -> "aac"
-        "audio/ogg", "application/ogg" -> "ogg"
-        "audio/opus" -> "opus"
-        "audio/wav", "audio/x-wav", "audio/wave" -> "wav"
-        "audio/aiff", "audio/x-aiff" -> "aiff"
-        else -> null
-    }
-    return answered ?: listed
+// The ending a kept file gets for the type its bytes are, or the listed
+// suffix when that type is not one it knows.
+fun keptSuffix(type: String?, listed: String?): String? = when (type?.substringBefore(';')?.trim()?.lowercase()) {
+    "audio/flac", "audio/x-flac" -> "flac"
+    "audio/mpeg", "audio/mp3" -> "mp3"
+    "audio/mp4", "audio/x-m4a", "audio/m4a" -> "m4a"
+    "audio/aac" -> "aac"
+    "audio/opus" -> "opus"
+    "audio/ogg", "application/ogg" -> "ogg"
+    "audio/webm" -> "webm"
+    "audio/wav", "audio/x-wav", "audio/wave" -> "wav"
+    "audio/aiff", "audio/x-aiff" -> "aiff"
+    else -> null
+} ?: listed
+
+// What a download's bytes are: their sniffed type, else the type the server
+// answered with when it names one, else `fallback` (what was asked).
+fun arrivedType(sniffed: String?, answered: String?, fallback: String?): String? =
+    sniffed ?: answered?.substringBefore(';')?.trim()?.lowercase()?.takeIf { it.isNotEmpty() && it != "application/octet-stream" } ?: fallback
+
+// What a kept song is asked for: the file as it is when the download
+// quality is Original or the song is a lossy file already at or under it,
+// otherwise `format` at the quality's bitrate. Never a length estimate: a
+// server's guess at the length of a copy it makes cuts or pads the file.
+fun downloadParams(song: Song, quality: StreamQuality, format: DownloadFormat): Map<String, String> {
+    val kbps = smallerKbps(listedAudioType(song.contentType, song.suffix), song.bitRate?.let { it * 1000 }, quality.kbps.takeIf { it > 0 })
+        ?: return mapOf("format" to "raw")
+    return mapOf("format" to format.param, "maxBitRate" to kbps.toString())
 }
+
+// What a download is named while it arrives, before its bytes say what it
+// is: "01 One.download.part".
+private const val ARRIVING = "download"
 
 // How the keeping is going, for the settings line.
 data class KeepStatus(val kept: Int = 0, val bytes: Long = 0, val waiting: Int = 0, val failed: Int = 0, val busy: Boolean = false)
@@ -145,6 +170,7 @@ class DesktopOffline(
         files = readIndex()
         status = statusOf(files)
         worker = scope.launch(Dispatchers.IO) {
+            runCatching { dropParts() }
             for (signal in wake) {
                 runCatching { sync() }
                 runCatching { keepLoops() }
@@ -152,6 +178,26 @@ class DesktopOffline(
         }
         poke()
     }
+
+    // Download part files a run that stopped part way left in the servers'
+    // folders. Only those folders are looked in (never the rest of the
+    // listener's folder), the albums' animated art keeps its own part files
+    // (its folder is passed over), and nothing but part files goes.
+    private fun dropParts() {
+        val servers = (settings.current.offline.servers.keys + files.map { it.server })
+            .map { app.winters.octo.offline.fileSafe(it) }
+            .toSet()
+        for (name in servers) {
+            File(folder, name).walkTopDown()
+                .onEnter { it.name != KEPT_LOOPS }
+                .filter { it.isFile && it.name.endsWith(".part") }
+                .forEach { it.delete() }
+        }
+    }
+
+    // Puts a download of AAC in ADTS into an M4A, so it says its own length.
+    // A test parks it to change things while it runs.
+    internal var rewrapAdts: (File, File) -> Boolean = AdtsToM4a::rewrap
 
     // Looks at what should be kept again, soon.
     fun poke() {
@@ -193,6 +239,15 @@ class DesktopOffline(
 
     fun setDownloadQuality(quality: StreamQuality) {
         settings.update { it.copy(offline = it.offline.copy(downloadQuality = quality.name)) }
+    }
+
+    // What smaller copies are made as from now on. Songs already here stay
+    // as they are.
+    val downloadFormat: DownloadFormat
+        get() = DownloadFormat.named(settings.current.offline.downloadFormat)
+
+    fun setDownloadFormat(format: DownloadFormat) {
+        settings.update { it.copy(offline = it.offline.copy(downloadFormat = format.name)) }
     }
 
     // Moves the folder: kept files move with it.
@@ -324,32 +379,62 @@ class DesktopOffline(
         status = statusOf(files).copy(failed = failed)
     }
 
-    // Downloads one song into the folder, in the download quality: the file
-    // as it is, or Opus at that bitrate, with the same stream parameters
-    // playing uses. The file is named by the type the server sent (see
-    // keptSuffix), and its size is what came.
+    // Downloads one song into the folder, in the download quality and
+    // format (see downloadParams). It arrives as a part file in the server's
+    // folder; what came is named and labeled by its bytes, a copy made
+    // smaller notes so (`made`), AAC in ADTS is put into an M4A so it says
+    // its own length, and its size is what is kept.
     private suspend fun fetch(server: String, client: app.winters.octo.subsonic.SubsonicClient, song: Song): KeptFile? = withContext(Dispatchers.IO) {
-        val params = streamParams(appPicks = true, quality = downloadQuality)
-        var part: File? = null
+        val format = downloadFormat
+        val params = downloadParams(song, downloadQuality, format)
+        val asked = params["maxBitRate"]?.let { "${format.param}-$it" }
+        val listed = listedAudioType(song.contentType, song.suffix)
+        val serverFolder = app.winters.octo.offline.fileSafe(server)
+        val artist = song.displayArtist ?: song.artist
+        val arrival = File(folder, "$serverFolder/" + keptPath(artist, song.album, song.track, song.title, ARRIVING) + ".part")
+        var rewrapped: File? = null
         try {
             val request = Request.Builder().url(client.url("stream", mapOf("id" to song.id) + params)).build()
-            http.newCall(request).execute().use { response ->
+            val answered = http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
                 // A sign-in page that answered in the server's place is no song.
                 if (isHtml(response.header("Content-Type"))) return@withContext null
-                val suffix = keptSuffix(params["format"], response.header("Content-Type"), song.suffix)
-                val path = "${app.winters.octo.offline.fileSafe(server)}/" + keptPath(song.displayArtist ?: song.artist, song.album, song.track, song.title, suffix)
-                val target = File(folder, path)
-                target.parentFile?.mkdirs()
-                val incoming = File(target.parentFile, target.name + ".part").also { part = it }
-                incoming.outputStream().use { out -> response.body.byteStream().copyTo(out) }
-                if (target.exists()) target.delete()
-                if (!incoming.renameTo(target)) return@withContext null
-                KeptFile(server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 }, song.albumId.orEmpty())
+                arrival.parentFile?.mkdirs()
+                arrival.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+                response.header("Content-Type")
             }
+            val head = firstBytes(arrival, HEAD_BYTES)
+            val type = arrivedType(sniffAudio(head, head.size), answered, if (asked != null) format.mimeType else listed)
+            val smaller = asked != null || !sameAudioKind(listed, type)
+            val rewrap = type == "audio/aac"
+            val suffix = when {
+                rewrap -> "m4a"
+                !smaller && !song.suffix.isNullOrBlank() -> song.suffix
+                else -> keptSuffix(type, song.suffix)
+            }
+            val path = "$serverFolder/" + keptPath(artist, song.album, song.track, song.title, suffix)
+            val target = File(folder, path)
+            val ready = if (rewrap) {
+                val part = File(target.parentFile, target.name + ".part").also { rewrapped = it }
+                if (!rewrapAdts(arrival, part)) return@withContext null
+                part
+            } else {
+                arrival
+            }
+            // Every song of this server let go while it arrived: nothing is kept.
+            if (settings.current.offline.servers[server] == null) return@withContext null
+            if (target.exists()) target.delete()
+            if (!ready.renameTo(target)) return@withContext null
+            KeptFile(
+                server, song.id, path, target.length(), song.title, song.artist.orEmpty(), song.size?.takeIf { it > 0 }, song.albumId.orEmpty(),
+                made = if (smaller) asked ?: "server" else null,
+            )
         } catch (e: IOException) {
-            part?.delete()
             null
+        } finally {
+            // Whatever was not renamed into place goes.
+            arrival.delete()
+            rewrapped?.delete()
         }
     }
 
@@ -368,7 +453,7 @@ class DesktopOffline(
             val song = now[kept.id]?.takeIf { kept.server == server } ?: return@map kept
             // Files kept before their album was noted have it noted here.
             val noted = if (kept.album.isEmpty() && !song.albumId.isNullOrBlank()) kept.copy(album = song.albumId.orEmpty()).also { changed = true } else kept
-            when (checkKeptCopy(noted.fileSize, song.size, noted.size, keptAsIs(noted.path, song.suffix))) {
+            when (checkKeptCopy(noted.fileSize, song.size, noted.size, keptAsIs(noted.path, song.suffix, noted.made))) {
                 KeptCopyCheck.Keep -> noted
                 KeptCopyCheck.Note -> noted.copy(fileSize = song.size).also { changed = true }
                 KeptCopyCheck.Refetch -> noted.also { swapped += it }
@@ -390,11 +475,12 @@ class DesktopOffline(
         files.filter { it.server == server && sniffed.add(it.path) && looksLikeHtmlFile(firstBytes(File(folder, it.path))) }
             .mapTo(HashSet()) { it.path }
 
-    // The start of a file, enough to tell a page from a song.
-    private fun firstBytes(file: File): ByteArray = runCatching {
+    // The start of a file: 64 bytes tell a page from a song; a type is told
+    // from more, past any tag at its start.
+    private fun firstBytes(file: File, size: Int = 64): ByteArray = runCatching {
         file.inputStream().use { stream ->
-            val bytes = ByteArray(64)
-            val read = stream.read(bytes)
+            val bytes = ByteArray(size)
+            val read = stream.readNBytes(bytes, 0, size)
             if (read <= 0) ByteArray(0) else bytes.copyOf(read)
         }
     }.getOrDefault(ByteArray(0))
@@ -423,5 +509,8 @@ class DesktopOffline(
 
     companion object {
         const val INDEX = "octo-offline.json"
+
+        // How much of a download is read to tell its type.
+        private const val HEAD_BYTES = 4096
     }
 }

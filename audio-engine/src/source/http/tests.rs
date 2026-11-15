@@ -144,6 +144,23 @@ fn replaces_a_connection_that_goes_quiet() {
     assert!(server.requests() >= 2);
 }
 
+// A stream made on the way is never picked up by bytes where it broke off:
+// a new request could send another file. Red when a stream sought by time
+// resumes like any other.
+#[test]
+fn a_stream_sought_by_time_that_breaks_off_asks_to_be_reopened() {
+    let body = data(1_000_000);
+    let server = TestServer::start(body, Behaviour { drop_after: Some(200_000), ..Default::default() });
+    let mut source = HttpSource::open(&server.url(), HttpOptions { by_time: true, ..quick() }).unwrap();
+    let mut out = Vec::new();
+    let error = source.read_to_end(&mut out).unwrap_err();
+    let failure = error.get_ref().and_then(|inner| inner.downcast_ref::<Failure>()).cloned().unwrap();
+    assert!(failure.reopen, "{failure:?}");
+    assert_eq!(failure.kind, ErrorKind::Network);
+    assert!(out.len() <= 200_000);
+    assert_eq!(server.requests(), 1);
+}
+
 #[test]
 fn a_quiet_connection_lets_go_of_the_stream_once_replaced() {
     let body = data(1_000_000);

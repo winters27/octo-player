@@ -35,23 +35,34 @@ pub struct Failure {
     pub message: String,
     /// The HTTP status, when the server answered with one.
     pub status: Option<u16>,
+    /// A stream made on the way (one sought by time) broke off, stalled or
+    /// changed under its reader: opening it again at the time it reached
+    /// mends it, and asking for more of its bytes would not.
+    pub reopen: bool,
 }
 
 impl Failure {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self { kind, message: message.into(), status: None }
+        Self { kind, message: message.into(), status: None, reopen: false }
     }
 
     pub fn http(status: u16) -> Self {
         let kind = if status == 404 || status == 410 { ErrorKind::NotFound } else { ErrorKind::Http };
-        Self { kind, message: format!("server answered {status}"), status: Some(status) }
+        Self { kind, message: format!("server answered {status}"), status: Some(status), reopen: false }
     }
 
     /// A sign-in page that answered, with this status, where a song should
     /// have been. Asking again only meets it again.
     pub fn sign_in_page(status: u16) -> Self {
         let message = format!("a sign-in page answered {status} instead of the song");
-        Self { kind: ErrorKind::SignInPage, message, status: Some(status) }
+        Self { kind: ErrorKind::SignInPage, message, status: Some(status), reopen: false }
+    }
+
+    /// A stream sought by time that broke off: the deck opens it again at
+    /// the time it reached. Shown to the app, once reopening gives up, as a
+    /// network failure.
+    pub fn reopen_at_time(message: impl Into<String>) -> Self {
+        Self { kind: ErrorKind::Network, message: message.into(), status: None, reopen: true }
     }
 }
 

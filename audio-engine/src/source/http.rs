@@ -61,6 +61,15 @@ pub struct HttpOptions {
     /// The first wait before connecting to an ended live stream again. It
     /// doubles each time, four times, before the stream counts as gone.
     pub live_backoff: Duration,
+    /// A stream made on the way (asked for with a `format` other than `raw`),
+    /// which the deck seeks by opening it again at a time. A break, a stall,
+    /// an answer other than 2xx to a later request, or a later answer of
+    /// another type ends it with a failure to reopen, never another request
+    /// for its bytes.
+    pub by_time: bool,
+    /// How long the deck waits before opening a stream sought by time again
+    /// after its server answered busy.
+    pub reopen_wait: Duration,
     /// Where a live stream's titles go once the reader reaches them.
     pub titles: Option<Arc<TitleSlot>>,
     /// The address is an HLS playlist, whatever it looks like.
@@ -86,6 +95,8 @@ impl Default for HttpOptions {
             cancel: None,
             live: false,
             live_backoff: Duration::from_secs(1),
+            by_time: false,
+            reopen_wait: Duration::from_secs(1),
             titles: None,
             hls: false,
             stream_count: &crate::live::HTTP_STREAMS,
@@ -110,6 +121,8 @@ impl fmt::Debug for HttpOptions {
             .field("live", &self.live)
             .field("live_backoff", &self.live_backoff)
             .field("hls", &self.hls)
+            .field("by_time", &self.by_time)
+            .field("reopen_wait", &self.reopen_wait)
             .finish_non_exhaustive()
     }
 }
@@ -460,7 +473,13 @@ impl Read for HttpSource {
                 && state.last_progress.elapsed() > shared.opts.stall_timeout
             {
                 state.stalls += 1;
-                if state.stalls > shared.opts.max_retries {
+                if shared.opts.by_time {
+                    // Made on the way: its bytes from here may not be the ones
+                    // a new request sends, so the deck opens it at its time.
+                    log::warn!("a stream made on the way stalled");
+                    state.generation += 1;
+                    state.failure = Some(Failure::reopen_at_time("the stream stopped arriving"));
+                } else if state.stalls > shared.opts.max_retries {
                     state.failure = Some(Failure::new(ErrorKind::Network, "the stream stopped arriving"));
                 } else {
                     log::warn!("stream stalled, connecting again");
@@ -634,6 +653,26 @@ impl Shared {
         // run out, ends the song as it would have at the start.
         let html = is_html(response.headers().get("content-type").and_then(|v| v.to_str().ok()));
         let login = sends_login(&self.url, &self.opts);
+        if self.opts.by_time && !html && !matches!(status, 401 | 403) {
+            // A stream made on the way that its server now refuses, or sends
+            // as another file, cannot go on by bytes.
+            if !matches!(status, 200 | 206 | 416) {
+                return Err(Failure::reopen_at_time(format!("server answered {status}")));
+            }
+            let answered =
+                response.headers().get("content-type").and_then(|v| v.to_str().ok()).map(plain_type);
+            let first = self.content_type.as_deref().map(plain_type);
+            if answered.is_some() && first.is_some() && answered != first {
+                return Err(Failure::reopen_at_time("the stream changed"));
+            }
+        }
+        if !self.opts.by_time && status == 503 && offset > 0 {
+            // A later part of a song refused as busy: the server let go of the
+            // file the song was read from (Octo does, when a kept copy is
+            // gone). Asking on for its bytes would mix two files, so the deck
+            // opens the song again from its first byte.
+            return Err(Failure::reopen_at_time("server answered 503 for a later part"));
+        }
         match status {
             200 | 206 if html => Err(Failure::sign_in_page(status)),
             401 | 403 if refusal_is_sign_in_page(status, response.headers(), login) => {
@@ -786,6 +825,11 @@ fn fetch(shared: Arc<Shared>, generation: u64, mut offset: u64, mut body: Option
                         return;
                     }
                     break;
+                }
+                Err(e) if shared.opts.by_time => {
+                    log::warn!("a stream made on the way broke off at {offset}: {e}");
+                    shared.fail(generation, Failure::reopen_at_time("the stream broke off"));
+                    return;
                 }
                 Err(e) => {
                     let ranges = shared.lock().ranges;
@@ -947,7 +991,7 @@ fn redirect_target(from: &str, response: &Answer) -> Result<String, Failure> {
 // A redirect that is not followed: the server's answer, and why.
 fn refused_redirect(status: u16, why: &str) -> Failure {
     let message = format!("server answered {status} {why}");
-    Failure { kind: ErrorKind::Http, message, status: Some(status) }
+    Failure { kind: ErrorKind::Http, message, status: Some(status), reopen: false }
 }
 
 // An address's scheme, host and port, as `origin` gives them.
@@ -1045,8 +1089,14 @@ fn sends_login(url: &str, opts: &HttpOptions) -> bool {
 // A failure that asking again would only repeat: the server said no, a
 // sign-in page answered in its place, or it sends another file now.
 fn is_final(failure: &Failure) -> bool {
-    matches!(failure.kind, ErrorKind::SignInPage | ErrorKind::FileChanged)
+    failure.reopen
+        || matches!(failure.kind, ErrorKind::SignInPage | ErrorKind::FileChanged)
         || failure.status.is_some_and(|s| (400..500).contains(&s))
+}
+
+// A content type without its parameters, in lowercase.
+fn plain_type(content_type: &str) -> String {
+    content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
 }
 
 // How many audio bytes a live server puts between its in-stream titles.

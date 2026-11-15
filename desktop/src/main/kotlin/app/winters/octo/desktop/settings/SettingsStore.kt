@@ -142,10 +142,13 @@ data class LiveRadioPrefs(
 @Serializable
 data class OfflinePrefs(
     val folder: String = "",
-    // How kept songs are fetched: the file as it is, or Opus at a lower
-    // bitrate (a StreamQuality name), as the phone's download quality.
+    // How kept songs are fetched: the file as it is, or a smaller copy at a
+    // lower bitrate (a StreamQuality name), as the phone's download quality.
     val downloadQuality: String = "Original",
     val servers: Map<String, KeepChoices> = emptyMap(),
+    // What a smaller copy is made as (a DownloadFormat name). A file from
+    // before this was kept reads as Opus, the default for everyone.
+    val downloadFormat: String = "Opus",
 )
 
 // A song table as the listener set it up: the columns shown, in order (by
