@@ -229,6 +229,12 @@ enum SongOpener {
             case "file":
                 let file = try LocalFile(url: url, contentType: mime)
                 token.adopt(file)
+                // A kept Ogg Opus (a phone whose system cannot play the Opus files it writes keeps
+                // them so), and an Opus CAF kept before this system version was found not to play
+                // them, play through Octo's own Opus decoder.
+                if let opus = try ownOpusDecoder(url, outputRate: outputRate) {
+                    return OpenedSong(decoder: opus, bytes: file)
+                }
                 if let decoder = try? SongDecoder(source: file, mimeType: mime, outputRate: outputRate) {
                     return OpenedSong(decoder: decoder, bytes: file)
                 }
@@ -282,5 +288,28 @@ enum SongOpener {
             guard hops > 0, let playlist = bytes.playlistAddress else { throw error }
             return try openStation(playlist, hls: true, trackId: trackId, mime: nil, token: token, outputRate: outputRate, hops: hops - 1)
         }
+    }
+}
+
+/// Octo's own Opus decoder for a kept file that needs it: an Ogg Opus always; an Opus CAF when this
+/// system version was found not to play those (`AppSettings.storedOpusAbility`, read off the main
+/// thread). None for any other file, which the system's own readers open.
+func ownOpusDecoder(_ url: URL, outputRate: Double) throws -> OpusFileDecoder? {
+    let head = arrivalHead(url)
+    switch sniffDownloadAudio(head) {
+    case "audio/opus":
+        let bytes = [UInt8](try Data(contentsOf: url, options: .mappedIfSafe))
+        guard let stream = OggOpus.read(bytes) else {
+            throw PlayError(.parsingContainerMalformed, detail: "an Opus file Octo cannot read")
+        }
+        playbackLog.info("\(url.lastPathComponent, privacy: .public) opens through OpusFileDecoder")
+        return try OpusFileDecoder(stream: stream, fileBytes: bytes.count, outputRate: outputRate)
+    case "audio/x-caf" where CafOpus.isOpus(head) && AppSettings.storedOpusAbility() == .no:
+        let bytes = [UInt8](try Data(contentsOf: url, options: .mappedIfSafe))
+        guard let stream = CafOpus.read(bytes) else { return nil }
+        playbackLog.info("\(url.lastPathComponent, privacy: .public) opens through OpusFileDecoder")
+        return try OpusFileDecoder(stream: stream, fileBytes: bytes.count, outputRate: outputRate)
+    default:
+        return nil
     }
 }

@@ -549,7 +549,10 @@ final class OfflineDownloads {
                        listed: job.listed, askedSmaller: job.askedSmaller, asked: job.asked,
                        opusInCaf: settings.opusAbility == .yes),
             stillWanted: { (try? await store.download(row.sourceId, row.serverId)) != nil },
-            rewrap: { kind, from, to in await Rewrap.inBackground(kind, from: from, to: to) })
+            readsAsOgg: { url in
+                OggOpus.read([UInt8]((try? Data(contentsOf: url, options: .mappedIfSafe)) ?? Data())).flatMap(OggOpusPlayer.init) != nil
+            },
+            rewrap:{ kind, from, to in await Rewrap.inBackground(kind, from: from, to: to) })
         if case .finished(let target, let label) = outcome {
             let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value ?? 0
             try? await store.finishDownload(row.sourceId, row.serverId, path: target.path, size: size, format: label, fileSize: job.fileSize)

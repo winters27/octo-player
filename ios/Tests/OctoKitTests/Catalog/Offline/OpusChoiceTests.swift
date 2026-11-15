@@ -35,12 +35,17 @@ import Testing
         }
         let ios = try #require(found, "ios/Package.swift not found above \(#filePath)")
         let package = try String(contentsOf: ios.appendingPathComponent("Package.swift"), encoding: .utf8)
-        #expect(package.contains(#"resources: [.copy("CoverArt"), .copy("Probe")]"#))
+        #expect(package.contains(#"resources: [.copy("CoverArt"), .copy("Probe"), .copy("Licenses")]"#))
         // A Windows checkout ends its lines with CR LF.
         let project = try String(contentsOf: ios.appendingPathComponent("project.yml"), encoding: .utf8)
             .replacingOccurrences(of: "\r\n", with: "\n")
         #expect(project.contains("- path: Sources/Octo/Probe\n        type: folder\n        buildPhase: resources"))
         #expect(project.contains("- \"Probe/**\""))
+        #expect(project.contains("- path: Sources/Octo/Licenses\n        type: folder\n        buildPhase: resources"))
+        #expect(project.contains("- \"Licenses/**\""))
+        // The notice About shows is the one the release carries.
+        let notice = ios.appendingPathComponent("Sources/Octo/Licenses/opus-COPYING.txt")
+        #expect(try String(contentsOf: notice, encoding: .utf8).contains("Xiph.Org"))
     }
 
     @Test func thePlayersOwnRefusalIsNo() {

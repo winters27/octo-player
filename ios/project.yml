@@ -29,12 +29,18 @@ targets:
           - "CoverArt/**"
           - "Probe"
           - "Probe/**"
+          - "Licenses"
+          - "Licenses/**"
       # Fonts and backgrounds for drawn playlist covers, read from a CoverArt folder.
       - path: Sources/Octo/CoverArt
         type: folder
         buildPhase: resources
       # The tone the phone plays once to find whether it plays the Opus files it writes.
       - path: Sources/Octo/Probe
+        type: folder
+        buildPhase: resources
+      # The notices of the code Octo bundles, shown in About.
+      - path: Sources/Octo/Licenses
         type: folder
         buildPhase: resources
       - path: XcodeSupport

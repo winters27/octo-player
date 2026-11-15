@@ -56,7 +56,7 @@ final class AppSettings {
         player = Self.readPlayer(playerKeys)
         stream = Self.readStream(playerStore)
         offline = Self.readOffline(offlineStore)
-        opusAbility = offlineStore.string(forKey: Self.opusAbilityKey).flatMap(OpusAbility.init(rawValue:))
+        opusAbility = Self.storedOpusAbility()
         keepScreenOn = lyricsStore.object(forKey: Keys.keepScreenOn) as? Bool ?? true
         lyricsLook = Self.readLook(lyricsStore)
         outputTimings = Self.readOutputTimings(lyricsStore)
@@ -283,9 +283,18 @@ final class AppSettings {
     }
 
     /// Where the ability is kept: one answer per system version, so a newer system tries again.
-    private static var opusAbilityKey: String {
+    nonisolated private static var opusAbilityKey: String {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return "opus.caf.ability.\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
+    /// The ability as a song opens, readable from any thread: a launch argument for this run only
+    /// (`-octo.opusAbility no` or `yes`, which nothing saves), else the stored answer.
+    nonisolated static func storedOpusAbility() -> OpusAbility? {
+        let launch = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["octo.opusAbility"] as? String
+        if let forced = launch.flatMap(OpusAbility.init(rawValue:)) { return forced }
+        let store = UserDefaults(suiteName: "offline") ?? .standard
+        return store.string(forKey: opusAbilityKey).flatMap(OpusAbility.init(rawValue:))
     }
 
     func setWifiOnly(_ on: Bool) {

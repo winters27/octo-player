@@ -9,6 +9,7 @@ struct AboutSettingsPage: View {
     @State private var updates = AppUpdates.shared
     @State private var navigator = SettingsNavigator.shared
     @State private var whatsNewOpen = false
+    @State private var opusLicenseOpen = false
 
     var body: some View {
         let state = updates.state
@@ -36,9 +37,15 @@ struct AboutSettingsPage: View {
                     ActionRow(SettingsIndex.checkNow, helper: state.line, chevron: false, busy: state.checking) { updates.checkNow() }
                 }
             }
+            SettingsGroup(title: "Licenses", icon: SettingsIcon.info) {
+                ActionRow(nil, title: "Opus audio decoder",
+                          helper: "libopus 1.5.2, under the BSD license. Copyright Xiph.Org Foundation and others.",
+                          trailing: "Read", enabled: true) { opusLicenseOpen = true }
+            }
             credit
         }
         .whatsNewPanel(isPresented: $whatsNewOpen)
+        .sheet(isPresented: $opusLicenseOpen) { LicenseSheet(title: "Opus license", text: Self.opusLicense) }
         .onChange(of: navigator.whatsNewOpen, initial: true) { _, open in
             if open {
                 navigator.whatsNewOpen = false
@@ -57,5 +64,38 @@ struct AboutSettingsPage: View {
         .padding(.horizontal, 32)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Made by Winters with love")
+    }
+
+    /// libopus's own notice, bundled beside the app's other resources.
+    private static let opusLicense: String = {
+        guard let url = Bundle.module.url(forResource: "opus-COPYING", withExtension: "txt", subdirectory: "Licenses"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return "libopus 1.5.2. Copyright Xiph.Org Foundation and others. BSD license: https://opus-codec.org/license/"
+        }
+        return text
+    }()
+}
+
+/// A license's full text, to read and copy.
+private struct LicenseSheet: View {
+    let title: String
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(text)
+                    .font(.footnote.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
     }
 }

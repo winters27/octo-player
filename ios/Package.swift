@@ -32,8 +32,32 @@ let package = Package(
         // Talking to the server, the models and the queue rules. Foundation only. Optimized in
         // every build, debug ones too: the phone's mix runs here on the audio thread, and
         // unoptimized it overran the output's cycle through every Automix blend.
-        .target(name: "OctoKit", dependencies: [.target(name: "CSQLite", condition: .when(platforms: [.linux]))],
+        .target(name: "OctoKit", dependencies: ["COpus", .target(name: "CSQLite", condition: .when(platforms: [.linux]))],
                 swiftSettings: [.unsafeFlags(["-O"], .when(configuration: .debug))]),
+        // libopus 1.5.2, the Xiph.Org reference Opus codec (BSD; its notice is COPYING here and in
+        // About): it plays the Ogg Opus files a phone's own system cannot. Built from its C sources
+        // on every platform, so the Linux test build decodes real Opus too, and optimized in debug
+        // builds as well, since it decodes as a song plays.
+        .target(
+            name: "COpus",
+            path: "Sources/COpus",
+            exclude: ["COPYING", "VERSION"],
+            sources: ["celt", "silk", "src"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("OPUS_BUILD"),
+                .define("VAR_ARRAYS"),
+                .define("HAVE_LRINTF", to: "1"),
+                .define("HAVE_LRINT", to: "1"),
+                .headerSearchPath("include"),
+                .headerSearchPath("celt"),
+                .headerSearchPath("silk"),
+                .headerSearchPath("silk/float"),
+                .headerSearchPath("src"),
+                .headerSearchPath("dnn"),
+                .unsafeFlags(["-O2", "-w"]),
+            ],
+            linkerSettings: [.linkedLibrary("m", .when(platforms: [.linux]))]),
         // The inbox the share extension leaves a shared list in for the app. Foundation only.
         .target(name: "ShareInbox"),
         // What the app leaves for its widgets, the links the widgets open it with, and the
@@ -46,7 +70,7 @@ let package = Package(
     ] + (kitOnly ? [] : [
         // The iPhone app: SwiftUI, AVFoundation and Apple's Liquid Glass.
         .target(name: "Octo", dependencies: ["OctoKit", "ShareInbox", "OctoSystem", "OctoIntents"],
-                resources: [.copy("CoverArt"), .copy("Probe")]),
+                resources: [.copy("CoverArt"), .copy("Probe"), .copy("Licenses")]),
         // The App Intents that Siri, Shortcuts and the widgets' buttons use. Linked into the app
         // and the widgets, so both know the same intents.
         .target(name: "OctoIntents", dependencies: ["OctoSystem"]),
