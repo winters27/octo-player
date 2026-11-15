@@ -193,10 +193,11 @@ fn parse_pin(text: &str) -> Option<Pin> {
     }
 }
 
-// A DER element's tag, the element whole, its contents, and what follows it.
+// One DER element: its tag, the element whole, its contents, and what
+// follows it in the input.
 type DerElement<'a> = (u8, &'a [u8], &'a [u8], &'a [u8]);
 
-// One DER element at the start of `input`. None when it runs past the input.
+// The DER element at the start of `input`. None when it runs past the input.
 fn der_next(input: &[u8]) -> Option<DerElement<'_>> {
     let tag = *input.first()?;
     let first = *input.get(1)? as usize;
