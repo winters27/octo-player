@@ -5,8 +5,12 @@ import app.winters.octo.design.PopupHost
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -17,7 +21,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -30,12 +33,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -49,14 +54,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.AdvancedGroup
 import app.winters.octo.connection.AdvancedRow
@@ -71,6 +80,7 @@ import app.winters.octo.design.FloatingGlaze
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.LocalFocusVisibility
 import app.winters.octo.design.LocalOctoSurfaces
+import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoTooltip
@@ -258,39 +268,51 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
     // While the certificate is asked about, the card steps back behind it.
     val asking by animateFloatAsState(if (form.question != null) 0.35f else 1f, label = "asking")
     CompositionLocalProvider(LocalCalloutHost provides host) {
-        BoxWithConstraints(Modifier.fillMaxSize().alpha(asking)) {
+        // A wheel turned anywhere on the page scrolls the card, as it does
+        // over the card itself.
+        val reverse = ScrollableDefaults.reverseDirection(LocalLayoutDirection.current, Orientation.Vertical, reverseScrolling = false)
+        BoxWithConstraints(Modifier.fillMaxSize().alpha(asking).scrollable(scroll, Orientation.Vertical, reverseDirection = reverse)) {
             // On a short window the card packs tighter, so Sign in shows without scrolling.
             val short = maxHeight < ShortWindow
             val pad = if (short) 12.dp else 32.dp
             val density = LocalDensity.current
             // The card and what is under it, measured with Advanced closed:
-            // while Advanced is open their top stays where it was centered,
-            // so nothing above Advanced moves as it opens.
+            // while Advanced's groups are drawn (open, or fading out) their
+            // top rests where it was centered, so nothing above Advanced
+            // moves as it opens or closes.
             var closedHeight by remember(form) { mutableIntStateOf(-1) }
-            val pinned = form.advancedOpen && closedHeight >= 0
+            var advancedShown by remember(form) { mutableStateOf(false) }
+            val pinned = (form.advancedOpen || advancedShown) && closedHeight >= 0
             val pinTop = if (pinned) with(density) { ((maxHeight - pad * 2 - closedHeight.toDp()) / 2).coerceAtLeast(0.dp) } else 0.dp
+            // Advanced closing under a lifted card takes the card back down
+            // to its rest, and its words back to their top, as the groups
+            // fade out.
+            val fade = advancedFade()
+            val still = LocalReduceMotion.current
+            LaunchedEffect(form.advancedOpen) {
+                if (form.advancedOpen || pinTop == 0.dp || scroll.value == 0) return@LaunchedEffect
+                if (still) scroll.scrollTo(0) else scroll.glideTo(0, fade)
+            }
+            // The card takes the room between the page's ends, over the
+            // other servers, resting `pinTop` under its top. A scroll toward
+            // the end first lifts the whole card to the top, then moves its
+            // words inside it (see SignInCard).
             Column(
                 Modifier
                     .fillMaxSize()
-                    .scrollbar(scroll)
-                    .scrollFades(scroll, PageFade, eased = true)
-                    .verticalScroll(scroll)
-                    .heightIn(min = maxHeight)
-                    .onGloballyPositioned { content = it }
                     .padding(vertical = pad),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = if (pinned) Arrangement.Top else Arrangement.Center,
             ) {
-                if (pinned) Spacer(Modifier.height(pinTop))
                 Column(
-                    Modifier.onSizeChanged { if (!form.advancedOpen) closedHeight = it.height },
+                    Modifier.weight(1f, fill = false).onSizeChanged { if (!pinned && !form.advancedOpen && !advancedShown) closedHeight = it.height },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    SignInCard(backdrop, short) {
+                    SignInCard(backdrop, short, scroll, pinTop, onContent = { content = it }, modifier = Modifier.weight(1f, fill = false)) {
                         Txt("Octo", OctoType.display)
                         Txt(
                             when {
-                                form.invite != null -> "Sign up for your family's Octo server. Your login then works in Octo and any other music app."
+                                form.invite != null -> "Sign up for your family's Octo server."
                                 form.handOver != null -> "Signing in with the login from your other device."
                                 else -> "Sign in to your music server. Any Subsonic, Navidrome or Octo server works."
                             },
@@ -315,7 +337,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                         if (form.invite != null || form.handOver != null) {
                             LinkCard(form, ::go, places, address = address, addressNotes = { ConnectionNotes(form) })
                             LinkFooter(form, ::go, onLeave = form::leaveLink, held = app.switching != null)
-                            Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
+                            Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl, onShown = { advancedShown = it })
                             return@SignInCard
                         }
 
@@ -355,7 +377,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                             if (text == null || !form.takeJoinLink(text, app.switching != null)) form.result = false to "The clipboard holds no family link. Copy the link from your invite or your other device first."
                         }, Modifier.align(Alignment.End).offset(x = Space.L), enabled = !held, icon = OctoIcons.Family)
 
-                        Advanced(app, form, ::signIn, places, replacingId = form.signsInAgainTo, url = form.url, home = form.homeUrl)
+                        Advanced(app, form, ::signIn, places, replacingId = form.signsInAgainTo, url = form.url, home = form.homeUrl, onShown = { advancedShown = it })
                     }
                     OtherServers(app)
                 }
@@ -405,27 +427,77 @@ private fun OtherServers(app: AppState) {
 private val ShortWindow = 720.dp
 
 // The one card of the sign-in: frosted glass over Octo's colors, with a
-// rim that takes a hint of the key color.
+// rim that takes a hint of the key color. Its words scroll on `scroll`
+// through the room `modifier` gives it, starting `pin` under the room's
+// top. That one scroll does both moves: its first `pin` lifts the glass
+// with its words up to the room's top, and past that the glass holds there
+// while the words move inside it, fading at its ends. Scrolled back, the
+// words reach their top before the glass comes down. The glass only grows
+// or shrinks at its top edge and never leaves the room, so its frost is
+// drawn wherever it is. `onContent` hears where the scroll's child is, for
+// the callout.
 @Composable
-private fun SignInCard(backdrop: HazeState, short: Boolean, content: @Composable ColumnScope.() -> Unit) {
+private fun SignInCard(
+    backdrop: HazeState,
+    short: Boolean,
+    scroll: ScrollState,
+    pin: Dp,
+    onContent: (LayoutCoordinates) -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val key = LocalKeyColour.current
+    val pinPx = with(LocalDensity.current) { pin.roundToPx() }
+    // How far under the room's top the glass starts: the pin, less what of
+    // it the scroll has used. The words' scroll fills the whole room and sits
+    // that far up inside the glass, so where the glass is never moves the
+    // words; only the scroll does.
+    val glassTop = remember(scroll, pinPx) { derivedStateOf { (pinPx - scroll.value).coerceAtLeast(0) } }
     FloatingGlaze(
         backdrop = backdrop,
-        modifier = Modifier.width(480.dp),
+        modifier = modifier
+            .width(480.dp)
+            .layout { measurable, constraints ->
+                val glass = measurable.measure(constraints)
+                val top = glassTop.value
+                layout(glass.width, glass.height + top) { glass.place(0, top) }
+            }
+            .scrollbar(scroll),
         shape = CardShape,
         film = CardFilm,
         frost = 20f,
         saturation = 1.8f,
     ) {
-        Box(Modifier.matchParentSize().innerShadow(CardShape, Shadow(radius = 0.dp, spread = 1.dp, color = keyRim(key))))
+        Box(Modifier.matchParentSize().innerShadow(CardShape, Shadow(radius = 0.dp, spread = 1.dp, color = keyRim(key))).testTag(SIGN_IN_CARD_TAG))
         // Secondary words a touch toward the main words: on the groups' glaze
         // over this film the theme's own read 6.6:1, under the 7:1 they need.
         val surfaces = LocalOctoSurfaces.current
         CompositionLocalProvider(LocalOctoSurfaces provides surfaces.copy(secondary = lerp(surfaces.secondary, surfaces.text, 0.12f))) {
-            Column(Modifier.fillMaxWidth().padding(if (short) 20.dp else 32.dp), verticalArrangement = Arrangement.spacedBy(if (short) 6.dp else 12.dp), content = content)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .layout { measurable, constraints ->
+                        val room = measurable.measure(constraints)
+                        val top = glassTop.value
+                        layout(room.width, (room.height - top).coerceAtLeast(0)) { room.place(0, -top) }
+                    }
+                    .scrollFades(scroll, PageFade, eased = true)
+                    .verticalScroll(scroll)
+                    .onGloballyPositioned(onContent),
+            ) {
+                Spacer(Modifier.height(pin))
+                Column(
+                    Modifier.fillMaxWidth().padding(if (short) 20.dp else 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (short) 6.dp else 12.dp),
+                    content = content,
+                )
+            }
         }
     }
 }
+
+// The card's glass, for finding it in tests.
+internal const val SIGN_IN_CARD_TAG = "sign-in-card"
 
 // The line under Remember password, saying what the switch does as it is set.
 internal fun rememberCaption(on: Boolean): String =
@@ -504,7 +576,9 @@ internal fun ResultLine(form: SignInForm) {
 // picked, and the home address), signing in (the Method, left out while
 // joining, where the link decides), and special setups (custom headers and
 // the client certificate, whose row resolves `replacingId`, `url` and `home`
-// as the request does). Groups come in the shared order and fade in and out.
+// as the request does). Groups come in the shared order and fade in and out;
+// `onShown` hears true once they are drawn and false once their fade out
+// ends.
 @Composable
 internal fun ColumnScope.Advanced(
     app: AppState,
@@ -514,9 +588,15 @@ internal fun ColumnScope.Advanced(
     replacingId: String?,
     url: HttpUrl?,
     home: HttpUrl?,
+    onShown: (Boolean) -> Unit = {},
 ) {
     AdvancedHead(form.advancedOpen) { form.advancedOpen = !form.advancedOpen }
+    val shown by rememberUpdatedState(onShown)
     AnimatedVisibility(form.advancedOpen, enter = fadeIn(advancedFade()), exit = fadeOut(advancedFade())) {
+        DisposableEffect(Unit) {
+            shown(true)
+            onDispose { shown(false) }
+        }
         val layout = form.layout
         Column(Modifier.fillMaxWidth().padding(top = Space.M), verticalArrangement = Arrangement.spacedBy(GroupGap)) {
             layout.groups.forEach { group ->
@@ -740,9 +820,9 @@ internal fun TrustQuestion(question: CertificateQuestion, onTrust: () -> Unit, o
             val pairs = formatFingerprint(question.fingerprint).split(':')
             Txt(pairs.chunked(16).joinToString("\n") { it.joinToString(":") }, OctoType.caption.copy(fontFamily = FontFamily.Monospace), maxLines = 3)
         }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
-            GlazeCapsule(null, "Cancel", onCancel)
-            GlazeCapsule(null, SignInWords.TRUST_CONFIRM, onTrust, lit = true)
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            GlazeCapsule(null, "Cancel", onCancel, height = ControlHeight.L)
+            AccentButton(SignInWords.TRUST_CONFIRM, onTrust, size = ButtonSize.Medium)
         }
     }
 }

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.pages
 
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
@@ -47,6 +47,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -75,6 +76,7 @@ import app.winters.octo.design.Glyph
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.LocalFocusVisibility
+import app.winters.octo.design.LocalOctoSurfaces
 import app.winters.octo.design.LocalReduceMotion
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoDuration
@@ -147,6 +149,18 @@ private const val VALUE_SHARE = 0.45f
 // wrap freely once the text is set larger.
 @Composable
 internal fun twoLines(): Int = if (LocalDensity.current.fontScale <= 1f) 2 else Int.MAX_VALUE
+
+// How far the middle of a style's capitals sits over its baseline, in
+// pixels at the text size the person set. A glyph or control aligned by its
+// own middle plus this, beside words aligned by their first baseline, sits
+// on the middle of their capitals at every text size, as a song title's
+// mark does.
+@Composable
+private fun capsMiddle(style: TextStyle): Int = with(LocalDensity.current) { (style.fontSize.toPx() * CAP_SHARE / 2).roundToInt() }
+
+// How tall a capital is, as a share of the type's size, in the desktop's
+// faces.
+private const val CAP_SHARE = 0.7f
 
 // Advanced comes and goes with a fade only.
 @Composable
@@ -232,29 +246,26 @@ internal fun FormRow(title: String, description: String? = null, modifier: Modif
 
 // A switch row: its name and the line saying what it does as it is set. The
 // whole row flips it, and is the one stop a screen reader hears. The switch
-// sits on the name's line, its middle on the middle of the name's capitals,
-// where a choice row's chevron sits on its name.
+// sits on the name's line, its middle on the middle of the name's capitals
+// at every text size, where a choice row's chevron sits on its name.
 @Composable
 internal fun FormSwitchRow(title: String, description: String, on: Boolean, change: (Boolean) -> Unit) {
+    val caps = capsMiddle(FormType.name)
     Row(
         Modifier
             .fillMaxWidth()
             .hoverLift(Corner.RowShape)
             .toggleable(value = on, interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Switch, onValueChange = change)
             .padding(horizontal = RowInset, vertical = Space.L),
-        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(Space.Xl),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).alignBy(FirstBaseline)) {
             Txt(title, FormType.name, OctoColors.TextPrimary, maxLines = 2)
             Txt(description, FormType.description, OctoColors.TextSecondary, maxLines = twoLines())
         }
-        OctoSwitch(on, change, Modifier.offset(y = -SwitchLift).focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
+        OctoSwitch(on, change, Modifier.alignBy { it.measuredHeight / 2 + caps }.focusProperties { canFocus = false }.semantics { hideFromAccessibility() })
     }
 }
-
-// How far a switch rises above the top of its name's line.
-private val SwitchLift = 1.dp
 
 // A titled field: its name with the Optional tag when it may stay empty, a
 // line under the name, then the entry on the line below. `leading` holds the
@@ -307,8 +318,10 @@ internal fun OptionalTag() {
 }
 
 // The entry every field row and header row uses: a well in the page's color,
-// edged with the theme's hairline, named for its field. Taking the keyboard
-// tells a waiting callout to leave the person where they are.
+// edged with the theme's hairline, named for its field. In a sheet on a light
+// theme, whose cards are trays a step under the sheet, the well takes the
+// theme's card color, the sheet's own, a step over the tray. Taking the
+// keyboard tells a waiting callout to leave the person where they are.
 @Composable
 internal fun FieldEntry(
     value: String,
@@ -339,7 +352,7 @@ internal fun FieldEntry(
         enabled = !readOnly,
         leading = leading,
         trailing = trailing,
-        fill = OctoColors.Background,
+        fill = if (LocalInSheet.current && LocalOctoSurfaces.current.light) LocalOctoSurfaces.current.card else OctoColors.Background,
         edge = OctoColors.Edge,
         name = name,
     )
@@ -410,8 +423,9 @@ internal fun HeaderRow(
 internal enum class NoteKind { Info, Lock, OpenLock, Error }
 
 // A note under a group's card, on its content edge: a glyph and words in the
-// secondary words, or, for an error, both in the error words. With `onClick`
-// it is a button (the pointer to the sign-in page group).
+// secondary words, or, for an error, both in the error words. The glyph sits
+// on the middle of the first line's capitals at every text size. With
+// `onClick` it is a button (the pointer to the sign-in page group).
 @Composable
 internal fun FormNote(text: String, kind: NoteKind = NoteKind.Info, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val ink = if (kind == NoteKind.Error) OctoColors.ErrorWords else OctoColors.TextSecondary
@@ -433,23 +447,25 @@ internal fun FormNote(text: String, kind: NoteKind = NoteKind.Info, modifier: Mo
             .hoverLift(Corner.RowShape)
             .clickable(interactionSource = null, indication = FocusRing(Corner.RowShape), role = Role.Button, onClick = onClick)
     }
+    val caps = capsMiddle(FormType.note)
     Row(
         modifier.fillMaxWidth().then(press).padding(horizontal = RowInset),
-        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        Glyph(glyph, Modifier.padding(top = Space.Xxs), size = IconSize.Table, tint = tint)
-        Txt(text, FormType.note, ink, Modifier.weight(1f), maxLines = Int.MAX_VALUE)
+        Glyph(glyph, Modifier.alignBy { it.measuredHeight / 2 + caps }, size = IconSize.Table, tint = tint)
+        Txt(text, FormType.note, ink, Modifier.weight(1f).alignBy(FirstBaseline), maxLines = Int.MAX_VALUE)
     }
 }
 
 // Advanced's head: its title, set as a group's title and at one size whether
 // open or not, the line naming what is inside, and a chevron that alone
 // turns. Its words start on the groups' content edge and its chevron ends on
-// the rows' right edge, its middle on the middle of the title's capitals.
+// the rows' right edge, its middle on the middle of the title's capitals at
+// every text size.
 @Composable
 internal fun AdvancedHead(open: Boolean, onClick: () -> Unit) {
     val turn by animateFloatAsState(if (open) 90f else 0f, if (LocalReduceMotion.current) snap() else spring(), label = "advanced chevron")
+    val caps = capsMiddle(FormType.group)
     Row(
         Modifier
             .fillMaxWidth()
@@ -460,25 +476,22 @@ internal fun AdvancedHead(open: Boolean, onClick: () -> Unit) {
                 stateDescription = if (open) "Expanded" else "Collapsed"
             }
             .padding(horizontal = RowInset, vertical = Space.M),
-        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(Space.M),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).alignBy(FirstBaseline)) {
             Txt(SignInWords.ADVANCED, FormType.group, OctoColors.TextPrimary)
             Txt(SignInWords.ADVANCED_LINE, FormType.description, OctoColors.TextSecondary, maxLines = twoLines())
         }
-        Glyph(OctoIcons.Chevron, Modifier.padding(top = ChevronDrop).rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
+        Glyph(OctoIcons.Chevron, Modifier.alignBy { it.measuredHeight / 2 + caps }.rotate(turn), size = IconSize.Toolbar, tint = OctoColors.TextSecondary)
     }
 }
-
-// How far Advanced's chevron sits under the top of its title's line.
-private val ChevronDrop = 3.dp
 
 // A choice: its name, the line under it, and the chosen option's words at
 // the row's end (under the name when the two do not fit side by side).
 // Pressed, the options open under it in the card, each with a line on what
 // it is for, the chosen one on the accent fill with a check; picking one
-// closes them, and the keyboard goes back to the row.
+// closes them, and the keyboard goes back to the row. Its chevron sits on
+// the middle of the name's capitals at every text size.
 @Composable
 internal fun <T> ChoiceFormRow(
     title: String,
@@ -494,6 +507,7 @@ internal fun <T> ChoiceFormRow(
     val head = remember { FocusRequester() }
     val visibility = LocalFocusVisibility.current
     val value = label(selected)
+    val caps = capsMiddle(FormType.name)
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -506,11 +520,10 @@ internal fun <T> ChoiceFormRow(
                     stateDescription = if (open) "Expanded" else "Collapsed"
                 }
                 .padding(horizontal = RowInset, vertical = Space.L),
-            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(Space.M),
         ) {
-            Box(Modifier.weight(1f)) { NameAndValue(title, description, value) }
-            Glyph(OctoIcons.Chevron, Modifier.padding(top = Space.Xxs).rotate(if (open) 270f else 90f), size = IconSize.Table, tint = OctoColors.TextSecondary)
+            Box(Modifier.weight(1f).alignBy(FirstBaseline)) { NameAndValue(title, description, value) }
+            Glyph(OctoIcons.Chevron, Modifier.alignBy { it.measuredHeight / 2 + caps }.rotate(if (open) 270f else 90f), size = IconSize.Table, tint = OctoColors.TextSecondary)
         }
         if (open) {
             Column(Modifier.fillMaxWidth().padding(start = Space.M, end = Space.M, bottom = Space.M).selectableGroup()) {
@@ -686,8 +699,8 @@ internal fun CalloutEffect(pending: Boolean, host: CalloutHost?, group: () -> La
 // the animation is now, so content that shrinks under the scroll mid-way (a
 // part closing, which clamps the scroll) does not carry it past the target.
 // A drag still cancels it, as it cancels any scroll.
-private suspend fun ScrollState.glideTo(target: Int) {
+internal suspend fun ScrollState.glideTo(target: Int, spec: AnimationSpec<Float> = spring()) {
     scroll {
-        animate(value.toFloat(), target.toFloat(), animationSpec = spring()) { now, _ -> scrollBy(now - value) }
+        animate(value.toFloat(), target.toFloat(), animationSpec = spec) { now, _ -> scrollBy(now - value) }
     }
 }
