@@ -186,7 +186,9 @@ const KEY_PIN_MARK: &str = "spki:";
 fn parse_pin(text: &str) -> Option<Pin> {
     let text = text.trim();
     match text.get(..KEY_PIN_MARK.len()) {
-        Some(mark) if mark.eq_ignore_ascii_case(KEY_PIN_MARK) => parse_fingerprint(&text[KEY_PIN_MARK.len()..]).map(Pin::Key),
+        Some(mark) if mark.eq_ignore_ascii_case(KEY_PIN_MARK) => {
+            parse_fingerprint(&text[KEY_PIN_MARK.len()..]).map(Pin::Key)
+        }
         _ => parse_fingerprint(text).map(Pin::Certificate),
     }
 }
@@ -541,7 +543,10 @@ mod tests {
         let renewed = made(&key, 2);
         let other = made(&rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap(), 3);
         assert_ne!(first, renewed);
-        let key_pin = format!("spki:{}", hex(ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info()).as_ref()));
+        let key_pin = format!(
+            "spki:{}",
+            hex(ring::digest::digest(&ring::digest::SHA256, &key.subject_public_key_info()).as_ref())
+        );
         let trust = Trust::default();
         trust.replace([("music.example.com".to_string(), key_pin)]);
         assert!(trust.allows("music.example.com", &first));
