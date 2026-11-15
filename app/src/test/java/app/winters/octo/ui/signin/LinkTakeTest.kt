@@ -525,8 +525,10 @@ class LinkTakeTest {
     }
 
     // A home QR from the person's own device: its link names the home address,
-    // its sealed sign-in the outside address and that home. The certificate
-    // trusted at home stays trusted for it. Red when adoption drops every pin.
+    // its sealed sign-in the outside address and that home. The form adopts
+    // the outside server, and the certificate trusted at home stays trusted
+    // for it. Red when adoption drops every pin, or the received sign-in is
+    // never checked (nothing is adopted and the form keeps showing the home).
     @Test
     fun aHomeQrKeepsTheHomesPin() {
         val vm = formWithPin(harness.link, "127.0.0.1")
@@ -537,12 +539,16 @@ class LinkTakeTest {
         harness.settle(vm)
         assertEquals("https://music.example.com", call.request.address)
         assertEquals(mapOf("127.0.0.1" to "ab12"), call.request.pins)
+        assertEquals("music.example.com", vm.address)
+        assertEquals(harness.link, vm.home)
     }
 
     // After adoption, a sign-in step that meets Cloudflare Access opens its
     // fields there; filled in, Try again sends them, and nothing is forgotten
     // again. Red when the attempt is not re-tagged with the adopted address
-    // (the page met would be dropped), or Try again forgets.
+    // (the page met would be dropped), Try again forgets, or the received
+    // sign-in is never checked (nothing is adopted, so the form shows the
+    // link's server while the sign-in goes to another).
     @Test
     fun anAdoptedServersSignInPageOpensAndTryAgainSendsItsFields() {
         val vm = harness.form()
@@ -553,6 +559,7 @@ class LinkTakeTest {
         harness.signIns.awaitCall("alice")
         harness.signIns.release("alice", SignInError.Failed(SubsonicException.NotSubsonic("HTTP 403 from ping", 403, Gateway.CloudflareAccess, false)) to null)
         harness.settle(vm)
+        assertEquals("music.example.com", vm.address)
         assertTrue(vm.advancedOpen)
         assertEquals(GatewayKind.CloudflareToken, vm.gatewayKind)
         vm.gatewayFirst = "id.access"

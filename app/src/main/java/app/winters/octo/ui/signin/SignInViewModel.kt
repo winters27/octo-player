@@ -648,7 +648,12 @@ class SignInViewModel @Inject constructor(
                     received = null
                     signedIn = true
                 }
-                is SignInError.Untrusted -> question = failed
+                // Every failure ends "Allowed, signing in": the row then says
+                // it is ready to sign in, while the question waits.
+                is SignInError.Untrusted -> {
+                    handOverStep = null
+                    question = failed
+                }
                 else -> {
                     handOverStep = null
                     error = failed.userMessage()

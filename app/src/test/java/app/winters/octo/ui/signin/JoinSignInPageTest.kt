@@ -26,6 +26,7 @@ import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.subsonic.gateway.basicCredentials
 import app.winters.octo.testing.PageLocals
 import app.winters.octo.testing.RobolectricComposeRule
+import app.winters.octo.ui.family.HANDOVER_ALLOWED
 import app.winters.octo.ui.family.HANDOVER_DENIED
 import app.winters.octo.ui.family.HANDOVER_EXPIRED
 import app.winters.octo.ui.family.HandOverSignIn
@@ -266,6 +267,34 @@ class JoinSignInPageTest {
         vm.scanFamilyCode()
         assertTrue(vm.joining)
         assertTrue(vm.scanning)
+    }
+
+    // Every way the sign-in step of an allowed hand-over can fail ends its
+    // "Allowed, signing in": a certificate the phone does not trust (its
+    // question then waits), a refused password, a sign-in page. Red when a
+    // failure leaves the step set (the row would say it is signing in while
+    // nothing is).
+    @Test
+    fun everyFailureOfAnAllowedHandOversSignInClearsItsStep() {
+        val failures = listOf(
+            SignInError.Untrusted("127.0.0.1", "ab12"),
+            SignInError.Failed(SubsonicException.WrongCredentials("no")),
+            SignInError.Failed(SubsonicException.NotSubsonic("HTTP 401 from ping", 401, Gateway.Authentik, false)),
+        )
+        for (failure in failures) {
+            val (link, box) = harness.handOver(HandOverSignIn(username = "alice", secret = "pw", server = harness.link))
+            harness.allowAtOnce(box)
+            val vm = harness.form()
+            harness.signIns.hold("alice")
+            val before = harness.signIns.callsFor("alice").size
+            vm.startJoin(link)
+            harness.signIns.awaitCall("alice", before + 1)
+            assertEquals("$failure", HANDOVER_ALLOWED, vm.handOverStep)
+            harness.signIns.release("alice", failure to null)
+            harness.settle(vm)
+            assertNull("$failure", vm.handOverStep)
+            assertTrue("$failure", vm.holdsReceived)
+        }
     }
 
     // The sign-in step of a received sign-in commits, from the run that
