@@ -318,25 +318,9 @@ compose.desktop {
         // or -Pocto.discordAppId=... . Without one, Settings leaves Discord out.
         providers.gradleProperty("octo.discordAppId").orNull?.takeIf(String::isNotBlank)?.let { jvmArgs("-Docto.discordAppId=${it.trim()}") }
         nativeDistributions {
-            // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
-            //
-            // An AppImage is one extra step on Linux, from the app image
-            // that createDistributable makes:
-            //   ./gradlew :desktop:createDistributable
-            //   mkdir -p Octo.AppDir/usr
-            //   cp -r desktop/build/compose/binaries/main/app/Octo/* Octo.AppDir/usr/
-            //   cp desktop/icons/octo.png Octo.AppDir/octo.png
-            //   ln -s usr/bin/Octo Octo.AppDir/AppRun
-            // then Octo.AppDir/octo-Octo.desktop (the name the media controls
-            // announce) with these lines:
-            //   [Desktop Entry]
-            //   Type=Application
-            //   Name=Octo
-            //   Exec=Octo %U
-            //   Icon=octo
-            //   Categories=AudioVideo;Audio;Player;
-            //   MimeType=audio/mpeg;audio/flac;audio/mp4;audio/ogg;audio/opus;audio/wav;x-scheme-handler/octo;
-            // and last: appimagetool Octo.AppDir Octo-1.0.0-x86_64.AppImage
+            // MSI for Windows, DMG for macOS, DEB and RPM for Linux. The
+            // Flatpak, AppImage and pacman package are made from the same
+            // app image by the tasks at the end of this file.
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "Octo"
             // Files beside the jars: the native libraries (shareAppNatives).
@@ -388,6 +372,12 @@ compose.desktop {
                 iconFile = file("icons/octo.icns")
                 bundleID = "app.winters.octo"
                 appCategory = "public.app-category.music"
+                // What the app and its runtime may do under the hardened
+                // runtime a signed, notarized app runs with. Signing itself
+                // is switched on by the release workflow with Gradle
+                // properties (compose.desktop.mac.sign and its identity).
+                entitlementsFile.set(file("packaging/macos/entitlements.plist"))
+                runtimeEntitlementsFile.set(file("packaging/macos/entitlements.plist"))
                 // octo:// links open the app.
                 infoPlist {
                     extraKeysRawXml = """
@@ -580,4 +570,43 @@ val packageFlatpak by tasks.registering(Exec::class) {
         "python3", file("packaging/linux/flatpak/flatpak.py").absolutePath, "bundle",
         "--image", image.get().asFile.absolutePath, "--version", desktopVersion, "--out", out.get().asFile.absolutePath,
     )
+}
+
+// The app as an AppImage and as an Arch Linux package, from the same app
+// image again: build/compose/binaries/main/appimage/Octo-<version>-linux-x64.AppImage
+// and build/compose/binaries/main/pacman/Octo-<version>-linux-x64.pkg.tar.zst.
+// Linux x64 only; packaging/linux/packages.py has the tools each needs.
+listOf("AppImage" to "appimage", "Pacman" to "pacman").forEach { (title, kind) ->
+    tasks.register<Exec>("package$title") {
+        group = "compose desktop"
+        description = "Packs the app into ${if (kind == "appimage") "an AppImage" else "an Arch Linux package"} (Linux x64)."
+        dependsOn("createDistributable")
+        val image = layout.buildDirectory.dir("compose/binaries/main/app/Octo")
+        val out = layout.buildDirectory.dir("compose/binaries/main/$kind")
+        inputs.dir(image)
+        inputs.files(file("packaging/linux/packages.py"), file("packaging/linux/flatpak/app.winters.octo.desktop"))
+        inputs.dir(file("packaging/linux/$kind"))
+        inputs.property("version", desktopVersion)
+        outputs.dir(out)
+        doFirst {
+            if (!hostName.startsWith("linux") || hostArch != "x86-64") throw GradleException("The $title is built on Linux x64.")
+            out.get().asFile.deleteRecursively()
+        }
+        commandLine(
+            "python3", file("packaging/linux/packages.py").absolutePath, kind,
+            "--image", image.get().asFile.absolutePath, "--version", desktopVersion, "--out", out.get().asFile.absolutePath,
+        )
+    }
+}
+
+// A release's disk image is only ever made signed (the release workflow
+// then notarizes it). A release build without compose.desktop.mac.sign=true
+// stops here, rather than make a DMG that Gatekeeper would turn away.
+val signsForMac = providers.gradleProperty("compose.desktop.mac.sign").orNull == "true"
+tasks.matching { it.name == "packageDmg" || it.name == "packageReleaseDmg" }.configureEach {
+    doFirst {
+        if (releaseVersion != null && !signsForMac) {
+            throw GradleException("A release DMG must be signed: pass -Pcompose.desktop.mac.sign=true with the signing identity, as desktop-installers.yml does.")
+        }
+    }
 }

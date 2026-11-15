@@ -35,7 +35,7 @@ With Navidrome or any Subsonic server, both apps are full players for the music 
 
 ## The desktop app
 
-For Windows and Linux. Several servers with one-click switching, a song table you can sort and resize, **Ctrl+K** to search or run a command from anywhere, live lists built from rules, Library health, a mini player, and media keys.
+For Windows, macOS and Linux. Several servers with one-click switching, a song table you can sort and resize, **Ctrl+K** to search or run a command from anywhere, live lists built from rules, Library health, a mini player, and media keys.
 
 <table>
 <tr><td width="50%" valign="top"><img src="docs/images/desktop-album.webp" alt="An album, with the songs you have marked"><br><sub>An album, with the songs you have marked</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-player.webp" alt="The full player"><br><sub>The full player</sub></td></tr>
@@ -60,7 +60,13 @@ For Android 10 and newer. Your phone's music and your server's make one library.
 
 Download the latest release:
 
-- [Octo for Windows and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, and a `.deb`, `.rpm`, `.flatpak` or portable zip for Linux. The Windows installer needs no administrator rights. Install the Flatpak with `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub. It isn't code signed yet, so Windows asks the first time you open Octo.
+- [Octo for Windows, macOS and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, a `.dmg` for Macs with Apple silicon, and a `.deb`, `.rpm`, `.flatpak`, `.AppImage`, Arch Linux package (`.pkg.tar.zst`) or portable zip for Linux.
+  - Windows: the installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
+  - macOS: open the `.dmg` and drag Octo into Applications. It is signed and notarized by Apple.
+  - Flatpak: `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub.
+  - AppImage: `chmod +x Octo-<version>-linux-x64.AppImage`, then open it. Keep it in a folder of your own, such as `~/Applications`, and it updates itself.
+  - Arch Linux: `sudo pacman -U Octo-<version>-linux-x64.pkg.tar.zst`.
+  - The desktop app carries its own Java 25 runtime, so nothing else needs installing.
 - [Octo for Android](https://github.com/winters27/octo/releases/tag/android-v1.11.0): an `.apk` for Android 10 and newer. Allow your browser or file manager to install apps when Android asks.
 - Or add [Octo's F-Droid repository](https://winters27.github.io/octo/fdroid/) in F-Droid, Droid-ify or Neo Store, and the Android app updates there like any other.
 
@@ -71,6 +77,7 @@ New versions appear on the [Octo Releases page](https://github.com/winters27/oct
 You need JDK 25 (the desktop app runs on it; the shared code and the Android app are built with it but keep Java 17 classes, which Android needs). The Android app also needs the Android SDK (platform 37). The desktop app plays through its own audio engine, written in Rust, so it needs Rust 1.88 or newer and:
 
 - Windows: the MSVC build tools.
+- macOS: the Xcode command line tools.
 - Linux: `libasound2-dev` and `pkg-config` (Fedora: `alsa-lib-devel`), plus `fakeroot` and `rpm` to build packages.
 
 ```bash
@@ -85,7 +92,9 @@ cd octo-player
 
 # Desktop installers, each on its own system
 ./gradlew :desktop:packageMsi :desktop:packagePortableZip                        # Windows
+./gradlew :desktop:packageDmg                                                    # macOS
 ./gradlew :desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip    # Linux
+./gradlew :desktop:packageAppImage :desktop:packagePacman                        # Linux: also curl, and Docker off Arch
 
 # Tests
 ./gradlew :shared:core:allTests :app:testDebugUnitTest :desktop:test

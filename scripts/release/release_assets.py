@@ -5,11 +5,12 @@ signed manifest (update.json) and SHA256SUMS the apps and people check.
 Used by .github/workflows/desktop-installers.yml and android-release.yml;
 it runs locally too (Python 3.11 or newer, nothing to install).
 
-  release_assets.py stage-desktop --version 1.2.0 --artifacts DIR --out DIR
+  release_assets.py stage-desktop --version 1.2.0 --artifacts DIR --out DIR [--require-platform macos-arm64 ...]
   release_assets.py stage-android --version 1.2.0 --apk FILE --out DIR
   release_assets.py notes --app desktop --tag desktop-v1.2.0 --out FILE
   release_assets.py manifest --app desktop --tag desktop-v1.2.0 --notes FILE --dir DIR
   release_assets.py public-keys --keys FILE --out DIR
+  release_assets.py retry --what "the DEB" [--tries 2] [--wait 20] -- COMMAND...
   release_assets.py self-test
 
 A rehearsal version (1.1.0-rehearsal.1) is refused: its build trusts a
@@ -31,12 +32,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 APPS = {
     "desktop": {
         "prefix": "desktop-v",
-        "title": "Octo for Windows and Linux",
+        "title": "Octo for Windows, macOS and Linux",
         # The parts of the repository the desktop app is built from.
         "paths": ["desktop", "desktop-design", "design", "shared", "subsonic", "audio-engine"],
     },
@@ -53,7 +55,10 @@ QUIET = re.compile(r"^(ci|tools|build|scripts|test|tests|docs)(\([^)]*\))?:", re
 # commit touched, which release notes leave out.
 AREA = re.compile(r"^[a-z][a-z0-9 /-]{0,30}: ")
 # Files the manifest describes, by name: Octo-<version>-<system>-<chip>[-portable].<type>
-DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|flatpak|zip)$")
+DESKTOP_NAME = re.compile(r"^Octo-(?P<version>.+)-(?P<os>windows|macos|linux)-(?P<arch>x64|arm64)(?P<portable>-portable)?\.(?P<kind>msi|dmg|deb|rpm|flatpak|AppImage|pkg\.tar\.zst|zip)$")
+# The files each system's build holds, as their names end. The manifest
+# gives each kind in lowercase (appimage), as the apps look for it.
+DESKTOP_KINDS = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "flatpak", "AppImage", "pkg.tar.zst", "zip"]}
 ANDROID_NAME = re.compile(r"^Octo-(?P<version>.+)-android\.apk$")
 MANIFEST = "update.json"
 SIGNATURE = "update.json.sig"
@@ -94,13 +99,15 @@ def git(*args: str) -> str:
 
 # The built files, under the names the release shows. Each artifact folder
 # is named octo-desktop-<runner os>-<runner arch>, as the workflow uploads them.
-def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
+# Every file its system makes must be there, once; `required` names the
+# systems (macos-arm64) a release can't go out without.
+def stage_desktop(version: str, artifacts: Path, out: Path, required: list[str] = ()) -> list[Path]:
     check_version(version)
     out.mkdir(parents=True, exist_ok=True)
     systems = {"windows": "windows", "macos": "macos", "linux": "linux"}
     chips = {"x64": "x64", "arm64": "arm64"}
-    wanted = {"windows": ["msi", "zip"], "macos": ["dmg"], "linux": ["deb", "rpm", "flatpak", "zip"]}
     staged = []
+    platforms = set()
     folders = sorted(p for p in artifacts.iterdir() if p.is_dir() and p.name.startswith("octo-desktop-"))
     if not folders:
         fail(f"no octo-desktop-* folders in {artifacts}")
@@ -109,14 +116,23 @@ def stage_desktop(version: str, artifacts: Path, out: Path) -> list[Path]:
         system, arch = systems.get(os_name), chips.get(chip)
         if system is None or arch is None:
             fail(f"unexpected artifact folder {folder.name}")
-        for kind in wanted[system]:
-            found = [p for p in folder.rglob(f"*.{kind}") if p.is_file()]
+        platform = f"{system}-{arch}"
+        if platform in platforms:
+            fail(f"more than one artifact folder for {platform}")
+        platforms.add(platform)
+        for kind in DESKTOP_KINDS[system]:
+            # By the name's ending, in its own case: Windows would match
+            # .appimage with *.AppImage, Linux would not.
+            found = [p for p in folder.rglob("*") if p.is_file() and p.name.endswith(f".{kind}")]
             if len(found) != 1:
                 fail(f"{folder.name} should hold one .{kind}, found {len(found)}")
             suffix = "-portable" if kind == "zip" else ""
             target = out / f"Octo-{version}-{system}-{arch}{suffix}.{kind}"
             shutil.copyfile(found[0], target)
             staged.append(target)
+    missing = sorted(set(required) - platforms)
+    if missing:
+        fail(f"the build for {', '.join(missing)} is missing, so this release would leave it out")
     return staged
 
 
@@ -133,7 +149,9 @@ def describe(name: str, app: str, version: str) -> dict:
         match = DESKTOP_NAME.match(name)
         if not match or match["version"] != version:
             fail(f"{name} is not named like Octo-{version}-<system>-<chip>.<type>")
-        return {"os": match["os"], "arch": match["arch"], "kind": match["kind"]}
+        if match["kind"] not in DESKTOP_KINDS[match["os"]] or bool(match["portable"]) != (match["kind"] == "zip"):
+            fail(f"{name} is not a file Octo makes for {match['os']}")
+        return {"os": match["os"], "arch": match["arch"], "kind": match["kind"].lower()}
     match = ANDROID_NAME.match(name)
     if not match or match["version"] != version:
         fail(f"{name} is not named like Octo-{version}-android.apk")
@@ -226,6 +244,27 @@ def public_keys(keys: Path, out: Path) -> list[Path]:
     return written
 
 
+# Runs one package's build, and once more if it fails: a mirror or download
+# that drops out now and then must not stop a release. A build that fails
+# every try still stops it, so the update list never names a file the
+# release lacks. Gives the last try's exit code.
+def retry(command: list[str], what: str, tries: int = 2, wait: float = 20, run=subprocess.call, sleep=time.sleep) -> int:
+    if tries < 1:
+        fail("--tries must be 1 or more")
+    code = 1
+    for attempt in range(1, tries + 1):
+        code = run(command)
+        if code == 0:
+            if attempt > 1:
+                print(f"{what} built on try {attempt}.", flush=True)
+            return 0
+        if attempt < tries:
+            print(f"::warning::{what} failed (exit {code}), so it is built once more.", flush=True)
+            sleep(wait)
+    print(f"::error::{what} failed {tries} times, so the release stops here.", flush=True)
+    return code
+
+
 # Whether a step stops the script (fail), keeping its message quiet.
 def refuses(step) -> bool:
     with contextlib.redirect_stderr(io.StringIO()):
@@ -234,6 +273,41 @@ def refuses(step) -> bool:
         except SystemExit:
             return True
     return False
+
+
+# A build that passes runs once; one that fails once runs again and
+# passes; one that fails every try is tried twice and stops the release.
+def retry_self_test(root: Path) -> None:
+    def runs(codes: list[int]):
+        calls = []
+        def run(command):
+            calls.append(command)
+            return codes[len(calls) - 1]
+        return calls, run
+    quiet = io.StringIO()
+    with contextlib.redirect_stdout(quiet):
+        calls, run = runs([0])
+        assert retry(["build"], "the DEB", run=run, sleep=lambda _: None) == 0 and len(calls) == 1
+        calls, run = runs([1, 0])
+        assert retry(["build"], "the DEB", run=run, sleep=lambda _: None) == 0 and len(calls) == 2
+        calls, run = runs([3, 4])
+        assert retry(["build"], "the DEB", run=run, sleep=lambda _: None) == 4 and len(calls) == 2
+        calls, run = runs([1])
+        assert retry(["build"], "the DMG", tries=1, run=run, sleep=lambda _: None) == 1 and len(calls) == 1
+    said = quiet.getvalue()
+    assert "::warning::the DEB failed (exit 3), so it is built once more." in said
+    assert "::error::the DEB failed 2 times, so the release stops here." in said
+    assert refuses(lambda: retry(["build"], "x", tries=0))
+    # The command line, with a real program that fails its first run only.
+    count = root / "runs.txt"
+    flaky = f"import pathlib,sys; p=pathlib.Path({str(count)!r}); n=int(p.read_text()) if p.exists() else 0; p.write_text(str(n+1)); sys.exit(0 if n else 5)"
+    script = str(Path(__file__).resolve())
+    command = [sys.executable, script, "retry", "--what", "the AppImage", "--wait", "0", "--", sys.executable, "-c", flaky]
+    done = subprocess.run(command, capture_output=True, text=True)
+    assert done.returncode == 0 and count.read_text() == "2", (done.returncode, done.stdout, done.stderr)
+    count.unlink()
+    command = [sys.executable, script, "retry", "--what", "the AppImage", "--tries", "1", "--", sys.executable, "-c", flaky]
+    assert subprocess.run(command, capture_output=True).returncode == 5 and count.read_text() == "1"
 
 
 def self_test() -> None:
@@ -265,6 +339,7 @@ def self_test() -> None:
             "octo-desktop-Windows-X64": ["msi/Octo-1.0.0.msi", "zip/Octo-1.0.0-win32-x86-64.zip"],
             "octo-desktop-macOS-ARM64": ["dmg/Octo-1.0.0.dmg"],
             "octo-desktop-Linux-X64": ["deb/octo_1.0.0-1_amd64.deb", "rpm/octo-1.0.0-1.x86_64.rpm", "flatpak/Octo-1.0.0-linux-x64.flatpak",
+                                       "appimage/Octo-1.0.0-linux-x64.AppImage", "pacman/Octo-1.0.0-linux-x64.pkg.tar.zst",
                                        "zip/Octo-1.0.0-linux-x86-64.zip"],
         }.items():
             for name in names:
@@ -272,18 +347,54 @@ def self_test() -> None:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(name.encode())
         out = root / "out"
-        staged = stage_desktop("1.2.0", artifacts, out)
+        every = ["windows-x64", "macos-arm64", "linux-x64"]
+        staged = stage_desktop("1.2.0", artifacts, out, every)
         assert sorted(p.name for p in staged) == sorted([
             "Octo-1.2.0-windows-x64.msi", "Octo-1.2.0-windows-x64-portable.zip", "Octo-1.2.0-macos-arm64.dmg",
-            "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64.flatpak", "Octo-1.2.0-linux-x64-portable.zip",
+            "Octo-1.2.0-linux-x64.deb", "Octo-1.2.0-linux-x64.rpm", "Octo-1.2.0-linux-x64.flatpak",
+            "Octo-1.2.0-linux-x64.AppImage", "Octo-1.2.0-linux-x64.pkg.tar.zst", "Octo-1.2.0-linux-x64-portable.zip",
         ]), staged
         manifest = json.loads(write_manifest("desktop", "desktop-v1.2.0", "- Hello.", out).read_bytes())
-        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 7
+        assert manifest["version"] == "1.2.0" and manifest["product"] == "desktop" and len(manifest["assets"]) == 9
         flatpak = next(a for a in manifest["assets"] if a["kind"] == "flatpak")
         assert (flatpak["os"], flatpak["arch"], flatpak["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.flatpak")
+        appimage = next(a for a in manifest["assets"] if a["kind"] == "appimage")
+        assert (appimage["os"], appimage["arch"], appimage["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.AppImage")
+        pacman = next(a for a in manifest["assets"] if a["kind"] == "pkg.tar.zst")
+        assert (pacman["os"], pacman["arch"], pacman["name"]) == ("linux", "x64", "Octo-1.2.0-linux-x64.pkg.tar.zst")
+        dmg = next(a for a in manifest["assets"] if a["kind"] == "dmg")
+        assert (dmg["os"], dmg["arch"], dmg["name"]) == ("macos", "arm64", "Octo-1.2.0-macos-arm64.dmg")
         msi = next(a for a in manifest["assets"] if a["kind"] == "msi")
         assert msi == {"name": "Octo-1.2.0-windows-x64.msi", "sha256": hashlib.sha256(b"msi/Octo-1.0.0.msi").hexdigest(), "size": 18, "os": "windows", "arch": "x64", "kind": "msi"}
-        assert (out / SUMS).read_text().count("\n") == 7
+        sums = (out / SUMS).read_text()
+        assert sums.count("\n") == 9 and "Octo-1.2.0-macos-arm64.dmg" in sums and "Octo-1.2.0-linux-x64.AppImage" in sums
+        # A file of the wrong system, or a portable one that isn't the zip, is never described.
+        assert refuses(lambda: describe("Octo-1.2.0-windows-x64.AppImage", "desktop", "1.2.0"))
+        assert refuses(lambda: describe("Octo-1.2.0-macos-arm64.msi", "desktop", "1.2.0"))
+        assert refuses(lambda: describe("Octo-1.2.0-linux-x64-portable.AppImage", "desktop", "1.2.0"))
+        assert refuses(lambda: describe("Octo-1.2.0-linux-x64.appimage", "desktop", "1.2.0"))
+        # A release missing a system's build, or a Linux build missing one
+        # of its files or holding two, stops before anything is named.
+        mac = artifacts / "octo-desktop-macOS-ARM64"
+        shutil.move(mac, root / "mac-aside")
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "no-mac", every))
+        assert len(stage_desktop("1.2.0", artifacts, root / "by-hand")) == 8, "a build by hand needs no system"
+        shutil.move(root / "mac-aside", mac)
+        linux = artifacts / "octo-desktop-Linux-X64"
+        image = linux / "appimage/Octo-1.0.0-linux-x64.AppImage"
+        image.rename(root / "aside.AppImage")
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "no-appimage"))
+        (root / "aside.AppImage").rename(image)
+        (linux / "pacman/second.pkg.tar.zst").write_bytes(b"again")
+        assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "two-packages"))
+        (linux / "pacman/second.pkg.tar.zst").unlink()
+        twice = artifacts / "octo-desktop-linux-x64"
+        # Only where names differ by case alone (Linux): Windows sees one folder.
+        if not twice.exists():
+            twice.mkdir()
+            assert refuses(lambda: stage_desktop("1.2.0", artifacts, root / "twice"))
+            twice.rmdir()
+        retry_self_test(root)
         # A rehearsal build is never staged or described for a release.
         assert refuses(lambda: stage_desktop("1.1.0-rehearsal.1", artifacts, root / "never"))
         assert refuses(lambda: stage_android("1.1.0-rehearsal.1", root / "app-release.apk", root / "never"))
@@ -310,6 +421,8 @@ def main() -> None:
     desktop.add_argument("--version", required=True)
     desktop.add_argument("--artifacts", type=Path, required=True)
     desktop.add_argument("--out", type=Path, required=True)
+    desktop.add_argument("--require-platform", action="append", default=[], metavar="SYSTEM-CHIP",
+                         help="stop unless this system's build is there, such as macos-arm64 (repeatable)")
     android = commands.add_parser("stage-android")
     android.add_argument("--version", required=True)
     android.add_argument("--apk", type=Path, required=True)
@@ -326,6 +439,11 @@ def main() -> None:
     keys = commands.add_parser("public-keys")
     keys.add_argument("--keys", type=Path, required=True)
     keys.add_argument("--out", type=Path, required=True)
+    again = commands.add_parser("retry", help="run a package build, and once more if it fails")
+    again.add_argument("--what", required=True, help="the package, for the log")
+    again.add_argument("--tries", type=int, default=2)
+    again.add_argument("--wait", type=float, default=20, help="seconds between tries")
+    again.add_argument("build", nargs=argparse.REMAINDER, metavar="-- COMMAND", help="the build to run")
     commands.add_parser("self-test")
     args = parser.parse_args()
     if args.rehearsal:
@@ -335,8 +453,13 @@ def main() -> None:
         REHEARSAL = True
 
     if args.command == "stage-desktop":
-        for path in stage_desktop(args.version, args.artifacts, args.out):
+        for path in stage_desktop(args.version, args.artifacts, args.out, args.require_platform):
             print(path.name)
+    elif args.command == "retry":
+        build = args.build[1:] if args.build[:1] == ["--"] else args.build
+        if not build:
+            fail("retry needs the build to run after --")
+        sys.exit(retry(build, args.what, args.tries, args.wait))
     elif args.command == "stage-android":
         print(stage_android(args.version, args.apk, args.out).name)
     elif args.command == "notes":

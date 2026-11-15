@@ -80,7 +80,9 @@ jobs:
         run: |
           version="${TAG#"${APP}-v"}"
           if [ "$APP" = desktop ]; then
-            python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release
+            # Every system's build, each with all its files, or no release.
+            python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release \
+              --require-platform windows-x64 --require-platform macos-arm64 --require-platform linux-x64
           else
             mapfile -t apks < <(find artifacts -name '*.apk')
             if [ "${#apks[@]}" -ne 1 ]; then echo "::error::Expected one APK, found ${#apks[@]}."; exit 1; fi
@@ -122,7 +124,7 @@ jobs:
           GH_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
         run: |
           version="${TAG#"${APP}-v"}"
-          if [ "$APP" = desktop ]; then title="Octo for Windows and Linux $version"; else title="Octo for Android $version"; fi
+          if [ "$APP" = desktop ]; then title="Octo for Windows, macOS and Linux $version"; else title="Octo for Android $version"; fi
           if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
             echo "::error::$TAG is already released on $REPO."
             exit 1

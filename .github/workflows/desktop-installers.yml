@@ -1,11 +1,22 @@
 # Builds the desktop installers on each system, since each is only made on
-# its own: the MSI and a portable zip on Windows, the DMG on macOS, and the
-# DEB, RPM, a Flatpak bundle and a portable zip on Linux. Run by hand from
-# the Actions tab, the installers are kept as the run's artifacts. On a
-# desktop-v<version> tag (desktop-v1.2.0, or desktop-v1.3.0-beta.1 for an
-# early version) they are also published, signed, as a release on the
-# public Octo repository, where the installed apps find them
-# (publish-player-release.yml).
+# its own: the MSI and a portable zip on Windows; the DMG on macOS (Apple
+# silicon), signed with the Developer ID and notarized by Apple; and the
+# DEB, RPM, Flatpak bundle, AppImage, pacman package and a portable zip on
+# Linux. Run by hand from the Actions tab, the installers are kept as the
+# run's artifacts. On a desktop-v<version> tag (desktop-v1.2.0, or
+# desktop-v1.3.0-beta.1 for an early version) they are also published,
+# signed, as a release on the public Octo repository, where the installed
+# apps find them (publish-player-release.yml). A release goes out with
+# every system's files or not at all.
+#
+# The Mac build needs five secrets in this repository, and stops without
+# any of them (it never makes an unsigned DMG):
+#   MACOS_SIGNING_CERTIFICATE           the Developer ID Application certificate
+#                                       and its private key, exported as a .p12, in base64
+#   MACOS_SIGNING_CERTIFICATE_PASSWORD  the password the .p12 was exported with
+#   MACOS_NOTARY_KEY                    an App Store Connect API key (the AuthKey_<id>.p8 file's text)
+#   MACOS_NOTARY_KEY_ID                 that key's ID
+#   MACOS_NOTARY_ISSUER_ID              the Issuer ID shown above the keys
 name: desktop-installers
 
 on:
@@ -42,9 +53,19 @@ jobs:
         include:
           - os: windows-latest
             tasks: ":desktop:packageMsi :desktop:packagePortableZip"
-          # macOS stays out until the Mac build has been opened on a Mac.
-          - os: ubuntu-latest
-            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageFlatpak"
+            tries: 1
+          # Apple silicon. Intel Macs are left out until the engine and the
+          # system library are known to build for x86_64-apple-darwin.
+          - os: macos-15
+            tasks: ":desktop:packageDmg"
+            tries: 1
+          # A fixed Ubuntu, so the oldest Linux the packages run on (its
+          # glibc, which the audio engine is built against) never moves
+          # by itself. Each package is built once more if it fails, and a
+          # second failure stops the release.
+          - os: ubuntu-24.04
+            tasks: ":desktop:packageDeb :desktop:packageRpm :desktop:packagePortableZip :desktop:packageFlatpak :desktop:packageAppImage :desktop:packagePacman"
+            tries: 2
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -54,8 +75,10 @@ jobs:
 
       - name: Linux build packages
         if: runner.os == 'Linux'
-        # ALSA headers for the audio engine, and the tools the DEB and RPM need.
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm flatpak flatpak-builder
+        # ALSA headers for the audio engine; the tools the DEB, RPM and
+        # Flatpak need; desktop-file-utils checks the AppImage's entry. The
+        # pacman package is built in Docker, which the runner has.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config fakeroot rpm flatpak flatpak-builder desktop-file-utils
 
       - name: Flatpak runtime
         if: runner.os == 'Linux'
@@ -70,9 +93,68 @@ jobs:
           done
           exit 1
 
-      - name: Flatpak files agree
+      - name: Linux package files agree
         if: runner.os == 'Linux'
-        run: python3 desktop/packaging/linux/flatpak/flatpak.py self-test
+        run: |
+          python3 desktop/packaging/linux/flatpak/flatpak.py self-test
+          python3 desktop/packaging/linux/packages.py self-test
+
+      - name: Release script checks
+        if: runner.os == 'Linux'
+        run: python3 scripts/release/release_assets.py self-test
+
+      - name: Mac signing secrets are set
+        if: runner.os == 'macOS'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          missing=()
+          [ -n "$CERTIFICATE" ] || missing+=(MACOS_SIGNING_CERTIFICATE)
+          [ -n "$CERTIFICATE_PASSWORD" ] || missing+=(MACOS_SIGNING_CERTIFICATE_PASSWORD)
+          [ -n "$NOTARY_KEY" ] || missing+=(MACOS_NOTARY_KEY)
+          [ -n "$NOTARY_KEY_ID" ] || missing+=(MACOS_NOTARY_KEY_ID)
+          [ -n "$NOTARY_ISSUER_ID" ] || missing+=(MACOS_NOTARY_ISSUER_ID)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::The Mac DMG is only built signed and notarized, and these secrets are not set in this repository: ${missing[*]}. See the top of desktop-installers.yml."
+            exit 1
+          fi
+
+      - name: Mac signing keychain
+        if: runner.os == 'macOS'
+        # A keychain of this run's own holding the Developer ID certificate,
+        # with a password made here and never kept. The certificate's name
+        # is the signing identity the build is told.
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_SIGNING_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/octo-signing.keychain-db"
+          password=$(openssl rand -base64 30)
+          certificate="$RUNNER_TEMP/octo-signing.p12"
+          trap 'rm -f "$certificate"' EXIT
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          # Apple's Developer ID intermediate, in case the runner lacks it.
+          if curl --fail --silent --show-error --location --output "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer; then
+            security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" || true
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identities=$(security find-identity -v -p codesigning "$keychain" | grep -o '"Developer ID Application: [^"]*"' | tr -d '"' | sort -u)
+          if [ "$(printf '%s\n' "$identities" | grep -c .)" -ne 1 ]; then
+            echo "::error::MACOS_SIGNING_CERTIFICATE should hold exactly one Developer ID Application certificate with its private key; it holds: ${identities:-none}."
+            exit 1
+          fi
+          echo "MAC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "MAC_IDENTITY=${identities#Developer ID Application: }" >> "$GITHUB_ENV"
+          echo "Signing as $identities."
 
       - uses: actions/setup-java@v6
         with:
@@ -93,13 +175,78 @@ jobs:
         run: echo "OCTO_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
 
       - name: Tests
+        # The Mac's run is reported but holds nothing up: the suite is made
+        # on Windows and Linux, and the Mac job's own proof is the signed,
+        # notarized DMG it checks below.
+        continue-on-error: ${{ runner.os == 'macOS' }}
+        timeout-minutes: 60
         run: ./gradlew :desktop:test --no-daemon
 
       - name: Installers
-        # A tag's version (none when run by hand) goes into the app and its installers.
+        # A tag's version (none when run by hand) goes into the app and its
+        # installers, and on the Mac the signing identity. Each package is
+        # its own build, so a retry (Linux) builds only the one that failed.
         # Bash on every system: PowerShell splits -PoctoDesktopVersion=1.1.0 at its first dot.
         shell: bash
-        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoDesktopVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          options=(-PoctoBuild="$OCTO_BUILD" --no-daemon)
+          if [ -n "$VERSION" ]; then options+=(-PoctoDesktopVersion="$VERSION"); fi
+          if [ "$RUNNER_OS" = macOS ]; then
+            options+=(-Pcompose.desktop.mac.sign=true -Pcompose.desktop.mac.signing.identity="$MAC_IDENTITY" -Pcompose.desktop.mac.signing.keychain="$MAC_KEYCHAIN")
+          fi
+          for task in ${{ matrix.tasks }}; do
+            if [ "${{ matrix.tries }}" -gt 1 ]; then
+              python3 scripts/release/release_assets.py retry --what "$task" --tries ${{ matrix.tries }} -- ./gradlew "$task" "${options[@]}"
+            else
+              ./gradlew "$task" "${options[@]}"
+            fi
+          done
+
+      - name: Notarize the DMG
+        if: runner.os == 'macOS'
+        # Signs the disk image itself, has Apple notarize it, staples the
+        # ticket to it, and checks what Gatekeeper will: the image and the
+        # app inside it, signed, notarized and whole.
+        env:
+          NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          shopt -s nullglob
+          dmgs=(desktop/build/compose/binaries/main/dmg/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then echo "::error::Expected one DMG, found ${#dmgs[@]}."; exit 1; fi
+          dmg="${dmgs[0]}"
+          key="$RUNNER_TEMP/notary-key.p8"
+          mount="$RUNNER_TEMP/octo-dmg"
+          trap 'rm -f "$key"; hdiutil detach "$mount" -quiet 2> /dev/null || true' EXIT
+          umask 077
+          printf '%s\n' "$NOTARY_KEY" > "$key"
+          codesign --force --timestamp --keychain "$MAC_KEYCHAIN" --sign "Developer ID Application: $MAC_IDENTITY" "$dmg"
+          xcrun notarytool submit "$dmg" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 1h --output-format json > "$RUNNER_TEMP/notary.json" || true
+          cat "$RUNNER_TEMP/notary.json"
+          status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$RUNNER_TEMP/notary.json" || true)
+          if [ "$status" != Accepted ]; then
+            id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id", ""))' "$RUNNER_TEMP/notary.json" || true)
+            if [ -n "$id" ]; then xcrun notarytool log "$id" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true; fi
+            echo "::error::Apple did not notarize the DMG (status: ${status:-no answer}). Its log is above."
+            exit 1
+          fi
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          codesign --verify --strict --verbose=2 "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" -quiet
+          codesign --verify --deep --strict --verbose=2 "$mount/Octo.app"
+          codesign --display --verbose=2 "$mount/Octo.app" 2>&1 | grep -q 'flags=.*runtime' || { echo "::error::Octo.app is not signed with the hardened runtime."; exit 1; }
+          spctl --assess --type execute --verbose=2 "$mount/Octo.app"
+
+      - name: Mac signing keychain removed
+        if: always() && runner.os == 'macOS'
+        run: |
+          if [ -n "${MAC_KEYCHAIN:-}" ]; then security delete-keychain "$MAC_KEYCHAIN" || true; fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -111,6 +258,8 @@ jobs:
             desktop/build/compose/binaries/main/deb/*.deb
             desktop/build/compose/binaries/main/rpm/*.rpm
             desktop/build/compose/binaries/main/flatpak/*.flatpak
+            desktop/build/compose/binaries/main/appimage/*.AppImage
+            desktop/build/compose/binaries/main/pacman/*.pkg.tar.zst
             desktop/build/compose/binaries/main/zip/*.zip
           if-no-files-found: error
 

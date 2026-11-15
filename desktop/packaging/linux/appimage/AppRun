@@ -1,0 +1,8 @@
+#!/bin/sh
+# Starts Octo from its AppImage, handing on the files and octo:// links it
+# was opened with. The AppImage's runtime sets APPDIR and APPIMAGE; an
+# AppImage unpacked by hand and run from its folder sets neither.
+set -eu
+here=${APPDIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)}
+export APPDIR="$here"
+exec "$here/usr/bin/Octo" "$@"
