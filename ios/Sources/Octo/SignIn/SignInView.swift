@@ -39,6 +39,10 @@ struct SignInView: View {
     @State private var focusedWhilePending = false
     /// The same for the API key row.
     @State private var focusedWhileKeyPending = false
+    /// Advanced was opened from its head, and its first group is still to be brought into view.
+    @State private var revealsAdvanced = false
+    /// Where Advanced's first row ends and where the scroll's visible bottom is, on screen.
+    @State private var marks = RevealMarks()
     let done: (String?) -> Void
 
     enum Field: Hashable {
@@ -185,7 +189,10 @@ struct SignInView: View {
                 if pending { focusedWhileKeyPending = false }
             }
             .onChange(of: model.advancedOpen) { _, open in
-                if !open { gatewayHeight = nil }
+                if !open {
+                    gatewayHeight = nil
+                    marks.rowBottom = nil
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
@@ -207,10 +214,11 @@ struct SignInView: View {
             }
             .alert(SignInWords.certPasswordTitle, isPresented: Binding(get: { pendingCertificate != nil }, set: { if !$0 { pendingCertificate = nil } })) {
                 SecureField(SignInWords.certPasswordField, text: $certificatePassword)
-                Button(SignInWords.certPasswordUse) { takeCertificate() }
+                // Off until the password is typed in.
+                Button(SignInWords.certPasswordUse) { takeCertificate() }.disabled(certificatePassword.isEmpty)
                 Button("Cancel", role: .cancel) { pendingCertificate = nil }
             } message: {
-                Text(certificateError ?? SignInWords.certPasswordHint)
+                Text(SignInWords.certPasswordHint)
             }
     }
 
@@ -242,10 +250,16 @@ struct SignInView: View {
                             visibleHeight = height
                             wait.send(.measured)
                         }
+                        // Where the scroll's visible part ends on screen: over the home indicator,
+                        // or the keyboard while it is up.
+                        .onChange(of: geo.frame(in: .global).maxY - geo.safeAreaInsets.bottom, initial: true) { _, bottom in
+                            marks.visibleBottom = bottom
+                        }
                 }
             }
             .task(id: CalloutKey(pending: model.calloutPending, open: model.advancedOpen)) { await gatewayCallout(proxy) }
             .task(id: model.keyPending) { await keyCallout(proxy) }
+            .task(id: model.advancedOpen) { await revealAdvanced(proxy) }
             #if DEBUG
             .task(id: EndKey(pending: endPending, callout: model.calloutPending)) { await scrollToEnd(proxy) }
             #endif
@@ -304,6 +318,34 @@ struct SignInView: View {
         if still { move() } else { withAnimation(.snappy) { move() } }
     }
 
+    /// Advanced opened from its head: its first group's first row comes into view when it opened
+    /// under the scroll's visible bottom (see `advancedRevealScrolls`), the page gliding until the
+    /// row's foot sits on that bottom, or moving at once under reduced motion. It waits for the row
+    /// to be measured; a field taking focus on the way ends it, since the person is typing.
+    private func revealAdvanced(_ proxy: ScrollViewProxy) async {
+        guard model.advancedOpen, revealsAdvanced else { return }
+        revealsAdvanced = false
+        let run = wait.begin()
+        defer { wait.end(run) }
+        while marks.rowBottom == nil || marks.visibleBottom == nil {
+            guard await wait.next(run, for: .measured) == .measured else { return }
+        }
+        await Task.yield()
+        guard !Task.isCancelled, let row = marks.rowBottom, let bottom = marks.visibleBottom,
+              advancedRevealScrolls(open: model.advancedOpen, calloutPending: model.calloutPending, keyPending: model.keyPending,
+                                    rowBottom: Double(row), visibleBottom: Double(bottom)) else { return }
+        let move = { proxy.scrollTo("advancedFirstRow", anchor: .bottom) }
+        if still { move() } else { withAnimation(.snappy) { move() } }
+    }
+
+    /// Advanced's first row was laid out or moved: where its foot is now, and the first time since
+    /// Advanced opened, a wake for the reveal waiting on it.
+    private func firstRowMoved(_ bottom: CGFloat) {
+        let first = marks.rowBottom == nil
+        marks.rowBottom = bottom
+        if first { wait.send(.measured) }
+    }
+
     /// Closes the on-screen keyboard before a callout: no field keeps focus, and whatever UIKit
     /// still holds lets go too.
     private func closeKeyboard() {
@@ -358,7 +400,8 @@ struct SignInView: View {
     }
 
     /// The page from the octopus down: the main card and its notes, the button and the line under
-    /// it, the join buttons or the scan button, then Advanced.
+    /// it, the join buttons or the scan button on the button's trailing edge, then Advanced.
+    /// Opened from its head, Advanced brings its first group into view.
     private var page: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -379,7 +422,7 @@ struct SignInView: View {
                         model.startJoin()
                         model.scanning = true
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 12)
                 }
             }
@@ -387,6 +430,7 @@ struct SignInView: View {
             // page, or want headers or a certificate of its own.
             FormSectionHead(title: SignInWords.advanced, line: SignInWords.advancedLine, open: model.advancedOpen) {
                 model.advancedOpen.toggle()
+                revealsAdvanced = model.advancedOpen
             }
             .padding(.top, 28)
             if model.advancedOpen {
@@ -500,7 +544,7 @@ struct SignInView: View {
         if let handOver = model.handOver {
             FormDivider()
             HStack(spacing: 12) {
-                Text(model.handOverStep ?? "Ready to sign in to \(shownServer(handOver.server))")
+                Text(handOverRowLine(step: model.handOverStep, failed: model.error != nil, server: handOver.server))
                     .font(.octoFormValue)
                     .foregroundStyle(OctoColor.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -571,8 +615,8 @@ struct SignInView: View {
         }
     }
 
-    /// Under the card while joining: the step's own button, the line under it, the scanner and the
-    /// way back to the password form.
+    /// Under the card while joining: the step's own button, the line under it, then the scanner and
+    /// the way back to the password form on the button's trailing edge.
     @ViewBuilder
     private var joinButtons: some View {
         if model.invite != nil {
@@ -587,11 +631,11 @@ struct SignInView: View {
         failureLine
         if model.handOver == nil {
             GlazeButton("Scan the QR code", icon: .camera, size: .small) { model.scanning = true }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.top, 12)
         }
         GlazeButton("Sign in with a password", size: .small, enabled: !model.committing) { model.stopJoin() }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 12)
     }
 
@@ -612,7 +656,8 @@ struct SignInView: View {
 
     /// Getting to the server: the sign-in page in front of it (Authentik, Authelia, a proxy's
     /// password or Cloudflare Access), its two fields once a kind is picked, and the home address.
-    /// A callout marks the group's title and its end, and measures it from title to last note.
+    /// A callout marks the group's title and its end, and measures it from title to last note. Its
+    /// first row, the kind, is what opening Advanced from its head brings into view.
     private func gettingThere(_ rows: [AdvancedRow]) -> some View {
         let labels = GatewayWords.fieldLabels(model.gatewayKind, detected: model.gatewayMet)
         // The values saved for this kind stay while its fields are left empty.
@@ -628,6 +673,7 @@ struct SignInView: View {
                     FormChoiceRow(title: GatewayWords.sectionLabel,
                                   description: GatewayWords.kindHelper(model.gatewayKind) ?? GatewayWords.caption,
                                   value: GatewayWords.kindLabel(model.gatewayKind), question: kinds)
+                        .revealMark("advancedFirstRow", bottom: firstRowMoved)
                 case .pageFirst:
                     FormFieldRow(title: labels.first, value: model.gatewayFirst, onChange: { model.gatewayFirst = $0 },
                                  placeholder: keptPage ? SignInWords.unchanged : SignInWords.required,
@@ -677,7 +723,8 @@ struct SignInView: View {
     }
 
     /// Custom headers, each row keyed by its own id so focus and Show stay with their row, then
-    /// the client certificate.
+    /// the client certificate. A picked file its password did not open says so in the group's
+    /// error note, since the password's question closes with either answer.
     private var specialSetups: some View {
         FormGroup(title: AdvancedGroup.specialSetups.title) {
             FormTrailingRow(title: SignInWords.customHeaders, description: SignInWords.headersDescription) { EmptyView() }
@@ -694,6 +741,8 @@ struct SignInView: View {
                 .padding(.vertical, 12)
             FormDivider()
             certificateRow
+        } notes: {
+            if let certificateError { FormNote(.error, certificateError) }
         }
     }
 
@@ -745,6 +794,14 @@ struct CalloutKey: Hashable {
     let open: Bool
 }
 
+/// Where Advanced's first row ends and where the scroll's visible bottom is, on screen. Kept out of
+/// the page's observed state: both move with every scroll and keyboard, and redraw nothing.
+@MainActor
+final class RevealMarks {
+    var rowBottom: CGFloat?
+    var visibleBottom: CGFloat?
+}
+
 #if DEBUG
 /// What starts a launch step's scroll to the page's end: one asked for, with no callout to come.
 struct EndKey: Hashable {
@@ -794,9 +851,9 @@ struct TrustSheet: View {
                 Text(SignInWords.trustFingerprint).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
                 Text(question.fingerprint).font(.system(size: 13, design: .monospaced)).textSelection(.enabled)
             }
-            HStack(spacing: 10) {
-                AccentButton(SignInWords.trustConfirm, size: .medium, action: trust)
-                GlazeButton("Cancel", size: .medium, action: cancel)
+            AnswerRow(gap: 10) {
+                AccentButton(SignInWords.trustConfirm, size: .medium, fillWidth: true, action: trust)
+                GlazeButton("Cancel", size: .medium, fillWidth: true, action: cancel)
             }
         }
         .padding(24)

@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.design.AccentButton
@@ -87,6 +88,7 @@ internal fun CertificateRow(app: AppState, form: SignInForm, replacingId: String
                 null,
                 if (name == null) SignInWords.CERT_CHOOSE else SignInWords.CERT_CHANGE,
                 { chooseCertificate(app, form, scope) },
+                Modifier.focusRequester(form.certificateButton),
                 enabled = !form.certificateOpening,
                 height = ControlHeight.M,
             )
@@ -154,11 +156,14 @@ private fun chooseCertificate(app: AppState, form: SignInForm, scope: CoroutineS
 
 // Asks for the password the picked file was saved with, in the middle of the
 // window, drawn as a sheet as the server sheets are: the pop-up gives the
-// field the keyboard once the sheet's rows are drawn.
+// field the keyboard once the sheet's rows are drawn. The page behind is
+// shaded as under every sheet. Asked from a server sheet, it keeps that
+// sheet under it, which comes back as it was once the ask closes, however it
+// closes; the keyboard then goes back to the row's Choose or Change.
 internal fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any) {
     val opening = Any()
     val first = FocusRequester()
-    app.popups.showCentred(width = SettingsSize.Sheet, first = first) { close ->
+    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true, first = first, keepUnder = true, returnTo = form.certificateButton) { close ->
         key(opening) { CompositionLocalProvider(LocalInSheet provides true) { CertificatePassword(app, form, path, turn, first, close) } }
     }
 }

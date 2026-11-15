@@ -153,3 +153,13 @@ public func advancedLayout(joining: Bool, takesApiKeys: Bool?, apiKeyOn: Bool, k
     groups.append(LayoutGroup(group: .specialSetups, rows: certificateRow ? [.headers, .certificate] : [.headers]))
     return AdvancedLayout(groups: groups, methods: joining ? [] : methodsShown(takesApiKeys: takesApiKeys, apiKeyOn: apiKeyOn))
 }
+
+/// Whether Advanced, just opened from its head, scrolls the page to bring its first group's first
+/// row into view: only while it is still open with no callout or API key scroll on its way (those
+/// move the page themselves), and only when that row ends under the view's visible bottom
+/// (`rowBottom` and `visibleBottom` on screen, growing downward). A page that already shows the row
+/// stays where it is, so opening never scrolls the page back.
+public func advancedRevealScrolls(open: Bool, calloutPending: Bool, keyPending: Bool, rowBottom: Double,
+                                  visibleBottom: Double) -> Bool {
+    open && !calloutPending && !keyPending && rowBottom > visibleBottom
+}

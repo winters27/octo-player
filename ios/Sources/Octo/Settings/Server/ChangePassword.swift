@@ -1,8 +1,9 @@
 import OctoKit
 import SwiftUI
 
-/// The current password, then the new one twice. Nothing is sent until the form is right; what
-/// the server says comes back in plain words. Made fresh each time its sheet opens.
+/// The current password, then the new one twice. Its button is off until all three are typed in,
+/// and nothing is sent until the form is right; what the server says comes back in plain words.
+/// Made fresh each time its sheet opens.
 struct ChangePasswordForm: View {
     let close: () -> Void
     @Environment(Session.self) private var session
@@ -28,9 +29,9 @@ struct ChangePasswordForm: View {
             if let problem {
                 Text(problem).font(.octoCaption).foregroundStyle(OctoColor.error).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 12) {
-                AccentButton("Change password", size: .medium, loading: busy, action: change)
-                GlazeButton("Cancel", size: .medium, enabled: !busy, action: close)
+            AnswerRow(gap: 12) {
+                AccentButton("Change password", size: .medium, enabled: draft.filled, loading: busy, fillWidth: true, action: change)
+                GlazeButton("Cancel", size: .medium, enabled: !busy, fillWidth: true, action: close)
             }
         }
         .padding(.horizontal, 20)

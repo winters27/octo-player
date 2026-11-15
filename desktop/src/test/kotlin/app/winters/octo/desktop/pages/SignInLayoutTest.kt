@@ -26,6 +26,10 @@ import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.a11y.clickable
 import app.winters.octo.desktop.a11y.name
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.nav.Shortcut
+import app.winters.octo.desktop.server.CertFixtures
+import app.winters.octo.desktop.server.CertificateDraft
+import app.winters.octo.desktop.server.CertificateOpened
 import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.settings.SavedServer
@@ -38,18 +42,22 @@ import app.winters.octo.subsonic.gateway.Gateway
 import app.winters.octo.subsonic.gateway.GatewayKind
 import app.winters.octo.theme.ThemeChoice
 import app.winters.octo.theme.errorWordsFor
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Image
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -1126,6 +1134,378 @@ class SignInLayoutTest {
             }
             s.settle(600).close()
             assertEquals("the certificate's ask", SignInWords.CERT_PASSWORD_FIELD, s.focused()?.name())
+        }
+    }
+
+    // The form the open sheet was made with: the receiver of the link note
+    // the sheet handed its pop-up (`form::noteLink`).
+    private fun A11yScene.sheetForm(): SignInForm {
+        val note = app.popups.request!!.noteLink
+        return note.javaClass.getMethod("getBoundReceiver").invoke(note) as SignInForm
+    }
+
+    // In the pop-up on top, not in one kept out of sight under it: the
+    // unmerged tree still lists what such a pop-up holds, under the node that
+    // clears it for a screen reader.
+    private fun SemanticsNode.inOpenPopup(): Boolean = inPopup() && generateSequence(this) { it.parent }.none { it.config.isClearingSemantics }
+
+    // The open pop-up's card, as laid out.
+    private fun A11yScene.popupArea(): Area = nodes().first { it.config.getOrNull(SemanticsProperties.TestTag) == POPUP_TAG && it.inOpenPopup() }.area()
+
+    // The control drawing these words in the open pop-up, its lowest.
+    private fun A11yScene.controlInPopup(words: String): SemanticsNode =
+        generateSequence(withText(words).filter { it.inOpenPopup() }.maxBy { it.positionInRoot.y }) { it.parent }.first { it.clickable }
+
+    // Presses a control the way a screen reader does, with no pointer moved.
+    private fun A11yScene.activate(words: String) {
+        val control = controlInPopup(words)
+        onUi { control.config[SemanticsActions.OnClick].action?.invoke() }
+        render(3)
+    }
+
+    private fun A11yScene.giveKeyboard(node: SemanticsNode) {
+        onUi { node.config[SemanticsActions.RequestFocus].action?.invoke() }
+        render(3)
+    }
+
+    // A click at a point of the window.
+    private fun A11yScene.pressAt(at: Offset) {
+        onUi {
+            scene.sendPointerEvent(PointerEventType.Move, at)
+            scene.sendPointerEvent(PointerEventType.Press, at, buttons = PointerButtons(isPrimaryPressed = true))
+            scene.sendPointerEvent(PointerEventType.Release, at)
+        }
+        render(3)
+    }
+
+    // How many of the area's pixels differ between two frames by more than
+    // 6 in a channel.
+    private fun changedPixels(a: Image, b: Image, area: Area): Int {
+        val one = Bitmap.makeFromImage(a)
+        val two = Bitmap.makeFromImage(b)
+        var changed = 0
+        for (y in area.top until area.bottom) {
+            for (x in area.left until area.right) {
+                val p = one.getColor(x, y)
+                val q = two.getColor(x, y)
+                val most = maxOf(abs((p shr 16 and 0xFF) - (q shr 16 and 0xFF)), abs((p shr 8 and 0xFF) - (q shr 8 and 0xFF)), abs((p and 0xFF) - (q and 0xFF)))
+                if (most > 6) changed++
+            }
+        }
+        one.close()
+        two.close()
+        return changed
+    }
+
+    // The mean lightness of the window round `area` (every fourth pixel
+    // more than `margin` off it, so its halo is left out).
+    private fun A11yScene.lightnessRound(image: Image, area: Area, margin: Int): Double {
+        val bitmap = Bitmap.makeFromImage(image)
+        var sum = 0.0
+        var count = 0
+        for (y in 0 until height step 4) {
+            for (x in 0 until width step 4) {
+                if (x in (area.left - margin) until (area.right + margin) && y in (area.top - margin) until (area.bottom + margin)) continue
+                sum += lightness(bitmap.getColor(x, y))
+                count++
+            }
+        }
+        bitmap.close()
+        return sum / count
+    }
+
+    // Asks for `file`'s password for `form`, as choosing a file that needs
+    // one does.
+    private fun A11yScene.chooseNeedingPassword(form: SignInForm, file: File) {
+        val opened = runBlocking { app.accounts.openPicked(file.path, "") }
+        assertTrue("the file needs its password", opened is CertificateOpened.Refused && opened.wrongPassword)
+        val turn = Any()
+        onUi {
+            form.certificateTurn = turn
+            askCertificatePassword(app, form, file.path, turn)
+        }
+        settle(600).close()
+    }
+
+    // From the open server sheet titled `title`: Advanced open and Choose
+    // holding the keyboard, as a press on it leaves it, a file that needs its
+    // password is chosen. The ask opens with its field holding the keyboard
+    // and the sheet out of sight. Cancel brings the sheet back exactly as it
+    // was (the same picture, what was typed, no certificate) with the
+    // keyboard back on Choose, as Escape and a press outside the ask do; Use
+    // it with the file's password brings it back with the file taken and the
+    // keyboard on Change. `kept` checks what was typed.
+    private fun A11yScene.askReturnsToTheSheet(title: String, file: File, kept: (SignInForm) -> Unit) {
+        val sheet = app.popups.request!!
+        val form = sheetForm()
+        val start = form.certificateDraft
+        onUi { form.advancedOpen = true }
+        settle(600).close()
+        bringUp(controlInPopup(SignInWords.CERT_CHOOSE))
+        giveKeyboard(controlInPopup(SignInWords.CERT_CHOOSE))
+        assertEquals("Choose has the keyboard", SignInWords.CERT_CHOOSE, focused()?.name())
+        val area = popupArea()
+        val before = settleStill(600, quiet = 200)
+
+        fun ask() {
+            chooseNeedingPassword(form, file)
+            assertNotSame("the ask is open", sheet, app.popups.request)
+            assertTrue("the sheet is out of sight", withText(title).none { it.inOpenPopup() })
+            val focus = focused()
+            assertTrue("the ask's field has the keyboard: ${focus?.name()}", focus != null && focus.name() == SignInWords.CERT_PASSWORD_FIELD && focus.inOpenPopup())
+        }
+        fun back(how: String) {
+            settle(600).close()
+            assertSame("$how: the sheet is back", sheet, app.popups.request)
+            assertEquals("$how: its title shows", 1, withText(title).count { it.inOpenPopup() })
+            kept(form)
+            assertEquals("$how: no certificate taken", start, form.certificateDraft)
+            assertEquals("$how: the keyboard is back on Choose", SignInWords.CERT_CHOOSE, focused()?.name())
+        }
+
+        ask()
+        activate("Cancel")
+        back("Cancel")
+        val after = settleStill(600, quiet = 200)
+        val changed = changedPixels(before, after, area)
+        before.close()
+        after.close()
+        val all = (area.right - area.left) * (area.bottom - area.top)
+        assertTrue("Cancel: $changed of the sheet's $all pixels changed", changed <= all / 1_000)
+
+        ask()
+        onUi { app.perform(Shortcut.CloseLayer, typing = true) }
+        back("Escape")
+
+        ask()
+        pressAt(Offset(24f, height / 2f))
+        back("a press outside")
+
+        ask()
+        type(named(SignInWords.CERT_PASSWORD_FIELD).single { it.inOpenPopup() }, CertFixtures.PASSWORD)
+        val asking = app.popups.request
+        activate(SignInWords.CERT_PASSWORD_USE)
+        until { app.popups.request !== asking }
+        settle(600).close()
+        assertSame("Use it: the sheet is back", sheet, app.popups.request)
+        kept(form)
+        assertTrue("Use it: the file is taken", form.certificateDraft is CertificateDraft.Use)
+        assertTrue("Use it: the row names it", withText(SignInWords.CERT_NONE).none { it.inOpenPopup() } && nodes().any { node -> node.inOpenPopup() && node.config.getOrNull(SemanticsProperties.Text)?.any { it.text.startsWith(file.name) } == true })
+        assertEquals("Use it: the keyboard is back on Change", SignInWords.CERT_CHANGE, focused()?.name())
+    }
+
+    // A certificate's password asked from the Add sheet keeps the sheet
+    // under it, and every way the ask closes brings the sheet back as it
+    // was, the address still typed (askReturnsToTheSheet). Red at BASE by
+    // the sheet being gone: the ask replaced it, and closing it left nothing
+    // open.
+    @Test(timeout = 240_000)
+    fun aCertificatePasswordAskedFromTheAddSheetReturnsToIt() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.SERVER_ADDRESS).single { it.inPopup() }, "music.example.com")
+            s.askReturnsToTheSheet("Add a server", file) { form -> assertEquals("the address still typed", "music.example.com", form.address) }
+        }
+    }
+
+    // The same from the Edit sheet, a new name typed, and from the Sign in
+    // sheet, a password typed. Red at BASE by the sheet being gone.
+    @Test(timeout = 300_000)
+    fun aCertificatePasswordAskedFromTheEditAndSignInSheetsReturnsToThem() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            val server = s.app.connection!!.server
+            s.onUi { editServer(s.app, server) }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.optionalName(SignInWords.SERVER_NAME)).single { it.inPopup() }, "Living room")
+            s.askReturnsToTheSheet("Edit ${server.name}", file) { form -> assertEquals("the name still typed", "Living room", form.label) }
+            s.onUi {
+                s.app.popups.close()
+                signInTo(s.app, server)
+            }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.PASSWORD).single { it.inPopup() }, "typed")
+            s.askReturnsToTheSheet("Sign in to ${server.name}", file) { form -> assertEquals("the password still typed", "typed", form.password) }
+        }
+    }
+
+    // The certificate's password ask shades the page as every sheet does:
+    // over the sign-in page with Advanced open the window round it darkens
+    // by a quarter or more, and asked from the Add sheet the shade round the
+    // cards is the sheet's own, neither lifted nor doubled. Red at BASE by
+    // the ask asking for no shade: the sign-in page round it stays as bright
+    // as before, and from the sheet the page comes back unshaded.
+    @Test(timeout = 180_000)
+    fun theCertificatePasswordAskShadesThePageAsTheSheetsDo() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        page().use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            val bare = s.settleStill(600, quiet = 200)
+            s.chooseNeedingPassword(s.app.signInForm, file)
+            val asking = s.settleStill(600, quiet = 200)
+            val ask = s.popupArea()
+            val before = s.lightnessRound(bare, ask, 64)
+            val after = s.lightnessRound(asking, ask, 64)
+            bare.close()
+            asking.close()
+            assertTrue("the sign-in page round the ask: L* %.1f, then %.1f".format(before, after), after <= before * 0.75)
+        }
+        signedIn().use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            val sheet = s.popupArea()
+            val shaded = s.settleStill(600, quiet = 200)
+            s.chooseNeedingPassword(s.sheetForm(), file)
+            val asking = s.settleStill(600, quiet = 200)
+            val under = s.lightnessRound(shaded, sheet, 64)
+            val over = s.lightnessRound(asking, sheet, 64)
+            shaded.close()
+            asking.close()
+            assertEquals("the shade round the sheet, then round the ask over it", under, over, 0.5)
+        }
+    }
+
+    // While the certificate's password is asked over a family link's sheet,
+    // that sheet is still open under it: a switch that needs a password opens
+    // nothing over them and says why, and Cancel brings the link's sheet
+    // back. Red at BASE by the ask having replaced the link's sheet: the
+    // switch's own sheet then opens over everything.
+    @Test(timeout = 120_000)
+    fun aSwitchOpensNothingOverTheAskOnALinksSheet() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn().use { s ->
+            s.onUi { s.app.openFamilyLink(FamilyInviteLink(s.server.address, "t1")) }
+            s.settle(600).close()
+            val link = s.app.popups.request
+            assertTrue("the link's sheet is open", link?.link == true)
+            s.chooseNeedingPassword(s.sheetForm(), file)
+            val asking = s.app.popups.request
+            val server = s.app.connection!!.server
+            s.onUi { askSignIn(s.app, SheetKind.SignIn, server, null) }
+            s.render(3)
+            assertSame("nothing opens over them", asking, s.app.popups.request)
+            assertEquals(SignInWords.askWhileSignInOpen(server.name), s.app.notice)
+            s.activate("Cancel")
+            s.settle(600).close()
+            assertSame("the link's sheet is back", link, s.app.popups.request)
+        }
+    }
+
+    // Settings, opened while the certificate's password is asked over a
+    // server sheet, closes both, as it closes any pop-up open. Red with
+    // Settings closing only the ask, which left the sheet open over Settings.
+    @Test(timeout = 120_000)
+    fun settingsClosesTheAskAndTheSheetUnderIt() {
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn().use { s ->
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            s.chooseNeedingPassword(s.sheetForm(), file)
+            assertTrue(s.app.popups.open)
+            s.onUi { s.app.openSettings() }
+            s.render(3)
+            assertNull("nothing left open", s.app.popups.request)
+        }
+    }
+
+    // Change password's main button waits, drawn off, until all three
+    // passwords hold words, as every sign-in sheet's main button waits for
+    // its required fields; then it can be pressed. Red with it lit as the
+    // sheet opens.
+    @Test(timeout = 120_000)
+    fun changePasswordsButtonWaitsForItsThreeFields() {
+        signedIn().use { s ->
+            s.onUi { changePassword(s.app) }
+            s.settle(600).close()
+            fun off() = s.controlInPopup("Change password").config.contains(SemanticsProperties.Disabled)
+            assertTrue("off as it opens", off())
+            s.type(s.named("Current password").single { it.inPopup() }, "pw")
+            s.type(s.named("New password").single { it.inPopup() }, "a new one")
+            assertTrue("off with one left empty", off())
+            s.type(s.named("New password again").single { it.inPopup() }, "a new one")
+            assertFalse("ready once all three hold words", off())
+        }
+    }
+
+    // Enter in Change password before all three hold words still asks: the
+    // note says what is missing, nothing is sent and the sheet stays. Red
+    // with the sheet's change refusing in silence until it is ready.
+    @Test(timeout = 120_000)
+    fun enterInChangePasswordEarlySaysWhatIsMissing() {
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { changePassword(s.app) }
+            s.settle(600).close()
+            s.type(s.named("Current password").single { it.inPopup() }, "pw")
+            assertEquals("Current password", s.focused()?.name())
+            val sent = s.server.endpoints().size
+            s.press(Key.Enter)
+            s.settle(400).close()
+            assertEquals("the note says what is missing", 1, s.withText("Enter a new password.").count { it.inPopup() })
+            assertTrue("the sheet stays", s.app.popups.open)
+            assertFalse(s.app.changingPassword)
+            assertTrue("nothing sent", s.server.endpoints().drop(sent).none { it.contains("changePassword", ignoreCase = true) })
+        }
+    }
+
+    // Pictures for the polish pass: the certificate's password asked from
+    // the Add sheet (the sheet before, the ask over it, the sheet back after
+    // Cancel and after Use it), over the sign-in page with Advanced open (the
+    // page before and the ask with its shade), and Change password empty and
+    // filled in Octo and Paper.
+    @Test(timeout = 300_000)
+    fun picturesOfTheCertificateAskInItsPlaces() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        val file = CertFixtures.copy("rsa2048.p12", folder.newFolder())
+        signedIn().use { s ->
+            s.onUi { s.keyboard.keyboard = false }
+            s.onUi { addServer(s.app) }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.SERVER_ADDRESS).single { it.inPopup() }, "music.example.com")
+            val form = s.sheetForm()
+            s.onUi { form.advancedOpen = true }
+            s.settle(600).close()
+            s.bringUp(s.controlInPopup(SignInWords.CERT_CHOOSE))
+            s.giveKeyboard(s.controlInPopup(SignInWords.CERT_CHOOSE))
+            s.shot("polish-cert-add-before")
+            s.chooseNeedingPassword(form, file)
+            s.shot("polish-cert-ask-over-add")
+            s.activate("Cancel")
+            s.shot("polish-cert-add-after-cancel")
+            s.chooseNeedingPassword(form, file)
+            s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inOpenPopup() }, CertFixtures.PASSWORD)
+            val asking = s.app.popups.request
+            s.activate(SignInWords.CERT_PASSWORD_USE)
+            s.until { s.app.popups.request !== asking }
+            assertTrue(form.certificateDraft is CertificateDraft.Use)
+            s.shot("polish-cert-add-after-use")
+        }
+        page().use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            s.shot("polish-cert-page-before")
+            s.chooseNeedingPassword(s.app.signInForm, file)
+            s.shot("polish-cert-ask-over-page")
+        }
+        signedIn().use { s ->
+            for (theme in listOf(ThemeChoice.Octo, ThemeChoice.Paper)) {
+                s.onUi {
+                    s.app.popups.close()
+                    s.app.settings.pickTheme(theme)
+                }
+                s.settle(600).close()
+                s.onUi { changePassword(s.app) }
+                s.shot("polish-change-password-empty-${theme.name.lowercase()}")
+                s.type(s.named("Current password").single { it.inPopup() }, "pw")
+                s.type(s.named("New password").single { it.inPopup() }, "a new one")
+                s.type(s.named("New password again").single { it.inPopup() }, "a new one")
+                s.shot("polish-change-password-filled-${theme.name.lowercase()}")
+            }
         }
     }
 
@@ -2294,18 +2674,22 @@ class SignInLayoutTest {
     // A filled button as drawn, found by its words: whether it is off, how
     // far its fill stands off the surface at `surfaceX` level with its middle
     // (its fill read 12 in from its left end), how colored the fill and that
-    // surface are, and its words' contrast on its fill.
+    // surface are, and its words' contrast on its fill. With no `surfaceX`
+    // the fill is read 6 in (a long label starts 12 in) and the surface 6
+    // over it, in its column: on a glass sheet whose page shows through it (a
+    // cover, a tile), only there is the same page under both.
     private class ButtonSeen(val off: Boolean, val fill: Double, val fillChroma: Double, val surfaceChroma: Double, val words: Double) {
         override fun toString() = "${if (off) "off" else "ready"}: fill %.2f:1 off the surface (chroma %.1f against %.1f), words %.2f:1".format(fill, fillChroma, surfaceChroma, words)
     }
 
-    private fun A11yScene.buttonSeen(words: () -> SemanticsNode, surfaceX: Int): ButtonSeen {
+    private fun A11yScene.buttonSeen(words: () -> SemanticsNode, surfaceX: Int? = null): ButtonSeen {
         val image = settle(700)
         val label = words()
         val button = generateSequence(label) { it.parent }.first { it.clickable }
         val y = button.middle().toInt()
-        val surface = pixel(image, surfaceX, y)
-        val fill = pixel(image, button.positionInRoot.x.toInt() + 12, y)
+        val x = button.positionInRoot.x.toInt() + if (surfaceX != null) 12 else 6
+        val surface = if (surfaceX != null) pixel(image, surfaceX, y) else pixel(image, x, button.positionInRoot.y.toInt() - 6)
+        val fill = pixel(image, x, y)
         val seen = ButtonSeen(button.config.contains(SemanticsProperties.Disabled), contrast(fill, surface), chroma(fill), chroma(surface), wordsContrast(image, label.area()))
         image.close()
         return seen
@@ -2313,7 +2697,8 @@ class SignInLayoutTest {
 
     // A filled button that cannot be used yet reads as off, never as ready,
     // on every theme: each theme's Add sheet with its Add before anything is
-    // typed, against the same Add once the form is filled in, and the
+    // typed, against the same Add once the form is filled in, its Change
+    // password with the three passwords empty and then typed, and the
     // sign-in page's Sign in (Octo's dark look on every theme) before and
     // after. Off, its words read 3:1 or more on its own fill, as a label, and
     // under the 4.5:1 of words that can be used; its fill stands 1.1 to 1.5
@@ -2321,7 +2706,8 @@ class SignInLayoutTest {
     // color of its own (its chroma at most 6 over the surface's). Ready, the same
     // button's fill stands 2:1 or more off that surface, with words 4.5:1 or
     // more. Red with the whole button faded: on Paper white words at 2.5:1 on
-    // a pale accent fill 2.3:1 off the sheet.
+    // a pale accent fill 2.3:1 off the sheet; and red with Change password's
+    // button lit while its fields are empty.
     @Test(timeout = 300_000)
     fun aFilledButtonThatCannotBeUsedReadsOffOnEveryTheme() {
         val problems = mutableListOf<String>()
@@ -2349,6 +2735,19 @@ class SignInLayoutTest {
                 s.type(s.named(SignInWords.USERNAME).single { it.inPopup() }, "winters")
                 s.type(s.named(SignInWords.PASSWORD).single { it.inPopup() }, "pw")
                 judge("${theme.label} Add sheet", off, s.buttonSeen({ s.inPopup("Add") }, left))
+                s.onUi {
+                    s.app.popups.close()
+                    changePassword(s.app)
+                }
+                s.settle(600).close()
+                // Its foot sits over the page's album tiles, which show through the
+                // glass at the sheet's edge, so its surface is read over the button;
+                // its long label starts where the Add sheet's fill is read.
+                val waiting = s.buttonSeen({ s.inPopup("Change password") })
+                s.type(s.named("Current password").single { it.inPopup() }, "pw")
+                s.type(s.named("New password").single { it.inPopup() }, "a new one")
+                s.type(s.named("New password again").single { it.inPopup() }, "a new one")
+                judge("${theme.label} Change password", waiting, s.buttonSeen({ s.inPopup("Change password") }))
             }
             s.onUi { s.app.popups.close() }
         }

@@ -7,8 +7,8 @@ import UIKit
 // and the quiet Optional tag.
 
 /// A group of the form: its title over a raised card of rows, and its notes under the card. A
-/// `marker` puts a callout's scroll mark on the title; `outlined` draws the accent outline round the
-/// card while the group calls out a failure.
+/// `marker` puts a callout's scroll mark on the title; `outlined` rings the card in the error red
+/// while the group calls out a failure.
 struct FormGroup<Rows: View, Notes: View>: View {
     let title: String
     var marker: String?
@@ -53,6 +53,7 @@ extension FormGroup where Notes == EmptyView {
 }
 
 /// The raised card a group's rows sit on, a surface a step above the page, as Settings' groups are.
+/// `outlined` rings it in the error red, the error note's own red.
 struct FormCard<Content: View>: View {
     var outlined = false
     let content: Content
@@ -68,7 +69,7 @@ struct FormCard<Content: View>: View {
             .raisedPanel()
             .overlay {
                 if outlined {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(OctoColor.accent, lineWidth: 2)
+                    RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(OctoColor.errorWords, lineWidth: 2)
                 }
             }
     }
@@ -516,14 +517,17 @@ struct FormTrailingRow<Trailing: View>: View {
 }
 
 /// A choice on the form (the sign-in page's kind, the Method): its name and the line under it, the
-/// current answer at the right edge, and a chevron. Tapping it opens the answers as the Settings
-/// questions do, each with its own line. At the accessibility sizes the answer goes under the name.
+/// current answer at the right edge, and a chevron, the answer and the chevron on the name's first
+/// line however many lines follow it. Tapping it opens the answers as the Settings questions do,
+/// each with its own line. At the accessibility sizes the answer goes under the name. The chevron
+/// grows with the text size, as the name does.
 struct FormChoiceRow: View {
     let title: String
     var description: String?
     let value: String
     let question: SettingsQuestion
     @Environment(\.dynamicTypeSize) private var size
+    @ScaledMetric(relativeTo: .subheadline) private var chevronSize: CGFloat = 13
 
     init(title: String, description: String? = nil, value: String, question: SettingsQuestion) {
         self.title = title
@@ -547,7 +551,7 @@ struct FormChoiceRow: View {
                         }
                     }
                 } else {
-                    HStack(alignment: .center, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             RowTitle(title: title, optional: false)
                             if let description { RowDescription(text: description) }
@@ -583,33 +587,43 @@ struct FormChoiceRow: View {
 
     private var chevron: some View {
         Image(systemName: "chevron.up.chevron.down")
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: chevronSize, weight: .semibold))
             .foregroundStyle(OctoColor.textMuted)
             .accessibilityHidden(true)
     }
 }
 
-/// A section's head (Advanced): its title, one size open or shut, the line naming what is inside,
-/// and a chevron that turns as it opens. VoiceOver reads it as a heading that opens and closes.
+/// A section's head (Advanced): its title, set as a group's title and one size open or shut, the
+/// line naming what is inside, and a chevron on the title's first line that turns as it opens and
+/// grows with the text size, as the title does. VoiceOver reads it as a heading that opens and
+/// closes.
 struct FormSectionHead: View {
     let title: String
     let line: String
     let open: Bool
     let toggle: () -> Void
+    @ScaledMetric(relativeTo: .headline) private var chevronSize: CGFloat = 15
+
+    init(title: String, line: String, open: Bool, toggle: @escaping () -> Void) {
+        self.title = title
+        self.line = line
+        self.open = open
+        self.toggle = toggle
+    }
 
     var body: some View {
         Button(action: toggle) {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.octoFormSection)
+                        .font(.octoFormGroup)
                         .foregroundStyle(OctoColor.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     RowDescription(text: line)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: chevronSize, weight: .semibold))
                     .foregroundStyle(OctoColor.textSecondary)
                     .rotationEffect(.degrees(open ? 90 : 0))
             }
@@ -641,6 +655,16 @@ extension View {
         overlay(alignment: .bottom) {
             Color.clear.frame(height: 8).alignmentGuide(.bottom) { $0[.top] }
                 .allowsHitTesting(false).accessibilityHidden(true).id(id)
+        }
+    }
+
+    /// The mark a reveal scrolls to the view's bottom: this view's own frame, so all of it comes
+    /// into view. `bottom` hears where the view's foot is on screen each time it moves.
+    func revealMark(_ id: String, bottom: @escaping @MainActor (CGFloat) -> Void) -> some View {
+        overlay {
+            Color.clear
+                .allowsHitTesting(false).accessibilityHidden(true).id(id)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom($0) }
         }
     }
 }

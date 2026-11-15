@@ -352,9 +352,7 @@ extension Font {
     static var octoBodySmall: Font { octo(14, .regular, .subheadline) }
     static var octoCaption: Font { octo(12, .regular, .caption1) }
     static var octoLabel: Font { octo(13.5, .semibold, .footnote) }
-    /// The sign-in form's roles. A section's title (Advanced): 22 bold, as title 2.
-    static var octoFormSection: Font { octo(22, .bold, .title2) }
-    /// A group's title: 17 semibold, as the headline.
+    /// The sign-in form's roles. A group's title, and Advanced's: 17 semibold, as the headline.
     static var octoFormGroup: Font { octo(17, .semibold, .headline) }
     /// A setting's name: 15 medium.
     static var octoFormName: Font { octo(15, .medium, .subheadline) }

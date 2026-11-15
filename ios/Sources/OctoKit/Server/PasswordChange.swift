@@ -11,6 +11,10 @@ public struct PasswordDraft: Sendable, Equatable {
         self.new = new
         self.confirm = confirm
     }
+
+    /// All three are typed in: until then the form's main button is off. What is wrong with what
+    /// is typed (the new ones not matching, the same password as now) is said when it is pressed.
+    public var filled: Bool { !current.isEmpty && !new.isEmpty && !confirm.isEmpty }
 }
 
 /// What keeps the form from being sent, in plain words, or nil when it can go. Nothing is asked

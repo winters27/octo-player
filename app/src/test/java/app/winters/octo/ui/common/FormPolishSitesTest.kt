@@ -101,7 +101,19 @@ class FormPolishSitesTest {
         assertTrue(question, question.contains("AnswerRow(\n            main = { AccentButton(confirm, onClick = onConfirm) },\n            other = { GlazeButton(cancel, onClick = onCancel) },"))
         assertFalse(question, question.contains("Row(Modifier"))
         val password = between(source("ui/settings/ServerPage.kt"), "private fun PasswordForm(", "\n}\n")
-        assertTrue(password, password.contains("AnswerRow(\n            main = { AccentButton(\"Change password\", onClick = ::change, loading = busy) },\n            other = { GlazeButton(\"Cancel\", onClick = close, enabled = !busy) },"))
+        assertTrue(password, password.contains("AnswerRow(\n            main = { AccentButton(\"Change password\", onClick = ::change, enabled = draft.current.isNotEmpty() && draft.new.isNotEmpty() && draft.confirm.isNotEmpty(), loading = busy) },\n            other = { GlazeButton(\"Cancel\", onClick = close, enabled = !busy) },"))
         assertFalse(password, password.contains("Row(horizontalArrangement"))
+    }
+
+    // Change password's lit answer waits until all three fields hold words,
+    // as every other sign-in form's does, while Enter in the last field still
+    // runs the change, which names what is missing. Red when the answer is
+    // ready over empty fields again, or Enter stops running the change.
+    @Test
+    fun changePasswordsAnswerWaitsForItsThreeFields() {
+        val password = between(source("ui/settings/ServerPage.kt"), "private fun PasswordForm(", "\n}\n")
+        assertTrue(password, password.contains("enabled = draft.current.isNotEmpty() && draft.new.isNotEmpty() && draft.confirm.isNotEmpty(), loading = busy"))
+        assertTrue(password, password.contains("last = true, onDone = ::change"))
+        assertTrue(password, password.contains("passwordDraftProblem(draft)?.let { problem = it; return }"))
     }
 }

@@ -704,7 +704,17 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, fir
         }
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            AccentButton("Change password", ::change, Modifier.widthIn(min = SheetMainButton), loading = busy, size = ButtonSize.Medium)
+            // Off until all three hold words, as every sheet's main button
+            // waits for its required fields; Enter in a field still asks, and
+            // the note says what is missing.
+            AccentButton(
+                "Change password",
+                ::change,
+                Modifier.widthIn(min = SheetMainButton),
+                enabled = draft.current.isNotEmpty() && draft.new.isNotEmpty() && draft.confirm.isNotEmpty(),
+                loading = busy,
+                size = ButtonSize.Medium,
+            )
         }
     }
 }
