@@ -19,6 +19,9 @@ struct ServerInUse: @unchecked Sendable {
     var familyRules: Bool { extensions.contains { $0.hasPrefix(familyPlaylistsExtension + ":") } }
 
     func lists(_ name: String, version: Int = 1) -> Bool { extensions.contains("\(name):\(version)") }
+
+    /// The server as OctoKit's playlist steps take it.
+    var playlistServer: PlaylistServer { PlaylistServer(client: client, account: account, sourceId: sourceId, extensions: extensions) }
 }
 
 extension Session {

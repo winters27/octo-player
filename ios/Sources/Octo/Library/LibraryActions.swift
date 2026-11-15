@@ -36,6 +36,10 @@ final class LibraryActions {
     var info: InfoRequest?
     /// Picked songs to add to a playlist chosen on a sheet.
     var playlistPick: PlaylistPick?
+    /// Playlists or a folder to move, while the Move to Folder sheet is open.
+    var folderMove: FolderMove?
+    /// The folder Add Playlists fills, while its sheet is open.
+    var addPlaylists: AddPlaylists?
     /// A menu laid out on a sheet.
     var menuPreview: MenuPreview?
     /// What album menus know of their songs, by album id.
@@ -290,11 +294,12 @@ final class LibraryActions {
 
     // MARK: Playlists
 
-    /// What adding these songs to a playlist would do; only library songs go on a playlist.
+    /// What adding these songs to a playlist would do: library songs go on a playlist, and songs
+    /// found online too on a server that keeps them, never in an upkeep list that refuses them.
     func planAdding(_ tracks: [LibraryTrack], to playlist: PlaylistSummary) async -> (AddPlan, [LibraryTrack]) {
-        let library = tracks.filter { !$0.isFound }
+        let songs = playlistAddable(tracks, isFind: \.isFound, findsGoIn: state.findsGoIn && !refusesFinds(playlist.upkeep))
         let onPlaylist = Set(await state.playlistTracks(playlist.id).map(\.track.id))
-        return (planAdd(library.map(\.id), onPlaylist: onPlaylist), library)
+        return (planAdd(songs.map(\.id), onPlaylist: onPlaylist), songs)
     }
 
     /// What adding the songs to a playlist would do, reading a collection's songs first.
@@ -305,7 +310,7 @@ final class LibraryActions {
     private func tracks(of source: AddSource) async -> [LibraryTrack] {
         switch source {
         case .tracks(let given): given
-        case .collection(let target): await state.songs(of: target)
+        case .collection(let target): await state.songs(of: target, withFinds: state.findsGoIn)
         }
     }
 
@@ -316,22 +321,22 @@ final class LibraryActions {
             if plan.asks {
                 addAsk = AddAsk(playlist: playlist, plan: plan)
             } else if plan.songs.isEmpty {
-                router.show("No library songs to add")
+                router.show(refusesFinds(playlist.upkeep) && state.findsGoIn ? PlaylistFolderWords.upkeepRefusesFinds : "No library songs to add")
             } else {
                 addNow(plan.songs, to: playlist)
             }
         }
     }
 
-    /// Asks for a new playlist's name, then makes it with the songs.
-    func askNewPlaylist(_ source: AddSource) { naming = newPlaylistRequest(source) }
+    /// Asks for a new playlist's name, then makes it with the songs, in `folderId` when given.
+    func askNewPlaylist(_ source: AddSource, in folderId: String? = nil) { naming = newPlaylistRequest(source, in: folderId) }
 
     /// The name question for a new playlist; `made` runs once a name is given.
-    func newPlaylistRequest(_ source: AddSource, made: (@MainActor () -> Void)? = nil) -> NameRequest {
+    func newPlaylistRequest(_ source: AddSource, in folderId: String? = nil, made: (@MainActor () -> Void)? = nil) -> NameRequest {
         NameRequest(title: "New playlist", action: "Create") { [weak self] name in
             guard let self else { return }
             made?()
-            Task { self.createPlaylist(name: name, tracks: await self.tracks(of: source)) }
+            Task { self.createPlaylist(name: name, tracks: await self.tracks(of: source), in: folderId) }
         }
     }
 
@@ -385,12 +390,12 @@ final class LibraryActions {
 
     /// Makes a playlist with the songs (each once) and says so.
     @discardableResult
-    func createPlaylist(name: String, tracks: [LibraryTrack]) -> String? {
+    func createPlaylist(name: String, tracks: [LibraryTrack], in folderId: String? = nil) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var seen = Set<String>()
-        let songs = tracks.filter { !$0.isFound && seen.insert($0.id).inserted }
-        let id = data.playlists.create(trimmed, trackIds: songs.map(\.id))
+        let songs = playlistAddable(tracks, isFind: \.isFound, findsGoIn: state.findsGoIn).filter { seen.insert($0.id).inserted }
+        let id = data.playlists.create(trimmed, trackIds: songs.map(\.id), in: folderId)
         if !songs.isEmpty {
             state.markRecent(id)
             router.show(addedMessage(trimmed, songs.count))
@@ -438,6 +443,48 @@ final class LibraryActions {
 
     /// Whether a playlist can be saved to the server: one is signed in and it is not there yet.
     func canSaveToServer(_ playlist: PlaylistSummary) -> Bool { session.client != nil && !playlist.onServer }
+
+    // MARK: Playlist folders
+
+    private var folders: PlaylistFolderStore { data.folders }
+
+    /// Asks a new folder's name, then makes it in `parent` (nil: the top level); `made` hears its id.
+    func askNewFolder(in parent: String?, made: (@MainActor (String) -> Void)? = nil) {
+        naming = NameRequest(title: PlaylistFolderWords.newFolder, action: "Create", placeholder: PlaylistFolderWords.folderName) { [weak self] name in
+            guard let self else { return }
+            Task {
+                if let id = await self.folders.create(name, in: parent) {
+                    made?(id)
+                } else {
+                    self.router.show(PlaylistFolderTree.cleanName(name) == nil ? PlaylistFolderWords.badName : PlaylistFolderWords.tooDeep)
+                }
+            }
+        }
+    }
+
+    func askRenameFolder(_ id: String) {
+        guard let folder = folders.tree.folder(id) else { return }
+        naming = NameRequest(title: PlaylistFolderWords.renameFolder, action: "Save", initial: folder.name,
+                             placeholder: PlaylistFolderWords.folderName) { [weak self] name in
+            guard let self else { return }
+            Task { await self.folders.rename(id, to: name) }
+        }
+    }
+
+    /// Asks before a folder goes: its playlists move to its parent, and no playlist is deleted.
+    func askDeleteFolder(_ id: String) {
+        let tree = folders.tree
+        guard let folder = tree.folder(id) else { return }
+        let parent = tree.parentOf(id).flatMap { tree.folder($0)?.name }
+        question = Question(title: PlaylistFolderWords.deleteTitle(folder.name), detail: PlaylistFolderWords.deleteBody(parentName: parent),
+                            confirm: PlaylistFolderWords.deleteFolder) { [weak self] in
+            guard let self else { return }
+            Task { await self.folders.delete(id) }
+        }
+    }
+
+    /// Opens Move to Folder for these playlists.
+    func moveToFolder(_ playlists: [PlaylistSummary]) { folderMove = FolderMove(playlistKeys: playlists.map(\.placeKey)) }
 
     /// Writes a playlist as an M3U file where the person picks.
     func exportPlaylist(_ playlist: PlaylistSummary) {
@@ -715,6 +762,8 @@ struct LibraryPresenter: ViewModifier {
             .questionAlert($actions.question)
             .sheet(item: $actions.info) { request in SongInfoSheet(subject: request.subject) }
             .sheet(item: $actions.playlistPick) { pick in PlaylistPickerSheet(source: pick.source) }
+            .sheet(item: $actions.folderMove) { move in MoveToFolderSheet(move: move) }
+            .sheet(item: $actions.addPlaylists) { request in AddPlaylistsSheet(folderId: request.folderId) }
             .sheet(item: $actions.menuPreview) { preview in MenuPreviewSheet(preview: preview) }
             .sheet(item: $actions.shareItem) { item in
                 ActivitySheet(items: item.items, subject: item.subject)

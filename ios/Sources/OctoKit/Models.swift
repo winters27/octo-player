@@ -267,11 +267,17 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
     /// Octo: what kind of list Octo made this ("genre", "decade", "year", "country", "artist",
     /// "chart", "forYou", "liked", "station"), for grouping its lists.
     public var octoGroup: String?
+    /// Octo: one of its library upkeep lists and which kind (UpkeepKind), and an imported
+    /// playlist's read-only copy (servers listing octoPlaylistSongs).
+    public var octoUpkeep: Bool
+    public var octoUpkeepKind: String?
+    public var octoImport: Bool
     /// Only on `getPlaylist`.
     public var entry: [Song]
 
     enum CodingKeys: String, CodingKey {
         case id, name, comment, owner, songCount, duration, coverArt, readonly, octoList, octoNotice, octoCoverTitle, octoGroup, entry
+        case octoUpkeep, octoUpkeepKind, octoImport
     }
 
     public init(from decoder: Decoder) throws {
@@ -288,6 +294,9 @@ public struct Playlist: Codable, Sendable, Hashable, Identifiable {
         octoNotice = c.string(.octoNotice)
         octoCoverTitle = c.string(.octoCoverTitle)
         octoGroup = c.string(.octoGroup)
+        octoUpkeep = c.bool(.octoUpkeep) ?? false
+        octoUpkeepKind = c.string(.octoUpkeepKind)
+        octoImport = c.bool(.octoImport) ?? false
         entry = (try? c.decodeIfPresent([Song].self, forKey: .entry)) ?? []
     }
 }

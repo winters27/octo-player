@@ -81,7 +81,7 @@ extension PlaylistSummary {
     /// The playlist as its page opens it.
     func asPlaylist(_ sourceInUse: String?) -> Playlist? {
         let data = try? JSONSerialization.data(withJSONObject: [
-            "id": serverId(of: id, sourceId: sourceInUse) ?? id, "name": name, "songCount": songCount,
+            "id": Octo.serverId(of: id, sourceId: sourceInUse) ?? id, "name": name, "songCount": songCount,
             "duration": Int(durationMs / 1_000), "coverArt": coverId(of: covers.first) ?? "", "octoNotice": octoNotice ?? "",
         ])
         return data.flatMap { try? JSONDecoder().decode(Playlist.self, from: $0) }

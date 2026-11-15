@@ -14,6 +14,7 @@ enum LibraryPage: Hashable, Codable {
     case recentlyRemoved
     case favorites(FavoriteSegment?)
     case playlist(id: String)
+    case playlistFolder(id: String)
 }
 
 extension LibraryPage {
@@ -31,6 +32,7 @@ extension LibraryPage {
         case .recentlyRemoved: .healthTrash
         case .favorites(let segment): segment == .songs ? .liked : .favorites
         case .playlist: .playlist
+        case .playlistFolder: .playlists
         }
     }
 }
@@ -61,6 +63,7 @@ struct LibraryPageView: View {
         case .recentlyRemoved: RecentlyRemovedPage()
         case .favorites(let segment): FavoritesView(opening: segment)
         case .playlist(let id): PlaylistPage(id: id)
+        case .playlistFolder(let id): PlaylistFolderPage(id: id)
         }
     }
 }

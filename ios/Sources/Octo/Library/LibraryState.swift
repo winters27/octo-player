@@ -215,9 +215,23 @@ final class LibraryState {
     }
 
     /// Every playlist shown with this server that songs can go into, the three added to most
-    /// recently first. A family playlist the listener may only listen to is left out.
+    /// recently first. A family playlist the listener may only listen to, and an imported
+    /// playlist's copy, are left out.
     var pickablePlaylists: [PlaylistSummary] {
-        recentFirst(playlists.filter { !($0.family && !$0.familyMayAdd) }, recent: recentPlaylists, id: \.id)
+        recentFirst(playlists.filter { !($0.family && !$0.familyMayAdd) && !$0.octoImport }, recent: recentPlaylists, id: \.id)
+    }
+
+    /// Whether songs found online go in the listener's playlists (a server listing octoPlaylistSongs).
+    var findsGoIn: Bool { data.playlistSync.findsGoIn }
+
+    /// The playlists to add to in their groups (PickerGroups): up to three added to lately, those in
+    /// no folder, each folder's under its path, then the library upkeep lists; for songs found online
+    /// (`forFind`) the upkeep lists that refuse them are left out.
+    func pickerGroups(forFind: Bool) -> [PickerGroup<PlaylistSummary>] {
+        let folders = data.folders
+        return PickerGroups.build(pickablePlaylists, id: \.id, placeKey: \.placeKey, name: \.name, upkeep: { $0.upkeep != nil },
+                                  refusesFind: { refusesFinds($0.upkeep) }, recentIds: recentPlaylists,
+                                  tree: folders.offered ? folders.tree : nil, forFind: forFind && findsGoIn)
     }
 
     func markRecent(_ id: String) {
@@ -226,6 +240,16 @@ final class LibraryState {
     }
 
     func playlistTracks(_ id: String) async -> [PlaylistTrack] { await library.playlistTracks(id) }
+
+    /// The songs of a collection in play order; with `withFinds` (a server that keeps songs found
+    /// online), an album's as the server lists it, its songs found online in their places, or its
+    /// library songs when the server lists none or can't be asked.
+    func songs(of target: CollectionTarget, withFinds: Bool) async -> [LibraryTrack] {
+        guard withFinds, case .album(let id) = target else { return await songs(of: target) }
+        let tracks = await library.albumTracks(id)
+        let listing = try? await data.discovery.libraryAlbum(tracks.map(\.id))
+        return albumSongsToAdd(tracks, server: listing.map { outsideAlbumSongs($0.sent, $0.resolved) }, findsGoIn: true)
+    }
 
     // MARK: Songs of collections
 

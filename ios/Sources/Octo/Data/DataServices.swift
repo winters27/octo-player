@@ -16,6 +16,7 @@ final class DataServices {
     let listening: ListeningSync
     let favoriteSync: FavoriteSync
     let playlistSync: PlaylistSync
+    let folders: PlaylistFolderStore
     let likes: LikeStore
     let ratings: RatingStore
     let playlists: PlaylistStore
@@ -47,10 +48,13 @@ final class DataServices {
         listening = ListeningSync(session: session, library: library, sync: serverSync)
         favoriteSync = FavoriteSync(session: session, library: library, sync: serverSync)
         downloads = Downloads(session: session, library: library, sync: serverSync, announce: announce)
-        playlistSync = PlaylistSync(session: session, library: library, discovery: discovery, sync: serverSync)
+        folders = PlaylistFolderStore(session: session, library: library) { words in announce(words, false) }
+        playlistSync = PlaylistSync(session: session, library: library, discovery: discovery, sync: serverSync, folders: folders) { words in
+            announce(words, false)
+        }
         likes = LikeStore(library: library, listening: listening)
         ratings = RatingStore(library: library, listening: listening)
-        playlists = PlaylistStore(library: library, sync: playlistSync)
+        playlists = PlaylistStore(library: library, sync: playlistSync, folders: folders)
         favorites = FavoriteStore(library: library, sync: favoriteSync)
         pins = PinStore(library: library)
         plays = PlayStore(library: library, listening: listening)

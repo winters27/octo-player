@@ -19,6 +19,12 @@ struct SongSubject {
 enum AddSource {
     case tracks([LibraryTrack])
     case collection(CollectionTarget)
+
+    /// Whether songs found online are among the songs given.
+    var holdsFinds: Bool {
+        if case .tracks(let tracks) = self { return tracks.contains(where: \.isFound) }
+        return false
+    }
 }
 
 /// A collection a menu is about.
@@ -124,12 +130,13 @@ struct SongMenuItems<Extras: View>: View {
             offline: !track.isFound && (!track.onPhone || kept != nil),
             place: place,
             phone: track.onPhone,
-            lastPlaylist: state.lastPlaylist != nil,
+            lastPlaylist: state.lastPlaylist.map { !track.isFound || !refusesFinds($0.upkeep) } ?? false,
             upgrade: actions.canUpgrade(track),
             findSongs: downloads.keepsLog && (track.serverSongId != nil || track.isFound),
             disk: actions.canDeleteFromDisk(track),
             requestCopy: family.outside.offersRequest,
-            removeFromMine: family.removesFromMine && track.serverSongId != nil && ownSong)
+            removeFromMine: family.removesFromMine && track.serverSongId != nil && ownSong,
+            findsToPlaylists: state.findsGoIn)
             // Phones have no way for an app to set a ringtone, a notification sound or an alarm.
             .filter { $0 != .setAsSound }
     }
@@ -267,16 +274,31 @@ struct AddToPlaylistMenu: View {
     var body: some View {
         Menu {
             item("New playlist", .addToLibrary) { actions.askNewPlaylist(source) }
-            Section {
-                ForEach(actions.state.pickablePlaylists) { playlist in
-                    Button { actions.add(source, to: playlist) } label: {
-                        Label(playlist.name, systemImage: (playlist.onServer ? OctoIcon.cloud : OctoIcon.playlists).symbol)
-                        Text(playlist.family ? "By Family · \(songsCount(playlist.songCount))" : songsCount(playlist.songCount))
-                    }
+            ForEach(Array(actions.state.pickerGroups(forFind: source.holdsFinds).enumerated()), id: \.offset) { _, group in
+                if let title = group.title {
+                    Section(title) { PickerMenuRows(source: source, playlists: group.items) }
+                } else {
+                    Section { PickerMenuRows(source: source, playlists: group.items) }
                 }
             }
         } label: {
             Label("Add to playlist", systemImage: OctoIcon.addToPlaylist.symbol)
+        }
+    }
+}
+
+/// One group's playlists in the Add to playlist menu, each with its song count.
+private struct PickerMenuRows: View {
+    let source: AddSource
+    let playlists: [PlaylistSummary]
+    @Environment(LibraryActions.self) private var actions
+
+    var body: some View {
+        ForEach(playlists) { playlist in
+            Button { actions.add(source, to: playlist) } label: {
+                Label(playlist.name, systemImage: (playlist.onServer ? OctoIcon.cloud : OctoIcon.playlists).symbol)
+                Text(playlist.family ? "By Family · \(songsCount(playlist.songCount))" : songsCount(playlist.songCount))
+            }
         }
     }
 }
@@ -366,7 +388,8 @@ struct CollectionMenuItems: View {
         case .artist(let artist):
             return artistActions(radio: true, favorite: state.favoriteArtistIds.contains(artist.id), pin: spot)
         case .playlist(let playlist):
-            return playlistActions(empty: playlist.songCount == 0, pin: spot)
+            return playlistActions(empty: playlist.songCount == 0, pin: spot, imported: playlist.octoImport,
+                                   folders: state.data.folders.offered && playlist.upkeep == nil)
         }
     }
 
@@ -433,6 +456,10 @@ struct CollectionMenuItems: View {
             if case .playlist(let playlist) = subject, !playlist.family || playlist.familyMayDelete {
                 item("Delete", .delete, role: .destructive) { actions.askDeletePlaylist(playlist) }
             }
+        case .moveToFolder:
+            if case .playlist(let playlist) = subject {
+                item(PlaylistFolderWords.moveToFolder, .playlistFolder) { actions.moveToFolder([playlist]) }
+            }
         }
     }
 }
@@ -447,8 +474,8 @@ struct PlaylistOptionsItems: View {
     let deleted: @MainActor () -> Void
     @Environment(LibraryActions.self) private var actions
 
-    private var mayRename: Bool { !playlist.family || playlist.familyMayRename }
-    private var mayDelete: Bool { !playlist.family || playlist.familyMayDelete }
+    private var mayRename: Bool { (!playlist.family || playlist.familyMayRename) && !playlist.octoImport }
+    private var mayDelete: Bool { (!playlist.family || playlist.familyMayDelete) && !playlist.octoImport }
 
     var body: some View {
         Section(playlist.name) {
@@ -462,6 +489,9 @@ struct PlaylistOptionsItems: View {
                 item("Download", .download) { actions.downloadSongs(of: .playlist(playlist.id)) }
             }
             item("Export as M3U", .share) { actions.exportPlaylist(playlist) }
+            if actions.state.data.folders.offered && playlist.upkeep == nil {
+                item(PlaylistFolderWords.moveToFolder, .playlistFolder) { actions.moveToFolder([playlist]) }
+            }
         }
         if mayDelete {
             Section {
@@ -608,12 +638,16 @@ struct PlaylistPickerSheet: View {
                 } label: {
                     Label("New playlist", systemImage: OctoIcon.addToLibrary.symbol)
                 }
-                Section {
-                    ForEach(actions.state.pickablePlaylists) { playlist in
-                        Button { pick(playlist) } label: {
-                            PlaylistPickRow(playlist: playlist, checking: checking == playlist.id)
+                ForEach(Array(actions.state.pickerGroups(forFind: source.holdsFinds).enumerated()), id: \.offset) { _, group in
+                    Section {
+                        ForEach(group.items) { playlist in
+                            Button { pick(playlist) } label: {
+                                PlaylistPickRow(playlist: playlist, checking: checking == playlist.id)
+                            }
+                            .disabled(checking != nil)
                         }
-                        .disabled(checking != nil)
+                    } header: {
+                        if let title = group.title { Text(title) }
                     }
                 }
             }

@@ -36,11 +36,16 @@ public struct LinkedPlaylist: Sendable, Hashable {
     public var syncedStamp: String?
     /// A family playlist, whose own changes are sent on top of everyone else's.
     public var family: Bool
-    /// A family playlist the listener may not change here: it only follows the server.
+    /// A family playlist the listener may not change here, or an imported playlist's copy: it only
+    /// follows the server.
     public var pullOnly: Bool
+    /// The listener's own playlist on a server listing octoPlaylistSongs: changed on both sides, it
+    /// sends its own changes on top of the server's, as a family playlist does.
+    public var ownRules: Bool
 
     public init(_ localId: String, _ serverId: String, _ name: String, _ edited: Bool, _ syncedName: String?, _ syncedStamp: String?,
-                family: Bool = false, pullOnly: Bool = false) {
+                family: Bool = false, pullOnly: Bool = false, ownRules: Bool = false) {
+        self.ownRules = ownRules
         self.localId = localId
         self.serverId = serverId
         self.name = name
@@ -78,10 +83,12 @@ public func stampOf(_ changed: String?, _ songCount: Int) -> String { "\(changed
 /// Server playlists worth a copy on the phone: the signed-in user's own and the family's they may
 /// change, leaving out read-only ones and stations, which the stations shelf shows, and the
 /// family's, which a listener without editing keeps as a copy that only follows the server.
+/// An imported playlist's copy (octoImport) comes too, as a copy that only follows the server.
 public func importable(_ playlists: [ServerPlaylistInfo], stationIds: Set<String>, username: String) -> [ServerPlaylistInfo] {
     playlists.filter {
         !stationIds.contains($0.id)
             && (isFamilyPlaylist(owner: $0.owner, username: username, octoFamily: $0.octoFamily)
+                || $0.octoImport
                 || (!$0.readonly && ownedBy($0.owner, username)))
     }
 }
@@ -90,7 +97,10 @@ public func importable(_ playlists: [ServerPlaylistInfo], stationIds: Set<String
 /// by that name not linked yet, never the family's.
 public func newestNamedCandidates(_ playlists: [ServerPlaylistInfo], name: String, username: String, linked: Set<String>) -> [ServerPlaylistInfo] {
     importable(playlists, stationIds: [], username: username)
-        .filter { $0.name == name && !linked.contains($0.id) && !isFamilyPlaylist(owner: $0.owner, username: username, octoFamily: $0.octoFamily) }
+        .filter {
+            $0.name == name && !linked.contains($0.id) && !$0.octoImport
+                && !isFamilyPlaylist(owner: $0.owner, username: username, octoFamily: $0.octoFamily)
+        }
 }
 
 /// How long the phone's copy of the server's playlists counts as fresh when the playlists come on
@@ -146,8 +156,9 @@ public func planLinked(_ server: ServerPlaylist?, _ playlist: LinkedPlaylist, st
             ? .pull(localId: playlist.localId, serverId: server.id, stamp: server.stamp, keepName: false) : nil
     }
     if serverChanged && playlist.edited {
-        // Both changed: a family playlist sends the phone's own changes on top of everyone else's.
-        if playlist.family { return .push(localId: playlist.localId, serverId: server.id) }
+        // Both changed: a family playlist, and the listener's own on a server listing
+        // octoPlaylistSongs, sends the phone's own changes on top of everyone else's.
+        if playlist.family || playlist.ownRules { return .push(localId: playlist.localId, serverId: server.id) }
         // Both changed: the server's songs, and the phone's name if it was renamed here.
         let renamedHere = playlist.name != playlist.syncedName && playlist.name != server.name
         return .pull(localId: playlist.localId, serverId: server.id, stamp: server.stamp, keepName: renamedHere)
@@ -176,6 +187,30 @@ public func serverSongFor(_ row: PlaylistSyncRow, _ copies: [String]) -> String?
     if let lowest = copies.min() { return lowest }
     if isFind(row.trackId) { return String(row.trackId.dropFirst(findPrefix.count)) }
     return row.serverSongId
+}
+
+/// The server song to send for a row on a server listing octoPlaylistSongs: the server's own id
+/// for a row that came from it as a song found online (an id that is none of the song's copies and
+/// that the library links to no song: `libraryIds` are the server ids the library links), never a
+/// library song matched to it by title; otherwise serverSongFor's. A library row whose copy moved
+/// keeps the id the server's list still holds.
+public func outsideSongFor(_ row: PlaylistSyncRow, _ copies: [String], libraryIds: Set<String>) -> String? {
+    if let own = row.serverSongId, !copies.contains(own), !libraryIds.contains(own) { return own }
+    return serverSongFor(row, copies)
+}
+
+/// The changed time a stamp (stampOf) holds, as the server sent it; nil when it holds none.
+public func changedOf(_ stamp: String?) -> String? {
+    guard let stamp, let bar = stamp.lastIndex(of: "|") else { return nil }
+    let changed = String(stamp[..<bar])
+    return changed.isEmpty ? nil : changed
+}
+
+/// Songs as pushed, less the ones the server skipped: the base a push keeps when its write-back
+/// was refused.
+public func withoutSkipped(_ songs: [String], _ skipped: [String]) -> [String] {
+    let out = Set(skipped)
+    return songs.filter { !out.contains($0) }
 }
 
 /// A server playlist's songs as phone rows: each server song with the library song or find it is.

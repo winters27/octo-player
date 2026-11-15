@@ -599,6 +599,10 @@ struct PlaylistsView: View {
     @State private var serverIds: [String: String] = [:]
     @State private var importing = false
     @State private var importNote: ImportNote?
+    /// Whether the Library upkeep group is open, on this phone; closed until opened.
+    @AppStorage("playlists.upkeepOpen") private var upkeepOpen = false
+
+    private var folders: PlaylistFolderStore { state.data.folders }
 
     /// How the last import went, until the page closes.
     struct ImportNote {
@@ -613,6 +617,7 @@ struct PlaylistsView: View {
         let claimed = Set(octoGroups.flatMap { $0.lists.map(\.id) })
         let gone = discovery.goneLists
         let shown = sortPlaylists(playlists ?? [], order).filter { !claimed.contains(serverIds[$0.id] ?? $0.id) }
+        let rows = playlistPageRows(shown, key: \.placeKey, upkeep: { $0.upkeep != nil }, tree: folders.offered ? folders.tree : nil, folder: nil)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -623,6 +628,9 @@ struct PlaylistsView: View {
                             // The ways to make a list, in the order the page once listed them.
                             GlassMoreMenu(icon: .addToLibrary, label: "New") {
                                 Button("New playlist", systemImage: OctoIcon.addToLibrary.symbol) { actions.askNewPlaylist(.tracks([])) }
+                                if folders.offered {
+                                    Button(PlaylistFolderWords.newFolder, systemImage: OctoIcon.playlistFolder.symbol) { actions.askNewFolder(in: nil) }
+                                }
                                 Button { router.go(.liveListEditor(id: nil)) } label: {
                                     Label {
                                         Text("New live list")
@@ -645,19 +653,12 @@ struct PlaylistsView: View {
                         .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
                         .contextMenu { LiveListOptionsItems(list: list) }
                     }
-                    ForEach(shown) { playlist in
-                        NavigationLink(value: Route.library(.playlist(id: playlist.id))) {
-                            PlaylistLine(name: playlist.name,
-                                         subtitle: playlist.family ? "By Family · \(songsCount(playlist.songCount))" : songsCount(playlist.songCount),
-                                         onServer: playlist.onServer) {
-                                PlaylistCover(playlist: playlist, size: 56)
-                            }
-                        }
-                        .buttonStyle(SqueezeStyle())
-                        .id(playlist.id)
-                        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: OctoRadius.row))
-                        .contextMenu { CollectionMenuItems(subject: .playlist(playlist)) }
-                    }
+                    // Folders A to Z, a gap, the playlists in no folder, then Octo's library upkeep
+                    // lists in a group of their own, closed until opened.
+                    ForEach(rows.folders) { entry in PlaylistFolderNavRow(entry: entry) }
+                    if !rows.folders.isEmpty && !rows.playlists.isEmpty { Color.clear.frame(height: 16) }
+                    ForEach(rows.playlists) { playlist in PlaylistNavRow(playlist: playlist) }
+                    if !rows.upkeep.isEmpty { UpkeepGroup(lists: rows.upkeep, open: $upkeepOpen) }
                     fromOcto
                 }
                 .padding(.bottom, 20)
@@ -921,7 +922,7 @@ struct PlaylistPage: View {
     private var reordering: Bool { editMode.isEditing }
 
     /// Whether songs can be taken out here: not from a family playlist unless the listener is known not to hear only clean songs.
-    private func takesOut(_ playlist: PlaylistSummary) -> Bool { !playlist.family || playlist.familyMayRemove }
+    private func takesOut(_ playlist: PlaylistSummary) -> Bool { (!playlist.family || playlist.familyMayRemove) && !playlist.octoImport }
 
     var body: some View {
         LibraryList {
@@ -978,7 +979,7 @@ struct PlaylistPage: View {
                     .foregroundStyle(OctoColor.textMuted)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if rows.count > 1 && !playlist.family { ReorderButton(editMode: $editMode) }
+                if rows.count > 1 && !playlist.family && !playlist.octoImport { ReorderButton(editMode: $editMode) }
                 Menu {
                     KeepDownloadedToggle(tracks: tracks, playlistId: playlist.id)
                     PlaylistOptionsItems(playlist: playlist, serverOnly: tracks.contains { !$0.onPhone && !$0.isFound }) { dismiss() }

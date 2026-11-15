@@ -113,11 +113,20 @@ public struct PlaylistRow: TableRow, Hashable, Identifiable {
     public var familyMayRemove: Bool
     public var familyMayRename: Bool
     public var familyMayDelete: Bool
+    /// One of Octo's library upkeep lists, by the kind the server names (UpkeepKind); nil for any
+    /// other playlist.
+    public var upkeep: String?
+    /// An imported playlist's read-only copy (octoImport): it only follows the server, takes no
+    /// songs here, and is never renamed or deleted here.
+    public var octoImport: Bool
 
     public init(id: String, name: String, createdAt: Int64, updatedAt: Int64, serverId: String? = nil,
                 sourceId: String? = nil, syncedAt: Int64? = nil, syncedName: String? = nil, serverStamp: String? = nil,
                 octoNotice: String? = nil, family: Bool = false, syncedSongs: String? = nil, familyMayAdd: Bool = false,
-                familyMayRemove: Bool = false, familyMayRename: Bool = false, familyMayDelete: Bool = false) {
+                familyMayRemove: Bool = false, familyMayRename: Bool = false, familyMayDelete: Bool = false,
+                upkeep: String? = nil, octoImport: Bool = false) {
+        self.upkeep = upkeep
+        self.octoImport = octoImport
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -139,10 +148,10 @@ public struct PlaylistRow: TableRow, Hashable, Identifiable {
     public static let table = "playlist"
     public static let columns = ["id", "name", "createdAt", "updatedAt", "serverId", "sourceId", "syncedAt", "syncedName",
                                  "serverStamp", "octoNotice", "family", "syncedSongs", "familyMayAdd", "familyMayRemove",
-                                 "familyMayRename", "familyMayDelete"]
+                                 "familyMayRename", "familyMayDelete", "upkeep", "octoImport"]
     public var values: [any SQLBindable] {
         [id, name, createdAt, updatedAt, serverId, sourceId, syncedAt, syncedName, serverStamp, octoNotice, family ? 1 : 0, syncedSongs,
-         familyMayAdd ? 1 : 0, familyMayRemove ? 1 : 0, familyMayRename ? 1 : 0, familyMayDelete ? 1 : 0]
+         familyMayAdd ? 1 : 0, familyMayRemove ? 1 : 0, familyMayRename ? 1 : 0, familyMayDelete ? 1 : 0, upkeep, octoImport ? 1 : 0]
     }
 
     public init(row: SQLRow) {
@@ -162,6 +171,8 @@ public struct PlaylistRow: TableRow, Hashable, Identifiable {
         familyMayRemove = row.int("familyMayRemove") != 0
         familyMayRename = row.int("familyMayRename") != 0
         familyMayDelete = row.int("familyMayDelete") != 0
+        upkeep = row.optionalString("upkeep")
+        octoImport = row.int("octoImport") != 0
     }
 
     /// Whether this playlist shows while this server is in use (nil for none): a phone-only one

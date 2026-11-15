@@ -65,16 +65,22 @@ public func menuPlace(_ context: SongMenuContext, albumId: String, artistId: Str
 /// server that can look for a better copy. `findSongs` is a server that can run the song's
 /// search again. `disk` is a server that lets this user delete its copy. `requestCopy` and
 /// `removeFromMine` are for family members.
+/// `findsToPlaylists` is a server listing octoPlaylistSongs, where a song found online goes in
+/// the listener's playlists too.
 public func songActions(
     find: Bool, radio: Bool, share: Bool = false, offline: Bool = false, place: MenuPlace = MenuPlace(), phone: Bool = false,
     lastPlaylist: Bool = false, upgrade: Bool = false, findSongs: Bool = false, disk: Bool = false, requestCopy: Bool = false,
-    removeFromMine: Bool = false
+    removeFromMine: Bool = false, findsToPlaylists: Bool = false
 ) -> [SongAction] {
     var out: [SongAction] = [.playNext, .addToQueue]
     if radio { out.append(.startRadio) }
     if find {
         out.append(.download)
         if requestCopy { out.append(.requestCopy) }
+        if findsToPlaylists {
+            if lastPlaylist { out.append(.addToLastPlaylist) }
+            out.append(.addToPlaylist)
+        }
         if place.inPlaylist { out.append(.removeFromPlaylist) }
         if place.selectable { out.append(.select) }
     } else {
@@ -158,8 +164,28 @@ public func starsLabel(_ rating: Int) -> String? {
 /// The choices in a collection's menu, in the order shown.
 public enum CollectionAction: CaseIterable, Sendable {
     case play, shuffle, playNext, addToQueue, addToPlaylist, download, findFlac, startRadio
-    case addToFavorites, removeFromFavorites, pinToHome, unpin, moveToFront
+    case addToFavorites, removeFromFavorites, pinToHome, unpin, moveToFront, moveToFolder
     case goToArtist, rename, duplicate, delete
+}
+
+/// Whether songs found online can go in the listener's playlists: a server listing
+/// octoPlaylistSongs.
+public func findsGoInPlaylists(_ extensions: [String]) -> Bool {
+    extensions.contains { $0.hasPrefix(playlistSongsExtension + ":") }
+}
+
+/// The songs of `items` an add to a playlist takes: every song when songs found online can go in
+/// (`findsGoIn`), otherwise the library's alone.
+public func playlistAddable<T>(_ items: [T], isFind: (T) -> Bool, findsGoIn: Bool) -> [T] {
+    findsGoIn ? items : items.filter { !isFind($0) }
+}
+
+/// An album's songs for an add to a playlist: with songs found online going in (`findsGoIn`) and
+/// the server's listing of it holding some (`server`, its songs found online in their places), the
+/// whole album; otherwise its library songs. An album found online has only the listing's.
+public func albumSongsToAdd(_ library: [LibraryTrack], server: [LibraryTrack]?, findsGoIn: Bool) -> [LibraryTrack] {
+    guard findsGoIn, let server, server.contains(where: { isFind($0.id) }) else { return library }
+    return wholeAlbum(library, server: server)
 }
 
 /// Where a collection stands on Home: not pinned, pinned, or pinned first.
@@ -202,18 +228,22 @@ public func artistActions(radio: Bool, favorite: Bool = false, pin: PinSpot = .n
     return out
 }
 
-/// An empty playlist has nothing to play, only itself to pin, rename, copy or delete.
-public func playlistActions(empty: Bool, pin: PinSpot = .none) -> [CollectionAction] {
+/// An empty playlist has nothing to play, only itself to pin, rename, copy or delete. With
+/// `folders` (folders kept, a playlist that can be filed) it can move to a folder. An imported
+/// playlist's copy (`imported`) is never renamed or deleted here: the server keeps it as the import
+/// made it.
+public func playlistActions(empty: Bool, pin: PinSpot = .none, imported: Bool = false, folders: Bool = false) -> [CollectionAction] {
     var out: [CollectionAction] = empty ? [] : playing
     out += pinRows(pin)
-    out += [.rename, .duplicate, .delete]
+    if folders { out.append(.moveToFolder) }
+    out += imported ? [.duplicate] : [.rename, .duplicate, .delete]
     return out
 }
 
 private let collectionMenuOrder: [[CollectionAction]] = [
     [.play, .shuffle, .playNext, .addToQueue, .startRadio],
     [.addToPlaylist, .addToFavorites, .removeFromFavorites, .download, .findFlac],
-    [.pinToHome, .unpin, .moveToFront],
+    [.pinToHome, .unpin, .moveToFront, .moveToFolder],
     [.goToArtist],
     [.rename, .duplicate, .delete],
 ]

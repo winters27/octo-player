@@ -170,6 +170,8 @@ private struct SelectionBar: View {
         let picked = target.picked()
         let songs = picked.map(\.song)
         let library = songs.filter { !$0.isExternal }
+        // What Add to playlist takes: songs found online too, on a server that keeps them.
+        let addable = playlistAddable(songs, isFind: \.isExternal, findsGoIn: session.client != nil && findsGoInPlaylists(session.extensions))
         let allLiked = !library.isEmpty && library.allSatisfy { actions.isLiked?($0) ?? $0.isStarred }
         let canDownload = actions.download != nil && library.contains { !actions.onPhone($0) }
         let allOnPhone = !picked.isEmpty && songs.allSatisfy { !$0.isExternal && actions.onPhone($0) }
@@ -218,8 +220,8 @@ private struct SelectionBar: View {
                 BarButton(icon: .play, label: "Play") { act { player.play(songs, from: 0) } }
                 BarButton(icon: .playNext, label: "Play next") { act { putInQueue(songs, next: true) } }
                 BarButton(icon: .addToQueue, label: "Add to queue") { act { putInQueue(songs, next: false) } }
-                BarButton(icon: .addToPlaylist, label: "Add to playlist", enabled: !library.isEmpty && actions.addToPlaylist != nil) {
-                    act { actions.addToPlaylist?(library) }
+                BarButton(icon: .addToPlaylist, label: "Add to playlist", enabled: !addable.isEmpty && actions.addToPlaylist != nil) {
+                    act { actions.addToPlaylist?(addable) }
                 }
                 BarButton(icon: .download, label: "Download", enabled: canDownload) {
                     act { actions.download?(library.filter { !actions.onPhone($0) }) }

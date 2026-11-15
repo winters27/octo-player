@@ -277,22 +277,28 @@ extension CatalogStore {
         changed(.playlists)
     }
 
-    /// Turns a playlist back into one only on the phone.
+    /// Turns a playlist back into one only on the phone. Its folder placement stays, as the
+    /// phone-only playlist's.
     public func unlinkPlaylist(_ id: String) throws {
-        try db.run("""
-            UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL,
-                octoNotice = NULL, syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0,
-                familyMayRename = 0, familyMayDelete = 0
-            WHERE id = ?
-            """, [id])
-        changed(.playlists)
+        try batch {
+            let serverId = try playlist(id)?.serverId
+            try db.run("""
+                UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL,
+                    octoNotice = NULL, syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0,
+                    familyMayRename = 0, familyMayDelete = 0, upkeep = NULL, octoImport = 0
+                WHERE id = ?
+                """, [id])
+            if let serverId { try turnPlacementLocal(serverId: serverId, rowId: id) }
+            changed(.playlists)
+        }
     }
 
     /// Every playlist kept with this server goes back to being only on the phone.
     public func unlinkServer(_ sourceId: String) throws {
         try db.run("""
             UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL,
-                syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0, familyMayRename = 0, familyMayDelete = 0
+                syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0, familyMayRename = 0, familyMayDelete = 0,
+                upkeep = NULL, octoImport = 0
             WHERE sourceId = ?
             """, [sourceId])
         changed(.playlists)
@@ -303,7 +309,8 @@ extension CatalogStore {
         let condition = kept.isEmpty ? "sourceId IS NOT NULL" : "sourceId IS NOT NULL AND sourceId NOT IN (\(marks(kept.count)))"
         try db.run("""
             UPDATE playlist SET serverId = NULL, sourceId = NULL, syncedAt = NULL, syncedName = NULL, serverStamp = NULL,
-                syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0, familyMayRename = 0, familyMayDelete = 0
+                syncedSongs = NULL, family = 0, familyMayAdd = 0, familyMayRemove = 0, familyMayRename = 0, familyMayDelete = 0,
+                upkeep = NULL, octoImport = 0
             WHERE \(condition)
             """, kept)
         changed(.playlists)

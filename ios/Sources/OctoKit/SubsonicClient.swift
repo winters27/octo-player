@@ -267,6 +267,7 @@ public final class SubsonicClient: Sendable {
         if answer.status != "ok" {
             let code = answer.error?.code ?? 0
             let message = answer.error?.message ?? ""
+            if answer.error?.octoConflict == true { throw PlaylistChanged(message: message) }
             switch code {
             case 40, 44: throw OctoError.wrongCredentials(message)
             case 41, 42: throw OctoError.authUnsupported(code: code, message: message)
@@ -303,7 +304,7 @@ struct Envelope<T: Decodable>: Decodable {
 }
 
 struct Answer<T: Decodable>: Decodable {
-    struct Failure: Decodable { let code: Int?; let message: String? }
+    struct Failure: Decodable { let code: Int?; let message: String?; let octoConflict: Bool? }
     let status: String
     let error: Failure?
     let value: T?

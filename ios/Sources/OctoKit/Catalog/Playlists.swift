@@ -22,11 +22,19 @@ public struct PlaylistSummary: Sendable, Hashable, Identifiable {
     public var familyMayRemove: Bool
     public var familyMayRename: Bool
     public var familyMayDelete: Bool
+    /// Its id on the server, once it is there, which its folder placement goes by.
+    public var serverId: String?
+    /// One of Octo's library upkeep lists, by kind (UpkeepKind), and an imported playlist's copy.
+    public var upkeep: String?
+    public var octoImport: Bool
 
     public init(id: String, name: String, songCount: Int, durationMs: Int64, covers: [String], onServer: Bool = false,
                 createdAt: Int64 = 0, updatedAt: Int64 = 0, octoNotice: String? = nil, family: Bool = false,
                 familyMayAdd: Bool = false, familyMayRemove: Bool = false, familyMayRename: Bool = false,
-                familyMayDelete: Bool = false) {
+                familyMayDelete: Bool = false, serverId: String? = nil, upkeep: String? = nil, octoImport: Bool = false) {
+        self.serverId = serverId
+        self.upkeep = upkeep
+        self.octoImport = octoImport
         self.id = id
         self.name = name
         self.songCount = songCount
@@ -42,6 +50,10 @@ public struct PlaylistSummary: Sendable, Hashable, Identifiable {
         self.familyMayRename = familyMayRename
         self.familyMayDelete = familyMayDelete
     }
+
+    /// The key its folder placement goes by: its server id, or "local:<id>" while it is only on the
+    /// phone.
+    public var placeKey: String { serverId ?? PlaylistFolderTree.localKey(id) }
 }
 
 /// A song on a playlist, as far as asking before adding it again goes.
@@ -118,7 +130,10 @@ public func summarize(_ playlists: [PlaylistRow], _ entries: [PlaylistEntry]) ->
             familyMayAdd: playlist.familyMayAdd,
             familyMayRemove: playlist.familyMayRemove,
             familyMayRename: playlist.familyMayRename,
-            familyMayDelete: playlist.familyMayDelete
+            familyMayDelete: playlist.familyMayDelete,
+            serverId: playlist.serverId,
+            upkeep: playlist.upkeep,
+            octoImport: playlist.octoImport
         )
     }
 }

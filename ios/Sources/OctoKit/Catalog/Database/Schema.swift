@@ -10,7 +10,7 @@ public struct NewerCatalogFile: Error, Equatable, Sendable {
 /// The library database's tables. Raise `version` and add a step to `migrations` when a table
 /// changes; a step runs once on a file made by the version before it.
 enum Schema {
-    static let version = 4
+    static let version = 5
 
     static let create = """
     CREATE TABLE IF NOT EXISTS track (
@@ -97,7 +97,7 @@ enum Schema {
         serverId TEXT, sourceId TEXT, syncedAt INTEGER, syncedName TEXT, serverStamp TEXT, octoNotice TEXT,
         family INTEGER NOT NULL DEFAULT 0, syncedSongs TEXT, familyMayAdd INTEGER NOT NULL DEFAULT 0,
         familyMayRemove INTEGER NOT NULL DEFAULT 0, familyMayRename INTEGER NOT NULL DEFAULT 0,
-        familyMayDelete INTEGER NOT NULL DEFAULT 0);
+        familyMayDelete INTEGER NOT NULL DEFAULT 0, upkeep TEXT, octoImport INTEGER NOT NULL DEFAULT 0);
 
     CREATE TABLE IF NOT EXISTS playlist_item (
         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, playlistId TEXT NOT NULL, trackId TEXT NOT NULL,
@@ -136,6 +136,23 @@ enum Schema {
     CREATE TABLE IF NOT EXISTS pinned_item (
         kind TEXT NOT NULL, itemId TEXT NOT NULL, relinkKey TEXT NOT NULL, position INTEGER NOT NULL,
         PRIMARY KEY(kind, itemId));
+
+    CREATE TABLE IF NOT EXISTS playlist_folder (
+        space TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created TEXT NOT NULL,
+        PRIMARY KEY(space, id));
+    CREATE INDEX IF NOT EXISTS index_playlist_folder_space_parent ON playlist_folder (space, parent);
+
+    CREATE TABLE IF NOT EXISTS playlist_place (
+        space TEXT NOT NULL, playlistKey TEXT NOT NULL, folderId TEXT NOT NULL, localOnly INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(space, playlistKey));
+    CREATE INDEX IF NOT EXISTS index_playlist_place_space_folderId ON playlist_place (space, folderId);
+
+    CREATE TABLE IF NOT EXISTS folder_op (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, space TEXT NOT NULL, kind TEXT NOT NULL, folderId TEXT,
+        name TEXT, parent TEXT, playlistKeys TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS index_folder_op_space_seq ON folder_op (space, seq);
+
+    CREATE TABLE IF NOT EXISTS playlist_base_mark (sourceId TEXT NOT NULL PRIMARY KEY, at INTEGER NOT NULL);
     """
 
     /// Steps from each older version to the next, by the version they start from.
@@ -151,6 +168,9 @@ enum Schema {
         ALTER TABLE playlist ADD COLUMN familyMayRename INTEGER NOT NULL DEFAULT 0; \
         ALTER TABLE playlist ADD COLUMN familyMayDelete INTEGER NOT NULL DEFAULT 0;
         """,
+        // Playlists carry the server's upkeep kind and whether they are an imported playlist's copy;
+        // the folder tables and the base step's mark come with `create`. Nothing is copied or seeded.
+        4: "ALTER TABLE playlist ADD COLUMN upkeep TEXT; ALTER TABLE playlist ADD COLUMN octoImport INTEGER NOT NULL DEFAULT 0;",
     ]
 
     /// Makes the tables, or brings a file from an older version up to `version`. A file written

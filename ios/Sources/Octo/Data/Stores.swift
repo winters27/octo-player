@@ -97,22 +97,30 @@ final class RatingStore {
 final class PlaylistStore {
     private let library: Library
     private let sync: PlaylistSync
+    private let folders: PlaylistFolderStore
 
-    init(library: Library, sync: PlaylistSync) {
+    init(library: Library, sync: PlaylistSync, folders: PlaylistFolderStore) {
         self.library = library
         self.sync = sync
+        self.folders = folders
     }
 
     /// Makes a playlist, with the songs in it if any are given, and gives back the id it will have.
+    /// Made from a folder (`folderId`), it lands in it. On a server that keeps songs found online
+    /// they go in too, and a playlist holding one is saved to the server at once, so they keep
+    /// playing; otherwise only library songs go in.
     @discardableResult
-    func create(_ name: String, trackIds: [String] = []) -> String {
+    func create(_ name: String, trackIds: [String] = [], in folderId: String? = nil) -> String {
         let id = UUID().uuidString.lowercased()
+        let findsGoIn = sync.findsGoIn
         Task {
             let now = epochNowMs()
             let store = library.store
             try? await store.insertPlaylist(PlaylistRow(id: id, name: name.trimmingCharacters(in: .whitespacesAndNewlines), createdAt: now, updatedAt: now))
-            if !trackIds.isEmpty { _ = try? await store.addToPlaylist(id, tracks: await library.tracks(ids: trackIds), now: now) }
-            sync.created(id)
+            if let folderId { await folders.place([PlaylistFolderTree.localKey(id)], in: folderId) }
+            let songs = trackIds.isEmpty ? [] : (findsGoIn ? await library.songs(ids: trackIds) : await library.tracks(ids: trackIds))
+            if !songs.isEmpty { _ = try? await store.addToPlaylist(id, tracks: songs, now: now) }
+            if songs.contains(where: { isFind($0.id) }) { sync.savedForFinds(id) } else { sync.created(id) }
         }
         return id
     }
@@ -129,16 +137,23 @@ final class PlaylistStore {
             let store = library.store
             guard let playlist = try? await store.playlist(id) else { return }
             try? await store.deletePlaylist(id)
+            await folders.forget(playlist.serverId ?? PlaylistFolderTree.localKey(id))
             sync.deleted(playlist)
         }
     }
 
-    /// Adds songs to the end. `added` hears the new rows, to take them back out.
+    /// Adds songs to the end. `added` hears the new rows, to take them back out. A song found online
+    /// added to a playlist only on the phone saves the playlist to the server first.
     func add(_ id: String, trackIds: [String], added: @escaping @MainActor ([Int64]) -> Void = { _ in }) {
         Task {
-            let rows = (try? await library.store.addToPlaylist(id, tracks: await songs(trackIds), now: epochNowMs())) ?? []
+            let store = library.store
+            let tracks = await songs(trackIds)
+            let rows = (try? await store.addToPlaylist(id, tracks: tracks, now: epochNowMs())) ?? []
             sync.changed(id)
             if !rows.isEmpty { added(rows) }
+            if tracks.contains(where: { isFind($0.id) }), let playlist = try? await store.playlist(id), playlist.sourceId == nil {
+                sync.savedForFinds(id)
+            }
         }
     }
 

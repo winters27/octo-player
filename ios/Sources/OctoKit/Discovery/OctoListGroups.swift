@@ -58,6 +58,9 @@ func ownedByListener(_ playlist: Playlist, _ listener: String) -> Bool {
 /// "1990s Mix" Years, any other More. Another server's own ids can have that shape, so a list
 /// the listener can change never counts by its id.
 public func octoListGroup(_ playlist: Playlist, listener: String, guess: Bool = true) -> OctoListGroup? {
+    // An imported playlist's copy is the listener's own: it sits with their playlists and can be
+    // filed, never in From Octo.
+    if playlist.octoImport { return nil }
     guard ownedByListener(playlist, listener) else { return nil }
     if let group = playlist.octoGroup {
         switch group {
@@ -131,7 +134,7 @@ private func yearOrder(_ a: Playlist, _ b: Playlist) -> Bool {
 /// Whether a server list opens as the server has it, read-only: on a server that runs Octo, one
 /// of the listener's that Octo made, by its kind, or read-only with an id of Octo's own shape.
 public func opensAsServerList(_ playlist: Playlist, runsOcto: Bool, listener: String) -> Bool {
-    guard runsOcto, ownedByListener(playlist, listener) else { return false }
+    guard runsOcto, !playlist.octoImport, ownedByListener(playlist, listener) else { return false }
     return playlist.octoGroup != nil || (playlist.readonly && isDrawnCoverId(playlist.id))
 }
 

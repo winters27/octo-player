@@ -40,11 +40,22 @@ public func songBatches(_ songIds: [String], formPost: Bool, perCall: Int = play
 
 /// The calls that make a playlist's songs exactly these, in this order: createPlaylist with a
 /// playlistId replaces the whole list; batches after the first are added with updatePlaylist.
+/// `ifStamp` (the changed time the server sent) makes Octo refuse the replace when the playlist
+/// changed since; `ownIds` says the ids are the server's own. Only the first call carries them:
+/// the calls after it add to the list it made.
 public func replaceSongsCalls(_ playlistId: String, _ songIds: [String], formPost: Bool,
-                              perCall: Int = playlistSongsPerCall) -> [PlaylistCall] {
+                              perCall: Int = playlistSongsPerCall, ifStamp: String? = nil, ownIds: Bool = false) -> [PlaylistCall] {
     let batches = songBatches(songIds, formPost: formPost, perCall: perCall)
-    let first = PlaylistCall("createPlaylist", [.init("playlistId", playlistId)] + batches[0].map { .init("songId", $0) })
+    let first = PlaylistCall("createPlaylist", replaceParams(playlistId, ifStamp: ifStamp, ownIds: ownIds) + batches[0].map { .init("songId", $0) })
     return [first] + addSongsCalls(playlistId, Array(batches.dropFirst()))
+}
+
+/// A replace's first params: the playlist, then the stamp and own-ids marks when given.
+func replaceParams(_ playlistId: String, ifStamp: String?, ownIds: Bool) -> [PlaylistCall.Param] {
+    var params: [PlaylistCall.Param] = [.init("playlistId", playlistId)]
+    if let ifStamp, !ifStamp.isEmpty { params.append(.init(ifStampParam, ifStamp)) }
+    if ownIds { params.append(.init(ownIdsParam, "1")) }
+    return params
 }
 
 /// The calls that make a new playlist: the first batch goes with the name, and the rest are added
@@ -101,12 +112,21 @@ public struct ServerPlaylistInfo: Decodable, Sendable, Hashable, Identifiable {
     public var octoFamilyCreatedBy: String?
     public var octoFamilyMayRename: Bool?
     public var octoFamilyMayDelete: Bool?
+    /// One of Octo's library upkeep lists, and which kind (UpkeepKind; an older server names none),
+    /// and an imported playlist's read-only copy (servers listing octoPlaylistSongs).
+    public var octoUpkeep: Bool
+    public var octoUpkeepKind: String?
+    public var octoImport: Bool
     public var entry: [Song]
 
     public init(id: String, name: String = "", owner: String? = nil, songCount: Int = 0, changed: String? = nil,
                 created: String? = nil, readonly: Bool = false, octoList: String? = nil, octoNotice: String? = nil,
                 coverArt: String? = nil, entry: [Song] = [], octoFamily: Bool? = nil, octoFamilyCreatedBy: String? = nil,
-                octoFamilyMayRename: Bool? = nil, octoFamilyMayDelete: Bool? = nil) {
+                octoFamilyMayRename: Bool? = nil, octoFamilyMayDelete: Bool? = nil, octoUpkeep: Bool = false,
+                octoUpkeepKind: String? = nil, octoImport: Bool = false) {
+        self.octoUpkeep = octoUpkeep
+        self.octoUpkeepKind = octoUpkeepKind
+        self.octoImport = octoImport
         self.id = id
         self.name = name
         self.owner = owner
@@ -130,6 +150,7 @@ public struct ServerPlaylistInfo: Decodable, Sendable, Hashable, Identifiable {
         case id, name, comment, owner, songCount, duration, coverArt, changed, created, readonly, validUntil
         case octoList, octoNotice, octoCoverTitle, entry
         case octoFamily, octoFamilyCreatedBy, octoFamilyMayRename, octoFamilyMayDelete
+        case octoUpkeep, octoUpkeepKind, octoImport
         case isPublic = "public"
     }
 
@@ -154,6 +175,9 @@ public struct ServerPlaylistInfo: Decodable, Sendable, Hashable, Identifiable {
         octoFamilyCreatedBy = c.string(.octoFamilyCreatedBy)
         octoFamilyMayRename = c.bool(.octoFamilyMayRename)
         octoFamilyMayDelete = c.bool(.octoFamilyMayDelete)
+        octoUpkeep = c.bool(.octoUpkeep) ?? false
+        octoUpkeepKind = c.string(.octoUpkeepKind)
+        octoImport = c.bool(.octoImport) ?? false
         entry = (try? c.decodeIfPresent([Song].self, forKey: .entry)) ?? []
     }
 }
@@ -180,6 +204,29 @@ public struct ServerUser: Decodable, Sendable, Equatable {
 
 enum PlaylistsKey: PayloadName { static let name = "playlists" }
 enum PlaylistKey: PayloadName { static let name = "playlist" }
+
+/// The ids an ok answer to a playlist change says the server skipped (octoSkipped).
+struct SkippedAnswer: Decodable {
+    let skipped: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        skipped = (try? c.decodeIfPresent([String].self, forKey: AnyKey("octoSkipped"))) ?? []
+    }
+}
+
+/// A new playlist's answer: the playlist (nil from a server older than API 1.14) and the ids it
+/// skipped.
+struct MadeAnswer: Decodable {
+    let playlist: ServerPlaylistInfo?
+    let skipped: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        playlist = try? c.decodeIfPresent(ServerPlaylistInfo.self, forKey: AnyKey("playlist"))
+        skipped = (try? c.decodeIfPresent([String].self, forKey: AnyKey("octoSkipped"))) ?? []
+    }
+}
 
 struct FullPlaylists: Decodable {
     let playlist: [ServerPlaylistInfo]
@@ -225,30 +272,49 @@ extension SubsonicClient {
     /// Makes a playlist with these songs in this order, and answers with it as the server now has
     /// it (nil from a server older than API 1.14, which sends nothing back).
     public func makePlaylist(name: String, songIds: [String], formPost: Bool = false) async throws -> ServerPlaylistInfo? {
-        let (first, rest) = createCalls(name, songIds, formPost: formPost)
-        let made = try await run(first, formPost: formPost, as: Lenient<PlaylistKey, ServerPlaylistInfo>.self).value
-        if !rest.isEmpty {
-            guard let id = made?.id else { throw OctoError.server(code: 0, message: "The server did not say the new playlist's id") }
-            for call in addSongsCalls(id, rest) { try await runCall(call, formPost: formPost) }
-        }
-        return made
+        try await makePlaylistNoting(name: name, songIds: songIds, formPost: formPost).playlist
     }
 
-    /// Makes a playlist's songs exactly these, in this order.
-    public func replacePlaylistSongs(_ id: String, songIds: [String], formPost: Bool = false) async throws {
-        for call in replaceSongsCalls(id, songIds, formPost: formPost) { try await runCall(call, formPost: formPost) }
+    /// The same, with the ids a server listing octoPlaylistSongs says it left out (octoSkipped).
+    public func makePlaylistNoting(name: String, songIds: [String], formPost: Bool = false) async throws
+        -> (playlist: ServerPlaylistInfo?, skipped: [String]) {
+        let (first, rest) = createCalls(name, songIds, formPost: formPost)
+        let answer = try await run(first, formPost: formPost, as: MadeAnswer.self)
+        var skipped = answer.skipped
+        if !rest.isEmpty {
+            guard let id = answer.playlist?.id else { throw OctoError.server(code: 0, message: "The server did not say the new playlist's id") }
+            for call in addSongsCalls(id, rest) { skipped += try await run(call, formPost: formPost, as: SkippedAnswer.self).skipped }
+        }
+        return (answer.playlist, skipped)
+    }
+
+    /// Makes a playlist's songs exactly these, in this order. `ifStamp` (the changed time the server
+    /// sent for it) makes Octo refuse it when the playlist changed since (`PlaylistChanged`);
+    /// `ownIds` says the ids are the server's own. Answers the ids the server skipped.
+    @discardableResult
+    public func replacePlaylistSongs(_ id: String, songIds: [String], formPost: Bool = false, ifStamp: String? = nil,
+                                     ownIds: Bool = false) async throws -> [String] {
+        var skipped: [String] = []
+        for call in replaceSongsCalls(id, songIds, formPost: formPost, ifStamp: ifStamp, ownIds: ownIds) {
+            skipped += try await run(call, formPost: formPost, as: SkippedAnswer.self).skipped
+        }
+        return skipped
     }
 
     /// Changes a playlist's details, takes songs out by their place (a place may repeat) and adds
-    /// songs to the end. Songs of a family playlist can also go by id and copy. Only what is given
-    /// changes.
+    /// songs to the end. Songs of a family playlist, and of the listener's own on a server listing
+    /// octoPlaylistSongs, can also go by id and copy. Only what is given changes. Answers the ids
+    /// the server skipped.
+    @discardableResult
     public func updatePlaylist(_ id: String, name: String? = nil, comment: String? = nil, isPublic: Bool? = nil,
                                songIdsToAdd: [String] = [], songIndexesToRemove: [Int] = [], songsToRemove: [SongToRemove] = [],
-                               formPost: Bool = false) async throws {
+                               formPost: Bool = false) async throws -> [String] {
+        var skipped: [String] = []
         for call in updateCalls(id, name: name, comment: comment, isPublic: isPublic, songIdsToAdd: songIdsToAdd,
                                 songIndexesToRemove: songIndexesToRemove, songsToRemove: songsToRemove, formPost: formPost) {
-            try await runCall(call, formPost: formPost)
+            skipped += try await run(call, formPost: formPost, as: SkippedAnswer.self).skipped
         }
+        return skipped
     }
 
     public func deletePlaylist(_ id: String) async throws { try await call("deletePlaylist", [("id", id)]) }
