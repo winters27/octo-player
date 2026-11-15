@@ -28,6 +28,7 @@
 
 ## Playback
 
+- **Try another version.** When a song found online plays the wrong take, like a live one, a remix or a sped-up edit, pick another from Try another version in the player's menu. It plays at once from the start, your server keeps it for everyone on every device, and a heart downloads the version you picked. Go back to Octo's pick undoes it. Needs an Octo server from this update.
 - **Automix is now its own choice next to Crossfade and is on by default:** songs blend where they meet best, and a quiet intro plays under the end of the song before it. If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on. Gapless is under Between songs. A Crossfade setup you chose stays as it was. Automix now picks its own blend lengths. Match tempo is now on for Automix; turn it off under Between songs if you prefer.
 - **Android Auto gets the whole app:** Home, Radio, Playlists and Library tabs, as on your phone, with Made for you, your server's stations, charts and stations near you.
 - Android Auto's Playlists tab shows your playlist folders, each opening to its folders and playlists.
