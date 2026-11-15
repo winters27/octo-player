@@ -26,7 +26,9 @@ class DownloadRowsTest {
 
     @Test
     fun theFormatCaptionSaysWhatItIsForAndWhatTheChoiceIsLike() {
-        assertEquals("What smaller downloads are saved as. Best sound for its size.", downloadFormatCaption(DownloadFormat.Opus))
-        assertEquals("What smaller downloads are saved as. Close to Opus, opens almost anywhere.", downloadFormatCaption(DownloadFormat.Aac))
+        // The last two words are joined by a no-break space, so a wrap never
+        // leaves one alone.
+        assertEquals("What smaller downloads are saved as. Best sound for its size.", downloadFormatCaption(DownloadFormat.Opus))
+        assertEquals("What smaller downloads are saved as. Close to Opus, opens almost anywhere.", downloadFormatCaption(DownloadFormat.Aac))
     }
 }

@@ -37,7 +37,7 @@ public enum DownloadFormat: String, CaseIterable, StoredChoice {
         switch self {
         case .opus: "Best sound for its size"
         case .aac: "Close to Opus, opens almost anywhere"
-        case .mp3: "Opens anywhere, sounds a little worse at the same size"
+        case .mp3: "Opens anywhere, a little worse for its size"
         }
     }
 

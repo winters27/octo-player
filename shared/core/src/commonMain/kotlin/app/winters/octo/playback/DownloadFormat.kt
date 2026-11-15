@@ -22,7 +22,7 @@ val DownloadFormat.detail: String
     get() = when (this) {
         DownloadFormat.Opus -> "Best sound for its size"
         DownloadFormat.Aac -> "Close to Opus, opens almost anywhere"
-        DownloadFormat.Mp3 -> "Opens anywhere, sounds a little worse at the same size"
+        DownloadFormat.Mp3 -> "Opens anywhere, a little worse for its size"
     }
 
 // The line under the Download format setting, and its search line.

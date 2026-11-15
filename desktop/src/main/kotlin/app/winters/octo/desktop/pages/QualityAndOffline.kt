@@ -138,8 +138,14 @@ internal fun downloadQualityCaption(quality: StreamQuality, format: DownloadForm
     }
 
 // What the Download format row says under its title: what it is for, and
-// what the chosen format is like.
-internal fun downloadFormatCaption(format: DownloadFormat): String = "$DOWNLOAD_FORMAT_HELP. ${format.detail}."
+// what the chosen format is like. Its last two words are joined, so a
+// narrow window never leaves one word alone on the last line.
+internal fun downloadFormatCaption(format: DownloadFormat): String {
+    val detail = format.detail
+    val last = detail.lastIndexOf(' ')
+    val joined = if (last > 0) detail.substring(0, last) + ' ' + detail.substring(last + 1) else detail
+    return "$DOWNLOAD_FORMAT_HELP. $joined."
+}
 
 // Streaming and downloads: how long a song buffers before it starts, then
 // the songs kept on this computer to play without a connection: the folder
@@ -185,12 +191,12 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
                 { ChoiceButton(StreamQuality.entries, chosen, ::qualityName, offline::setDownloadQuality, title = "Download quality") },
             )
         }
-        // Always shown, so the card keeps its shape whatever the quality.
-        SettingRow(DOWNLOAD_FORMAT_TITLE, downloadFormatCaption(format)) {
-            FitOrElse(
-                { GlazeSegments(DownloadFormat.entries, format, { it.label }, offline::setDownloadFormat) },
-                { ChoiceButton(DownloadFormat.entries, format, { it.label }, offline::setDownloadFormat, title = DOWNLOAD_FORMAT_TITLE) },
-            )
+        // Always shown, so the card keeps its shape whatever the quality, and
+        // as tall as its longest caption, so picking a format moves nothing. A
+        // menu like Download quality's above it, which it belongs to, so it
+        // never outweighs it.
+        SettingRow(DOWNLOAD_FORMAT_TITLE, downloadFormatCaption(format), captionRoom = DownloadFormat.entries.map(::downloadFormatCaption)) {
+            ChoiceButton(DownloadFormat.entries, format, { it.label }, offline::setDownloadFormat, title = DOWNLOAD_FORMAT_TITLE)
         }
     }
     val playlists = app.playlists

@@ -530,6 +530,9 @@ internal fun SettingRow(
     dim: Boolean = false,
     stable: String? = null,
     id: String? = null,
+    // Every caption the row can show as its choice changes, so it keeps the
+    // height of the longest and never moves when another is picked.
+    captionRoom: List<String> = emptyList(),
     control: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
@@ -544,7 +547,14 @@ internal fun SettingRow(
     ) {
         Column(Modifier.weight(1f)) {
             Txt(title, RowTitleWords, if (dim) OctoColors.TextMuted else OctoColors.TextPrimary, maxLines = 2)
-            if (caption != null) Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = Int.MAX_VALUE)
+            if (caption != null && captionRoom.isEmpty()) {
+                Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = Int.MAX_VALUE)
+            } else if (caption != null) {
+                Box(Modifier.padding(top = Space.Xxs)) {
+                    captionRoom.forEach { Txt(it, DesktopType.meta, Color.Transparent, Modifier.clearAndSetSemantics { }, maxLines = Int.MAX_VALUE) }
+                    Txt(caption, DesktopType.meta, OctoColors.TextMuted, maxLines = Int.MAX_VALUE)
+                }
+            }
         }
         // The control is measured first, so it is held to its share of the
         // row and the words keep the rest; a picker too wide for that turns

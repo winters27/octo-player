@@ -25,7 +25,7 @@ class DownloadFormatTest {
     fun theWordsAreTheOnesPeopleRead() {
         assertEquals("Best sound for its size", DownloadFormat.Opus.detail)
         assertEquals("Close to Opus, opens almost anywhere", DownloadFormat.Aac.detail)
-        assertEquals("Opens anywhere, sounds a little worse at the same size", DownloadFormat.Mp3.detail)
+        assertEquals("Opens anywhere, a little worse for its size", DownloadFormat.Mp3.detail)
         assertEquals("What smaller downloads are saved as", DOWNLOAD_FORMAT_HELP)
     }
 }
