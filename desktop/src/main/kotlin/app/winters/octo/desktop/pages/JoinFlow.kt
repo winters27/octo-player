@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -29,10 +30,12 @@ import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.signInOpen
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.ButtonSize
-import app.winters.octo.design.OctoColors
+import app.winters.octo.design.ControlHeight
+import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.PopupPadding
 import app.winters.octo.design.ProgressRing
 import app.winters.octo.design.SettingsSize
+import app.winters.octo.design.Space
 import app.winters.octo.design.TextAction
 import app.winters.octo.design.scrollFades
 import app.winters.octo.design.scrollbar
@@ -60,6 +63,7 @@ import app.winters.octo.ui.family.MIN_PASSWORD
 import app.winters.octo.ui.family.joinWithInvite
 import app.winters.octo.ui.family.passwordStrength
 import app.winters.octo.ui.family.receiveHandOver
+import app.winters.octo.ui.family.shownServer
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -402,13 +406,14 @@ private fun ColumnScope.LinkSheet(app: AppState, form: SignInForm, close: () -> 
             Advanced(app, form, ::go, places, replacingId = null, url = form.handOver?.base?.toHttpUrlOrNull() ?: form.url, home = form.homeUrl)
         }
     }
-    PopupPadding { LinkFooter(form, ::go, onLeave = { if (form.invite != null) form.leaveLink() else if (!form.committing) close() }) }
+    PopupPadding { LinkFooter(form, ::go, onLeave = { if (form.invite != null) form.leaveLink() else if (!form.committing) close() }, onClose = { if (!form.committing) close() }) }
 }
 
 // The part of the sign-in a family link fills, as the page's main card:
 // signing up from an invite (a name and a password, twice, the strength
 // under the first), a sign-in coming from another device (what is
-// happening, with a spinner at the end while it goes), or the server and
+// happening, with a spinner at the end while it goes, or that it is not
+// signed in yet once a try failed), or the server and
 // username filled in, waiting for the password or key. On the page the
 // address row comes first, with its notes. The invite's sentence and the
 // hand-over's "choose Allow" are notes under the card.
@@ -427,7 +432,7 @@ internal fun LinkCard(
         notes = {
             addressNotes()
             when {
-                invite != null -> FormNote("You're invited to ${invite.server.substringAfter("://")}. Choose your name and a password. Your login then works in Octo and any other music app.")
+                invite != null -> FormNote("You're invited to ${shownServer(invite.server)}. Choose your name and a password. Your login then works in Octo and any other music app.")
                 handOver != null -> FormNote("On your other device, choose Allow when it asks about this computer.")
             }
         },
@@ -469,8 +474,11 @@ internal fun LinkCard(
                     onSubmit = go,
                 )
             }
-            handOver != null -> FormRow(form.handOverStep ?: "Ready to sign in to ${handOver.server.substringAfter("://")}") {
-                if (form.busy) ProgressRing(null)
+            handOver != null -> {
+                val host = shownServer(handOver.server)
+                FormRow(form.handOverStep ?: if (form.result?.first == false) "Not signed in to $host yet" else "Ready to sign in to $host") {
+                    if (form.busy) ProgressRing(null)
+                }
             }
             else -> {
                 FormFieldRow(
@@ -491,23 +499,32 @@ internal fun LinkCard(
 }
 
 // The foot of a link's card: the result line and a refused link's words,
-// then the way out of the link and the button that goes on. With an invite
-// held the way out is a password sign-in instead; with anything else it is
-// Cancel. Nothing leaves while the request commits, and nothing goes while
-// `held` (a switch from the page on its way). The page draws it in its card;
-// the sheet keeps it under its scrolling part.
+// then the buttons on the right: Cancel where there is a way out, and the
+// page's filled button that goes on. With an invite held, Cancel closes the
+// sheet (`onClose`; the page has none) and is off while a sign-up made here
+// is held, which only the password sign-in leaves; the way to that sign-in
+// sits under the buttons on their right edge, as Paste a family link does.
+// With anything else Cancel leaves the link (`onLeave`). Nothing leaves
+// while the request commits, and nothing goes while `held` (a switch from
+// the page on its way). The page draws it in its card; the sheet keeps it
+// under its scrolling part.
 @Composable
-internal fun LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit, held: Boolean = false) {
+internal fun ColumnScope.LinkFooter(form: SignInForm, go: () -> Unit, onLeave: () -> Unit, held: Boolean = false, onClose: (() -> Unit)? = null) {
     val invite = form.invite
     val handOver = form.handOver
     ResultLine(form)
     LinkNote(form)
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        TextAction(if (invite != null) "Sign in with a password instead" else "Cancel", onLeave, enabled = !form.committing)
+        val out = if (invite != null) onClose else onLeave
+        out?.let { GlazeCapsule(null, "Cancel", it, enabled = !form.committing && (invite == null || form.signedUp == null), height = ControlHeight.L) }
         when {
-            invite != null -> AccentButton("Sign up", go, Modifier.widthIn(min = 150.dp), enabled = form.inviteReady && !held, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
-            handOver != null -> if (!form.busy) AccentButton("Try again", go, Modifier.widthIn(min = 150.dp), enabled = !held, size = ButtonSize.Medium, fill = OctoColors.Accent)
-            else -> AccentButton("Sign in", go, Modifier.widthIn(min = 150.dp), enabled = form.ready && !held, loading = form.busy, size = ButtonSize.Medium, fill = OctoColors.Accent)
+            invite != null -> AccentButton("Sign up", go, Modifier.widthIn(min = 150.dp), enabled = form.inviteReady && !held, loading = form.busy, size = ButtonSize.Medium)
+            handOver != null -> if (!form.busy) AccentButton("Try again", go, Modifier.widthIn(min = 150.dp), enabled = !held, size = ButtonSize.Medium)
+            else -> AccentButton("Sign in", go, Modifier.widthIn(min = 150.dp), enabled = form.ready && !held, loading = form.busy, size = ButtonSize.Medium)
         }
+    }
+    if (invite != null) {
+        // Its words, not its hover pill, end on the buttons' right edge.
+        TextAction("Sign in with a password instead", onLeave, Modifier.align(Alignment.End).offset(x = Space.L), enabled = !form.committing)
     }
 }

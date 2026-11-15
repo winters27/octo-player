@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.SignInWords
 import app.winters.octo.connection.signInOpen
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.CardFit
 import app.winters.octo.design.Corner
@@ -576,19 +578,19 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically) {
             if (kind != SheetKind.SignIn) GlazeCapsule(null, "Test connection", ::test, enabled = form.ready, height = ControlHeight.L)
             Spacer(Modifier.weight(1f))
-            if (form.busy) Spinner(size = IconSize.Table)
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            GlazeCapsule(
-                null,
+            // The page's own filled button, its spinner in it while the sheet
+            // tests or saves.
+            AccentButton(
                 when (kind) {
                     SheetKind.Add -> "Add"
                     SheetKind.Edit -> "Save"
                     SheetKind.SignIn, SheetKind.Secure -> "Sign in"
                 },
                 ::save,
-                lit = true,
                 enabled = form.ready,
-                height = ControlHeight.L,
+                loading = form.busy,
+                size = ButtonSize.Medium,
             )
         }
     }
@@ -685,9 +687,8 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
         val shown = problem ?: if (tried) passwordDraftProblem(draft) else null
         shown?.let { Txt(it, DesktopType.meta, OctoColors.Error, maxLines = 3) }
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-            if (busy) Spinner(size = IconSize.Table)
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            GlazeCapsule(null, "Change password", ::change, lit = true, enabled = !busy, height = ControlHeight.L)
+            AccentButton("Change password", ::change, loading = busy, size = ButtonSize.Medium)
         }
     }
 }

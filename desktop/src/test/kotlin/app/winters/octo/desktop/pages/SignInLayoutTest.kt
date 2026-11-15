@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import app.winters.octo.connection.GatewayWords
 import app.winters.octo.connection.SignInWords
+import app.winters.octo.design.FrameSize
 import app.winters.octo.design.IconSize
 import app.winters.octo.design.POPUP_TAG
 import app.winters.octo.design.Space
@@ -22,6 +23,7 @@ import app.winters.octo.desktop.a11y.A11yScene
 import app.winters.octo.desktop.a11y.clickable
 import app.winters.octo.desktop.a11y.name
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.server.CertificateQuestion
 import app.winters.octo.desktop.server.SavedGateway
 import app.winters.octo.desktop.settings.SavedServer
 import app.winters.octo.subsonic.AuthMode
@@ -1138,6 +1140,579 @@ class SignInLayoutTest {
             s.until { s.withText(GatewayWords.POINTER).isNotEmpty() }
             s.render(6)
             s.shot("polish-sheet-callout")
+        }
+    }
+
+    // Scrolls the node's scroll to its end, gliding as bringUp does, and
+    // gives how far that is.
+    private fun A11yScene.scrollToEnd(node: SemanticsNode): Float {
+        val scroll = scrollOf(node)
+        val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+        val goal = range.maxValue()
+        onUi { scroll.config[SemanticsActions.ScrollBy].action?.invoke(0f, goal - range.value()) }
+        render(1)
+        val end = System.currentTimeMillis() + 10_000
+        do {
+            check(System.currentTimeMillis() < end) { "waited too long" }
+            frameAt(System.nanoTime()).close()
+        } while (abs(range.value() - goal) > 0.5f)
+        return goal
+    }
+
+    // The rows from `top` until `bottom` where the card shows the page
+    // unfrosted. Taking the card's film (0xFF1A1A1E at 0.79) off its pixels
+    // leaves the page as the glass shows it, whose chroma (the spread of its
+    // channels) the frost raises about 1.8 times over the bare page's beside
+    // the card; a row counts when that is under `least`. Each row averages 13
+    // columns 6 to 18 in from the card's left edge, against 13 columns 6 to 18
+    // out from it.
+    private fun unfrostedRows(image: Image, cardLeft: Int, top: Int, bottom: Int, least: Double): List<Int> {
+        val bitmap = Bitmap.makeFromImage(image)
+        fun mean(from: Int, y: Int): DoubleArray {
+            val sum = DoubleArray(3)
+            for (x in from until from + 13) {
+                val c = bitmap.getColor(x, y)
+                sum[0] += (c shr 16 and 0xFF).toDouble()
+                sum[1] += (c shr 8 and 0xFF).toDouble()
+                sum[2] += (c and 0xFF).toDouble()
+            }
+            return DoubleArray(3) { sum[it] / 13 }
+        }
+        val film = doubleArrayOf(26.0, 26.0, 30.0)
+        val rows = (top until bottom).filter { y ->
+            val card = mean(cardLeft + 6, y)
+            val seen = DoubleArray(3) { (card[it] - 0.79 * film[it]) / 0.21 }
+            val page = mean(cardLeft - 18, y)
+            (seen.max() - seen.min()) / (page.max() - page.min()) < least
+        }
+        bitmap.close()
+        return rows
+    }
+
+    // The card's glass stays frosted however far its words scroll: on every
+    // row of the card clear of its soft edges, the page seen through the glass
+    // has 1.7 times the bare page's chroma or more. The card is 480 wide in
+    // the middle of the window. Measured once the scroll has lifted the card
+    // from its pin to the window's top pad and taken its words to their end.
+    // Red when the glass scrolls with the page (past the rows its frost was
+    // first drawn for: film over the raw page, about 1.0), or when the card
+    // stays at its pin.
+    @Test(timeout = 120_000)
+    fun theCardStaysFrostedWhenItsWordsScroll() {
+        page().use { s ->
+            s.settle(600).close()
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            val title = s.text(SignInWords.ADVANCED)
+            val far = s.scrollToEnd(title)
+            assertTrue("the words scroll $far", far > 200f)
+            val image = s.settle(300)
+            val view = scrollOf(title).boundsInRoot
+            val flat = unfrostedRows(image, (s.width - 480) / 2, view.top.toInt() + 24, view.bottom.toInt() - 24, 1.7)
+            image.close()
+            assertTrue("${flat.size} rows unfrosted, the first ${flat.take(5)}", flat.isEmpty())
+            assertEquals("the card lifted to the window's top pad", pagePad, s.cardTop(), 0.5f)
+        }
+    }
+
+    // A wheel turned over the page beside the card scrolls the card's words,
+    // as it does over the card. Red when only the card takes the wheel (the
+    // words stay at the top).
+    @Test(timeout = 120_000)
+    fun aWheelBesideTheCardScrollsItsWords() {
+        page(height = 600).use { s ->
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            val title = s.text(SignInWords.ADVANCED)
+            assertEquals(0f, s.scrolled(title), 0.5f)
+            s.onUi { repeat(3) { s.scene.sendPointerEvent(PointerEventType.Scroll, Offset(200f, 300f), scrollDelta = Offset(0f, 1f)) } }
+            s.settle(600).close()
+            assertTrue("scrolled ${s.scrolled(title)}", s.scrolled(title) > 0f)
+        }
+    }
+
+    // The top of the room the card lifts to in a window 720 or taller: the
+    // window's title bar, then the page's 32 over the card.
+    private val pagePad = FrameSize.TitleBar.value + 32f
+
+    // The top and bottom, in the window, of the card's glass, found by the
+    // tag SignInPage gives it.
+    private fun A11yScene.cardEdges(): Pair<Float, Float> {
+        val card = nodes().firstOrNull { it.config.getOrNull(SemanticsProperties.TestTag) == "sign-in-card" }
+        assertNotNull("the card's glass is tagged", card)
+        return card!!.positionInRoot.y to card.positionInRoot.y + card.size.height
+    }
+
+    private fun A11yScene.cardTop(): Float = cardEdges().first
+
+    // One turn of the wheel at `at`, toward the end (1) or the start (-1),
+    // drawn on the real clock until `scroll` has been still for four frames.
+    private fun A11yScene.wheel(at: Offset, toward: Float, scroll: SemanticsNode) {
+        val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+        onUi { scene.sendPointerEvent(PointerEventType.Scroll, at, scrollDelta = Offset(0f, toward)) }
+        val begin = System.currentTimeMillis()
+        var last = range.value()
+        var still = 0
+        while (still < 4 || System.currentTimeMillis() - begin < 150) {
+            check(System.currentTimeMillis() - begin < 10_000) { "waited too long" }
+            frameAt(System.nanoTime()).close()
+            Thread.sleep(16)
+            val now = range.value()
+            still = if (abs(now - last) < 0.01f) still + 1 else 0
+            last = now
+        }
+    }
+
+    // Where a turn of the wheel goes: on odd turns over the card, in its
+    // left margin halfway down, and on even ones over the page beside it.
+    private fun A11yScene.wheelSpot(turn: Int): Offset {
+        val (top, bottom) = cardEdges()
+        return if (turn % 2 == 1) Offset((width - 480) / 2f + 16f, (top + bottom) / 2f) else Offset(200f, height / 2f)
+    }
+
+    // Advanced open on a tall window with more than fits even once the card
+    // is lifted: three headers and a sign-in page with its two fields.
+    private fun A11yScene.tallAdvanced() {
+        threeHeaders()
+        onUi { app.signInForm.pickGateway(GatewayKind.Password) }
+        settle(600).close()
+    }
+
+    // In a tall window with Advanced open, the wheel's first turns toward
+    // the end lift the whole card, its words going up with it and never
+    // moving inside it, until its top meets the window's top pad; only then
+    // do the words move inside it. Over the card and beside it alike, the
+    // words move once for each pixel scrolled. Red with the card held at its
+    // pin, where the words move inside it from the first turn.
+    @Test(timeout = 120_000)
+    fun theWheelLiftsTheCardBeforeItsWordsMoveInsideIt() {
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            val pin = s.cardTop()
+            s.tallAdvanced()
+            val title = s.text("Octo")
+            val scroll = scrollOf(title)
+            val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+            assertTrue("more than fits once lifted: ${range.maxValue()} past a pin of $pin", range.maxValue() > pin - pagePad + 100f)
+            val rest = title.positionInRoot.y
+            val inside = rest - s.cardTop()
+            var turn = 0
+            while (title.positionInRoot.y - s.cardTop() > inside - 100f) {
+                check(turn < 60) { "the wheel stopped at ${range.value()} of ${range.maxValue()}" }
+                turn++
+                s.wheel(s.wheelSpot(turn), 1f, scroll)
+                val top = s.cardTop()
+                val y = title.positionInRoot.y
+                assertEquals("turn $turn: the words move once per pixel scrolled", rest - range.value(), y, 0.5f)
+                if (top > pagePad + 0.5f) assertEquals("turn $turn: the card at $top lifts with its words still inside it", inside, y - top, 0.5f)
+            }
+            assertTrue("it took more than one turn", turn > 1)
+            assertEquals("the card's top meets the pad", pagePad, s.cardTop(), 0.5f)
+        }
+    }
+
+    // Turned back toward the start, the wheel brings the words home to the
+    // top of the lifted card first, and only then lowers the card, until it
+    // rests at its pin again. Red with the card held at its pin (it never
+    // lifts).
+    @Test(timeout = 120_000)
+    fun theWheelBackTakesTheWordsHomeThenLowersTheCardToItsPin() {
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            val pin = s.cardTop()
+            s.tallAdvanced()
+            val title = s.text("Octo")
+            val scroll = scrollOf(title)
+            val range = scroll.config[SemanticsProperties.VerticalScrollAxisRange]
+            val inside = title.positionInRoot.y - s.cardTop()
+            s.scrollToEnd(title)
+            assertEquals("lifted to the pad", pagePad, s.cardTop(), 0.5f)
+            var turn = 0
+            while (range.value() > 0f) {
+                check(turn < 80) { "the wheel stopped at ${range.value()}" }
+                turn++
+                s.wheel(s.wheelSpot(turn), -1f, scroll)
+                val top = s.cardTop()
+                if (top > pagePad + 0.5f) assertEquals("turn $turn: the words are home before the card at $top comes down", inside, title.positionInRoot.y - top, 0.5f)
+            }
+            assertEquals("back at its pin", pin, s.cardTop(), 1f)
+            assertEquals(inside, title.positionInRoot.y - s.cardTop(), 0.5f)
+        }
+    }
+
+    // A failure that met a sign-in page, in a tall window, lifts the card
+    // toward the window's top as it brings the group up, as the page did
+    // before the glass held still: the ringed group (its title and its error
+    // note) and the pointer over the buttons all show on the card, clear of
+    // its soft edges. Red with the card held at its pin, where the words
+    // scroll inside it until the pointer leaves the card.
+    @Test(timeout = 120_000)
+    fun aCalloutInATallWindowShowsTheGroupAndThePointer() {
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            val pin = s.cardTop()
+            s.onUi {
+                val form = s.app.signInForm
+                form.typeAddress("https://music.example.com")
+                form.result = false to GatewayWords.failure(Gateway.Authentik, false)
+                form.failed(form.attemptAddress, Gateway.Authentik)
+            }
+            s.until { s.app.signInForm.showsCallout && !s.app.signInForm.calloutPending }
+            s.settle(300).close()
+            val (top, bottom) = s.cardEdges()
+            assertTrue("the card lifted from its pin at $pin to $top", top < pin - 0.5f)
+            fun shows(node: SemanticsNode, what: String) {
+                val y = node.positionInRoot.y
+                assertTrue("$what at $y to ${y + node.size.height}, on a card from $top to $bottom", y >= top + PageFade.value && y + node.size.height <= bottom - PageFade.value)
+            }
+            shows(s.text(GatewayWords.POINTER), "the pointer")
+            shows(s.text(SignInWords.GROUP_GETTING_THERE), "the group's title")
+            shows(s.text(GatewayWords.inGroup(s.app.signInForm.result!!.second)), "the group's error")
+        }
+    }
+
+    // Advanced closing under a lifted card brings the card back down to its
+    // pin as the groups fade, its top never rising on the way. Drawn with
+    // motion on. Red when the card lets go of its pin as Advanced closes (it
+    // fills the window while the groups fade out, then drops back).
+    @Test(timeout = 120_000)
+    fun closingAdvancedBringsALiftedCardDownToItsPin() {
+        A11yScene(folder.newFolder(), height = 900, signedOut = true).use { s ->
+            s.settle(800).close()
+            val pin = s.cardTop()
+            s.onUi { s.app.signInForm.advancedOpen = true }
+            s.settle(800).close()
+            val title = s.text("Octo")
+            s.placeTop(title, title.positionInRoot.y - 60f)
+            s.settle(300).close()
+            val tops = mutableListOf(s.cardTop())
+            s.onUi { s.app.signInForm.advancedOpen = false }
+            val end = System.currentTimeMillis() + 1_500
+            while (System.currentTimeMillis() < end) {
+                s.frameAt(System.nanoTime()).close()
+                tops += s.cardTop()
+                Thread.sleep(15)
+            }
+            val rises = tops.zipWithNext().filter { (a, b) -> b < a - 0.5f }
+            assertTrue("the card's top rose ${rises.take(3)} on its way from ${tops.first()} to ${tops.last()}", rises.isEmpty())
+            assertEquals("back at its pin", pin, tops.last(), 1f)
+        }
+    }
+
+    // The lift in a tall window: Advanced open at rest, the card lifted half
+    // way, and lifted to the top with its words moved 120 inside it.
+    @Test(timeout = 300_000)
+    fun picturesOfTheLift() {
+        assumeTrue(System.getenv("OCTO_SHOTS") == "1")
+        page(height = 1_600).use { s ->
+            s.settle(600).close()
+            val pin = s.cardTop()
+            s.tallAdvanced()
+            s.shot("polish-page-lift-rest")
+            val title = s.text("Octo")
+            s.placeTop(title, title.positionInRoot.y - ((pin - pagePad) / 2f).toInt())
+            s.shot("polish-page-lift-half")
+            val range = scrollOf(title).config[SemanticsProperties.VerticalScrollAxisRange]
+            val inside = minOf(120f, range.maxValue() - range.value() - (s.cardTop() - pagePad))
+            s.placeTop(title, title.positionInRoot.y - (s.cardTop() - pagePad) - inside)
+            assertEquals(pagePad, s.cardTop(), 0.5f)
+            s.shot("polish-page-lift-top")
+        }
+    }
+
+    // WCAG's contrast between two colors.
+    private fun contrast(a: Int, b: Int): Double {
+        val hi = maxOf(luminance(a), luminance(b))
+        val lo = minOf(luminance(a), luminance(b))
+        return (hi + 0.05) / (lo + 0.05)
+    }
+
+    // The fill of the button `gap` right of the open pop-up's Cancel, 12 in
+    // from its left end, against the pop-up 8 in from its left edge, level
+    // with the buttons' middle.
+    private fun A11yScene.fillRightOfCancel(gap: Float): Double {
+        val cancel = named("Cancel").single { it.inPopup() }
+        val y = (cancel.positionInRoot.y + cancel.size.height / 2f).toInt()
+        val image = settleStill(500, quiet = 150)
+        val popup = pixel(image, popupLeft().toInt() + 8, y)
+        val button = pixel(image, (cancel.positionInRoot.x + cancel.size.width + gap).toInt() + 12, y)
+        image.close()
+        return contrast(button, popup)
+    }
+
+    // Every sign-in pop-up's main button is the page's filled button, the
+    // loudest thing in its foot: its fill stands 1.8:1 or more off the pop-up
+    // (3:1 measured on the Edit sheet), in the Edit sheet, Change password and
+    // the certificate password's ask. Red with the lit capsules (about 1:1).
+    @Test(timeout = 120_000)
+    fun everySignInSheetsMainButtonIsTheFilledButton() {
+        signedIn().use { s ->
+            s.onUi { editServer(s.app, s.app.connection!!.server) }
+            s.settle(600).close()
+            val save = s.fillRightOfCancel(Space.M.value)
+            s.onUi {
+                s.app.popups.close()
+                changePassword(s.app)
+            }
+            s.settle(600).close()
+            val change = s.fillRightOfCancel(Space.M.value)
+            s.onUi {
+                s.app.popups.close()
+                askCertificatePassword(s.app, s.app.signInForm, "identity.p12", Any())
+            }
+            s.settle(600).close()
+            s.type(s.named(SignInWords.CERT_PASSWORD_FIELD).single { it.inPopup() }, "pw")
+            val use = s.fillRightOfCancel(Space.M.value)
+            assertTrue("Save $save:1, Change password $change:1, Use $use:1", save >= 1.8 && change >= 1.8 && use >= 1.8)
+        }
+    }
+
+    // On the page the certificate question's Trust is the filled button too,
+    // and a family link's button is the same filled button as Sign in. Red
+    // with Trust a lit capsule, or Try again in the pale accent.
+    @Test(timeout = 120_000)
+    fun thePagesTrustAndLinkButtonsAreTheFilledButton() {
+        page(height = 1_000).use { s ->
+            s.fill("https://music.example.com")
+            s.settle(600).close()
+            val signIn = generateSequence(s.text("Sign in")) { it.parent }.first { it.clickable }
+            val ready = s.settle(300)
+            val plain = pixel(ready, signIn.positionInRoot.x.toInt() + 12, signIn.middle().toInt())
+            ready.close()
+            s.onUi { s.app.signInForm.question = CertificateQuestion("music.example.com", "AB".repeat(32)) }
+            s.settle(600).close()
+            val trust = s.fillRightOfCancel(12f)
+            s.onUi {
+                // The question's pop-up closes; with no question left, closing
+                // it trusts and refuses nothing.
+                s.app.popups.close()
+                s.app.signInForm.question = null
+                val form = s.app.signInForm
+                // The result is written before the page draws, so the hand-over does not start.
+                form.take(FamilyHandOverLink(base = "https://music.example.com", token = "t2", key = "k", server = "https://music.example.com"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+            }
+            s.settle(600).close()
+            val again = generateSequence(s.text("Try again")) { it.parent }.first { it.clickable }
+            val shown = s.settle(300)
+            val link = pixel(shown, again.positionInRoot.x.toInt() + 12, again.middle().toInt())
+            shown.close()
+            assertTrue("Trust $trust:1 against the pop-up", trust >= 1.8)
+            assertTrue("Try again ${Integer.toHexString(link)} against Sign in ${Integer.toHexString(plain)}", distance(link, plain) < 12.0)
+        }
+    }
+
+    // The page's words set 130% larger, as the text size setting makes them.
+    private fun largerText(height: Int = 900) =
+        A11yScene(folder.newFolder(), height = height, reduceMotion = true, signedOut = true, textScale = 1.3f)
+
+    // The middle, in the window, of the ink of the first seven columns of a
+    // line of words: the middle of its first capital.
+    private fun capsMiddleOf(image: Image, words: SemanticsNode): Float {
+        val box = words.area()
+        return inkMiddle(image, Area(box.left, box.top, box.left + 7, box.bottom))
+    }
+
+    // Remember password's switch: its middle, and its name's capitals'.
+    private fun A11yScene.rememberSwitchAndCaps(): Pair<Float, Float> {
+        val name = text("Remember password")
+        val switch = nodes().first { it.config.getOrNull(SemanticsProperties.Role) == Role.Switch && it.config.getOrNull(SemanticsProperties.HideFromAccessibility) != null }
+        val image = settle(300)
+        val caps = capsMiddleOf(image, name)
+        image.close()
+        return switch.positionInRoot.y + switch.size.height / 2f to caps
+    }
+
+    // Advanced's chevron's ink middle, and its title's capitals'.
+    private fun A11yScene.advancedChevronAndCaps(): Pair<Float, Float> {
+        val title = text(SignInWords.ADVANCED)
+        val head = generateSequence(title) { it.parent }.first { it.config.getOrNull(SemanticsProperties.StateDescription) != null }
+        val image = settle(300)
+        val caps = capsMiddleOf(image, title)
+        val right = head.positionInRoot.x.toInt() + head.size.width - RowInset.value.toInt()
+        val top = head.positionInRoot.y.toInt()
+        val chevron = inkMiddle(image, Area(right - IconSize.Toolbar.value.toInt(), top, right, top + head.size.height))
+        image.close()
+        return chevron to caps
+    }
+
+    // The Method row's chevron's ink middle, and its name's capitals', the
+    // row brought to the middle of its scroll first.
+    private fun A11yScene.methodChevronAndCaps(): Pair<Float, Float> {
+        bringUp(text(SignInWords.METHOD))
+        val name = text(SignInWords.METHOD)
+        val row = generateSequence(name) { it.parent }.first { it.clickable }
+        val image = settle(300)
+        val caps = capsMiddleOf(image, name)
+        val right = row.positionInRoot.x.toInt() + row.size.width - RowInset.value.toInt()
+        val top = row.positionInRoot.y.toInt()
+        val chevron = inkMiddle(image, Area(right - IconSize.Table.value.toInt(), top, right, top + row.size.height))
+        image.close()
+        return chevron to caps
+    }
+
+    // The error note's mark's ink middle, and its words' capitals'. The mark
+    // is 16 wide and ends 8 before the words.
+    private fun A11yScene.errorMarkAndCaps(): Pair<Float, Float> {
+        val words = text(SignInWords.WRONG_PASSWORD)
+        val image = settle(300)
+        val caps = capsMiddleOf(image, words)
+        val box = words.area()
+        val mark = inkMiddle(image, Area(box.left - 24, box.top, box.left - 8, box.bottom))
+        image.close()
+        return mark to caps
+    }
+
+    // At 130% text Remember password's switch still sits on its name: its
+    // middle within 1 of the middle of the name's capitals. Red with the
+    // switch lifted a fixed 1 over the name's line (4 high).
+    @Test(timeout = 120_000)
+    fun atLargerTextTheRememberSwitchSitsOnItsName() {
+        largerText().use { s ->
+            s.settle(600).close()
+            val (switch, caps) = s.rememberSwitchAndCaps()
+            assertEquals(caps, switch, 1f)
+        }
+    }
+
+    // At 130% text Advanced's chevron still sits on its title. Red with the
+    // chevron dropped a fixed 3 under the title's line (4 high).
+    @Test(timeout = 120_000)
+    fun atLargerTextAdvancedsChevronSitsOnItsTitle() {
+        largerText(height = 1_200).use { s ->
+            s.settle(600).close()
+            val (chevron, caps) = s.advancedChevronAndCaps()
+            assertEquals(caps, chevron, 1f)
+        }
+    }
+
+    // A choice row's chevron sits on its name, at the usual text size and at
+    // 130%. Red at 130% with the chevron a fixed 2 under the name's line
+    // (about 4 high).
+    @Test(timeout = 240_000)
+    fun aChoicesChevronSitsOnItsNameAtEveryTextSize() {
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), height = 1_600, reduceMotion = true, signedOut = true, textScale = scale).use { s ->
+                s.onUi { s.app.signInForm.advancedOpen = true }
+                s.settle(800).close()
+                val (chevron, caps) = s.methodChevronAndCaps()
+                assertEquals("at ${scale}x", caps, chevron, 1f)
+            }
+        }
+    }
+
+    // An error note's mark sits on its words' first line, at the usual text
+    // size and at 130%. Red at 130% with the mark a fixed 2 under the line's
+    // top (about 3 high).
+    @Test(timeout = 240_000)
+    fun anErrorNotesMarkSitsOnItsWordsAtEveryTextSize() {
+        for (scale in listOf(1f, 1.3f)) {
+            A11yScene(folder.newFolder(), reduceMotion = true, signedOut = true, textScale = scale).use { s ->
+                s.onUi { s.app.signInForm.result = false to SignInWords.WRONG_PASSWORD }
+                s.settle(600).close()
+                val (mark, caps) = s.errorMarkAndCaps()
+                assertEquals("at ${scale}x", caps, mark, 1f)
+            }
+        }
+    }
+
+    // On a light theme a sheet's field wells stand a step over the tray their
+    // card is: on Paper and Daylight 3 or more over it in lightness. Red with
+    // the page-colored wells (0.6 under the tray on Paper).
+    @Test(timeout = 120_000)
+    fun aSheetsWellsStandOverTheTrayOnALightTheme() {
+        signedIn().use { s ->
+            for (theme in listOf(ThemeChoice.Paper, ThemeChoice.Daylight)) {
+                s.onUi {
+                    s.app.popups.close()
+                    s.app.settings.pickTheme(theme)
+                }
+                s.settle(600).close()
+                s.onUi { addServer(s.app) }
+                val image = s.settleStill(700, quiet = 150)
+                val name = s.inPopup(SignInWords.USERNAME)
+                val field = s.named(SignInWords.USERNAME).single { it.inPopup() }
+                val tray = pixel(image, s.popupLeft().toInt() + Space.Xl.value.toInt() + 4, (name.positionInRoot.y + name.size.height / 2f).toInt())
+                val well = pixel(image, (field.positionInRoot.x + field.size.width).toInt() - 6, (field.positionInRoot.y + field.size.height / 2f).toInt())
+                image.close()
+                assertTrue("$theme: well ${lightness(well)} on tray ${lightness(tray)}", lightness(well) - lightness(tray) >= 3.0)
+            }
+        }
+    }
+
+    // A family invite's sheet has a way out as every sheet does, a Cancel
+    // capsule that closes it, and its way to a password sign-in sits under
+    // the buttons, its words ending on Sign up's right edge. Red with that way
+    // in the button row and no Cancel.
+    @Test(timeout = 120_000)
+    fun theInviteSheetHasCancelAndItsPasswordWayUnderTheButtons() {
+        signedIn().use { s ->
+            s.onUi { s.app.openFamilyLink(FamilyInviteLink(s.server.address, "t1")) }
+            s.settle(600).close()
+            val cancel = s.named("Cancel").filter { it.inPopup() }
+            assertEquals("a Cancel capsule", 1, cancel.size)
+            val signUp = generateSequence(s.inPopup("Sign up")) { it.parent }.first { it.clickable }
+            val words = s.inPopup("Sign in with a password instead")
+            assertTrue("under the buttons", words.positionInRoot.y >= signUp.positionInRoot.y + signUp.size.height)
+            assertEquals(signUp.positionInRoot.x + signUp.size.width, words.positionInRoot.x + words.size.width, 1f)
+            s.click(cancel.single())
+            assertNull(s.app.popups.request)
+        }
+    }
+
+    // A family sign-in's way out on the page is a Cancel capsule, as in every
+    // sheet. Red with the bare text Cancel (no capsule named for it).
+    @Test(timeout = 120_000)
+    fun theHandOversCancelIsACapsule() {
+        page(height = 1_000).use { s ->
+            s.onUi {
+                val form = s.app.signInForm
+                // The result is written before the page draws, so the hand-over does not start.
+                form.take(FamilyHandOverLink(base = "https://music.example.com", token = "t2", key = "k", server = "https://music.example.com"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+            }
+            s.settle(600).close()
+            assertEquals(1, s.named("Cancel").size)
+        }
+    }
+
+    // A family sign-in that failed says it is not signed in yet, naming its
+    // server as people read it, with no slash at its end. Red with "Ready to
+    // sign in to music.example.com/" over the failure.
+    @Test(timeout = 120_000)
+    fun aFailedHandOverSaysItIsNotSignedInYet() {
+        page(height = 1_000).use { s ->
+            s.onUi {
+                val form = s.app.signInForm
+                // The result is written before the page draws, so the hand-over does not start.
+                form.take(FamilyHandOverLink(base = "https://music.example.com/", token = "t2", key = "k", server = "https://music.example.com/"))
+                form.result = false to SignInWords.WRONG_PASSWORD
+            }
+            s.settle(600).close()
+            assertEquals(1, s.withText("Not signed in to music.example.com yet").size)
+        }
+    }
+
+    // An invite's note names its server as people read it, with no slash at
+    // its end. Red with "music.example.com/.".
+    @Test(timeout = 120_000)
+    fun anInvitesNoteNamesItsServerWithoutASlash() {
+        page(height = 1_000).use { s ->
+            s.onUi { s.app.signInForm.take(FamilyInviteLink("https://music.example.com/", "t1")) }
+            s.settle(600).close()
+            assertEquals(1, s.withText("You're invited to music.example.com. Choose your name and a password. Your login then works in Octo and any other music app.").size)
+        }
+    }
+
+    // The invite's page says once that the login works in any music app, in
+    // its note, not again in the line under Octo. Red with it in both.
+    @Test(timeout = 120_000)
+    fun theInvitePageSaysItsLoginSentenceOnce() {
+        page(height = 1_000).use { s ->
+            s.onUi { s.app.signInForm.take(FamilyInviteLink("https://music.example.com", "t1")) }
+            s.settle(600).close()
+            val said = s.nodes().count { node -> node.config.getOrNull(SemanticsProperties.Text)?.any { it.text.contains("Your login then works in Octo and any other music app.") } == true }
+            assertEquals(1, said)
         }
     }
 }

@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.unit.dp
 import app.winters.octo.connection.SignInWords
+import app.winters.octo.design.AccentButton
+import app.winters.octo.design.ButtonSize
 import app.winters.octo.design.ControlHeight
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.GlazeCapsule
@@ -152,7 +154,9 @@ private fun chooseCertificate(app: AppState, form: SignInForm, scope: CoroutineS
     }
 }
 
-private fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any) {
+// Asks for the password the picked file was saved with, in the middle of the
+// window.
+internal fun askCertificatePassword(app: AppState, form: SignInForm, path: String, turn: Any) {
     val opening = Any()
     app.popups.showCentred(width = SettingsSize.Sheet) { close -> key(opening) { CertificatePassword(app, form, path, turn, close) } }
 }
@@ -196,9 +200,8 @@ private fun ColumnScope.CertificatePassword(app: AppState, form: SignInForm, pat
             horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (busy) Spinner(size = IconSize.Table)
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
-            GlazeCapsule(null, SignInWords.CERT_PASSWORD_USE, ::use, lit = true, enabled = !busy && password.isNotEmpty(), height = ControlHeight.L)
+            AccentButton(SignInWords.CERT_PASSWORD_USE, ::use, enabled = password.isNotEmpty(), loading = busy, size = ButtonSize.Medium)
         }
     }
 }
