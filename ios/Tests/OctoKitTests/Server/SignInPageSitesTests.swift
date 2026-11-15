@@ -262,12 +262,13 @@ import Testing
             ".onChange(of: model.keyPending) { _, pending in if pending { focusedWhileKeyPending = false } }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }",
             ".onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false wait.send(.hidden) }",
-            "let landing = UnitPoint(x: 0, y: 68 / max(visibleHeight ?? 728, 1))",
+            "let landing = UnitPoint(x: 0, y: CGFloat(calloutLanding) / max(visibleHeight ?? 730, 1))",
             "proxy.scrollTo(\"gatewayMarker\", anchor: landing)",
-            "proxy.scrollTo(\"gatewayEnd\", anchor: .bottom)",
+            "let end = gatewayErrorFoot == nil ? \"gatewayEnd\" : \"gatewayErrorEnd\"",
+            "proxy.scrollTo(end, anchor: .bottom)",
             "proxy.scrollTo(\"keyMarker\", anchor: landing)",
             "FormGroup(title: AdvancedGroup.gettingThere.title, marker: \"gatewayMarker\", outlined: model.calloutShowing) {",
-            ".onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in gatewayHeight = height wait.send(.measured) } .calloutEnd(\"gatewayEnd\")",
+            "{ $0.size.height } action: { height in gatewayHeight = height wait.send(.measured) } .calloutEnd(\"gatewayEnd\")",
             ".calloutMarker(\"keyMarker\")",
             "focus = nil UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)",
         ]
@@ -294,7 +295,32 @@ import Testing
         let wait = try SourceText.read("OctoKit/Server/CalloutWait.swift")
         #expect(!wait.contains("UIApplication"))
         #expect(!wait.contains("import UIKit"))
-        #expect(wait.contains("group <= visible - 68"))
+        #expect(wait.contains("group <= visible - calloutLanding"))
+        #expect(wait.contains("public let calloutLanding: Double = 78"))
+        #expect(!SourceText.squashed(try SourceText.read(Self.view)).contains("68 /"))
+    }
+
+    /// Red when the view's height for a callout is read behind the scroll again (it took the safe
+    /// area off twice and came out 82 points short, so groups that fit were shown by their end and
+    /// every landing sat low), or read anywhere but the window's safe area.
+    @Test func aCalloutMeasuresTheViewByTheWindowsSafeArea() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains(
+            "private var visibleHeight: CGFloat? { let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first guard let height = window?.safeAreaLayoutGuide.layoutFrame.height, height > 0 else { return nil } return height }"))
+        #expect(!view.contains("@State private var visibleHeight"))
+        #expect(!view.contains("visibleHeight = "))
+    }
+
+    /// Red when a tall group's callout fits the whole group instead of the part it must show (its
+    /// title through its error note), so at large text the first row's name lands under the Back
+    /// button, or the end it shows is the group's last hint instead of its failure.
+    @Test func aTallGroupsCalloutShowsItsTitleThroughItsFailure() throws {
+        let view = SourceText.squashed(try SourceText.read(Self.view))
+        #expect(view.contains("groupHeight: { (gatewayErrorFoot ?? gatewayHeight).map { Double($0) } },"))
+        #expect(view.contains(
+            "FormNote(.error, GatewayWords.inGroup(error)) .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(\"gatewayGroup\")).maxY } action: { foot in gatewayErrorFoot = foot wait.send(.measured) } .onDisappear { gatewayErrorFoot = nil } .calloutEnd(\"gatewayErrorEnd\")"))
+        #expect(view.contains(".coordinateSpace(.named(\"gatewayGroup\")) .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in gatewayHeight = height"))
+        #expect(view.contains("gatewayHeight = nil gatewayErrorFoot = nil"))
     }
 
     /// Red when the error note, the outline or the pointer draws outside a callout, or VoiceOver is
@@ -303,7 +329,7 @@ import Testing
         let model = try SourceText.read(Self.model)
         #expect(model.contains("var calloutShowing: Bool { callout && advancedOpen && error != nil }"))
         let view = SourceText.squashed(try SourceText.read(Self.view))
-        #expect(view.contains("if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) }"))
+        #expect(view.contains("if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) .onGeometryChange("))
         #expect(view.contains("Button { model.pointTo() } label: { FormNote(.error, GatewayWords.pointer) }"))
         #expect(view.contains("AccessibilityNotification.Announcement(GatewayWords.inGroup(error)).post()"))
     }

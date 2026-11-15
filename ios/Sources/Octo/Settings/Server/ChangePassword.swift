@@ -49,7 +49,8 @@ struct ChangePasswordForm: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, 18)
+        // Room under the sheet's grabber, as Family's sheets keep over their titles.
+        .padding(.top, 30)
         .padding(.bottom, 20)
         // A swipe down does nothing while a change is on its way.
         .interactiveDismissDisabled(busy)

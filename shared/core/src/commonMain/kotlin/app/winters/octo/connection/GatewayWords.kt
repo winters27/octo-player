@@ -63,10 +63,11 @@ object GatewayWords {
     }
 
     // A failure's words as the sign-in page group's own error note shows
-    // them, under the fields it names: "under Advanced" there reads "above".
+    // them, under the fields it names: "under Advanced" there reads "above",
+    // kept with "fields" so it never ends a wrapped note alone.
     fun inGroup(text: String): String = text
-        .replace("Otherwise fill in the sign-in page fields under Advanced.", "Otherwise fill in the fields above.")
-        .replace("Fill in the sign-in page fields under Advanced.", "Fill in the fields above.")
+        .replace("Otherwise fill in the sign-in page fields under Advanced.", "Otherwise fill in the fields above.")
+        .replace("Fill in the sign-in page fields under Advanced.", "Fill in the fields above.")
 
     // The same, short enough for a server's row in the list.
     fun row(gateway: Gateway, loginSent: Boolean): String =

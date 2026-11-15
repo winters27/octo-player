@@ -269,10 +269,11 @@ final class CalloutProbe {
         #expect(probe.shown == 1)
     }
 
-    /// Red when a group exactly as tall as the view less the marker is shown by its end.
+    /// Red when a group exactly as tall as the view less the landing is shown by its end.
     @Test func aGroupThatJustFitsStillLandsUnderTheFade() async throws {
+        #expect(calloutLanding == 78)
         let wait = CalloutWait()
-        let probe = makeProbe(group: 632, visible: 700)
+        let probe = makeProbe(group: 622, visible: 700)
         let run = Task { await probe.run(.gateway, wait) }
         try await Bounded.finished(run)
         #expect(probe.scrolled == [.marker])
@@ -281,7 +282,7 @@ final class CalloutProbe {
     /// Red when a group taller than the view puts its title under the fade and its notes off screen.
     @Test func aGroupTallerThanTheViewShowsItsEnd() async throws {
         let wait = CalloutWait()
-        let probe = makeProbe(group: 633, visible: 700)
+        let probe = makeProbe(group: 623, visible: 700)
         let run = Task { await probe.run(.gateway, wait) }
         try await Bounded.finished(run)
         #expect(probe.scrolled == [.end])

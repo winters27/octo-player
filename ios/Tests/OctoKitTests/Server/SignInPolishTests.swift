@@ -129,9 +129,10 @@ import Testing
         let choice = try SourceText.slice(groups, from: "struct FormChoiceRow: View {", to: "\n}\n")
         #expect(choice.contains("@ScaledMetric(relativeTo: .subheadline) private var chevronSize: CGFloat = 13"))
         #expect(choice.contains(".font(.system(size: chevronSize, weight: .semibold))"))
-        // Side by side and, at the accessibility sizes, the answer's own line.
-        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 12) {", in: choice) == 1)
-        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 6) {", in: choice) == 1)
+        // Beside the name on its first baseline, and on the answer's own line (where it does not fit
+        // beside the name, and at the accessibility sizes) with the chevron after it.
+        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 0) {", in: choice) == 1)
+        #expect(SourceText.count("HStack(alignment: .firstTextBaseline, spacing: 6) {", in: choice) == 2)
         #expect(!choice.contains("alignment: .center"))
         #expect(!choice.contains("size: 13,"))
         let style = try SourceText.read(Self.style)
@@ -185,7 +186,7 @@ import Testing
         #expect(SourceText.count(".revealMark(", in: raw) == 1)
         #expect(view.contains(
             "value: GatewayWords.kindLabel(model.gatewayKind), question: kinds) .revealMark(\"advancedFirstRow\", bottom: firstRowMoved)"))
-        #expect(view.contains("if !open { gatewayHeight = nil marks.rowBottom = nil }"))
+        #expect(view.contains("if !open { gatewayHeight = nil gatewayErrorFoot = nil marks.rowBottom = nil }"))
         let groups = SourceText.squashed(try SourceText.read(Self.groups))
         #expect(groups.contains(
             "Color.clear .allowsHitTesting(false).accessibilityHidden(true).id(id) .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom($0) }"))
@@ -293,13 +294,17 @@ import Testing
         #expect(SourceText.squashed(raw).contains("} catch { certificateError = error.localizedDescription }"))
     }
 
-    /// Red when a choice row's words column takes the whole row again, so the answer gets no width:
-    /// no "Normal" beside Method, and above Large an empty row one letter wide per line.
+    /// Red when a choice row's words column takes the whole row again, so the answer gets no width
+    /// (no "Normal" beside Method, and above Large an empty row one letter wide per line), when an
+    /// answer that fits is pushed under the name by spacing on both sides of the spacer, or when an
+    /// answer under the name has no chevron after it and reads as the row's line.
     @Test func aChoiceRowShowsItsAnswerBesideOrUnderItsName() throws {
         let groups = SourceText.squashed(try SourceText.read(Self.groups))
         #expect(groups.contains(
-            "ViewThatFits(in: .horizontal) { HStack(alignment: .firstTextBaseline, spacing: 8) { RowTitle(title: title, optional: false) Spacer(minLength: 0) answer(.trailing) } VStack(alignment: .leading, spacing: 2) { RowTitle(title: title, optional: false) answer(.leading) } }"))
+            "ViewThatFits(in: .horizontal) { HStack(alignment: .firstTextBaseline, spacing: 0) { RowTitle(title: title, optional: false) Spacer(minLength: 8) answer(.trailing) chevron.padding(.leading, 12) } VStack(alignment: .leading, spacing: 2) { RowTitle(title: title, optional: false) HStack(alignment: .firstTextBaseline, spacing: 6) { answer(.leading) chevron } } }"))
+        #expect(groups.contains("if let description { RowDescription(text: description).padding(.trailing, chevronSize + 12) }"))
         #expect(!groups.contains(".layoutPriority(1) answer(.trailing)"))
+        #expect(!groups.contains("Spacer(minLength: 0) answer(.trailing)"))
     }
 
     /// Red when Change password's title is body text again, or a field's name lives only in its
@@ -309,6 +314,7 @@ import Testing
         #expect(change.contains(
             "Text(\"Change password\") .font(.octoHeadline) .foregroundStyle(OctoColor.textPrimary) .accessibilityAddTraits(.isHeader)"))
         #expect(change.contains(".font(.octoBodySmall) .foregroundStyle(OctoColor.textSecondary)"))
+        #expect(change.contains(".padding(.horizontal, 20) // Room under the sheet's grabber, as Family's sheets keep over their titles. .padding(.top, 30)"))
         #expect(!change.contains("Text(\"Change password\").font(.octoBody)"))
         let family = SourceText.squashed(try SourceText.read(Self.familySheets))
         for code in [change, family] {
@@ -354,6 +360,8 @@ import Testing
         let first = try SourceText.at("if model.handOver != nil {", in: notes)
         #expect(connection < first)
         #expect(SourceText.count("connectionNote(note)", in: notes) == 1)
+        #expect(notes.contains(
+            "\"Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this\\u{00A0}phone.\""))
         let buttons = SourceText.squashed(try SourceText.read(Self.buttons))
         #expect(buttons.contains("struct TrailingColumn: Layout {"))
         #expect(buttons.contains(

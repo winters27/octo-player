@@ -32,8 +32,17 @@ struct SignInView: View {
     /// The sign-in page group's height, from its title through its last note; nil while Advanced
     /// is shut.
     @State private var gatewayHeight: CGFloat?
-    /// The scroll's height between the status bar and the home indicator.
-    @State private var visibleHeight: CGFloat?
+    /// How far the callout's part of the group reaches, from its title through its error note;
+    /// nil while no error note shows. The callout lands the title when this fits under the fade,
+    /// so a tall group's hints may scroll on past the bottom while its title and failure show.
+    @State private var gatewayErrorFoot: CGFloat?
+    /// The scroll's height between the status bar and the home indicator: the key window's safe
+    /// area, which the page fills. A callout reads it as it decides, once the keyboard has closed.
+    private var visibleHeight: CGFloat? {
+        let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+        guard let height = window?.safeAreaLayoutGuide.layoutFrame.height, height > 0 else { return nil }
+        return height
+    }
     /// The address field's lock grows with the text size, as "https://" beside it does.
     @ScaledMetric(relativeTo: .subheadline) private var lockSize: CGFloat = 13
     /// A field took focus while the group waited to come into view: the callout then leaves the
@@ -200,6 +209,7 @@ struct SignInView: View {
             .onChange(of: model.advancedOpen) { _, open in
                 if !open {
                     gatewayHeight = nil
+                    gatewayErrorFoot = nil
                     marks.rowBottom = nil
                 }
             }
@@ -241,18 +251,8 @@ struct SignInView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background {
-                // The height a callout measures against: the scroll's frame less the status bar and
-                // the home indicator it reaches under.
                 GeometryReader { geo in
                     Color.clear
-                        .onAppear {
-                            visibleHeight = geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom
-                            wait.send(.measured)
-                        }
-                        .onChange(of: geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom) { _, height in
-                            visibleHeight = height
-                            wait.send(.measured)
-                        }
                         // Where the scroll's visible part ends on screen: over the home indicator,
                         // or the keyboard while it is up.
                         .onChange(of: geo.frame(in: .global).maxY - geo.safeAreaInsets.bottom, initial: true) { _, bottom in
@@ -275,7 +275,7 @@ struct SignInView: View {
         guard model.calloutPending, model.advancedOpen else { return }
         let wasUp = keyboardUp
         await runCallout(.gateway, wait: wait, focusedAtStart: { focusedWhilePending }, keyboardWasUp: { wasUp },
-                         clearFocus: { closeKeyboard() }, groupHeight: { gatewayHeight.map { Double($0) } },
+                         clearFocus: { closeKeyboard() }, groupHeight: { (gatewayErrorFoot ?? gatewayHeight).map { Double($0) } },
                          visibleHeight: {
                              let height = visibleHeight.map { Double($0) }
                              #if DEBUG
@@ -310,14 +310,16 @@ struct SignInView: View {
     }
 
     /// Brings a callout's target into view; at once under reduced motion. A group's title or the
-    /// key row lands 68 points under the scroll's top (the 56 of the top fade and 12 more), clear
-    /// of the fade and of the Back button, whose foot is 59 under the top.
+    /// key row lands `calloutLanding` points under the scroll's top (the 56 of the top fade and 22
+    /// more), clear of the fade and of the Back button, whose foot is 59 under the top. A group too
+    /// tall for that shows the end of what the callout needs: its error note above the bottom.
     private func scrollCallout(_ proxy: ScrollViewProxy, to target: CalloutTarget) {
-        let landing = UnitPoint(x: 0, y: 68 / max(visibleHeight ?? 728, 1))
+        let landing = UnitPoint(x: 0, y: CGFloat(calloutLanding) / max(visibleHeight ?? 730, 1))
+        let end = gatewayErrorFoot == nil ? "gatewayEnd" : "gatewayErrorEnd"
         let move = {
             switch target {
             case .marker: proxy.scrollTo("gatewayMarker", anchor: landing)
-            case .end: proxy.scrollTo("gatewayEnd", anchor: .bottom)
+            case .end: proxy.scrollTo(end, anchor: .bottom)
             case .key: proxy.scrollTo("keyMarker", anchor: landing)
             }
         }
@@ -589,7 +591,7 @@ struct SignInView: View {
             } else if let invite = model.invite {
                 FormNote(.info, "You're invited to \(shownServer(invite.server)). Choose your name and a password. Your login then works in Octo and any other music app.")
             } else if model.joining {
-                FormNote(.info, "Your invite shows a QR code, and so does Sign in on another device in Octo on your other phone or computer. Scan it, or open its link on this\u{00A0}phone.")
+                FormNote(.info, "Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this\u{00A0}phone.")
             }
         }
         .padding(.horizontal, 16)
@@ -702,7 +704,15 @@ struct SignInView: View {
                 }
             }
         } notes: {
-            if model.calloutShowing, let error = model.error { FormNote(.error, GatewayWords.inGroup(error)) }
+            if model.calloutShowing, let error = model.error {
+                FormNote(.error, GatewayWords.inGroup(error))
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("gatewayGroup")).maxY } action: { foot in
+                        gatewayErrorFoot = foot
+                        wait.send(.measured)
+                    }
+                    .onDisappear { gatewayErrorFoot = nil }
+                    .calloutEnd("gatewayErrorEnd")
+            }
             // A sign-in page's password never crosses the internet readable.
             if model.gatewayInsecure { FormNote(.error, GatewayWords.needsHttps) }
             if let met = model.gatewayMet {
@@ -713,6 +723,7 @@ struct SignInView: View {
             if model.joining { FormNote(.info, GatewayWords.joinHint) }
             FormNote(.info, SignInWords.homeNote)
         }
+        .coordinateSpace(.named("gatewayGroup"))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             gatewayHeight = height
             wait.send(.measured)

@@ -64,10 +64,11 @@ public enum GatewayWords {
     }
 
     /// A failure's words as the sign-in page group's own error note shows them, under the fields
-    /// it names: "under Advanced" there reads "above".
+    /// it names: "under Advanced" there reads "above", kept with "fields" so it never ends a
+    /// wrapped note alone.
     public static func inGroup(_ text: String) -> String {
-        text.replacingOccurrences(of: "Otherwise fill in the sign-in page fields under Advanced.", with: "Otherwise fill in the fields above.")
-            .replacingOccurrences(of: "Fill in the sign-in page fields under Advanced.", with: "Fill in the fields above.")
+        text.replacingOccurrences(of: "Otherwise fill in the sign-in page fields under Advanced.", with: "Otherwise fill in the fields\u{00A0}above.")
+            .replacingOccurrences(of: "Fill in the sign-in page fields under Advanced.", with: "Fill in the fields\u{00A0}above.")
     }
 
     /// How to fill in the fields for that gateway.

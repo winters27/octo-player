@@ -112,10 +112,10 @@ import Testing
     /// words `glued` lists: a no-break space, which keeps a wrapped line's last two words together,
     /// or a word joiner, which keeps "Wi-Fi" whole.
     @Test func everyWordIsPlainAscii() {
-        let glued: Set<String> = ["advanced.line", "note.home", "inGroup.SignInPage.false"]
+        let glued: Set<String> = ["advanced.line", "note.home"]
         for (key, text) in Self.swiftWords() {
-            #expect(text.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) || (glued.contains(key) && [0xA0, 0x2060].contains($0.value)) },
-                    "\(key)")
+            let mayGlue = glued.contains(key) || key.hasPrefix("inGroup.")
+            #expect(text.unicodeScalars.allSatisfy { (0x20...0x7E).contains($0.value) || (mayGlue && [0xA0, 0x2060].contains($0.value)) }, "\(key)")
         }
     }
 

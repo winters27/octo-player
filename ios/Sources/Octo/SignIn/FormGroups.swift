@@ -554,25 +554,29 @@ struct FormChoiceRow: View {
                         }
                     }
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            // The answer on the name's line while both fit on one, else under the name.
-                            ViewThatFits(in: .horizontal) {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    RowTitle(title: title, optional: false)
-                                    Spacer(minLength: 0)
-                                    answer(.trailing)
-                                }
-                                VStack(alignment: .leading, spacing: 2) {
-                                    RowTitle(title: title, optional: false)
+                    VStack(alignment: .leading, spacing: 2) {
+                        // The answer and the chevron on the name's line while they fit on one; else
+                        // the answer under the name with the chevron after it, as at the
+                        // accessibility sizes, so it reads as the row's value, never its line.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                                RowTitle(title: title, optional: false)
+                                Spacer(minLength: 8)
+                                answer(.trailing)
+                                chevron.padding(.leading, 12)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                RowTitle(title: title, optional: false)
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
                                     answer(.leading)
+                                    chevron
                                 }
                             }
-                            if let description { RowDescription(text: description) }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        chevron
+                        // The line wraps where it did beside the chevron's column.
+                        if let description { RowDescription(text: description).padding(.trailing, chevronSize + 12) }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.horizontal, 16)

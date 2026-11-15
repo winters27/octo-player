@@ -587,7 +587,7 @@ private fun MainNotes(vm: SignInViewModel) {
             "You're invited to ${shownServer(invite.server)}. Choose your name and a password. Your login then works in Octo and any other music app.",
         )
         vm.joining -> FormNote(
-            "Your invite shows a QR code, and so does Sign in on another device in Octo on your other phone or computer. Scan it, or open its link on this phone.",
+            "Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this phone.",
         )
     }
 }

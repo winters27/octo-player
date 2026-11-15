@@ -119,9 +119,10 @@ class SignInWordsTest {
     // keeps "Wi-Fi" whole.
     @Test
     fun everyWordIsPlainAscii() {
-        val glued = setOf("advanced.line", "note.home", "inGroup.SignInPage.false")
+        val glued = setOf("advanced.line", "note.home")
         kotlinWords().forEach { (key, words) ->
-            assertTrue(key, words.all { it.code in 0x20..0x7E || (key in glued && (it.code == 0xA0 || it.code == 0x2060)) })
+            val mayGlue = key in glued || key.startsWith("inGroup.")
+            assertTrue(key, words.all { it.code in 0x20..0x7E || (mayGlue && (it.code == 0xA0 || it.code == 0x2060)) })
         }
     }
 

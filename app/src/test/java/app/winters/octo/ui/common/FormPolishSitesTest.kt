@@ -148,7 +148,7 @@ class FormPolishSitesTest {
     // phone"), or its last word can wrap alone.
     @Test
     fun theJoinNoteReadsInOneGo() {
-        assertTrue(screen.contains("\"Your invite shows a QR code, and so does Sign in on another device in Octo on your other phone or computer. Scan it, or open its link on this${Char(0xA0)}phone.\""))
+        assertTrue(screen.contains("\"Your invite shows a QR code. So does Sign in on another device, in Octo on your other phone or computer. Scan it, or open its link on this${Char(0xA0)}phone.\""))
         assertFalse(screen.contains("on another device on your other phone"))
     }
 }
