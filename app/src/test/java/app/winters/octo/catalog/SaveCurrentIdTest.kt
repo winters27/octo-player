@@ -412,6 +412,8 @@ class SaveCurrentIdTest {
             "OfflineDownloads.setPlaylistKept" to "not a library id: a playlist's",
             "OfflineDownloads.forgetSource" to "not a library id: a source's",
             "OfflineDownloads.dropStoredHtml" to "the playing song's rows kept in that file; a stale id's copy heals when its file is found gone",
+            "OfflineDownloads.isDownloadFile" to "not a library id: a file's address",
+            "OfflineDownloads.serverCopyOfFile" to "a read; the walk's opening moves downloads",
             "ListeningSync.likeChanged" to "copiesOf: SongIds.song, one hold",
             "ListeningSync.ratingChanged" to "copiesOf: SongIds.song, one hold",
             "ListeningSync.nowPlaying" to "copiesOf: SongIds.song, one hold",
