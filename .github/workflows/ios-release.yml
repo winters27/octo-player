@@ -1,0 +1,95 @@
+# Publishes an iPhone release (the IPA for sideloading) on the public Octo repository, on an
+# ios-v<version> tag, through publish-player-release.yml like the other apps. The IPA is built
+# and signed on Linux, never here (Apple's SDK cannot be on GitHub). It arrives as the asset of a
+# draft release with the same tag on this repository (the carrier), and the annotated tag names
+# its SHA-256 and the commit it was built from on ipa-sha256: and ipa-commit: lines, which the
+# release notes leave out. The carrier is deleted once the public release reads back.
+name: ios-release
+
+on:
+  push:
+    tags: ["ios-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  carrier:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      draft: ${{ steps.ipa.outputs.draft }}
+      sha256: ${{ steps.ipa.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: The tag with its message
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+      - name: The carrier's IPA
+        id: ipa
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ipa
+          draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq "[.[] | select(.draft and .tag_name == \"${GITHUB_REF_NAME}\")] | .[0].id")
+          if [ -z "$draft" ] || [ "$draft" = null ]; then
+            echo "::error::No draft release here carries the IPA for ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+          url=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${draft}/assets" \
+            --jq '[.[] | select(.name | endswith("-iPhone.ipa"))] | .[0].url')
+          if [ -z "$url" ] || [ "$url" = null ]; then
+            echo "::error::The draft for ${GITHUB_REF_NAME} has no -iPhone.ipa asset."
+            exit 1
+          fi
+          curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" -o ipa/carrier.ipa "$url"
+          python3 scripts/release/release_assets.py verify-carrier --tag "${GITHUB_REF_NAME}" --ipa ipa/carrier.ipa
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum ipa/carrier.ipa | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: octo-ios-ipa
+          path: ipa/carrier.ipa
+          if-no-files-found: error
+
+  publish:
+    needs: carrier
+    uses: ./.github/workflows/publish-player-release.yml
+    with:
+      app: ios
+      tag: ${{ github.ref_name }}
+      artifacts: octo-ios-ipa
+    secrets:
+      OCTO_RELEASES_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
+      OCTO_UPDATE_SIGNING_KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}
+
+  tidy:
+    needs: [carrier, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: The public release reads back, then the carrier goes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ needs.carrier.outputs.draft }}
+          SHA: ${{ needs.carrier.outputs.sha256 }}
+        run: |
+          state=$(gh release view "${GITHUB_REF_NAME}" --repo winters27/octo --json isDraft --jq .isDraft)
+          if [ "$state" != false ]; then
+            echo "::error::${GITHUB_REF_NAME} is not published on winters27/octo; the carrier stays."
+            exit 1
+          fi
+          gh release download "${GITHUB_REF_NAME}" --repo winters27/octo --pattern SHA256SUMS --dir sums
+          if ! grep -q "^${SHA}  Octo-.*-iPhone\.ipa$" sums/SHA256SUMS; then
+            echo "::error::The published SHA256SUMS does not list the carrier's IPA; the carrier stays."
+            exit 1
+          fi
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${DRAFT}"
+          echo "Published ${GITHUB_REF_NAME} on winters27/octo and removed its carrier draft."

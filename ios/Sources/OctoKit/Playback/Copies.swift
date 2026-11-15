@@ -80,6 +80,19 @@ public func chooseCopy(_ copies: [SongCopy], download: SongCopy?, streamInstead:
     return chooseCopy(copies.filter { !$0.isServerCopy } + [download], preference, serverReachable: false, phoneFileMissing: phoneFileMissing)
 }
 
+/// Whether a library song that would not play from the copy at `uri` is tried again from its
+/// other copies before it is passed over. Only a file on the phone is, and only when the file
+/// itself failed: the Music app can still list a song whose file it no longer keeps on the phone,
+/// while a sound device that would not start is no fault of the file. A file passed over once is
+/// left out when the song's copies are chosen again, so a song whose every copy fails is still
+/// passed over, and another place in the queue holding the same file moves to the other copy too.
+public func triesAnotherCopy(trackId: String, uri: String, isFind: Bool, code: PlayErrorCode) -> Bool {
+    guard !isFind, !isRadio(trackId), !isOpenedFile(trackId), parseStreamUri(uri) == nil,
+          let scheme = URL(string: uri)?.scheme?.lowercased(), scheme == "file" || scheme == "ipod-library"
+    else { return false }
+    return code != .audioTrackInitFailed && code != .audioTrackWriteFailed
+}
+
 /// Where downloads sit among a song's copies.
 public let downloadSource = "download"
 

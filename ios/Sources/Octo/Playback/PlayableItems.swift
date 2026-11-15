@@ -11,6 +11,9 @@ struct PlayableItems {
     let session: Session
     let data: DataServices?
 
+    /// Phone files that would not play this run, passed over for the song's other copies.
+    static var unplayableCopies: Set<String> = []
+
     /// One queue item for each song asked for, in order; nil for any that cannot be found. A song
     /// as the server lists it that the library does not know yet is taken in first, as the
     /// library song or the find it is, like every song from the server before it plays.
@@ -41,7 +44,7 @@ struct PlayableItems {
             let reachable = !onServer.isEmpty && OnlineWatch.shared.online && context.client != nil
             // Phone files that could be swapped for a stream, checked in case one is gone.
             let phoneFiles = onServer.values.flatMap { $0 }.filter { !$0.isServerCopy }.compactMap(\.uri)
-            let missing = reachable ? await Self.missingPhoneFiles(phoneFiles) : []
+            let missing = (reachable ? await Self.missingPhoneFiles(phoneFiles) : []).union(Self.unplayableCopies)
             let downloads = onServer.isEmpty ? [:] : await data.offline.playableCopies(Array(onServer.keys))
             for id in distinct(ids) where byId[id] == nil {
                 guard let track = tracksById[id] else { continue }
@@ -176,8 +179,9 @@ struct PlayableItems {
     }
 
     /// The phone files among these that are gone: files in Octo's folder no longer there, and
-    /// songs the Music app's library no longer has. Without access to the Music app's library,
-    /// none of its songs can play.
+    /// songs the Music app no longer keeps on the phone. A song it still lists can have no file
+    /// here (moved to iCloud to save room) or play only in Apple's own player. Without access to
+    /// the Music app's library, none of its songs can play.
     nonisolated private static func missingPhoneFiles(_ uris: [String]) async -> Set<String> {
         guard !uris.isEmpty else { return [] }
         return await Task.detached(priority: .userInitiated) {
@@ -198,7 +202,8 @@ struct PlayableItems {
                     }
                     let query = MPMediaQuery.songs()
                     query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
-                    if (query.items ?? []).isEmpty { missing.insert(uri) }
+                    let item = query.items?.first
+                    if item?.assetURL == nil || item?.hasProtectedAsset == true { missing.insert(uri) }
                 }
             }
             return missing

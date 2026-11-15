@@ -1,6 +1,7 @@
 * text=auto
 gradlew text eol=lf
 *.sh text eol=lf
+*.patch text eol=lf
 # Linux package files run or read on Linux, also from a Windows checkout.
 desktop/packaging/linux/appimage/AppRun text eol=lf
 desktop/packaging/linux/flatpak/octo-launcher text eol=lf

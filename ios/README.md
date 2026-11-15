@@ -17,6 +17,8 @@ mini player in its accessory, the player's controls and the icon.
 | `AppIcon.icon` | The Icon Composer icon, written by `tools/appicon/make_app_icon.py ios`. |
 | `Resources/AppIcon.png` | The flat icon for builds without the compiled `Assets.car`. |
 | `Info.plist`, `xtool.yml` | What xtool adds to the app bundle. |
+| `scripts/release` | Store builds: TestFlight and the IPA for sideloading, built, signed and uploaded on Linux. |
+| `Resources/StoreAssets` | The icon catalog and the App Intents metadata the `iOS store assets` workflow made. |
 
 ## Set up once (WSL on Windows)
 
@@ -61,4 +63,14 @@ Linux.
 `python tools/appicon/make_app_icon.py ios` writes `AppIcon.icon`, the flat
 `Resources/AppIcon.png`, and the octopus's paths the app draws itself. Liquid
 Glass needs the `.icon` compiled into `Assets.car` by Apple's `actool`, which
-only runs on macOS: the `iOS icon` workflow does that on a GitHub macOS runner.
+only runs on macOS. The `iOS store assets` workflow does that on a GitHub
+macOS runner, and also writes the App Intents metadata for Shortcuts, App
+Shortcuts and the widget buttons. Its output lives in `Resources/StoreAssets`;
+run it again whenever the icon or the App Intents change.
+
+## Releases
+
+TestFlight builds and the IPA for sideloading are built, signed and uploaded
+on Linux with the tools in `scripts/release` (`testflight.sh`,
+`octo_asc.py`). Nothing there holds a secret: the App Store Connect key and
+the signing identity stay on the build machine.

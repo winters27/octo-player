@@ -284,6 +284,45 @@ public enum UpdateFiles {
         }
         return manifest
     }
+
+    /// The file an iPhone installs from a release: the IPA its manifest lists, or nil when the
+    /// release has none for phones yet.
+    public static func iosInstaller(_ manifest: UpdateManifest) -> ManifestAsset? {
+        manifest.assets.first { $0.os == "ios" && $0.kind == "ipa" }
+    }
+
+    /// What one check of these releases found for the iPhone app: the newest release past
+    /// `running` whose signed manifest holds and lists an IPA of the size the release has.
+    /// `fetch` reads a small release file (address, size limit), nil when it could not; `verify`
+    /// checks an Ed25519 signature (key, message, signature).
+    public static func decide(_ releases: [GitHubRelease], running: PlayerVersion, early: Bool, keys: [Data],
+                              fetch: @Sendable (String, Int) async throws -> Data?,
+                              verify: @Sendable (Data, Data, Data) -> Bool) async -> UpdateCheck {
+        guard let candidate = newestUpdate(releases, app: .ios, running: running, early: early) else { return .upToDate }
+        let tag = candidate.release.tag
+        do {
+            guard let manifestAsset = candidate.release.asset(manifestName) else {
+                throw UpdateRefused("the release has no \(manifestName)")
+            }
+            guard let signatureAsset = candidate.release.asset(signatureName) else {
+                throw UpdateRefused("the release has no \(signatureName)")
+            }
+            guard let bytes = try await fetch(manifestAsset.url, manifestLimit),
+                  let signatureBytes = try await fetch(signatureAsset.url, signatureLimit)
+            else { return .unavailable(reason: "the download stopped", retryAt: nil) }
+            let manifest = try verifiedManifest(bytes, signature: String(decoding: signatureBytes, as: UTF8.self), keys: keys,
+                                                app: .ios, tag: tag, verify: verify)
+            guard let file = iosInstaller(manifest) else { return .noInstaller(version: candidate.version) }
+            guard let listed = candidate.release.asset(file.name), listed.size == file.size else {
+                throw UpdateRefused("the release is missing \(file.name)")
+            }
+            return .available(version: candidate.version, tag: tag, notes: manifest.notes, page: candidate.release.page)
+        } catch let refused as UpdateRefused {
+            return .refused(reason: refused.reason)
+        } catch {
+            return .unavailable(reason: "the download stopped", retryAt: nil)
+        }
+    }
 }
 
 /// When the checks run: a while after start, so opening the app stays quick, then every six

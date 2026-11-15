@@ -8,30 +8,27 @@ import UIKit
 final class WhatsNewStore {
     static let shared = WhatsNewStore()
 
-    private let store = UserDefaults(suiteName: "whats_new") ?? .standard
-    private let key = "last_seen_version"
+    @ObservationIgnored private let seen = WhatsNewSeen(
+        defaults: UserDefaults(suiteName: "whats_new") ?? .standard,
+        current: Bundle.main.object(forInfoDictionaryKey: WhatsNewSeen.versionInfoKey) as? String ?? "")
 
-    /// The build number running, which each update raises.
-    static var currentVersion: Int {
-        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    }
-
-    private(set) var lastSeen: Int?
+    private(set) var lastSeen: String?
 
     private init() {
-        lastSeen = store.object(forKey: key) as? Int
+        lastSeen = seen.lastSeen
     }
 
-    var due: Bool { WhatsNew.due(lastSeen: lastSeen, current: Self.currentVersion, freshInstall: Self.freshInstall) }
+    var due: Bool { WhatsNew.due(lastSeen: lastSeen, current: seen.current, freshInstall: Self.freshInstall) }
 
     /// A fresh install starts having seen this version, so later updates know where they stand.
     func settle() {
-        if lastSeen == nil, Self.freshInstall { markSeen() }
+        seen.settle(freshInstall: Self.freshInstall)
+        lastSeen = seen.lastSeen
     }
 
     func markSeen() {
-        store.set(Self.currentVersion, forKey: key)
-        lastSeen = Self.currentVersion
+        seen.markSeen()
+        lastSeen = seen.lastSeen
     }
 
     /// Installed and never used before: nothing an earlier Octo keeps is here yet.

@@ -626,12 +626,9 @@ struct MemoryStore {
         #expect(playbackHighlight(nil, .automix) == nil)
     }
 
-    @Test func whatsNewTellsWhatMovedToAutomix() {
+    @Test func whatsNewNamesAutomixAndTheOtherChoices() {
         let notes = WhatsNew.notes
-        #expect(notes.contains("**Automix is now its own choice next to Crossfade and is on by default:**"))
-        #expect(notes.contains("If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on."))
-        #expect(notes.contains("Gapless is under Between songs. A Crossfade setup you chose stays as it was."))
-        #expect(notes.contains("Match tempo is now on for Automix; turn it off under Between songs if you prefer."))
+        #expect(notes.contains("- **Automix** blends each song into the next where they meet best, or pick Gapless or Crossfade under Between songs."))
         #expect(!notes.contains("Smart transitions"))
     }
 

@@ -4,94 +4,76 @@ import Foundation
 /// as markdown. Both are rewritten with each update.
 public enum WhatsNew {
     /// The one line the card on Home shows. Kept short.
-    public static let summary = "A new equalizer, sorting, favorites, downloads and much more"
+    public static let summary = "Octo comes to iPhone, with Liquid Glass, widgets, Siri and Shortcuts"
 
-    /// Whether the card about what is new should show: once after each update, but not on a
-    /// fresh install, which has nothing to compare with.
-    public static func due(lastSeen: Int?, current: Int, freshInstall: Bool) -> Bool {
+    /// Whether the card about what is new should show: once after each new version, not again
+    /// for a later build of the same version (TestFlight raises the build on every upload), and
+    /// not on a fresh install, which has nothing to compare with. A version that does not read as
+    /// one counts as new when it differs.
+    public static func due(lastSeen: String?, current: String, freshInstall: Bool) -> Bool {
         guard let lastSeen else { return !freshInstall }
-        return lastSeen < current
+        guard let seen = PlayerVersion.parse(lastSeen), let running = PlayerVersion.parse(current) else {
+            return lastSeen != current
+        }
+        return seen < running
+    }
+
+    /// The version counted as seen. Older builds kept the build number they showed the news
+    /// for instead of a version; one found means this version's news was already read.
+    public static func seenVersion(stored: String?, storedBuild: Int?, current: String) -> String? {
+        if let stored { return stored }
+        return storedBuild == nil ? nil : current
     }
 
     public static let notes = """
-    A big update: a new **equalizer**, **sorting** for every list, **favorites**, **downloads**, lyrics that follow the song, and much more.
+    Octo is here on iPhone: your music server and the music on your phone, in one player made with Apple's **Liquid Glass**.
 
-    ## Sound
+    ## Playing
 
-    - An **equalizer** with a live curve, presets, and room for your own.
-    - **Loudness** evens out the volume from song to song.
-    - **Headphone correction**, and balance between left and right.
-    - Headphones and speakers can each keep their own sound.
+    - **Automix** blends each song into the next where they meet best, or pick Gapless or Crossfade under Between songs.
+    - The full player has lyrics, the queue, and AirPlay in its More menu.
+    - **Lock screen** controls, and music that keeps playing in the background.
+    - Play next and Add to queue on every song, and a swipe to the right plays it next.
+    - A **sleep timer**, and speed and pitch.
 
-    ## Library
+    ## Your server
 
-    - **Sort any list**, and each list remembers its order.
-    - **Favorites** in one place: your liked songs, albums and artists, with a shelf on Home.
-    - **Pin** albums, artists and playlists to the top of Home.
-    - Browse your music **by folder** on your server.
-    - **History** shows what you played lately and what you play most.
-    - Rate songs with stars.
-    - Play and Shuffle at the top of your lists, and a random album.
-    - Pull down on a list to look for new music.
-
-    ## Playback
-
-    - Play next and Add to queue keep their place while shuffling.
-    - The **queue** shows what already played. It can clear itself, save as a playlist, or stop after a song.
-    - **Autoplay** keeps similar songs coming when the queue runs out.
-    - Change the **speed and pitch**, and skip the quiet parts.
-    - The **sleep timer** can add a few minutes, or stop after a few songs.
-    - **Automix is now its own choice next to Crossfade and is on by default:** songs blend where they meet best, and a quiet intro plays under the end of the song before it. If you never changed Crossfade, or turned it off without changing its other settings, Automix is now on. Gapless is under Between songs. A Crossfade setup you chose stays as it was. Automix now picks its own blend lengths. Match tempo is now on for Automix; turn it off under Between songs if you prefer.
-    - Music can carry on when headphones reconnect.
-    - Swipe the artwork to skip.
-    - Play on **AirPlay** speakers and TVs from the player.
-
-    ## Server
-
-    - **Discover** finds songs, albums and artists beyond your library, and plays them.
-    - Stations on Home, and a **radio** from a song or an artist.
-    - Play your server's internet radio stations.
-    - Playlists stay the same on the phone and your server, both ways.
-    - **Share links** to songs and albums.
+    - Works with **Navidrome** and any Subsonic-compatible server, and with everything an **Octo** server adds.
+    - **Servers behind a sign-in page work:** Octo signs in through Authentik, Authelia or Cloudflare Access.
+    - **Search** finds your own music first, then beyond your library when your Octo server offers it.
+    - **A heart gets the version you heard:** an Octo server from this update downloads the same recording, checked by its sound, and a download that needs you says why.
+    - Stations, **Made for you**, mixes, and **charts** from any country.
+    - Playlists stay the same on your phone and your server, both ways.
+    - **Family**: join by link or QR code, and add to family playlists.
     - Pick up the queue where another device left off.
-    - Artist pages show top songs, a biography and similar artists.
-    - **Charts from any country.** Make one your own, or pin up to three so their charts come as playlists too.
-    - Scan your server for new music, and see who else is listening.
-    - If your server is Octo, Settings shows what it is doing.
+
+    ## Your phone
+
+    - Songs from the **Music app** and the Files app play beside your server's.
+    - **Download** songs, albums and playlists to play with no connection.
+    - Songs you stream are kept for a while, so they play again offline.
+    - **Copying your server's library** shows how far it is, and a long copy keeps going after you leave the app.
 
     ## Lyrics
 
-    - **Lyrics** in the player, from your server, the song's files or online.
-    - Lyrics that follow the song light up as they are sung. Tap a line to play from there.
-    - Move a song's lyrics earlier or later when they are out of time.
-    - The screen stays on while lyrics show.
+    - **Lyrics** that follow the song and light up as they are sung.
+    - Tap a line to play from there, or move the lyrics earlier or later.
 
-    ## Offline
+    ## Sound
 
-    - **Download** songs, albums and playlists.
-    - Keep Liked songs and chosen playlists downloaded as they change.
-    - Songs you stream are kept for a while, so they play again without a connection.
-    - The next few songs load ahead while one plays.
-    - With no connection, songs that cannot play are dimmed.
+    - An **equalizer** with presets, **loudness**, and headphone correction.
+    - **Crossfeed** for headphones, and a choice of crossfade curves.
 
-    ## Everyday touches
+    ## Look
 
-    - **Undo** when you remove something, and a short note when something does not work.
-    - **Pick several songs** at once to play, queue, add to a playlist, download or like.
-    - **Song info** shows everything known about a song.
-    - Swipe a song to the right to play it next.
-    - **Home Screen widgets** for what is playing and for quick play.
-    - Ask Siri or Shortcuts to play Liked songs, recently added or an album mix, start a radio, or resume.
-    - Audio files from the Files app open straight in Octo.
-    - Share a song's file, or delete it from the phone.
-    - Search remembers your recent searches, and can show only songs, albums, artists or playlists.
-    - Bring in playlists from files, and save them out again.
+    - **Themes**: Octo, Moss, Dusk, Daylight or Paper, or match the phone's light and dark.
+    - **Animated album art**, square or full screen.
 
-    ## Settings
+    ## iPhone
 
-    - Settings has **a page for each topic**, and a search for any setting.
-    - The artwork's colors can glow softly behind the app.
-    - Send your plays to **ListenBrainz**, with or without a server.
-    - **Back up** your settings, playlists, likes, favorites and more to a file, and bring them back.
+    - **Home Screen widgets** for what is playing and quick play.
+    - Ask **Siri** or **Shortcuts** to play an album, Liked songs or an album mix, start a radio, or resume.
+    - **Share to Octo** from other apps to bring in a playlist.
+    - **Live radio** from stations near you.
     """
 }

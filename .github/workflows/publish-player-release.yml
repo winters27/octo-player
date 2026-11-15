@@ -1,11 +1,13 @@
 # Publishes a player release on the public Octo repository (winters27/octo),
 # beside the server's releases, from the files a build job uploaded. Called
-# by desktop-installers.yml and android-release.yml on their version tags.
+# by desktop-installers.yml, android-release.yml and ios-release.yml on their
+# version tags.
 #
-# The release gets the same tag as here (desktop-v1.2.0, android-v0.3.0).
-# It is never marked Latest, so the server's dated release stays the one
-# GitHub and Docker users see first, and neither tag pattern can start the
-# server's image build (that runs on v* and dated tags only).
+# The release gets the same tag as here (desktop-v1.2.0, android-v0.3.0,
+# ios-v1.12.0). It is never marked Latest, so the server's dated release
+# stays the one GitHub and Docker users see first, and none of the tag
+# patterns can start the server's image build (that runs on v* and dated
+# tags only).
 #
 # Every release carries update.json (each file's SHA-256 and size, and the
 # notes) and update.json.sig, an Ed25519 signature over it. The apps install
@@ -21,7 +23,7 @@ on:
   workflow_call:
     inputs:
       app:
-        description: desktop or android
+        description: desktop, android or ios
         required: true
         type: string
       tag:
@@ -83,10 +85,17 @@ jobs:
             # Every system's build, each with all its files, or no release.
             python3 scripts/release/release_assets.py stage-desktop --version "$version" --artifacts artifacts --out release \
               --require-platform windows-x64 --require-platform macos-arm64 --require-platform macos-x64 --require-platform linux-x64
-          else
+          elif [ "$APP" = android ]; then
             mapfile -t apks < <(find artifacts -name '*.apk')
             if [ "${#apks[@]}" -ne 1 ]; then echo "::error::Expected one APK, found ${#apks[@]}."; exit 1; fi
             python3 scripts/release/release_assets.py stage-android --version "$version" --apk "${apks[0]}" --out release
+          elif [ "$APP" = ios ]; then
+            mapfile -t ipas < <(find artifacts -name '*.ipa')
+            if [ "${#ipas[@]}" -ne 1 ]; then echo "::error::Expected one IPA, found ${#ipas[@]}."; exit 1; fi
+            python3 scripts/release/release_assets.py stage-ios --version "$version" --ipa "${ipas[0]}" --out release
+          else
+            echo "::error::Unknown app $APP."
+            exit 1
           fi
 
       - name: Release notes
@@ -124,7 +133,12 @@ jobs:
           GH_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
         run: |
           version="${TAG#"${APP}-v"}"
-          if [ "$APP" = desktop ]; then title="Octo for Windows, macOS and Linux $version"; else title="Octo for Android $version"; fi
+          case "$APP" in
+            desktop) title="Octo for Windows, macOS and Linux $version" ;;
+            android) title="Octo for Android $version" ;;
+            ios) title="Octo for iPhone $version" ;;
+            *) echo "::error::Unknown app $APP."; exit 1 ;;
+          esac
           if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
             echo "::error::$TAG is already released on $REPO."
             exit 1
