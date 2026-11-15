@@ -241,6 +241,7 @@ def self_test() -> None:
     assert f"/usr/share/applications/{ENTRY}" in text and f"{APP_ID}.png" in text
     container = CONTAINER.read_text(encoding="utf-8")
     assert f"/usr/share/applications/{ENTRY}" in container and "EARLY_PKGVER" in container
+    assert 'if [ "$builder_uid" = 0 ]' in container, "a build started by root still needs a builder makepkg accepts"
     assert 'exec "$here/usr/bin/Octo" "$@"' in APPRUN.read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)

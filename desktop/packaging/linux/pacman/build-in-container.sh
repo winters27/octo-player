@@ -4,7 +4,15 @@
 # dependencies and checks every file landed.
 set -euo pipefail
 pacman -Syu --noconfirm --needed base-devel
-useradd --uid "$BUILD_UID" --create-home builder
+# makepkg never runs as root. A build started by root (BUILD_UID 0) gets a
+# builder of its own, and the folder is handed back to root afterwards.
+builder_uid=$BUILD_UID
+if [ "$builder_uid" = 0 ]; then
+    builder_uid=1000
+    trap 'chown -R 0:0 /work' EXIT
+fi
+useradd --uid "$builder_uid" --create-home builder
+chown -R builder: /work
 cd /work
 runuser -u builder -- makepkg --nodeps --noconfirm
 pacman -U --noconfirm ./*.pkg.tar.zst
