@@ -74,7 +74,15 @@ final class FamilyHub {
         case .family:
             router.openInSettings(.family)
         case .join(let link):
+            // A sign-in that is open is never replaced: its form says so under its address, and the
+            // message offers the link again.
+            guard !router.hasOpenSignIn else {
+                router.noteLink(SignInWords.linkWhileSignInOpen)
+                router.show(SignInWords.linkWhileSignInOpen, action: "Use it") { [weak self] in self?.open(.join(link)) }
+                return
+            }
             joinOpens += 1
+            router.setAside()
             router.signIn = .join(familyAppLink(link), opened: joinOpens)
         }
     }

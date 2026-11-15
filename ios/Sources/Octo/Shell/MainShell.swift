@@ -296,10 +296,10 @@ struct MainShell: View {
             }
             .environment(drift)
         }
-        // A server app start did not sign in to again opens its sign-in form with why, the same
-        // form a switch to it opens.
+        // A server app start did not sign in to again asks for its sign-in form with why, the same
+        // ask a switch to it makes: behind an open sign-in or a link's form it waits as a message.
         .task {
-            if case .needsPassword(let server, let note)? = session.takeStartAsk() { router.signIn = .again(server, note: note) }
+            if case .needsPassword(let server, let note)? = session.takeStartAsk() { router.askSignIn(serverId: server.id, note: note) }
         }
     }
 

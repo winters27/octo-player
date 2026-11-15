@@ -143,7 +143,7 @@ struct ServersSection: View {
         }
         switch await serverSwitch.switchTo(server.id) {
         case .done(let notice): if let notice { router.done(notice) }
-        case .needsPassword(_, let note): router.signIn = .again(server, note: note)
+        case .needsPassword(_, let note): router.askSignIn(serverId: server.id, note: note)
         case .failed(let words): router.show(words)
         }
     }

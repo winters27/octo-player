@@ -103,7 +103,7 @@ object SignInWords {
     const val CERT_PASSWORD_TITLE = "Certificate password"
     const val CERT_PASSWORD_HINT = "The password the certificate file was saved with."
     const val CERT_PASSWORD_FIELD = "Password"
-    const val CERT_PASSWORD_USE = "Use It"
+    const val CERT_PASSWORD_USE = "Use it"
 
     fun certificateLine(name: String, date: String): String = "$name, expires $date"
 

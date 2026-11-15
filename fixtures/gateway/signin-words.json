@@ -57,7 +57,7 @@
   "cert.password.title": "Certificate password",
   "cert.password.hint": "The password the certificate file was saved with.",
   "cert.password.field": "Password",
-  "cert.password.use": "Use It",
+  "cert.password.use": "Use it",
   "cert.asked": "This server asks for a client certificate. Choose one under Advanced, Special setups.",
   "cert.refused": "The server didn't accept that client certificate.",
   "cert.keyKind": "Octo can't play through this kind of key. Use an RSA (2048 bits or more), P-256, P-384 or Ed25519 certificate.",

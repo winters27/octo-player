@@ -18,7 +18,8 @@ struct CertificatePinsTests {
 
     private static func certificate(_ name: String) throws -> [UInt8] {
         let pem = String(decoding: try fixture("\(name).pem"), as: UTF8.self)
-        let body = pem.components(separatedBy: "\n").filter { !$0.hasPrefix("-----") }.joined()
+        // Any line ending: a checkout made on Windows ends the fixture's lines with \r\n.
+        let body = pem.components(separatedBy: .newlines).filter { !$0.hasPrefix("-----") }.joined()
         return [UInt8](try #require(Data(base64Encoded: body)))
     }
 

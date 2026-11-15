@@ -13,3 +13,6 @@ desktop/packaging/linux/pacman/PKGBUILD.in text eol=lf
 
 # Signed test fixtures: their bytes are what was signed.
 shared/core/src/commonTest/resources/update/** -text
+
+# Certificates made with openssl: every checkout writes them with LF, as they were made.
+fixtures/certificate-pins/*.pem text eol=lf

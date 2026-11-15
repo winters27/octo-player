@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -52,6 +53,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
@@ -268,11 +272,20 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
 
     // While the certificate is asked about, the card steps back behind it.
     val asking by animateFloatAsState(if (form.question != null) 0.35f else 1f, label = "asking")
+    // While Advanced is open, the place its opening glide lifts the card to
+    // is the scroll's floor: the room's middle when the open card fits, else
+    // its top with the words at their own top. A wheel or drag turned back
+    // stops there, so nothing but closing Advanced lowers the open card from
+    // where it sits balanced, and the card's bar counts from there. The pin
+    // while Advanced is open, else 0.
+    val openPin = remember(form) { mutableIntStateOf(0) }
+    val floor = remember(scroll, openPin) { { minOf(openPin.intValue, scroll.maxValue) } }
+    val hold = remember(scroll, floor) { HoldPast(scroll, floor) }
     CompositionLocalProvider(LocalCalloutHost provides host) {
         // A wheel turned anywhere on the page scrolls the card, as it does
-        // over the card itself.
+        // over the card itself, and both are held at the floor.
         val reverse = ScrollableDefaults.reverseDirection(LocalLayoutDirection.current, Orientation.Vertical, reverseScrolling = false)
-        BoxWithConstraints(Modifier.fillMaxSize().alpha(asking).scrollable(scroll, Orientation.Vertical, reverseDirection = reverse)) {
+        BoxWithConstraints(Modifier.fillMaxSize().alpha(asking).nestedScroll(hold).scrollable(scroll, Orientation.Vertical, reverseDirection = reverse)) {
             // On a short window the card packs tighter, so Sign in shows without scrolling.
             val short = maxHeight < ShortWindow
             val pad = if (short) 12.dp else 32.dp
@@ -285,6 +298,8 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
             var advancedShown by remember(form) { mutableStateOf(false) }
             val pinned = (form.advancedOpen || advancedShown) && closedHeight >= 0
             val pinTop = if (pinned) with(density) { ((maxHeight - pad * 2 - closedHeight.toDp()) / 2).coerceAtLeast(0.dp) } else 0.dp
+            val pinPx = with(density) { pinTop.roundToPx() }
+            SideEffect { openPin.intValue = if (form.advancedOpen) pinPx else 0 }
             // Advanced opening glides the card up from its pin as the groups
             // fade in, until the open card sits balanced: in the middle of
             // the room when it fits there (the scroll's end, see SignInCard),
@@ -330,7 +345,7 @@ fun SignInPage(app: AppState, backdrop: HazeState) {
                     Modifier.weight(1f, fill = false).onSizeChanged { if (!pinned && !form.advancedOpen && !advancedShown) closedHeight = it.height },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    SignInCard(backdrop, short, scroll, pinTop, onContent = { content = it }, modifier = Modifier.weight(1f, fill = false)) {
+                    SignInCard(backdrop, short, scroll, pinTop, floor, onContent = { content = it }, modifier = Modifier.weight(1f, fill = false)) {
                         Txt("Octo", OctoType.display)
                         Txt(
                             when {
@@ -458,20 +473,24 @@ private val ShortWindow = 720.dp
 // fit the room have half the room they leave added after them, so the
 // scroll ends with the card in the room's middle. The glass reaches from
 // its words' top to their end, or to the room's foot, and never leaves the
-// room, so its frost is drawn wherever it is. `onContent` hears where the
-// scroll's child is, for the callout.
+// room, so its frost is drawn wherever it is. Its bar counts from `rest`,
+// the least a scroll back reaches. `onContent` hears where the scroll's
+// child is, for the callout.
 @Composable
 private fun SignInCard(
     backdrop: HazeState,
     short: Boolean,
     scroll: ScrollState,
     pin: Dp,
+    rest: () -> Int,
     onContent: (LayoutCoordinates) -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val key = LocalKeyColour.current
+    val inset = if (short) 20.dp else 32.dp
     val pinPx = with(LocalDensity.current) { pin.roundToPx() }
+    val insetPx = with(LocalDensity.current) { inset.roundToPx() }
     // How far under the room's top the glass starts: the pin, less what of
     // it the scroll has used. The words' scroll fills the whole room and sits
     // that far up inside the glass, so where the glass is never moves the
@@ -488,9 +507,10 @@ private fun SignInCard(
                 layout(glass.width, glass.height + top) { glass.place(0, top) }
             }
             // The bar runs between the corner arcs. Its resting thumb says
-            // there is more while the words run past the card even once it
-            // is lifted to the top, not for the lift alone.
-            .scrollbar(scroll, bottom = CardBarEnds, resting = scroll.maxValue > pinPx, top = CardBarEnds),
+            // there is more while words run past the card even once it is
+            // lifted to the top: not for the lift alone, nor for the card's
+            // own empty padding at its foot.
+            .scrollbar(scroll, bottom = CardBarEnds, resting = scroll.maxValue > pinPx + insetPx, top = CardBarEnds, start = rest),
         shape = CardShape,
         film = CardFilm,
         frost = 20f,
@@ -504,7 +524,7 @@ private fun SignInCard(
             Layout(
                 content = {
                     Column(
-                        Modifier.fillMaxWidth().padding(if (short) 20.dp else 32.dp),
+                        Modifier.fillMaxWidth().padding(inset),
                         verticalArrangement = Arrangement.spacedBy(if (short) 6.dp else 12.dp),
                         content = content,
                     )
@@ -539,6 +559,20 @@ private fun SignInCard(
 private class CardMeasures {
     var room = 0
     var wordsEnd = 0
+}
+
+// Keeps a wheel or drag toward the start from taking `scroll` back past
+// `floor`: what would go under it is given up, so nothing moves. A scroll
+// the page sets itself (a glide, a callout, the bar's drag) is not held.
+private class HoldPast(private val scroll: ScrollState, private val floor: () -> Int) : NestedScrollConnection {
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        val stop = floor()
+        // A positive y is toward the start: a scroll passes the gesture on
+        // as it comes, and turns it round only for its own state.
+        if (available.y <= 0f || stop <= 0) return Offset.Zero
+        val room = (scroll.value - stop).coerceAtLeast(0).toFloat()
+        return Offset(0f, (available.y - room).coerceAtLeast(0f))
+    }
 }
 
 // The card's glass, for finding it in tests.

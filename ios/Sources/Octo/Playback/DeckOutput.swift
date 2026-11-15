@@ -152,8 +152,7 @@ final class DeckOutput {
         let device = session.outputLatency + session.ioBufferDuration + limiterDelay
         for deck in decks {
             deck.refreshLatency()
-            let stage = deck.timePitch.bypass ? 0 : deck.timePitch.latency
-            deck.outputDelayMs = (device + stage) * 1000
+            deck.outputDelayMs = (device + deck.latencyFrames / deckRate) * 1000
         }
         mix.outputDelayMs = device * 1000
         mix.noteLatency()

@@ -55,7 +55,6 @@ import app.winters.octo.design.CardFit
 import app.winters.octo.design.Corner
 import app.winters.octo.design.DesktopType
 import app.winters.octo.design.FrameSize
-import app.winters.octo.design.GlassField
 import app.winters.octo.design.GlazeCapsule
 import app.winters.octo.design.IconAction
 import app.winters.octo.design.IconSize
@@ -599,53 +598,31 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
 }
 
 // Changes the signed-in user's password on the server in use: the current
-// one, then the new one twice.
+// one, then the new one twice, in a sheet drawn as the server sheets are.
+// The pop-up gives the current password the keyboard once the sheet's rows
+// are drawn.
 fun changePassword(app: AppState) {
     if (app.changingPassword) return
     val connection = app.connection ?: return
     val opening = Any()
-    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true) { close -> key(opening) { PasswordSheet(app, connection, close) } }
+    val first = FocusRequester()
+    app.popups.showCentred(width = SettingsSize.Sheet, scrim = true, first = first) { close ->
+        key(opening) { CompositionLocalProvider(LocalInSheet provides true) { PasswordSheet(app, connection, first, close) } }
+    }
 }
 
-// A password or key: dots until the eye inside the field shows it.
+// The sheet's own title, who it is for, then the three passwords in one
+// group, each a row with its name over its entry; how strong the new one is
+// and what is wrong show as the group's notes.
 @Composable
-internal fun SecretField(value: String, onChange: (String) -> Unit, placeholder: String, submit: () -> Unit, focus: FocusRequester? = null) {
-    var reveal by remember { mutableStateOf(false) }
-    GlassField(
-        value,
-        onChange,
-        Modifier.fillMaxWidth(),
-        placeholder = placeholder,
-        password = !reveal,
-        focusRequester = focus,
-        onSubmit = submit,
-        trailing = {
-            val words = if (reveal) "Hide" else "Show"
-            IconAction(
-                if (reveal) OctoIcons.Conceal else OctoIcons.Reveal,
-                words,
-                { reveal = !reveal },
-                // Tab goes from field to field, past the eye.
-                Modifier.focusProperties { canFocus = false },
-                size = ControlHeight.M,
-                iconSize = IconSize.Toolbar,
-                tint = OctoColors.TextSecondary,
-            )
-        },
-    )
-}
-
-@Composable
-private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, close: () -> Unit) {
+private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, first: FocusRequester, close: () -> Unit) {
     // The pop-up this sheet opened in, to know whether it is still the one open.
     val mine = remember { app.popups.request }
-    val first = remember { FocusRequester() }
     var draft by remember { mutableStateOf(PasswordDraft()) }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     // The form's own problem shows once something was tried, not while typing.
     var tried by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
     // A family member's password: the family's own call, which signs every
     // other app and device out.
     val family = connection.family && app.family.me?.managed == true
@@ -673,7 +650,7 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
         }
     }
 
-    MenuTitle("Change password")
+    FormSheetTitle("Change password")
     PopupPadding {
         Txt(
             if (family) "For ${connection.client.username} on ${connection.server.name}. Every other app and device is signed out and needs the new password."
@@ -682,12 +659,49 @@ private fun ColumnScope.PasswordSheet(app: AppState, connection: Connection, clo
             OctoColors.TextSecondary,
             maxLines = 3,
         )
-        Field("Current password") { SecretField(draft.current, { draft = draft.copy(current = it); problem = null }, "Current password", ::change, first) }
-        Field("New password") { SecretField(draft.new, { draft = draft.copy(new = it); problem = null }, "New password", ::change) }
-        passwordStrength(draft.new)?.let { Txt(it, DesktopType.meta, OctoColors.TextMuted) }
-        Field("New password again") { SecretField(draft.confirm, { draft = draft.copy(confirm = it); problem = null }, "New password again", ::change) }
         val shown = problem ?: if (tried) passwordDraftProblem(draft) else null
-        shown?.let { Txt(it, DesktopType.meta, OctoColors.Error, maxLines = 3) }
+        FormGroup(
+            null,
+            notes = {
+                passwordStrength(draft.new)?.let { FormNote(it) }
+                shown?.let { FormNote(it, NoteKind.Error) }
+            },
+        ) {
+            FormFieldRow(
+                "Current password",
+                value = draft.current,
+                onChange = {
+                    draft = draft.copy(current = it)
+                    problem = null
+                },
+                placeholder = SignInWords.REQUIRED,
+                secret = true,
+                onSubmit = ::change,
+                focus = first,
+            )
+            FormFieldRow(
+                "New password",
+                value = draft.new,
+                onChange = {
+                    draft = draft.copy(new = it)
+                    problem = null
+                },
+                placeholder = SignInWords.REQUIRED,
+                secret = true,
+                onSubmit = ::change,
+            )
+            FormFieldRow(
+                "New password again",
+                value = draft.confirm,
+                onChange = {
+                    draft = draft.copy(confirm = it)
+                    problem = null
+                },
+                placeholder = SignInWords.REQUIRED,
+                secret = true,
+                onSubmit = ::change,
+            )
+        }
         Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
             AccentButton("Change password", ::change, Modifier.widthIn(min = SheetMainButton), loading = busy, size = ButtonSize.Medium)
@@ -728,15 +742,6 @@ fun askToRemove(app: AppState, server: SavedServer) {
                 }, icon = OctoIcons.Delete)
             }
         }
-    }
-}
-
-// A field with its name close above it.
-@Composable
-private fun Field(name: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Space.Xs)) {
-        Txt(name, DesktopType.meta, OctoColors.TextMuted)
-        content()
     }
 }
 

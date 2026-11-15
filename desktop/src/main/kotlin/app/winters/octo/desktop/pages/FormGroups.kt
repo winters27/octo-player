@@ -144,8 +144,9 @@ internal val PageFade = 24.dp
 internal val SheetFade = 12.dp
 
 // The least width of a sheet's or pop-up's main button, so a short word
-// ("Add", "Save", "Use") never makes it narrower than Cancel beside it.
-internal val SheetMainButton = 96.dp
+// ("Add", "Save", "Use it") never makes it narrower than Cancel beside it, at
+// any text size up to 130% (Cancel is 99 there).
+internal val SheetMainButton = 112.dp
 
 // The least of a choice row a value may take beside its name.
 private const val VALUE_SHARE = 0.45f

@@ -34,6 +34,7 @@ struct OctoApp: App {
         let session = Session()
         let sound = SoundStore()
         let router = Router()
+        router.session = session
         let data = DataServices(session: session) { words, done in router.show(words, done: done) }
         _data = State(initialValue: data)
         _router = State(initialValue: router)

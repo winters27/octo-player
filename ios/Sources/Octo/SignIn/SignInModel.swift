@@ -41,13 +41,25 @@ final class SignInModel {
     let form: Form
     var rest = "" {
         didSet {
+            // A scheme typed in moves into the button, which sets `rest` again: that inner set
+            // returns at once, and the pair is compared once the split is done.
+            guard !splitting else { return }
+            let before = (scheme, oldValue)
+            splitting = true
             typed()
+            splitting = false
             if rest != oldValue { error = nil }
             // A sign-in page met at another address is forgotten.
             useGatewayForm(addressChanged(gatewayForm, address: sentAddress))
+            // The kept server's own address pasted again changes nothing.
+            if before != (scheme, rest) { linkEdited() }
         }
     }
-    private(set) var scheme: ServerAddress.Scheme = .https
+    private(set) var scheme: ServerAddress.Scheme = .https {
+        didSet { if !splitting, scheme != oldValue { linkEdited() } }
+    }
+    /// The address is being split into its scheme and the rest.
+    @ObservationIgnored private var splitting = false
     private var schemePicked = false
     var label = ""
     var username = ""
@@ -58,7 +70,9 @@ final class SignInModel {
     /// Whether the server takes API keys: nil until known, which is before signing in, when a
     /// key may still be tried.
     var takesApiKeys: Bool?
-    var homeAddress = ""
+    var homeAddress = "" {
+        didSet { if homeAddress != oldValue { linkEdited() } }
+    }
     /// The custom header rows; every change goes through `HeaderList`, which keeps each row's id.
     private var headerList = HeaderList.empty
     var headers: [Header] { headerList.rows }
@@ -113,6 +127,13 @@ final class SignInModel {
     @ObservationIgnored var serverSwitch: ServerSwitch?
     /// The link this page was opened with has been taken: a page shown again never takes it twice.
     @ObservationIgnored var didOpenJoin = false
+    /// Where family links may take this form (see `LinkFormState`); its note is the link note.
+    private var linkState = LinkFormState(.fresh)
+    /// Why the last link was refused, shown under the address field.
+    var linkNote: String? { linkState.note }
+    /// Bumped when a link pasted into the address is refused, so the field is drawn again without
+    /// the pasted text.
+    private(set) var addressResets = 0
 
     // MARK: Joining a family
 
@@ -126,12 +147,27 @@ final class SignInModel {
     var joinName = ""
     var joinPassword = ""
     var joinAgain = ""
-    /// An account the invite made, kept until it signs in, since an invite works once.
-    private var signedUp: (username: String, password: String)?
+    /// An account the invite made, kept until it signs in, since an invite works once, with the
+    /// main address the sign-up started from: the sign-in goes there, and the address field stays
+    /// as it is while this is held.
+    private var signedUp: (username: String, password: String, main: URL)?
     /// A sign-in received from another device, kept until signed in with: a hand-over works once,
     /// so a certificate asked about afterwards does not redeem it again.
     private var received: HandOverSignIn?
     private var receiving: Task<Void, Never>?
+    /// A hand-over waits for the other device to allow it: leaving now is harmless, so every way
+    /// out stays open and cancels it.
+    private(set) var waiting = false
+    /// A request that commits is running (a sign-up, a sign-in, a hand-over's sign-in after Allow):
+    /// every way out waits for it.
+    var committing: Bool { busy && !waiting }
+    /// A finished sign-up is held: its account is made but not yet signed in to.
+    var holdsSignUp: Bool { signedUp != nil }
+    /// A sign-in is open here: running, a certificate question waiting, or a received sign-in or a
+    /// finished sign-up held, each of which works only once. A link from outside never replaces it.
+    var signInOpen: Bool {
+        OctoKit.signInOpen(busy: busy, question: question != nil, holdsReceived: received != nil, holdsSignUp: signedUp != nil)
+    }
     /// What the saved server looked like, for telling a rename from a real change.
     private let saved: StoredServer?
     private let savedHeaderNames: [String]
@@ -140,6 +176,8 @@ final class SignInModel {
         self.form = form
         saved = form.server
         savedHeaderNames = form.server.map { session.savedHeaderNames($0.id) } ?? []
+        // A form opened for a kept server is about that server and account alone.
+        linkState = LinkFormState(form.server == nil ? .fresh : .keptServer)
         guard let server = form.server else { return }
         let (scheme, rest) = ServerAddress.split(ServerAddress.shown(server.address))
         self.rest = rest
@@ -165,6 +203,9 @@ final class SignInModel {
         if hadCertificate { readSavedExpiry(server.id) }
         takesApiKeys = server.takesApiKeys
         if case .again(_, let note) = form { error = note }
+        // After the fill's own writes, each of which ends an anchor.
+        linkState.filled(LinkAnchor(main: server.address.absoluteString, home: server.homeAddress?.absoluteString,
+                                    username: server.username))
     }
 
     /// Editing a kept server's details, so empty secrets keep the saved ones.
@@ -284,10 +325,21 @@ final class SignInModel {
         if !schemePicked, !rest.isEmpty { scheme = ServerAddress.automaticScheme(rest) }
     }
 
+    /// The address, its scheme or the home changed: the form is no longer tied to a saved server or
+    /// to the links taken so far.
+    private func linkEdited() {
+        let home: String? = switch ServerAddress.home(homeAddress, main: url) {
+        case .address(let read): read.absoluteString
+        case .none, .unreadable: nil
+        }
+        linkState.edited(address: url?.absoluteString, home: home,
+                         addressNonBlank: !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     /// What the address field takes: a family link starts the join instead of being typed in.
     func typeAddress(_ text: String, session: Session) {
         if let link = parseFamilyLink(text) {
-            startJoin(link, session: session)
+            if !startJoin(link, session: session) { addressResets += 1 }
         } else {
             rest = text
         }
@@ -480,6 +532,7 @@ final class SignInModel {
         case .edit(let server), .editConnection(let server): .edit(server.id)
         }
         busy = true
+        waiting = false
         defer { busy = false }
         let previous = session.inUse != nil ? session.active : nil
         do {
@@ -551,20 +604,44 @@ final class SignInModel {
 
     // MARK: Join
 
-    /// Turns the join part on. With a link: types its server in, takes its home address, and
-    /// shows the sign-up for an invite, receives a hand-over at once, or fills in the ordinary
-    /// form for a sign-in to fill in.
-    func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) {
+    /// Turns the join part on. A link goes to the form's link state first: a link the form takes
+    /// types its server in, takes its home address, and shows the sign-up for an invite, receives a
+    /// hand-over at once, or fills in the ordinary form for a sign-in to fill in; a link to another
+    /// server first forgets everything typed or saved for the last one. A refused link changes
+    /// nothing but the link note; the camera closes either way. Answers whether it was taken.
+    @discardableResult
+    func startJoin(_ link: FamilyLink? = nil, session: Session? = nil) -> Bool {
         scanning = false
-        error = nil
         guard let link else {
+            error = nil
             joining = true
-            return
+            return true
         }
-        rest = link.server
-        if let home = link.home { homeAddress = home }
-        signedUp = nil
-        received = nil
+        let action = linkState.take(link.facts, busy: busy || question != nil, home: homeAddress)
+        guard case .take(let kind, let address, let home, _) = action else {
+            linkState.took(action)
+            return false
+        }
+        error = nil
+        if kind == .forget {
+            // Nothing of the last server goes to this one; a prefill's username is written below.
+            let named: String? = if case .prefill(let prefill) = link { prefill.username } else { nil }
+            forgetLastServer(linkUsername: named)
+        }
+        if let address { rest = address }
+        if let home { homeAddress = home }
+        linkState.took(action)
+        // The same invite or hand-over opened again keeps what it already made: it works once. A link
+        // to another server is never the same one, whatever its token.
+        let sameToken: Bool = switch link {
+        case .invite(let held): held.token == invite?.token
+        case .handOver(let held): held.token == handOver?.token
+        case .prefill: false
+        }
+        if kind == .forget || !sameToken {
+            signedUp = nil
+            received = nil
+        }
         invite = nil
         handOver = nil
         handOverStep = nil
@@ -582,15 +659,60 @@ final class SignInModel {
             password = ""
             useApiKey = false
         }
+        return true
     }
 
-    /// Back to the ordinary password form. A hand-over still running can still finish.
+    /// A link or a received sign-in for another server: nothing typed or saved for the last one
+    /// stays, as `LinkFields.forgotten` lists it. The username stays only for a link that names one,
+    /// which then writes it in.
+    private func forgetLastServer(linkUsername: String?) {
+        let fields = LinkFields(headers: headerList, gatewayKind: gatewayKind, gatewaySaved: gatewaySaved, gatewayFirst: gatewayFirst,
+                                gatewaySecond: gatewaySecond, legacy: legacy, useApiKey: useApiKey, apiKey: apiKey, password: password,
+                                joinName: joinName, joinPassword: joinPassword, joinAgain: joinAgain, username: username,
+                                takesApiKeys: takesApiKeys, certificatePicked: certificate != nil)
+            .forgotten(linkUsername: linkUsername)
+        headerList = fields.headers
+        var state = gatewayForm
+        state.kind = fields.gatewayKind
+        useGatewayForm(state)
+        gatewaySaved = fields.gatewaySaved
+        gatewayFirst = fields.gatewayFirst
+        gatewaySecond = fields.gatewaySecond
+        legacy = fields.legacy
+        useApiKey = fields.useApiKey
+        apiKey = fields.apiKey
+        password = fields.password
+        joinName = fields.joinName
+        joinPassword = fields.joinPassword
+        joinAgain = fields.joinAgain
+        username = fields.username
+        takesApiKeys = fields.takesApiKeys
+        if !fields.certificatePicked { certificate = nil }
+    }
+
+    /// Back to the ordinary password form. Refused while a request that commits runs; a hand-over
+    /// still waiting for Allow is cancelled. A finished sign-up's username stays in the username
+    /// field, since the server chose it.
     func stopJoin() {
+        guard !committing else { return }
+        receiving?.cancel()
+        receiving = nil
+        busy = false
+        waiting = false
+        handOverStep = nil
+        leaveJoin()
+    }
+
+    /// Leaves the link: the sign-up or hand-over it held is spent.
+    private func leaveJoin() {
+        if let account = signedUp { username = account.username }
         joining = false
         invite = nil
         handOver = nil
         handOverStep = nil
         received = nil
+        signedUp = nil
+        linkState.left()
         error = nil
     }
 
@@ -609,6 +731,7 @@ final class SignInModel {
         guard !busy, joinMissing == nil, let url, let invite else { return }
         useGatewayForm(OctoKit.sending(gatewayForm))
         busy = true
+        waiting = false
         error = nil
         defer { busy = false }
         let home: URL?
@@ -642,7 +765,9 @@ final class SignInModel {
             client.session.finishTasksAndInvalidate()
             switch outcome {
             case .signedUp(let name, let chosen, _):
-                signedUp = (name, chosen)
+                // Kept with the main address the sign-up started from, never the home address it may
+                // have fallen back to: the sign-in goes there.
+                signedUp = (name, chosen, url)
             case .untrusted(let host):
                 if let rejected = ServerTrust.shared.rejection(for: host) {
                     question = rejected
@@ -659,7 +784,7 @@ final class SignInModel {
         }
         guard let account = signedUp else { return }
         let fields = Session.Form(
-            address: url, homeAddress: home, label: nil, username: account.username, secret: account.password, mode: .token,
+            address: account.main, homeAddress: home, label: nil, username: account.username, secret: account.password, mode: .token,
             headers: rows, gateway: gatewayDraft,
             certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false, certificateName: certificate?.name)
         let previous = session.inUse != nil ? session.active : nil
@@ -713,6 +838,8 @@ final class SignInModel {
             }
         }
         busy = true
+        // Only a redeem waits for the other device; a sign-in received already commits at once.
+        waiting = received == nil
         error = nil
         let attempt = sentAddress
         let kept = received
@@ -726,14 +853,21 @@ final class SignInModel {
                 result = await receiveHandOver(link, connect: { client.at($0) }, deviceName: device, platform: .iOS, step: step)
             }
             client.session.finishTasksAndInvalidate()
+            guard !Task.isCancelled else { return }
             await self?.finish(result, session: session, host: base.host, attempt: attempt)
         }
     }
 
     private func show(step words: String) { handOverStep = words }
 
+    /// The hand-over's result. A cancelled run (the person left the link) ends here with nothing
+    /// shown, since a cancel reads as a refused, expired link. The sealed sign-in is checked against
+    /// the form before anything is sent, on every retry that reuses it too.
     private func finish(_ result: HandOverResult, session: Session, host: String?, attempt: String) async {
+        guard !Task.isCancelled else { return }
+        waiting = false
         defer { busy = false }
+        var attempt = attempt
         switch result {
         case .refused(let words, let gateway, _):
             handOverStep = nil
@@ -747,19 +881,56 @@ final class SignInModel {
             error = words
             met(attempt, gateway)
         case .received(let signIn):
-            guard let address = ServerAddress.parse(signIn.server) else {
-                handOverStep = nil
-                error = SignInWords.badAddress
+            let check = linkState.received(signIn.facts)
+            switch check {
+            case .refuse(let why):
+                // The hand-over is spent: the form leaves it, then says why.
+                leaveJoin()
+                linkState.noted(why.words)
                 return
+            case .forgetAndAdopt(let address, let home, _):
+                // Another server: nothing of the last one goes to it, and the form shows where the
+                // sign-in goes, so a retry checks against it and failures belong to it.
+                forgetLastServer(linkUsername: nil)
+                rest = address
+                homeAddress = home
+                linkState.adopted(check)
+                attempt = sentAddress
+            case .keep:
+                break
             }
+            let address: URL
             let homeURL: URL?
-            switch ServerAddress.home(signIn.home ?? "", main: address) {
-            case .none: homeURL = nil
-            case .address(let home): homeURL = home
-            case .unreadable:
-                handOverStep = nil
-                error = SignInWords.badHomeAddress
-                return
+            if check == .keep(useForm: true) {
+                // The kept server's own addresses, the ones the redeem just used.
+                guard let url else {
+                    handOverStep = nil
+                    error = SignInWords.badAddress
+                    return
+                }
+                switch readHome() {
+                case .success(let read): homeURL = read
+                case .failure(let failure):
+                    handOverStep = nil
+                    error = failure.localizedDescription
+                    return
+                }
+                address = url
+            } else {
+                guard let parsed = ServerAddress.parse(signIn.server) else {
+                    handOverStep = nil
+                    error = SignInWords.badAddress
+                    return
+                }
+                switch ServerAddress.home(signIn.home ?? "", main: parsed) {
+                case .none: homeURL = nil
+                case .address(let home): homeURL = home
+                case .unreadable:
+                    handOverStep = nil
+                    error = SignInWords.badHomeAddress
+                    return
+                }
+                address = parsed
             }
             let mode: AuthMode = switch signIn.mode {
             case "LegacyPassword": .legacyPassword
@@ -772,9 +943,11 @@ final class SignInModel {
                                       certificate: certificate.map { ($0.data, $0.password) }, removesCertificate: false,
                                       certificateName: certificate?.name)
             received = signIn
+            // A kept server's own form signs in to that server again, so it is updated in place.
+            let purpose: Session.Purpose = form.server.map { .signInAgain($0.id) } ?? .signIn
             let previous = session.inUse != nil ? session.active : nil
             do {
-                _ = try await session.keepServer(fields, for: .signIn)
+                _ = try await session.keepServer(fields, for: purpose)
                 notice = serverSwitch?.signInNotice(previous: previous)
                 handOverStep = handOverSignedIn
                 handOver = nil
@@ -799,6 +972,11 @@ final class SignInModel {
     func leave() {
         receiving?.cancel()
         expiryRead?.cancel()
+    }
+
+    /// Words for the link note from outside the form: a link that came in while this sign-in was open.
+    func noteLink(_ words: String) {
+        linkState.noted(words)
     }
 }
 

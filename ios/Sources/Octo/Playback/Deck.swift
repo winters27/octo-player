@@ -156,13 +156,17 @@ final class Deck {
         pace = next
         timePitch.rate = next.speed
         timePitch.pitch = next.pitch > 0 ? 1200 * log2(next.pitch) : 0
-        timePitch.bypass = next.speed == 1 && next.pitch == 1
+        timePitch.bypass = stageSetting.bypass
         refreshLatency()
         render.orders.withLock { $0.speed = next.speed }
     }
 
-    /// The time-pitch stage's latency in bus frames, 0 while it is bypassed.
-    var latencyFrames: Double { timePitch.bypass ? 0 : timePitch.latency * deckRate }
+    private var stageSetting: (bypass: Bool, latencyFrames: Double) {
+        timePitchSetting(speed: pace.speed, pitch: pace.pitch, latencySeconds: timePitch.latency, deckRate: deckRate)
+    }
+
+    /// How far the time-pitch stage delays this deck's sound, in bus frames, bypassed or not.
+    var latencyFrames: Double { stageSetting.latencyFrames }
 
     /// The stage's latency read again (it is known once the engine runs), for this deck's render
     /// and for main's own estimate of the larger of the two.

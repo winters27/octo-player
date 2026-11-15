@@ -125,16 +125,23 @@ class SignInSitesTest {
     }
 
     // The hosts draw only the form's own entries; FormGroups is where the
-    // real field is, and SecretField now sits after the password sheet.
+    // real field is. The pop-ups that ask for a password (Change password and
+    // the certificate's) draw them too, in a group under a sheet's title.
     @Test
     fun noRawEntryInTheSignInHosts() {
+        val certificate = main("pages/CertificateRow.kt")
+        val password = slice(servers, "private fun ColumnScope.PasswordSheet(", "fun askToRemove(")
         val raw = listOf("GlassField(", "SecretField(", "BasicTextField(", "TextField(")
-        listOf("SignInPage.kt" to page, "JoinFlow.kt" to join, "ServerSheet" to sheet).forEach { (name, text) ->
+        listOf("SignInPage.kt" to page, "JoinFlow.kt" to join, "ServerSheet" to sheet, "ServersSection.kt" to servers, "CertificateRow.kt" to certificate).forEach { (name, text) ->
             raw.forEach { assertFalse("$name holds $it", text.contains(it)) }
         }
         assertTrue(sheet.contains("FormFieldRow("))
+        listOf("PasswordSheet" to password, "CertificatePassword" to certificate.substringAfter("private fun ColumnScope.CertificatePassword(")).forEach { (name, text) ->
+            assertTrue(name, text.contains("FormSheetTitle("))
+            assertEquals(name, 0, count(text, "MenuTitle("))
+            assertTrue(name, text.contains("FormFieldRow("))
+        }
         assertTrue(groups.contains("GlassField("))
-        assertTrue(servers.substringAfter("fun changePassword(").contains("internal fun SecretField("))
     }
 
     // Only the address row passes a leading part (the scheme toggle).

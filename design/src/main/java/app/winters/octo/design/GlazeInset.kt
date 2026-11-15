@@ -20,22 +20,36 @@ import androidx.compose.ui.unit.dp
 // what is behind. It casts a contact shadow onto that surface (without it,
 // it reads as a hole cut through), has a faint rim all round inside, and
 // light bounces back up along its bottom edge. `focused` false (a desktop
-// window in the background) turns its specular off.
+// window in the background) turns its specular off. `flat` draws the fill
+// alone, with no shadow, rim or light: a control that cannot be used yet,
+// lying flat in its surface rather than standing on it.
 @Composable
 fun GlazeInset(
     fill: Color,
     shape: Shape,
     modifier: Modifier = Modifier,
     focused: Boolean = LocalWindowFocused.current,
+    flat: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val contour = shadowColor(0.40f)
+    val contact = shadowColor(0.05f)
+    val soft = shadowColor(0.10f)
+    val rim = glassRim(if (focused) 0.10f else 0.05f)
+    val bounce = glassRim(if (focused) 0.10f else 0.04f)
     Box(
-        modifier
-            // A half-pixel dark contour against a bright surface.
-            .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = shadowColor(0.40f)))
-            // The contact shadow: a hard line, then a soft one.
-            .dropShadow(shape, Shadow(radius = 0.dp, color = shadowColor(0.05f), offset = DpOffset(0.dp, 1.dp)))
-            .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = shadowColor(0.10f), offset = DpOffset(0.dp, 1.dp))),
+        modifier.then(
+            if (flat) {
+                Modifier
+            } else {
+                Modifier
+                    // A half-pixel dark contour against a bright surface.
+                    .dropShadow(shape, Shadow(radius = 0.dp, spread = 0.5.dp, color = contour))
+                    // The contact shadow: a hard line, then a soft one.
+                    .dropShadow(shape, Shadow(radius = 0.dp, color = contact, offset = DpOffset(0.dp, 1.dp)))
+                    .dropShadow(shape, Shadow(radius = shadowBlur(3f), color = soft, offset = DpOffset(0.dp, 1.dp)))
+            },
+        ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -43,14 +57,21 @@ fun GlazeInset(
                 .matchParentSize()
                 .clip(shape)
                 .background(fill)
-                // The inner rim, all round.
-                .innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = glassRim(if (focused) 0.10f else 0.05f)))
-                // The light line along the bottom inside edge.
-                .innerShadow(shape, Shadow(radius = 0.dp, color = glassRim(if (focused) 0.10f else 0.04f), offset = DpOffset(0.dp, (-0.5).dp))),
+                .then(
+                    if (flat) {
+                        Modifier
+                    } else {
+                        Modifier
+                            // The inner rim, all round.
+                            .innerShadow(shape, Shadow(radius = 0.dp, spread = 1.dp, color = rim))
+                            // The light line along the bottom inside edge.
+                            .innerShadow(shape, Shadow(radius = 0.dp, color = bounce, offset = DpOffset(0.dp, (-0.5).dp)))
+                    },
+                ),
         )
         // Specular, masked to the middle, at the three-quarter strength
         // nested components use.
-        if (focused) Specular(shape, glassRim(0.14f), glassRim(0.11f), strength = 0.75f)
+        if (focused && !flat) Specular(shape, glassRim(0.14f), glassRim(0.11f), strength = 0.75f)
         content()
     }
 }
