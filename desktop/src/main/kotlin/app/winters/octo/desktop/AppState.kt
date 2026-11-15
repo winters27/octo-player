@@ -234,7 +234,7 @@ class AppState(
     // Opens Settings on `page` (or the page it last showed), bringing `row`
     // into view when given. Already in Settings, it only moves there.
     fun openSettings(page: String? = null, row: String? = null) {
-        if (!popups.dismiss()) return
+        if (!popups.dismissAll()) return
         fullPlayer = false
         if (page != null) settingsUi.page = page
         settingsUi.aim(row)
@@ -249,9 +249,9 @@ class AppState(
     }
 
     // Settings' shortcut: leaves Settings when in it, else opens it on the
-    // page it last showed. An open menu closes first.
+    // page it last showed. Every pop-up open closes first.
     fun toggleSettings() {
-        if (!popups.dismiss()) return
+        if (!popups.dismissAll()) return
         if (inSettings) leaveSettings() else openSettings()
     }
 

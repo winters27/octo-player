@@ -219,12 +219,13 @@ class SignInSitesTest {
     }
 
     // Every way a pop-up closes but its own buttons asks the host, and none
-    // moves the page when it refuses.
+    // moves the page when it refuses: Escape and a press outside close the
+    // open one (one kept under it comes back), Settings closes them all.
     @Test
     fun everyCloseButTheSheetsOwnGoesThroughDismiss() {
         assertTrue(menus.contains("Key.Escape -> host.dismiss()"))
         assertTrue(menus.contains("awaitFirstDown(requireUnconsumed = true)\n                    host.dismiss()"))
-        assertEquals(2, count(app, "if (!popups.dismiss()) return"))
+        assertEquals(2, count(app, "if (!popups.dismissAll()) return"))
         assertTrue(app.contains("popups.open -> popups.dismiss()"))
         assertFalse(app.contains("popups.close()"))
     }

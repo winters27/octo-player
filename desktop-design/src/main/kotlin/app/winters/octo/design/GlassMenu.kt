@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -154,12 +156,28 @@ class PopupRequest(
     // A sign-in in it that is committing, so closing waits for it to end.
     val busy: () -> Boolean = { false },
     // A sign-in open in it, so a link does not replace it.
-    val open: () -> Boolean = { false },
+    open: () -> Boolean = { false },
     // Where the words of a link refused while it is open go.
-    val noteLink: (String) -> Unit = {},
+    noteLink: (String) -> Unit = {},
     // A family link opened it.
-    val link: Boolean = false,
-)
+    link: Boolean = false,
+    // The pop-up it was opened over, kept as it is, out of sight, until
+    // this one closes.
+    val under: PopupRequest? = null,
+    // What takes the keyboard once it closes (the control that opened it),
+    // in the pop-up under it or on the page.
+    val returnTo: FocusRequester? = null,
+) {
+    // What a link must not replace counts the pop-up under it too: a sign-in
+    // open in either, the refused link's words shown in both, and a family
+    // link's sheet still open under it.
+    val open: () -> Boolean = if (under == null) open else ({ open() || under.open() })
+    val noteLink: (String) -> Unit = if (under == null) noteLink else ({ words -> noteLink(words); under.noteLink(words) })
+    val link: Boolean = link || under?.link == true
+}
+
+// The open pop-up and every one kept under it, the open one first.
+private fun PopupRequest?.andUnder(): Sequence<PopupRequest> = generateSequence(this) { it.under }
 
 // How dark the shade over the part of the window a question is about.
 private const val OVER_SHADE = 0.40f
@@ -186,7 +204,10 @@ private fun ScrimBlur(): HazeBlurStyle {
 val PopupMaxHeight = 560.dp
 
 // Shows floating glass pop-ups over the whole window: menus at the pointer,
-// small forms, song details. One at a time; a new one replaces the old.
+// small forms, song details. One shows at a time, and a new one replaces
+// the old, unless it is kept over it (`keepUnder`, a sheet's certificate
+// asking for its password): the old one then waits as it is, out of sight,
+// and comes back once the new one closes.
 @Stable
 class PopupHost {
     var request by mutableStateOf<PopupRequest?>(null)
@@ -213,7 +234,10 @@ class PopupHost {
     // sign-in form says when it is committing (`busy`, then nothing closes
     // it but its own buttons) and when a sign-in is open in it (`open`,
     // then a link must not replace it), where a refused link's words go
-    // (`noteLink`), and whether a family link opened it (`link`).
+    // (`noteLink`), and whether a family link opened it (`link`). A question
+    // a pop-up asks on its way (`keepUnder`) keeps that pop-up under it
+    // rather than replacing it, and `returnTo` takes the keyboard once it
+    // closes.
     fun showCentred(
         width: Dp? = 380.dp,
         maxHeight: Dp = PopupMaxHeight,
@@ -225,23 +249,43 @@ class PopupHost {
         open: () -> Boolean = { false },
         noteLink: (String) -> Unit = {},
         link: Boolean = false,
+        keepUnder: Boolean = false,
+        returnTo: FocusRequester? = null,
         content: @Composable ColumnScope.(close: () -> Unit) -> Unit,
     ) {
         if (this.busy) return
-        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link)
+        val under = if (keepUnder) request else null
+        request = PopupRequest(null, null, width, content, maxHeight, scrim, scrollsItself, over, first, busy, open, noteLink, link, under, returnTo)
     }
 
+    // Closes the open pop-up; the one it was kept over comes back.
     fun close() {
-        request = null
+        request = request?.under
     }
 
-    // Whether the open pop-up holds a sign-in that is committing.
-    val busy: Boolean get() = request?.busy?.invoke() == true
+    // Closes `shown` and whatever was kept over it, as its own buttons do;
+    // the one it was kept over comes back. Once it has gone, nothing.
+    fun close(shown: PopupRequest) {
+        if (request.andUnder().any { it === shown }) request = shown.under
+    }
 
-    // Closes the open pop-up the way Escape, a press outside it, Settings
-    // and the Mac menu do: not while its sign-in is committing. False when it
-    // stays.
+    // Whether a pop-up open, or one kept under it, holds a sign-in that is
+    // committing.
+    val busy: Boolean get() = request.andUnder().any { it.busy() }
+
+    // Closes the open pop-up the way Escape and a press outside it do: not
+    // while its sign-in is committing. The one it was kept over comes back.
+    // False when it stays.
     fun dismiss(): Boolean {
+        val top = request ?: return true
+        if (top.busy()) return false
+        request = top.under
+        return true
+    }
+
+    // Closes every pop-up open the way Settings and the Mac menu do: not
+    // while one holds a sign-in that is committing. False when they stay.
+    fun dismissAll(): Boolean {
         if (busy) return false
         request = null
         return true
@@ -265,24 +309,60 @@ private const val POPUP_MS = OctoDuration.Hover
 // the card while it is open: the arrow keys and Tab walk its rows, Enter
 // picks one. Opened from the
 // keyboard, its first row has the keyboard at once; once it shuts, what
-// had it before gets it back.
+// had it before gets it back. A pop-up kept under the open one stays drawn
+// as it was, out of sight, and the page is shaded once under both.
 @Composable
 fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     val request = host.request
-    // Hands the keyboard back once the pop-up that had it has gone.
+    // Hands the keyboard back once the pop-up that had it has gone: to the
+    // control that opened the last one, else to what had it before the
+    // first.
     var held by remember { mutableStateOf<PopupRequest?>(null) }
     var handBack by remember { mutableStateOf(false) }
     LaunchedEffect(request) {
+        if (request != null && held != null) held = request
         if (request == null && held != null) {
+            val back = held?.returnTo
             held = null
-            if (handBack) runCatching { host.returnFocus?.invoke() }
+            val returned = back != null && runCatching { back.requestFocus(FocusDirection.Enter) }.getOrDefault(false)
+            if (handBack && !returned) runCatching { host.returnFocus?.invoke() }
             handBack = false
         }
     }
     if (request == null) return
+    val keyboard = LocalFocusVisibility.current.keyboard
+    // The lowest first, so the open one draws over the one kept under it.
+    val shown = remember(request) { request.andUnder().toList().asReversed() }
+    // The page is shaded by the lowest that asks for it, so one kept over a
+    // sheet lies on the sheet's own shade, never a second one.
+    val shading = shown.firstOrNull { it.scrim }
+    shown.forEachIndexed { index, layer ->
+        key(layer) {
+            PopupCard(host, layer, backdrop, above = shown.getOrNull(index + 1), shade = layer === shading) {
+                // Only for the keyboard: after a click the keyboard stays where
+                // the click put it, and an old field is never woken.
+                if (held == null && keyboard) {
+                    handBack = true
+                    runCatching { host.saveFocus?.invoke() }
+                }
+                held = layer
+            }
+        }
+    }
+}
+
+// One pop-up of the layer. `above` is the one kept over it, if any: it is
+// then out of sight, and nothing in it is read out, takes the keyboard or
+// hears the pointer, and once that one closes it comes back as it was, the
+// keyboard on what opened that one. `shade` draws the page's scrim under
+// it. `opened` hears it open.
+@Composable
+private fun PopupCard(host: PopupHost, request: PopupRequest, backdrop: HazeState, above: PopupRequest?, shade: Boolean, opened: () -> Unit) {
+    val top = above == null
     val raised = CardFill
     val motion = motionScale()
     val grow = remember(request) { Animatable(0f) }
+    val showing = remember(request) { Animatable(1f) }
     val focus = remember(request) { FocusRequester() }
     val card = remember(request) { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -293,18 +373,15 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
     // tries in a row at most, so nothing can bounce for ever.
     var had by remember(request) { mutableStateOf(false) }
     var tries by remember(request) { mutableIntStateOf(0) }
+    // The pop-up last kept over it, for what to give the keyboard back to.
+    val kept = remember(request) { arrayOfNulls<PopupRequest>(1) }
+    if (above != null) kept[0] = above
     fun takeKeyboard(rows: Boolean) {
         runCatching { focus.requestFocus() }
         if (rows) runCatching { card.requestFocus(FocusDirection.Enter) }
     }
     LaunchedEffect(request) {
-        // Only for the keyboard: after a click the keyboard stays where the
-        // click put it, and an old field is never woken.
-        if (held == null && keyboard) {
-            handBack = true
-            runCatching { host.saveFocus?.invoke() }
-        }
-        held = request
+        opened()
         takeKeyboard(rows = false)
         // Opened from the keyboard, its first row takes it once laid out;
         // a card naming what goes first gives it the keyboard however it
@@ -319,8 +396,21 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
         }
         grow.animateTo(1f, octoTween(motion, POPUP_MS))
     }
+    LaunchedEffect(top) {
+        if (!top) {
+            showing.animateTo(0f, octoTween(motion, POPUP_MS))
+            return@LaunchedEffect
+        }
+        val gone = kept[0] ?: return@LaunchedEffect
+        kept[0] = null
+        // Once it can take the keyboard again.
+        withFrameNanos { }
+        val back = gone.returnTo
+        if (back == null || !runCatching { back.requestFocus(FocusDirection.Enter) }.getOrDefault(false)) takeKeyboard(rows = keyboard)
+        showing.animateTo(1f, octoTween(motion, POPUP_MS))
+    }
     var origin by remember(request) { mutableStateOf(TransformOrigin(0f, 0f)) }
-    if (request.scrim) {
+    if (shade) {
         // The page behind, dimmed and blurred, for a dialog.
         Box(
             Modifier
@@ -355,7 +445,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                 halo = true,
                 modifier = Modifier
                     .graphicsLayer {
-                        val shown = grow.value
+                        val shown = grow.value * showing.value
                         // With motion reduced it only fades.
                         val scale = motion.scale(0.94f + 0.06f * shown)
                         scaleX = scale
@@ -372,19 +462,25 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                 Column(
                     Modifier
                         .focusRequester(card)
-                        // The keyboard stays among the rows while the card is open.
-                        .focusProperties { onExit = { if (host.request === request) cancelFocusChange() } }
+                        // The keyboard stays among the rows while the card is
+                        // open, and never comes in while one is kept over it.
+                        .focusProperties {
+                            onExit = { if (host.request === request) cancelFocusChange() }
+                            onEnter = { if (host.request !== request) cancelFocusChange() }
+                        }
                         .focusGroup()
                         .heightIn(max = request.maxHeight)
                         .then(if (request.scrollsItself) Modifier else Modifier.scrollbar(scroll).verticalScroll(scroll))
                         .padding(vertical = 6.dp),
                 ) {
-                    request.content(this) { host.close() }
+                    request.content(this) { host.close(request) }
                 }
             }
         },
         modifier = Modifier
             .fillMaxSize()
+            // Out of sight under one kept over it, it is not read out.
+            .then(if (top) Modifier else Modifier.clearAndSetSemantics { })
             .onFocusChanged {
                 when {
                     it.hasFocus && !it.isFocused -> {
@@ -404,6 +500,7 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                     }
                 }
             }
+            .focusProperties { canFocus = top }
             .focusRequester(focus)
             .focusable()
             .onKeyEvent { event ->
@@ -416,7 +513,9 @@ fun PopupLayer(host: PopupHost, backdrop: HazeState) {
                 }
                 true
             }
-            .pointerInput(request) {
+            // A press off the open card closes it; one kept under it hears none.
+            .pointerInput(request, top) {
+                if (!top) return@pointerInput
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = true)
                     host.dismiss()

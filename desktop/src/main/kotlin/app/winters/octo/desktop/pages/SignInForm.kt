@@ -12,6 +12,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
 import app.winters.octo.connection.AdvancedLayout
 import app.winters.octo.connection.GatewayDraft
 import app.winters.octo.connection.GatewayFormState
@@ -193,6 +194,10 @@ class SignInForm(last: SavedServer? = null, val keepsSecret: Boolean = false, ce
 
     // The latest file opening, so an older one's answer is let go.
     internal var certificateTurn: Any? = null
+
+    // The row's Choose or Change, which has the keyboard again once the
+    // password asked for a chosen file is given or not.
+    internal val certificateButton = FocusRequester()
 
     // Takes a file opened on the row.
     fun useCertificate(picked: PickedCertificate) {
