@@ -31,6 +31,7 @@ struct VersionsSheet: View {
         NavigationStack {
             content
                 .navigationTitle(StreamVersionWords.title)
+                .navigationSubtitle(StreamVersionWords.songLine(title: song.title, artist: song.artist ?? ""))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { done }
         }
@@ -49,8 +50,15 @@ struct VersionsSheet: View {
         }
     }
 
+    /// The list, with the footer in the bar under it while the song streams (with no list to choose
+    /// from, nothing is said about choosing).
+    @ViewBuilder
     private var content: some View {
-        list.safeAreaInset(edge: .bottom, spacing: 0) { footer }
+        if let shown, shown.answer.playsFrom == PLAYS_FROM_STREAM {
+            list.safeAreaBar(edge: .bottom, spacing: 0) { footer(shown) }
+        } else {
+            list
+        }
     }
 
     /// The server's answer, once the sheet shows one.
@@ -61,34 +69,54 @@ struct VersionsSheet: View {
     private var list: some View {
         let shown = shown
         return List {
-            Section {
-                Text(StreamVersionWords.songLine(title: song.title, artist: song.artist ?? ""))
-                    .font(.octoBodySmall)
-                    .foregroundStyle(OctoColor.textMuted)
-                    .listRowBackground(Color.clear)
-            }
             if let shown, let playing = shown.playing {
-                Section(StreamVersionWords.playingNow) {
+                Section {
                     PlayingVersionRow(playing: playing, note: StreamVersionWords.playingNote(playing, heardVideoId: shown.answer.heardVideoId))
+                } header: {
+                    groupTitle(StreamVersionWords.playingNow)
                 }
             }
-            if let line = StreamVersionWords.stateLine(state) {
+            if shown == nil, let line = StreamVersionWords.stateLine(state) {
                 Section { stateRow(line) }
             }
             if let shown, shown.picksOpen {
-                Section(StreamVersionWords.otherVersions) { others(shown) }
+                Section {
+                    others(shown)
+                } header: {
+                    groupTitle(StreamVersionWords.otherVersions)
+                } footer: {
+                    // The notice over the list, as a note under its title's card.
+                    if let notice = shown.notice { FormNote(.info, notice) }
+                }
+            } else if let shown, let notice = shown.notice {
+                // Busy, a file or a download: the server's words, no rows.
+                Section { FormNote(.info, notice) }
             }
         }
         .listStyle(.insetGrouped)
+        .scrollIndicatorsFlash(trigger: shown?.rows.count ?? 0)
     }
 
-    /// Where the sheet stands, in its own words: looking (with a spinner), could not reach (with
-    /// Try again), the server's refusal, or the notice above the list.
+    /// A group's title, set as the form groups' titles are, never in small capitals.
+    private func groupTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.octoFormGroup)
+            .foregroundStyle(OctoColor.textPrimary)
+            .textCase(nil)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Where the sheet stands, before an answer: looking (with a spinner), or could not reach or
+    /// the server's refusal as an error note, with Try again when it may work later.
     @ViewBuilder
     private func stateRow(_ line: String) -> some View {
-        HStack(spacing: 10) {
-            if case .looking = state { ProgressView() }
-            Text(line).font(.octoBodySmall).foregroundStyle(OctoColor.textMuted)
+        if case .looking = state {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text(line).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary)
+            }
+        } else {
+            FormNote(.error, line)
         }
         if case .couldNotReach = state {
             Button(StreamVersionWords.tryAgain, action: retry)
@@ -98,22 +126,24 @@ struct VersionsSheet: View {
     @ViewBuilder
     private func others(_ shown: StreamVersionsShown) -> some View {
         if let empty = shown.emptyText {
-            Text(empty).font(.octoBodySmall).foregroundStyle(OctoColor.textMuted)
+            Text(empty).font(.octoBodySmall).foregroundStyle(OctoColor.textSecondary)
         }
         ForEach(shown.rows, id: \.videoId) { version in
-            VersionChoiceRow(version: version, checking: shown.checking == version.videoId,
+            let checking = shown.checking == version.videoId
+            VersionChoiceRow(version: version, checking: checking,
                              refused: shown.refused == version.videoId ? shown.refusal : nil) { pick(version.videoId) }
                 .disabled(shown.checking != nil)
+                // The others wait, dimmed, while one pick is checked.
+                .opacity(shown.checking != nil && !checking ? 0.5 : 1)
         }
     }
 
-    /// The footer, above the home indicator whatever the list's length: whose the pick is for, and
-    /// while a person's pick stands, the way back to Octo's.
-    private var footer: some View {
-        let shown = shown
-        return VStack(alignment: .leading, spacing: 8) {
+    /// The footer, in the bar above the home indicator whatever the list's length: whose the pick
+    /// is for, and while a person's pick stands, the way back to Octo's.
+    private func footer(_ shown: StreamVersionsShown) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             Text(StreamVersionWords.note).font(.octoCaption).foregroundStyle(OctoColor.textSecondary)
-            if let shown, shown.canUndo {
+            if shown.canUndo {
                 HStack(spacing: 8) {
                     Button(StreamVersionWords.goBack) { pick(nil) }
                         .font(.octoLabel)
@@ -121,14 +151,13 @@ struct VersionsSheet: View {
                     if shown.checking == STREAM_VERSION_AUTO { ProgressView() }
                 }
             }
-            if let shown, shown.refused == STREAM_VERSION_AUTO, let words = shown.refusal {
-                Text(words).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+            if shown.refused == STREAM_VERSION_AUTO, let words = shown.refusal {
+                FormNote(.error, words)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(.bar)
     }
 
     private func look() async {
@@ -203,27 +232,29 @@ private struct PlayingVersionRow: View {
     let note: String
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(playing.title ?? playing.videoId).font(.octoBody).lineLimit(2)
                 Text(StreamVersionWords.rowDetail(channel: playing.channel, seconds: playing.duration, kind: playing.kind))
                     .font(.octoCaption)
                     .foregroundStyle(OctoColor.textSecondary)
-                Text(note).font(.octoCaption).foregroundStyle(OctoColor.accent)
+                Text(note).font(.octoCaption).fontWeight(.semibold).foregroundStyle(OctoColor.accent)
             }
             Spacer(minLength: 0)
             Image(systemName: "checkmark")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(OctoColor.accent)
         }
+        .octoOnSelectedFill()
         .listRowBackground(Rectangle().fill(OctoColor.accentSelected))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isSelected)
     }
 }
 
-/// Another version: its title (two lines at most) and "channel · length · kind"; while it is
-/// checked, a spinner; refused, the server's words under it.
+/// Another version: its title (two lines at most) and "channel · length · kind". While it is
+/// checked, "Checking" takes the detail line's place and a spinner the slot the playing row's check
+/// takes, so nothing moves; refused, the server's words under it as an error.
 private struct VersionChoiceRow: View {
     let version: StreamVersion
     let checking: Bool
@@ -232,21 +263,26 @@ private struct VersionChoiceRow: View {
 
     var body: some View {
         Button(action: pick) {
-            HStack(spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(version.title).font(.octoBody).foregroundStyle(.primary).lineLimit(2)
-                    Text(StreamVersionWords.rowDetail(channel: version.channel, seconds: version.duration, kind: version.kind))
+                    Text(checking ? StreamVersionWords.checking
+                                  : StreamVersionWords.rowDetail(channel: version.channel, seconds: version.duration, kind: version.kind))
                         .font(.octoCaption)
                         .foregroundStyle(OctoColor.textSecondary)
                     if let refused {
-                        Text(refused).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
+                        Text(refused).font(.octoCaption).foregroundStyle(OctoColor.errorWords)
                     }
                 }
                 Spacer(minLength: 0)
-                if checking {
-                    ProgressView()
-                    Text(StreamVersionWords.checking).font(.octoCaption).foregroundStyle(OctoColor.textMuted)
-                }
+                // The playing row's check, unseen, holds the slot; the spinner sits on it.
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .hidden()
+                    .overlay {
+                        if checking { ProgressView().controlSize(.small) }
+                    }
+                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
         }
