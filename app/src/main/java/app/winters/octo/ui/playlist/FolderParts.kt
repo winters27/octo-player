@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -54,8 +55,11 @@ import app.winters.octo.design.GlazeButton
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
+import app.winters.octo.player.capMiddle
+import app.winters.octo.player.rememberCapHeightPx
 import app.winters.octo.playlists.PlaylistFolderTree
 import app.winters.octo.playlists.PlaylistFolderWords
+import app.winters.octo.ui.common.AnswerRow
 import app.winters.octo.ui.common.GlassMenuAction
 import app.winters.octo.ui.common.GlassMenuBack
 import app.winters.octo.ui.common.GlassMenuHeading
@@ -69,6 +73,7 @@ import app.winters.octo.ui.common.phonePlaylistFooter
 import app.winters.octo.ui.common.songs
 import app.winters.octo.ui.nav.PlaylistRoute
 import java.text.Collator
+import kotlin.math.roundToInt
 
 // What Move to folder moves: playlists by placement key, or a folder.
 sealed interface FolderMoveTarget {
@@ -131,11 +136,12 @@ internal fun LazyListScope.upkeepRows(
     if (open) items(upkeep, key = { "upkeep:${it.id}" }) { row(it) }
 }
 
-// The group's heading in the section style of the layering system (17
-// semibold), the chevron on its line, and the note in the helper style (13,
-// the secondary words, the info glyph).
+// The group's heading in the section style, as "From Octo" after it, the
+// chevron on its line, and the note in the helper style (13, the secondary
+// words, the info glyph in the accent on the first line's capitals).
 @Composable
 private fun UpkeepHeader(open: Boolean, note: String?, onClick: () -> Unit) {
+    val cap = rememberCapHeightPx(OctoType.formDescription)
     Column(
         Modifier
             .fillMaxWidth()
@@ -146,7 +152,7 @@ private fun UpkeepHeader(open: Boolean, note: String?, onClick: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 PlaylistFolderWords.LIBRARY_UPKEEP,
-                style = OctoType.formGroup,
+                style = OctoType.section,
                 color = OctoColors.TextPrimary,
                 modifier = Modifier.weight(1f).semantics {
                     heading()
@@ -161,9 +167,9 @@ private fun UpkeepHeader(open: Boolean, note: String?, onClick: () -> Unit) {
             )
         }
         if (note != null) {
-            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(14.dp))
-                Text(note, style = OctoType.formDescription, color = OctoColors.TextSecondary)
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(14.dp))
+                Text(note, style = OctoType.formDescription, color = OctoColors.TextSecondary, modifier = Modifier.weight(1f).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() })
             }
         }
     }
@@ -174,9 +180,16 @@ private fun UpkeepHeader(open: Boolean, note: String?, onClick: () -> Unit) {
 internal fun EmptyFolderNote() {
     Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(PlaylistFolderWords.NOTHING_HERE_YET, style = OctoType.formName, color = OctoColors.TextPrimary, textAlign = TextAlign.Center)
-        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(14.dp))
-            Text(PlaylistFolderWords.EMPTY_FOLDER_NOTE, style = OctoType.formDescription, color = OctoColors.TextSecondary, textAlign = TextAlign.Center)
+        val cap = rememberCapHeightPx(OctoType.formDescription)
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(painterResource(OctoIcons.Info), contentDescription = null, tint = OctoColors.Accent, modifier = Modifier.alignBy { it.measuredHeight / 2 }.size(14.dp))
+            Text(
+                PlaylistFolderWords.EMPTY_FOLDER_NOTE,
+                style = OctoType.formDescription,
+                color = OctoColors.TextSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f, fill = false).alignBy { capMiddle(it[FirstBaseline].toFloat(), cap).roundToInt() },
+            )
         }
     }
 }
@@ -269,7 +282,8 @@ private fun FolderChoice(label: String, depth: Int, selected: Boolean, dimmed: B
                 modifier = Modifier.size(20.dp),
             )
         } else {
-            Spacer(Modifier.size(20.dp))
+            // "Not in a folder": the playlists glyph, as on the other apps.
+            Icon(painterResource(OctoIcons.Playlists), contentDescription = null, tint = OctoColors.TextSecondary, modifier = Modifier.size(20.dp))
         }
         Text(
             label,
@@ -360,9 +374,12 @@ internal fun ConfirmDeleteFolder(name: String, parentName: String?, onCancel: ()
     Column(Modifier.width(MenuWidth).padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp)) {
         Text(PlaylistFolderWords.deleteTitle(name), style = OctoType.body, color = OctoColors.TextPrimary, modifier = Modifier.semantics { heading() })
         Text(PlaylistFolderWords.deleteBody(parentName), style = OctoType.bodySmall, color = OctoColors.TextMuted, modifier = Modifier.padding(top = 6.dp))
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            AccentButton(PlaylistFolderWords.DELETE_FOLDER, onClick = onDelete, fill = OctoColors.Destructive)
-            GlazeButton(PlaylistFolderWords.CANCEL, onClick = onCancel)
-        }
+        // The answers as every question's: side by side while they fit,
+        // stacked at large text, so neither is cut.
+        AnswerRow(
+            main = { AccentButton(PlaylistFolderWords.DELETE_FOLDER, onClick = onDelete, fill = OctoColors.Destructive) },
+            other = { GlazeButton(PlaylistFolderWords.CANCEL, onClick = onCancel) },
+            modifier = Modifier.padding(top = 18.dp),
+        )
     }
 }
