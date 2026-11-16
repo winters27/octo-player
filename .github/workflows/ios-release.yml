@@ -93,3 +93,12 @@ jobs:
           fi
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${DRAFT}"
           echo "Published ${GITHUB_REF_NAME} on winters27/octo and removed its carrier draft."
+
+  # After the carrier is gone, so the copy is the only release here with this tag.
+  mirror:
+    needs: tidy
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mirror-player-release.yml
+    with:
+      tag: ${{ github.ref_name }}

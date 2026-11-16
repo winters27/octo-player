@@ -110,3 +110,11 @@ jobs:
     secrets:
       OCTO_RELEASES_TOKEN: ${{ secrets.OCTO_RELEASES_TOKEN }}
       OCTO_UPDATE_SIGNING_KEY: ${{ secrets.OCTO_UPDATE_SIGNING_KEY }}
+
+  mirror:
+    needs: publish
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mirror-player-release.yml
+    with:
+      tag: ${{ github.ref_name }}

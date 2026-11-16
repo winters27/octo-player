@@ -1,0 +1,68 @@
+# Copies a published player release from the public Octo repository (winters27/octo) to this
+# repository's releases, with the same title, notes and files. winters27/octo stays the one the
+# installed apps update from; the copy here is for people who look for the apps on this repo.
+#
+# Called by the Android, desktop and iPhone release workflows once their release is out, and
+# can be run by hand for a tag released before this existed.
+name: mirror-player-release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The released tag, such as android-v1.13.0.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The released tag, such as android-v1.13.0.
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: mirror-${{ inputs.tag }}
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      SOURCE: winters27/octo
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Copy the release here
+        run: |
+          case "$TAG" in
+            android-v*|desktop-v*|ios-v*) ;;
+            *) echo "::error::$TAG is not a player release tag."; exit 1 ;;
+          esac
+          if [ "$(gh release view "$TAG" --repo "$SOURCE" --json isDraft --jq .isDraft)" != false ]; then
+            echo "::error::$TAG is not published on $SOURCE."
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "$TAG is already released on $GITHUB_REPOSITORY; nothing to copy."
+            exit 0
+          fi
+          gh release view "$TAG" --repo "$SOURCE" --json name --jq .name > title.txt
+          gh release view "$TAG" --repo "$SOURCE" --json body --jq .body > notes.md
+          gh release download "$TAG" --repo "$SOURCE" --dir files
+          early=()
+          if [ "$(gh release view "$TAG" --repo "$SOURCE" --json isPrerelease --jq .isPrerelease)" = true ]; then
+            early=(--prerelease)
+          fi
+          # A draft first, so no one sees the copy before all its files are there.
+          gh release create "$TAG" files/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "$(cat title.txt)" --notes-file notes.md --latest=false "${early[@]}"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+          source_files=$(gh release view "$TAG" --repo "$SOURCE" --json assets --jq '[.assets[].name] | sort | join(" ")')
+          copied_files=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | join(" ")')
+          if [ "$source_files" != "$copied_files" ]; then
+            echo "::error::The copy's files differ from $SOURCE's: $copied_files"
+            exit 1
+          fi
+          echo "Copied $TAG from $SOURCE to $GITHUB_REPOSITORY with its $(echo "$copied_files" | wc -w) files."
