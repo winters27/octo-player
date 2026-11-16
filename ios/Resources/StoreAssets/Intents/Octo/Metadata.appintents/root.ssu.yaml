@@ -1,0 +1,99 @@
+apiVersion: ssu/v1
+nlu:
+  shortcuts:
+    bundleIdentifier: app.winters.octo
+    intents:
+    - metadata:
+        name: PlayItemIntent_0
+        title: Play in Octo
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Play ${MusicItemEntity} in ${+applicationName}'
+          - '{${+prefix} }Play ${MusicItemEntity} on ${+applicationName}'
+    - metadata:
+        name: PlayMusicIntent_1
+        title: Play music
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Play music in ${+applicationName}'
+          - '{${+prefix} }Shuffle my music in ${+applicationName}'
+    - metadata:
+        name: ResumeIntent_2
+        title: Resume
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Resume ${+applicationName}'
+          - '{${+prefix} }Carry on in ${+applicationName}'
+    - metadata:
+        name: PlayLikedIntent_3
+        title: Play Liked songs
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Play my Liked songs in ${+applicationName}'
+          - '{${+prefix} }Shuffle my Liked songs in ${+applicationName}'
+    - metadata:
+        name: PlayRecentlyAddedIntent_4
+        title: Play Recently added
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Play recently added in ${+applicationName}'
+          - '{${+prefix} }Play my newest albums in ${+applicationName}'
+    - metadata:
+        name: PlayAlbumMixIntent_5
+        title: Play an Album mix
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Play an album mix in ${+applicationName}'
+    - metadata:
+        name: StartRadioIntent_6
+        title: Start radio
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }Start radio from ${MusicItemEntity} in ${+applicationName}'
+          - '{${+prefix} }Start ${MusicItemEntity} radio in ${+applicationName}'
+    - metadata:
+        name: +negative
+      corpuses:
+        training:
+        - locale: en
+          utterances:
+          - '{${+prefix} }${+standardAppShortcutNegatives}'
+variables:
+- name: +applicationName
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+    - Octo
+- name: MusicItemEntity
+  type: ssu/parameter
+  definitions:
+  - locale: en
+    synomyms:
+    - Music
+- name: +prefix
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+      $ref: ssu://Resources/prefix/en.yaml
+- name: +standardAppShortcutNegatives
+  type: ssu/expansion
+  definitions:
+  - locale: en
+    synomyms:
+      $ref: ssu://Resources/standardAppShortcutNegatives/en.yaml

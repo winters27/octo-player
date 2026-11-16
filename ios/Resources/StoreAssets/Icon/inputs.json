@@ -1,0 +1,16 @@
+{
+  "files": [
+    ".github/workflows/ios-store-assets.yml",
+    "ios/AppIcon.icon/Assets/headphones.svg",
+    "ios/AppIcon.icon/Assets/octopus.svg",
+    "ios/AppIcon.icon/icon.json",
+    "ios/Launch.xcassets/Contents.json",
+    "ios/Launch.xcassets/LaunchBackground.colorset/Contents.json",
+    "ios/Launch.xcassets/LaunchOctopus.imageset/Contents.json",
+    "ios/Launch.xcassets/LaunchOctopus.imageset/LaunchOctopus@2x.png",
+    "ios/Launch.xcassets/LaunchOctopus.imageset/LaunchOctopus@3x.png"
+  ],
+  "kind": "icon",
+  "sha256": "db0fb8738520b7fb65ac99f01ef27b267426efdc33864702afc2aea13756140d",
+  "xcode_build": "27A9275"
+}

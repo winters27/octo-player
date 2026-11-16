@@ -1,0 +1,16 @@
+{
+  "files": [
+    ".github/workflows/ios-store-assets.yml",
+    "ios/Package.swift",
+    "ios/Sources/Octo/System/OctoShortcuts.swift",
+    "ios/Sources/OctoIntents/IntentsPackage.swift",
+    "ios/Sources/OctoIntents/MusicIntents.swift",
+    "ios/Sources/OctoIntents/PlaybackIntents.swift",
+    "ios/Sources/OctoWidgets/WidgetIntents.swift",
+    "ios/project.yml",
+    "ios/xtool.yml"
+  ],
+  "kind": "intents",
+  "sha256": "7211c5ed49f4b8931003c7f7ba5912812218941840d8bc58582cd3d08148be33",
+  "xcode_build": "27A9275"
+}
