@@ -1,0 +1,9 @@
+<resources>
+    <!-- The default for any configuration the night and notnight folders do not match: the light theme's page. -->
+    <color name="splash_daylight_octo">#FFE7ECEF</color>
+    <color name="splash_daylight_moss">#FFE7ECEF</color>
+    <color name="splash_daylight_dusk">#FFE7ECEF</color>
+    <color name="splash_paper_octo">#FFEBE2D2</color>
+    <color name="splash_paper_moss">#FFEBE2D2</color>
+    <color name="splash_paper_dusk">#FFEBE2D2</color>
+</resources>
