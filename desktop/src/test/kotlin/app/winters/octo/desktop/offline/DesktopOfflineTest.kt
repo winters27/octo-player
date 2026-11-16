@@ -25,6 +25,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -58,7 +61,7 @@ class DesktopOfflineTest {
 
     private fun song(id: String, title: String) = Song(id, title, album = "Album", artist = "Artist", track = 1, suffix = "flac")
 
-    private fun offline(): DesktopOffline {
+    private fun offline(scope: CoroutineScope = this.scope): DesktopOffline {
         val settings = SettingsStore(File(folder.root, "settings.json"))
         val connection = server.connection(if (familyOn) listOf("octoFamily:1") else emptyList())
         // The server's own addresses hear what the request is for.
@@ -388,14 +391,19 @@ class DesktopOfflineTest {
     }
 
     // A sign-in page an older version kept in a song's place is dropped and
-    // the song fetched again. Red when kept files are not looked at.
+    // the song fetched again. Red when kept files are not looked at. The
+    // older version has stopped before the page is put in the file, as an
+    // older run of the app has: still running, its own look at the file
+    // would fetch the song a second time.
     @Test
     fun aSignInPageKeptAsASongBeforeIsDroppedAndFetchedAgain() {
         val audio = ByteArray(1000) { 7 }
         server.file("stream", audio)
-        val first = offline()
+        val older = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val first = offline(older)
         first.keep(listOf(song("tr-1", "One")), true)
         until("kept") { first.localFile("tr-1") != null }
+        runBlocking { older.coroutineContext.job.cancelAndJoin() }
         first.localFile("tr-1")!!.writeText("\n<!DOCTYPE html><html><body>Sign in</body></html>")
         server.answer("getSong", """"song":{"id":"tr-1","title":"One","artist":"Artist","album":"Album","track":1,"suffix":"flac"}""")
         val next = offline()
