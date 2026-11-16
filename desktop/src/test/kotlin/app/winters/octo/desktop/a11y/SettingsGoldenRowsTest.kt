@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.a11y
 
+import androidx.compose.ui.window.isTraySupported
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
 import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
@@ -30,12 +31,15 @@ class SettingsGoldenRowsTest {
     @Test(timeout = 300_000)
     fun everyRowTheOldPagesHadIsDrawnAndNoOther() {
         val drawn = SettingsWalk.windows.flatMap { window -> window.rows.map { it.title.stable } }.toSortedSet()
-        val expected = (Old - Removed.keys).map { Renamed[it] ?: it }.toSortedSet() - NeverInTheWindow.keys
+        // The walked windows have this computer's own tray. Without one (a
+        // Linux machine with no display) their tray rows are never drawn.
+        val noTray = if (runCatching { isTraySupported }.getOrDefault(false)) emptyMap() else NeedATray
+        val expected = (Old - Removed.keys).map { Renamed[it] ?: it }.toSortedSet() - NeverInTheWindow.keys - noTray.keys
         val lost = expected - drawn
         val extra = drawn - expected - New.keys
         assertTrue("rows the old pages had that no page draws now:\n" + lost.joinToString("\n"), lost.isEmpty())
         assertTrue("rows drawn that the old pages did not have:\n" + extra.joinToString("\n"), extra.isEmpty())
-        val stale = (Removed.keys + Renamed.keys + NeverInTheWindow.keys).filter { it in drawn }
+        val stale = (Removed.keys + Renamed.keys + NeverInTheWindow.keys + noTray.keys).filter { it in drawn }
         assertTrue("rows removed, renamed or never drawn are drawn:\n" + stale.joinToString("\n"), stale.isEmpty())
     }
 
@@ -106,6 +110,11 @@ class SettingsGoldenRowsTest {
 
         // Rows the code still has that the window cannot draw, each with why.
         val NeverInTheWindow = mapOf("No server connected" to "drawn only without a server, and without one the window shows the sign-in page, not Settings")
+
+        // Rows the walked windows draw only on a computer with a tray, each
+        // with why. The installed startup card's Start in the tray is drawn
+        // with a tray of its own, so it is not here.
+        val NeedATray = mapOf("Keep playing when the window closes" to "a closed window comes back from the tray, so without one closing it quits")
 
         // Rows the new pages draw that the old ones did not have, each with why.
         val New = mapOf(
