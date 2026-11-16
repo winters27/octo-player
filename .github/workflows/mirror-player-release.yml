@@ -1,22 +1,24 @@
-# Copies a published player release from the public Octo repository (winters27/octo) to this
-# repository's releases, with the same title, notes and files. winters27/octo stays the one the
-# installed apps update from; the copy here is for people who look for the apps on this repo.
+# Gathers the player releases of one version from the public Octo repository (winters27/octo)
+# into a single release on this repository: "Octo Player <version>", tag v<version>, with every
+# app's files and one changelog, a section per app. winters27/octo keeps a release per app,
+# because that is what the installed apps update from; this one is for people who come here.
 #
-# Called by the Android, desktop and iPhone release workflows once their release is out, and
-# can be run by hand for a tag released before this existed.
+# Called by the Android, desktop and iPhone release workflows once their release is out (each
+# call adds that app and rebuilds the notes from every app released so far), and can be run by
+# hand with any app tag of the version.
 name: mirror-player-release
 
 on:
   workflow_call:
     inputs:
       tag:
-        description: The released tag, such as android-v1.13.0.
+        description: An app tag of the version, such as android-v1.13.0.
         required: true
         type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: The released tag, such as android-v1.13.0.
+        description: An app tag of the version, such as android-v1.13.0.
         required: true
         type: string
 
@@ -27,42 +29,68 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     concurrency:
-      group: mirror-${{ inputs.tag }}
+      # One at a time, so two apps of a version never write its release together. A waiting run
+      # that a newer one replaces loses nothing: each run gathers every app published so far.
+      group: player-release
       cancel-in-progress: false
     env:
       TAG: ${{ inputs.tag }}
       SOURCE: winters27/octo
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Copy the release here
+      - name: Gather the version's release here
         run: |
           case "$TAG" in
             android-v*|desktop-v*|ios-v*) ;;
             *) echo "::error::$TAG is not a player release tag."; exit 1 ;;
           esac
-          if [ "$(gh release view "$TAG" --repo "$SOURCE" --json isDraft --jq .isDraft)" != false ]; then
-            echo "::error::$TAG is not published on $SOURCE."
+          version="${TAG#*-v}"
+          release="v$version"
+          title="Octo Player $version"
+          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          mkdir -p files
+          {
+            echo "The Octo apps for your Octo server, version $version. Pick your device's file below; the apps you have installed update themselves."
+            echo
+          } > notes.md
+          apps=0
+          for app in android desktop ios; do
+            app_tag="$app-v$version"
+            draft=$(gh release view "$app_tag" --repo "$SOURCE" --json isDraft --jq .isDraft 2>/dev/null || true)
+            [ "$draft" = false ] || continue
+            name=$(gh release view "$app_tag" --repo "$SOURCE" --json name --jq .name)
+            echo "## $name" >> notes.md
+            echo >> notes.md
+            # The notes open with their own title; the heading above already says it.
+            gh release view "$app_tag" --repo "$SOURCE" --json body --jq .body |
+              awk -v title="$name" 'NR == 1 && $0 == title { skip = 1; next } skip && NR == 2 && $0 == "" { next } { print }' >> notes.md
+            echo >> notes.md
+            gh release download "$app_tag" --repo "$SOURCE" --dir "download-$app"
+            # Each app's manifest and checksums are for its updater on winters27/octo; this
+            # release gets one checksum list for all of its files instead.
+            rm -f "download-$app/SHA256SUMS" "download-$app/update.json" "download-$app/update.json.sig"
+            mv "download-$app"/* files/
+            apps=$((apps + 1))
+          done
+          if [ "$apps" -eq 0 ]; then
+            echo "::error::No app of version $version is published on $SOURCE."
             exit 1
           fi
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
-            echo "$TAG is already released on $GITHUB_REPOSITORY; nothing to copy."
-            exit 0
-          fi
-          gh release view "$TAG" --repo "$SOURCE" --json name --jq .name > title.txt
-          gh release view "$TAG" --repo "$SOURCE" --json body --jq .body > notes.md
-          gh release download "$TAG" --repo "$SOURCE" --dir files
+          (cd files && sha256sum -- * > ../SHA256SUMS) && mv SHA256SUMS files/
           early=()
-          if [ "$(gh release view "$TAG" --repo "$SOURCE" --json isPrerelease --jq .isPrerelease)" = true ]; then
-            early=(--prerelease)
+          case "$version" in *-*) early=(--prerelease) ;; esac
+          if gh release view "$release" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$release" files/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$release" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md
+          else
+            # A draft first, so no one sees the release before all its files are there.
+            gh release create "$release" files/* --repo "$GITHUB_REPOSITORY" --target "$commit" --draft \
+              --title "$title" --notes-file notes.md "${early[@]}"
+            gh release edit "$release" --repo "$GITHUB_REPOSITORY" --draft=false
           fi
-          # A draft first, so no one sees the copy before all its files are there.
-          gh release create "$TAG" files/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
-            --title "$(cat title.txt)" --notes-file notes.md --latest=false "${early[@]}"
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
-          source_files=$(gh release view "$TAG" --repo "$SOURCE" --json assets --jq '[.assets[].name] | sort | join(" ")')
-          copied_files=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | join(" ")')
-          if [ "$source_files" != "$copied_files" ]; then
-            echo "::error::The copy's files differ from $SOURCE's: $copied_files"
-            exit 1
-          fi
-          echo "Copied $TAG from $SOURCE to $GITHUB_REPOSITORY with its $(echo "$copied_files" | wc -w) files."
+          want=$(cd files && ls | sort | tr '\n' ' ')
+          have=$(gh release view "$release" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name] | sort | join(" ")')
+          for file in $want; do
+            case " $have " in *" $file "*) ;; *) echo "::error::$release lacks $file."; exit 1 ;; esac
+          done
+          echo "$release holds $apps app(s) of version $version: $want"

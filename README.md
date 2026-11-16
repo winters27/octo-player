@@ -1,10 +1,13 @@
 <div align="center">
 
-# Octo
+# Octo Player
 
-**The desktop and Android apps for your Octo music server.**
+**The Android, iPhone, Windows and Linux apps for your Octo music server.**
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Latest release](https://img.shields.io/github/v/release/winters27/octo-player?label=latest)](https://github.com/winters27/octo-player/releases/latest)
+
+**[Download the latest release](https://github.com/winters27/octo-player/releases/latest)** · [Install](#install) · [The Octo server](https://github.com/winters27/octo)
 
 <a href="https://winters27.github.io/octo/fdroid/"><img src="https://f-droid.org/badge/get-it-on.png" alt="Get the Octo Android app on F-Droid" height="80"></a>
 
@@ -23,11 +26,11 @@
 - **Honest labels.** A song you don't own is marked as such until you add it.
 - **Import your lists.** Bring playlists and liked songs from Spotify, Apple Music and more as a TuneMyMusic file, or add a public Spotify playlist or album link, to see what your library has of each list, keep one as a playlist, and let Octo fetch the rest a few songs an hour. On the desktop it is in the sidebar; on the phone, under Settings, Server. Needs an Octo with imports.
 
-These need Octo 2026.09.29 or newer.
+These need an Octo server; the newest (playlist folders, songs found online in your playlists, Try another version) need Octo 2026.11.15 or newer.
 
 ## With any Subsonic server
 
-With Navidrome or any Subsonic server, both apps are full players for the music you have:
+With Navidrome or any Subsonic server, every app is a full player for the music you have:
 
 - Browse by artist, album, song, genre or folder, with favorites, ratings and playlists shared with your other apps.
 - Synced lyrics, gapless playback, an equalizer with presets, ReplayGain and a sleep timer.
@@ -35,7 +38,7 @@ With Navidrome or any Subsonic server, both apps are full players for the music 
 
 ## The desktop app
 
-For Windows, macOS and Linux. Several servers with one-click switching, a song table you can sort and resize, **Ctrl+K** to search or run a command from anywhere, live lists built from rules, Library health, a mini player, and media keys.
+For Windows and Linux (a Mac build is coming). Several servers with one-click switching, a song table you can sort and resize, **Ctrl+K** to search or run a command from anywhere, live lists built from rules, Library health, a mini player, and media keys.
 
 <table>
 <tr><td width="50%" valign="top"><img src="docs/images/desktop-album.webp" alt="An album, with the songs you have marked"><br><sub>An album, with the songs you have marked</sub></td><td width="50%" valign="top"><img src="docs/images/desktop-player.webp" alt="The full player"><br><sub>The full player</sub></td></tr>
@@ -56,21 +59,25 @@ For Android 10 and newer. Your phone's music and your server's make one library.
 <tr><td width="25%" valign="top"><img src="docs/images/phone-library.webp" alt="Albums"><br><sub>Albums</sub></td><td width="25%" valign="top"><img src="docs/images/phone-artist-library.webp" alt="An artist in your library"><br><sub>An artist in your library</sub></td><td width="25%" valign="top"><img src="docs/images/phone-health.webp" alt="Library health"><br><sub>Library health</sub></td></tr>
 </table>
 
+## The iPhone app
+
+For iOS 26 and newer, made with Apple's Liquid Glass. Your server's music and the songs already on your iPhone play in one player, with Automix, lyrics that follow the song, AirPlay, downloads for offline, widgets, Siri and Shortcuts.
+
 ## Install
 
-Download the latest release:
+Each version is one release on the [Releases page](https://github.com/winters27/octo-player/releases/latest), with every device's file and what changed. The apps you have installed update themselves.
 
-- [Octo for Windows, macOS and Linux](https://github.com/winters27/octo/releases/tag/desktop-v1.11.0): an `.msi` or portable zip for Windows, a `.dmg` for Macs (`arm64` for Apple silicon, `x64` for Intel), and a `.deb`, `.rpm`, `.flatpak`, `.AppImage`, Arch Linux package (`.pkg.tar.zst`) or portable zip for Linux.
-  - Windows: the installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo.
-  - macOS: open the `.dmg` and drag Octo into Applications. It is signed and notarized by Apple.
-  - Flatpak: `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub.
-  - AppImage: `chmod +x Octo-<version>-linux-x64.AppImage`, then open it. Keep it in a folder of your own, such as `~/Applications`, and it updates itself.
-  - Arch Linux: `sudo pacman -U Octo-<version>-linux-x64.pkg.tar.zst`.
-  - The desktop app carries its own Java 25 runtime, so nothing else needs installing.
-- [Octo for Android](https://github.com/winters27/octo/releases/tag/android-v1.11.0): an `.apk` for Android 10 and newer. Allow your browser or file manager to install apps when Android asks.
-- Or add [Octo's F-Droid repository](https://winters27.github.io/octo/fdroid/) in F-Droid, Droid-ify or Neo Store, and the Android app updates there like any other.
+| Device | File | How |
+| --- | --- | --- |
+| Android 10 and newer | `Octo-<version>-android.apk` | Open it and allow your browser or file manager to install apps when Android asks. Or add [Octo's F-Droid repository](https://winters27.github.io/octo/fdroid/) in F-Droid, Droid-ify or Neo Store, and the app updates there like any other. |
+| iPhone, iOS 26 and newer | `Octo-<version>-iPhone.ipa` | Install it with a sideloading app such as AltStore or SideStore. TestFlight is coming. |
+| Windows | `.msi` or portable zip | The installer needs no administrator rights. It isn't code signed yet, so Windows asks the first time you open Octo. |
+| Linux, Flatpak | `Octo-<version>-linux-x64.flatpak` | `flatpak install --user Octo-<version>-linux-x64.flatpak`; it brings its runtime from Flathub. |
+| Linux, AppImage | `Octo-<version>-linux-x64.AppImage` | `chmod +x` it, then open it. Keep it in a folder of your own, such as `~/Applications`, and it updates itself. |
+| Arch Linux | `Octo-<version>-linux-x64.pkg.tar.zst` | `sudo pacman -U Octo-<version>-linux-x64.pkg.tar.zst` |
+| Debian, Ubuntu, Fedora | `.deb` or `.rpm` | Install it with your package manager, or use the portable zip. |
 
-New versions appear on the [Octo Releases page](https://github.com/winters27/octo/releases), tagged `desktop-v` and `android-v`.
+The desktop app carries its own Java 25 runtime, so nothing else needs installing. A Mac build is coming.
 
 ## Build from source
 
