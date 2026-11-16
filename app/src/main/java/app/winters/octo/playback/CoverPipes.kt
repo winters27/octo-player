@@ -1,5 +1,6 @@
 package app.winters.octo.playback
 
+import android.annotation.SuppressLint
 import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
@@ -50,16 +51,26 @@ interface CoverPipes {
 // error, never as a broken picture.
 class SystemCoverPipes : CoverPipes {
     private class Pipe(override val reader: ParcelFileDescriptor, val writer: ParcelFileDescriptor) : CoverPipe {
+        // fcntl on the writer. Os.fcntlInt is public from Android 11; Android
+        // 10 has the same method outside the SDK, so where it is missing the
+        // call fails as fcntl would, and the picture fails instead of the app.
+        @SuppressLint("NewApi")
+        private fun fcntl(cmd: Int, arg: Int): Int = try {
+            Os.fcntlInt(writer.fileDescriptor, cmd, arg)
+        } catch (e: LinkageError) {
+            throw ErrnoException("fcntl", OsConstants.ENOSYS)
+        }
+
         override fun grow(bytes: Int): Int = try {
-            Os.fcntlInt(writer.fileDescriptor, F_SETPIPE_SZ, bytes)
+            fcntl(F_SETPIPE_SZ, bytes)
         } catch (e: ErrnoException) {
             -1
         }
 
         override fun nonBlocking() {
             try {
-                val flags = Os.fcntlInt(writer.fileDescriptor, OsConstants.F_GETFL, 0)
-                Os.fcntlInt(writer.fileDescriptor, OsConstants.F_SETFL, flags or OsConstants.O_NONBLOCK)
+                val flags = fcntl(OsConstants.F_GETFL, 0)
+                fcntl(OsConstants.F_SETFL, flags or OsConstants.O_NONBLOCK)
             } catch (e: ErrnoException) {
                 throw IOException(e)
             }
