@@ -5,7 +5,8 @@
 #
 # Called by the Android, desktop and iPhone release workflows once their release is out (each
 # call adds that app and rebuilds the notes from every app released so far), and can be run by
-# hand with any app tag of the version.
+# hand with any app tag of the version. The tag v<version> must already be here, on the app
+# tags' commit.
 name: mirror-player-release
 
 on:
@@ -47,7 +48,12 @@ jobs:
           version="${TAG#*-v}"
           release="v$version"
           title="Octo Player $version"
-          commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          # The version tag is pushed with the app tags: this job's token may not make a tag on
+          # a commit that changes workflow files.
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release" > /dev/null 2>&1; then
+            echo "::error::Tag $release is not on $GITHUB_REPOSITORY; push it with the app tags (same commit)."
+            exit 1
+          fi
           mkdir -p files
           {
             echo "The Octo apps for your Octo server, version $version. Pick your device's file below; the apps you have installed update themselves."
@@ -84,7 +90,7 @@ jobs:
             gh release edit "$release" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file notes.md
           else
             # A draft first, so no one sees the release before all its files are there.
-            gh release create "$release" files/* --repo "$GITHUB_REPOSITORY" --target "$commit" --draft \
+            gh release create "$release" files/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
               --title "$title" --notes-file notes.md "${early[@]}"
             gh release edit "$release" --repo "$GITHUB_REPOSITORY" --draft=false
           fi
