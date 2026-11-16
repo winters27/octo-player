@@ -1030,6 +1030,8 @@ def canary_problems(docs: dict, declared: dict, symbols: dict, demangler=demangl
 # ---------------------------------------------------------------- validate
 
 CR_SUFFIXES = (".swift", ".plist", ".yml", ".json", ".entitlements")
+# The folders a build writes into the tree it builds; nothing in them is source.
+BUILT_FOLDERS = ("ios/.build/", "ios/xtool/")
 
 
 def cr_problems(tree: Path) -> list[str]:
@@ -1037,9 +1039,14 @@ def cr_problems(tree: Path) -> list[str]:
     bad = []
     for root in roots:
         for path in ([root] if root.is_file() else root.rglob("*")):
-            if path.is_file() and path.suffix in CR_SUFFIXES and "/Resources/StoreAssets/" not in path.as_posix() \
-                    and b"\r" in path.read_bytes():
-                bad.append(path.relative_to(tree).as_posix())
+            name = path.relative_to(tree).as_posix()
+            if not path.is_file() or path.suffix not in CR_SUFFIXES or "/Resources/StoreAssets/" in path.as_posix() \
+                    or name.startswith(BUILT_FOLDERS):
+                continue
+            data = path.read_bytes()
+            # A binary plist has no lines: a 0x0D among its bytes is data.
+            if b"\r" in data and not data.startswith(b"bplist"):
+                bad.append(name)
     return [f"carriage returns in {name}" for name in bad[:5]]
 
 

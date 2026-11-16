@@ -436,6 +436,20 @@ class ValidateTests(Home):
         store_inputs.record(self.tree, "intents", self.tree / "ios/Resources/StoreAssets/Intents/inputs.json", "27A9275")
         self.assertProblem(self.problems(), "carriage returns in ios/xtool.yml")
 
+    def test_what_the_build_wrote_and_binary_plists_are_not_read_as_text(self):
+        # The build's own output (a resource bundle's binary Info.plist with a 0x0D byte in it)
+        # is not source, and a binary plist anywhere has no line endings to check.
+        built = self.tree / "ios/.build/out/Products/Release-iphoneos/Octo_Octo.bundle/Info.plist"
+        built.parent.mkdir(parents=True)
+        built.write_bytes(b"bplist00\x0d\x01")
+        (self.tree / "ios/xtool/Octo.app").mkdir(parents=True)
+        (self.tree / "ios/xtool/Octo.app/Info.plist").write_bytes(b"text\r\n")
+        (self.tree / "ios/Settings.plist").write_bytes(b"bplist00\x0d")
+        self.assertEqual(asc.cr_problems(self.tree), [])
+        # A text plist with Windows line endings in the source is still refused.
+        (self.tree / "ios/Text.plist").write_bytes(b"<plist>\r\n</plist>\r\n")
+        self.assertEqual(asc.cr_problems(self.tree), ["carriage returns in ios/Text.plist"])
+
     def test_metadata_from_another_xcode_is_refused(self):
         def other_tools(files):
             files["Payload/Octo.app/Metadata.appintents/version.json"] = b'{"version":"3.0","toolsVersion":"17F113"}'
