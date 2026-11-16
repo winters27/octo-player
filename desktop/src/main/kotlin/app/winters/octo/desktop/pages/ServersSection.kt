@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
@@ -575,9 +576,10 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
     PopupPadding {
         ResultLine(form)
         LinkNote(form)
-        Row(Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs), horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically) {
-            if (kind != SheetKind.SignIn) GlazeCapsule(null, "Test connection", ::test, enabled = form.ready, height = ControlHeight.L)
-            Spacer(Modifier.weight(1f))
+        SheetFoot(
+            Modifier.fillMaxWidth().padding(top = Space.Xs, bottom = Space.Xs),
+            lead = { if (kind != SheetKind.SignIn) GlazeCapsule(null, "Test connection", ::test, enabled = form.ready, height = ControlHeight.L) },
+        ) {
             GlazeCapsule(null, "Cancel", close, height = ControlHeight.L)
             // The page's own filled button, its spinner in it while the sheet
             // tests or saves.
@@ -593,6 +595,33 @@ private fun ColumnScope.ServerSheet(app: AppState, kind: SheetKind, server: Save
                 loading = form.busy,
                 size = ButtonSize.Medium,
             )
+        }
+    }
+}
+
+// A sheet's foot: `lead` (Test connection) at its start and the sheet's
+// buttons at its end, on one line while all of them fit. Where they do not
+// (a wider system face, as Linux's, at a larger text size) `lead` keeps a
+// line of its own above the buttons, so the main button keeps its least
+// width and no button runs into another.
+@Composable
+internal fun SheetFoot(modifier: Modifier, lead: @Composable () -> Unit, buttons: @Composable RowScope.() -> Unit) {
+    val row: @Composable () -> Unit = { Row(horizontalArrangement = Arrangement.spacedBy(Space.M), verticalAlignment = Alignment.CenterVertically, content = buttons) }
+    Layout(contents = listOf(lead, row), modifier = modifier) { (leads, ends), constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val end = ends.single().measure(loose)
+        val start = leads.firstOrNull()?.measure(loose)
+        val gap = Space.M.roundToPx()
+        val width = constraints.maxWidth
+        val oneLine = start == null || start.width + gap + end.width <= width
+        val height = when {
+            start == null -> end.height
+            oneLine -> maxOf(start.height, end.height)
+            else -> start.height + gap + end.height
+        }
+        layout(width, height) {
+            if (start != null) start.placeRelative(0, if (oneLine) (height - start.height) / 2 else 0)
+            end.placeRelative(width - end.width, if (oneLine) (height - end.height) / 2 else height - end.height)
         }
     }
 }

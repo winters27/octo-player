@@ -68,6 +68,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 // The sign-in page and its sheets as drawn: Advanced opening glides the
@@ -2460,8 +2461,13 @@ class SignInLayoutTest {
         val cancelButton = generateSequence(cancel) { it.parent }.first { it.clickable }
         assertTrue("$words $how is ${button.size.width}, narrower than Cancel's ${cancelButton.size.width}", button.size.width >= cancelButton.size.width)
         assertTrue("Cancel $how runs into $words", cancel.positionInRoot.x + cancel.size.width <= left)
+        // Test connection ends before Cancel on their line, or, where the
+        // three do not fit on one (a wider system face), sits on a line of
+        // its own above them.
         named("Test connection").singleOrNull { it.inPopup() }?.let { test ->
-            assertTrue("Test connection $how runs into Cancel", test.positionInRoot.x + test.size.width <= cancel.positionInRoot.x)
+            val before = test.positionInRoot.x + test.size.width <= cancel.positionInRoot.x
+            val above = test.positionInRoot.y + test.size.height <= cancelButton.positionInRoot.y
+            assertTrue("Test connection $how runs into Cancel", before || above)
         }
     }
 
@@ -2706,16 +2712,32 @@ class SignInLayoutTest {
         return rows
     }
 
+    // The window height at which the closed card at 130% text runs past its
+    // view by `by`, from a window short enough to hold the card to it: there
+    // the view is the window less its margins and the card's words are the
+    // view and its scroll, so the height holds in any system face (Segoe UI
+    // runs past a 900 window by 1, Linux's DejaVu Sans fits in it). The
+    // window measured in is 780: its page, under the 40 title bar, is just
+    // over the 720 below which the card packs tighter.
+    private fun closedCardRunsPastBy(by: Float): Int {
+        val measured = 780
+        return largerText(measured).use { s ->
+            s.settle(600).close()
+            val range = scrollOf(s.text("Octo")).config[SemanticsProperties.VerticalScrollAxisRange].maxValue()
+            assertTrue("the closed card runs past a $measured window by $range", range > by)
+            (measured + range - by).roundToInt()
+        }
+    }
+
     // The card's resting thumb says there is more only while words are
     // hidden past the card's own padding: none on the closed card at 130%
-    // text in a 900 window, whose words run past it by less than its 32 of
-    // padding, and there on the open card in that window, lifted with its
-    // words running on. Red with the thumb shown whenever the card runs past
-    // at all (a rail down the closed card's whole edge for about 1 of empty
-    // padding).
+    // text in a window it runs past by half its 32 of padding, and there on
+    // the open card in that window, lifted with its words running on. Red
+    // with the thumb shown whenever the card runs past at all (a rail down
+    // the closed card's whole edge for about 1 of empty padding).
     @Test(timeout = 120_000)
     fun theRestingThumbShowsOnlyWhenWordsAreHidden() {
-        largerText().use { s ->
+        largerText(closedCardRunsPastBy(16f)).use { s ->
             s.settle(600).close()
             val range = scrollOf(s.text("Octo")).config[SemanticsProperties.VerticalScrollAxisRange]
             assertTrue("the closed card runs past its view by ${range.maxValue()}, under its padding", range.maxValue() > 0f && range.maxValue() < 32f)
