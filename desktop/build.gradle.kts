@@ -234,7 +234,13 @@ dependencies {
 }
 
 // The client certificate tests open the files in fixtures/gateway/certs.
-tasks.withType<Test>().configureEach { inputs.dir(rootProject.file("fixtures/gateway/certs")) }
+// A fresh test JVM every 150 classes: the drawing tests' native memory grows
+// across the whole suite in one process (about 14 GB on Linux), more than a
+// 16 GB build machine has to spare.
+tasks.withType<Test>().configureEach {
+    inputs.dir(rootProject.file("fixtures/gateway/certs"))
+    forkEvery = 150
+}
 
 // The performance harness (OCTO_PERF=1, perf/LibraryPerfTest.kt) runs each
 // time it is asked for, with room for a library of 100,000 songs.
