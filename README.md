@@ -6,6 +6,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Latest release](https://img.shields.io/github/v/release/winters27/octo-player?label=latest)](https://github.com/winters27/octo-player/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/winters27/octo-player/total?label=downloads)](https://github.com/winters27/octo-player/releases)
 
 **[Download the latest release](https://github.com/winters27/octo-player/releases/latest)** · [Install](#install) · [The Octo server](https://github.com/winters27/octo)
 
