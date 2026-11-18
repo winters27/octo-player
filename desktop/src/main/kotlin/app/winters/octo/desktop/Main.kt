@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -100,7 +101,7 @@ import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
 import app.winters.octo.desktop.window.keepsSpot
 import app.winters.octo.desktop.window.placeWindow
-import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.setWindowsFrameMaximized
 import app.winters.octo.desktop.window.appTextPixels
 import app.winters.octo.desktop.window.systemTextPixels
 import app.winters.octo.desktop.window.useTextPixels
@@ -116,6 +117,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.awt.Dimension
+import java.awt.event.HierarchyEvent
+import java.awt.event.HierarchyListener
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.io.File
@@ -345,11 +348,24 @@ fun main(args: Array<String>) {
                 if (drawn.isNotEmpty()) window.iconImages = drawn
             }
             val own = remember { if (custom) Frame(window, windowState) else null }
+            if (own != null && os == DesktopOs.Windows) {
+                val maximized = own.maximized
+                DisposableEffect(window, maximized) {
+                    fun updateFrame() {
+                        if (window.isDisplayable) setWindowsFrameMaximized(window, maximized)
+                    }
+                    val onPeerChanged = HierarchyListener { event ->
+                        if (event.changeFlags and HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L) updateFrame()
+                    }
+                    window.addHierarchyListener(onPeerChanged)
+                    updateFrame()
+                    onDispose { window.removeHierarchyListener(onPeerChanged) }
+                }
+            }
             LaunchedEffect(Unit) {
                 frame = own
                 window.minimumSize = Dimension(MIN_WIDTH.toInt(), MIN_HEIGHT.toInt())
                 if (os == DesktopOs.Mac) seeThroughMacTitleBar(window)
-                if (own != null && os == DesktopOs.Windows) roundWindowsCorners(window)
                 if (own != null && spot.maximized) own.maximize()
                 // The first frame on screen, then the app: making it and
                 // drawing it keep this thread busy a while.

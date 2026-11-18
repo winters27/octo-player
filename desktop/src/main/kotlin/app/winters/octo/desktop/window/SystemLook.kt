@@ -11,11 +11,24 @@ import javax.swing.JFrame
 
 // Asks Windows 11 to round the corners of the app's frameless window, as it
 // does for every framed one. Older Windows ignores the request.
-fun roundWindowsCorners(window: Window) {
+fun roundWindowsCorners(window: Window) = applyWindowsFrame(window, DWMWCP_ROUND)
+
+// Frame.maximize fills the work area by resizing, so DWM still treats the
+// window as floating and needs an explicit request to hide its outline.
+internal fun setWindowsFrameMaximized(window: Window, maximized: Boolean) {
+    val cornerPreference = if (maximized) DWMWCP_DONOTROUND else DWMWCP_ROUND
+    val borderColor = if (maximized) DWMWA_COLOR_NONE else DWMWA_COLOR_DEFAULT
+    applyWindowsFrame(window, cornerPreference, borderColor)
+}
+
+private fun applyWindowsFrame(window: Window, cornerPreference: Int, borderColor: Int? = null) {
     runCatching {
         val dwm = Native.load("dwmapi", Dwm::class.java)
         val handle = Native.getWindowPointer(window) ?: return
-        dwm.DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, IntByReference(DWMWCP_ROUND), 4)
+        dwm.DwmSetWindowAttribute(handle, DWMWA_WINDOW_CORNER_PREFERENCE, IntByReference(cornerPreference), Int.SIZE_BYTES)
+        if (borderColor != null) {
+            dwm.DwmSetWindowAttribute(handle, DWMWA_BORDER_COLOR, IntByReference(borderColor), Int.SIZE_BYTES)
+        }
     }
 }
 
@@ -33,7 +46,11 @@ private interface Dwm : Library {
 }
 
 private const val DWMWA_WINDOW_CORNER_PREFERENCE = 33
+private const val DWMWA_BORDER_COLOR = 34
+private const val DWMWCP_DONOTROUND = 1
 private const val DWMWCP_ROUND = 2
+private const val DWMWA_COLOR_NONE = -2 // 0xFFFFFFFE
+private const val DWMWA_COLOR_DEFAULT = -1 // 0xFFFFFFFF
 
 // Windows' system title bar drawn dark or light to match the app, repainted
 // at once.
