@@ -103,6 +103,7 @@ import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.HeaderButton
 import app.winters.octo.ui.common.HeaderControlLine
+import app.winters.octo.ui.common.NotInLibraryText
 import app.winters.octo.ui.common.PlayShuffleButtons
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.Refreshable
@@ -117,6 +118,7 @@ import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.menu.playRadio
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -281,6 +283,7 @@ fun ArtistScreen(
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
     val similar = extras?.similar.orEmpty()
+    val outside = extras?.outside.orEmpty()
     val ownSongs by vm.songs.collectAsStateWithLifecycle()
     val radio by vm.radio.collectAsStateWithLifecycle()
     var allSongs by rememberSaveable { mutableStateOf(false) }
@@ -397,6 +400,17 @@ fun ArtistScreen(
                 }
                 items(albums, key = { it.id }) { album ->
                     AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem().padding(bottom = ArtistRowGap), width = null)
+                }
+            }
+            // The rest of their releases, as the server lists them: the ones
+            // outside the library, on the same shelves, each saying so
+            // in its name. Each opens as the server has it.
+            outside.forEach { (shelf, albums) ->
+                wide("outside:${shelf.name}") {
+                    SectionTitle("${shelf.title} ${NotInLibraryText.replaceFirstChar { it.lowercase() }}", Modifier.padding(top = 8.dp))
+                }
+                items(albums, key = { "outside:${it.id}" }) { album ->
+                    AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) }, modifier = Modifier.animateItem().padding(bottom = ArtistRowGap), width = null)
                 }
             }
             about?.let { text ->

@@ -139,6 +139,13 @@ data class ServerLists(
 
 class OnlineArtistPage(val artist: OnlineArtist, val albums: List<OnlineAlbum>)
 
+// An album as the server lists it, shown as one found online. How many of
+// its songs the library holds counts only for an album outside the library.
+internal fun onlineAlbumOf(album: Album, sourceId: String) = OnlineAlbum(
+    album.id, album.name, album.artist, album.artistId, album.year, album.songCount, onlineArtwork(sourceId, album.coverArt),
+    ownedCount = album.ownedCount.takeIf { album.isExternal },
+)
+
 // Radio answers remembered for "Suggested by" before the oldest are dropped,
 // and how long one is believed: a later radio may suggest the song again
 // from another source, and an old answer would name the wrong one.
@@ -477,10 +484,7 @@ class Discovery @Inject constructor(
             .map { OnlineArtist(it.id, it.name, it.albumCount, onlineArtwork(sourceId, it.coverArt)) }
     }
 
-    private fun Album.toOnline(sourceId: String) = OnlineAlbum(
-        id, name, artist, artistId, year, songCount, onlineArtwork(sourceId, coverArt),
-        ownedCount = ownedCount.takeIf { isExternal },
-    )
+    private fun Album.toOnline(sourceId: String) = onlineAlbumOf(this, sourceId)
 
     private fun server(): Pair<SubsonicClient, String>? {
         val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
