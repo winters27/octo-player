@@ -103,6 +103,7 @@ import app.winters.octo.ui.common.FavouriteHeart
 import app.winters.octo.ui.common.Feedback
 import app.winters.octo.ui.common.HeaderButton
 import app.winters.octo.ui.common.HeaderControlLine
+import app.winters.octo.ui.common.NotInLibraryText
 import app.winters.octo.ui.common.PlayShuffleButtons
 import app.winters.octo.ui.common.QuietButton
 import app.winters.octo.ui.common.Refreshable
@@ -117,6 +118,7 @@ import app.winters.octo.ui.menu.SongMenuContext
 import app.winters.octo.ui.menu.playRadio
 import app.winters.octo.ui.nav.AlbumRoute
 import app.winters.octo.ui.nav.ArtistRoute
+import app.winters.octo.ui.nav.OnlineAlbumRoute
 import app.winters.octo.ui.nav.OnlineArtistRoute
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -134,8 +136,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -178,8 +180,10 @@ class ArtistViewModel @AssistedInject constructor(
         .filterNotNull()
         .distinctUntilChanged { a, b -> a.id == b.id && a.name == b.name }
         .combine(reload) { artist, _ -> artist }
-        .mapLatest { artist ->
-            try {
+        .transformLatest { artist ->
+            // Top songs, the biography and similar artists first; the
+            // releases outside the library follow once the server has them.
+            val extras = try {
                 extrasSource.forArtist(artist)
             } catch (e: CancellationException) {
                 throw e
@@ -187,6 +191,16 @@ class ArtistViewModel @AssistedInject constructor(
                 Log.w("Octo", "artist extras failed: ${e.javaClass.simpleName}")
                 null
             }
+            emit(extras)
+            val outside = try {
+                extrasSource.outsideFor(artist)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "artist releases failed: ${e.javaClass.simpleName}")
+                null
+            }
+            if (!outside.isNullOrEmpty()) emit((extras ?: ArtistExtras()).copy(outside = outside))
         }
         .combine(player.prefs.map { it.libraryOnly }.distinctUntilChanged()) { extras, libraryOnly ->
             if (libraryOnly) extras?.inLibraryOnly(owned.ids.value) else extras
@@ -281,6 +295,7 @@ fun ArtistScreen(
     val top = extras?.topSongs.orEmpty()
     val about = extras?.about
     val similar = extras?.similar.orEmpty()
+    val outside = extras?.outside.orEmpty()
     val ownSongs by vm.songs.collectAsStateWithLifecycle()
     val radio by vm.radio.collectAsStateWithLifecycle()
     var allSongs by rememberSaveable { mutableStateOf(false) }
@@ -397,6 +412,17 @@ fun ArtistScreen(
                 }
                 items(albums, key = { it.id }) { album ->
                     AlbumCard(album, onClick = { onOpen(AlbumRoute(album.id)) }, modifier = Modifier.animateItem().padding(bottom = ArtistRowGap), width = null)
+                }
+            }
+            // The rest of their releases, as the server lists them: the ones
+            // outside the library, on the same shelves, each saying so
+            // in its name. Each opens as the server has it.
+            outside.forEach { (shelf, albums) ->
+                wide("outside:${shelf.name}") {
+                    SectionTitle("${shelf.title} ${NotInLibraryText.replaceFirstChar { it.lowercase() }}", Modifier.padding(top = 8.dp))
+                }
+                items(albums, key = { "outside:${it.id}" }) { album ->
+                    AlbumCard(album, onClick = { onOpen(OnlineAlbumRoute(album.id)) }, modifier = Modifier.animateItem().padding(bottom = ArtistRowGap), width = null)
                 }
             }
             about?.let { text ->

@@ -2,6 +2,8 @@ package app.winters.octo.discovery
 
 import app.winters.octo.catalog.ArtistEntity
 import app.winters.octo.catalog.CatalogDao
+import app.winters.octo.catalog.ReleaseGroup
+import app.winters.octo.catalog.groupAlbums
 import app.winters.octo.catalog.SongIdentity
 import app.winters.octo.catalog.SourceDao
 import app.winters.octo.catalog.TrackEntity
@@ -12,6 +14,7 @@ import app.winters.octo.catalog.searchKey
 import app.winters.octo.data.SessionRepository
 import app.winters.octo.data.SessionState
 import app.winters.octo.server.serverSourceId
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.ArtistInfo
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
@@ -33,18 +36,30 @@ private const val TOP_SONGS_BY_ID = "topSongsByArtistId"
 data class SimilarArtist(val name: String, val artwork: String?, val libraryId: String?, val serverId: String)
 
 // What the signed-in server adds to a library artist's page. Any part can be
-// empty, and the page shows only the parts that are not.
+// empty, and the page shows only the parts that are not. `outside` is the
+// rest of their releases, the ones outside the library, on shelves by
+// kind, as an Octo server lists them beside the library's.
 data class ArtistExtras(
     val topSongs: List<TrackEntity> = emptyList(),
     val about: String? = null,
     val similar: List<SimilarArtist> = emptyList(),
+    val outside: List<Pair<ReleaseGroup, List<OnlineAlbum>>> = emptyList(),
 )
 
 // The extras as "Library songs only" shows them: top songs in the library
 // (with those the server owns, `owned`, that the phone's copy lacks), and
-// similar artists the library has.
+// similar artists the library has, and none of their releases outside it.
 fun ArtistExtras.inLibraryOnly(owned: Set<String> = emptySet()): ArtistExtras =
-    copy(topSongs = librarySongsOnly(topSongs, true) { isFind(it.id) && it.id !in owned }, similar = similar.filter { it.libraryId != null })
+    copy(
+        topSongs = librarySongsOnly(topSongs, true) { isFind(it.id) && it.id !in owned },
+        similar = similar.filter { it.libraryId != null },
+        outside = emptyList(),
+    )
+
+// The releases a server lists for an artist that are outside the library,
+// on shelves by kind. A server that is not Octo marks none, so has none.
+internal fun outsideAlbumShelves(albums: List<Album>, sourceId: String): List<Pair<ReleaseGroup, List<OnlineAlbum>>> =
+    groupAlbums(albums.filter { it.isExternal }).map { (group, shelf) -> group to shelf.map { onlineAlbumOf(it, sourceId) } }
 
 // Reads what the server knows about library artists: their top songs, a
 // biography and artists like them. Kept for as long as the app runs, per
@@ -58,11 +73,13 @@ class ArtistExtrasSource @Inject constructor(
     private val discovery: Discovery,
 ) {
     private val cache = ConcurrentHashMap<String, ArtistExtras>()
+    private val outsideCache = ConcurrentHashMap<String, List<Pair<ReleaseGroup, List<OnlineAlbum>>>>()
     private val extensions = ConcurrentHashMap<String, Set<String>>()
 
     // Drops what was kept for one artist, so the next read asks the server again.
     fun forget(artistId: String) {
         cache.keys.removeAll { it.endsWith("|$artistId") }
+        outsideCache.keys.removeAll { it.endsWith("|$artistId") }
     }
 
     suspend fun forArtist(artist: ArtistEntity): ArtistExtras? {
@@ -92,6 +109,21 @@ class ArtistExtrasSource @Inject constructor(
         )
         cache["$server|${artist.id}"] = extras
         return extras
+    }
+
+    // The rest of the artist's releases, outside the library, on shelves by
+    // kind. Asked for apart from the other extras, since Octo looks the whole
+    // discography up and answers more slowly, so the page shows them once
+    // they come. Kept like the other extras; nothing when the server could
+    // not be reached, so it is asked again next time.
+    suspend fun outsideFor(artist: ArtistEntity): List<Pair<ReleaseGroup, List<OnlineAlbum>>>? {
+        val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
+        val sourceId = serverSourceId(client.baseUrl)
+        val key = "${client.username}@${client.baseUrl}|${artist.id}"
+        outsideCache[key]?.let { return it }
+        val serverId = serverArtistId(client, sourceId, artist) ?: return emptyList()
+        val releases = answerOf { client.artist(serverId) } ?: return null
+        return outsideAlbumShelves(releases.album, sourceId).also { outsideCache[key] = it }
     }
 
     // The artist's id on the server: the library's own when the artist came
