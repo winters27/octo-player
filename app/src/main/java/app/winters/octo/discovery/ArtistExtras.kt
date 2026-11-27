@@ -73,11 +73,13 @@ class ArtistExtrasSource @Inject constructor(
     private val discovery: Discovery,
 ) {
     private val cache = ConcurrentHashMap<String, ArtistExtras>()
+    private val outsideCache = ConcurrentHashMap<String, List<Pair<ReleaseGroup, List<OnlineAlbum>>>>()
     private val extensions = ConcurrentHashMap<String, Set<String>>()
 
     // Drops what was kept for one artist, so the next read asks the server again.
     fun forget(artistId: String) {
         cache.keys.removeAll { it.endsWith("|$artistId") }
+        outsideCache.keys.removeAll { it.endsWith("|$artistId") }
     }
 
     suspend fun forArtist(artist: ArtistEntity): ArtistExtras? {
@@ -87,28 +89,41 @@ class ArtistExtrasSource @Inject constructor(
         cache["$server|${artist.id}"]?.let { return it }
 
         val serverId = serverArtistId(client, sourceId, artist)
-        val (info, songs, releases) = coroutineScope {
+        val (info, songs) = coroutineScope {
             val info = async { serverId?.let { id -> answerOf { client.artistInfo(id) } } }
-            val releases = async { serverId?.let { id -> answerOf { client.artist(id) } } }
             val songs = async {
                 val byId = serverId?.takeIf { TOP_SONGS_BY_ID in extensionsOf(server, client) }
                 answerOf { client.topSongs(artist.name, TOP_SONGS, byId) }?.let { found ->
                     if (byId != null) found else ownSongs(found, artist.name)
                 }
             }
-            Triple(info.await(), songs.await(), releases.await())
+            info.await() to songs.await()
         }
-        // None answered: the server could not be reached, so ask again next time.
-        if (info == null && songs == null && releases == null) return null
+        // Neither answered: the server could not be reached, so ask again next time.
+        if (info == null && songs == null) return null
 
         val extras = ArtistExtras(
             topSongs = songs?.let { discovery.resolveFromServer(it) }.orEmpty().take(TOP_SONGS),
             about = info?.biography?.let(::cleanBiography),
             similar = info?.let { similarArtists(sourceId, artist, it) }.orEmpty(),
-            outside = releases?.let { outsideAlbumShelves(it.album, sourceId) }.orEmpty(),
         )
         cache["$server|${artist.id}"] = extras
         return extras
+    }
+
+    // The rest of the artist's releases, outside the library, on shelves by
+    // kind. Asked for apart from the other extras, since Octo looks the whole
+    // discography up and answers more slowly, so the page shows them once
+    // they come. Kept like the other extras; nothing when the server could
+    // not be reached, so it is asked again next time.
+    suspend fun outsideFor(artist: ArtistEntity): List<Pair<ReleaseGroup, List<OnlineAlbum>>>? {
+        val client = (sessions.state.value as? SessionState.SignedIn)?.session?.client ?: return null
+        val sourceId = serverSourceId(client.baseUrl)
+        val key = "${client.username}@${client.baseUrl}|${artist.id}"
+        outsideCache[key]?.let { return it }
+        val serverId = serverArtistId(client, sourceId, artist) ?: return emptyList()
+        val releases = answerOf { client.artist(serverId) } ?: return null
+        return outsideAlbumShelves(releases.album, sourceId).also { outsideCache[key] = it }
     }
 
     // The artist's id on the server: the library's own when the artist came

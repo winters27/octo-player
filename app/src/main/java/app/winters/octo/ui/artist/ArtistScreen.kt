@@ -136,8 +136,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -180,8 +180,10 @@ class ArtistViewModel @AssistedInject constructor(
         .filterNotNull()
         .distinctUntilChanged { a, b -> a.id == b.id && a.name == b.name }
         .combine(reload) { artist, _ -> artist }
-        .mapLatest { artist ->
-            try {
+        .transformLatest { artist ->
+            // Top songs, the biography and similar artists first; the
+            // releases outside the library follow once the server has them.
+            val extras = try {
                 extrasSource.forArtist(artist)
             } catch (e: CancellationException) {
                 throw e
@@ -189,6 +191,16 @@ class ArtistViewModel @AssistedInject constructor(
                 Log.w("Octo", "artist extras failed: ${e.javaClass.simpleName}")
                 null
             }
+            emit(extras)
+            val outside = try {
+                extrasSource.outsideFor(artist)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Octo", "artist releases failed: ${e.javaClass.simpleName}")
+                null
+            }
+            if (!outside.isNullOrEmpty()) emit((extras ?: ArtistExtras()).copy(outside = outside))
         }
         .combine(player.prefs.map { it.libraryOnly }.distinctUntilChanged()) { extras, libraryOnly ->
             if (libraryOnly) extras?.inLibraryOnly(owned.ids.value) else extras
